@@ -27,6 +27,7 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::time::Duration;
 
 use parking_lot::Mutex;
 use tauri::{AppHandle, Manager};
@@ -39,6 +40,9 @@ use crate::clock::{Kick, now_ms};
 use crate::db::ReadPool;
 use crate::model::{AccountId, SubId};
 use crate::writer::{EffectReceiver, Writer};
+
+/// How long Gmail errors may go on before the account shows a quiet sync status.
+const QUIET_STATUS_AFTER: Duration = Duration::from_secs(30);
 
 /// Endpoints and credentials. Debug builds may point at the fake Gmail server.
 #[derive(Clone)]
@@ -250,7 +254,7 @@ impl Engine {
     }
 
     /// Records a Gmail outcome for the online flag and the account's sync status.
-    pub fn note<T>(&self, rt: &AccountRt, r: &Result<T, GmailError>) {
+    pub fn note<T>(self: &Arc<Self>, rt: &Arc<AccountRt>, r: &Result<T, GmailError>) {
         match r {
             Ok(_) => self.note_ok(rt),
             Err(err) => self.note_err(rt, err),
@@ -263,7 +267,7 @@ impl Engine {
         self.set_status(rt.id, "idle");
     }
 
-    pub fn note_err(&self, rt: &AccountRt, err: &GmailError) {
+    pub fn note_err(self: &Arc<Self>, rt: &Arc<AccountRt>, err: &GmailError) {
         match err.outcome {
             Outcome::Offline => {
                 self.set_online(false);
@@ -272,11 +276,19 @@ impl Engine {
             Outcome::InvalidGrant => self.needs_signin(rt.id),
             Outcome::RateLimited { .. } | Outcome::ServerError { .. } | Outcome::NoResponse => {
                 let now = now_ms();
-                let since = rt.retrying_since.load(Ordering::Relaxed);
-                if since == 0 {
-                    rt.retrying_since.store(now, Ordering::Relaxed);
-                } else if now - since > 30_000 {
-                    self.set_status(rt.id, "retrying");
+                if rt
+                    .retrying_since
+                    .compare_exchange(0, now, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    // Still retrying 30 s later, with no success between: a quiet status.
+                    let (e, rt) = (self.clone(), rt.clone());
+                    self.spawn("sync status", async move {
+                        crate::clock::sleep(QUIET_STATUS_AFTER).await;
+                        if rt.retrying_since.load(Ordering::Acquire) == now && !rt.is_stopped() {
+                            e.set_status(rt.id, "retrying");
+                        }
+                    });
                 }
             }
             _ => {}

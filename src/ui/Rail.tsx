@@ -15,6 +15,13 @@ const VIEWS: { view: View; icon: typeof Inbox; title: string }[] = [
   { view: { kind: "drafts" }, icon: File, title: "Drafts (g d)" },
 ];
 
+/** What the avatar's tooltip adds: sign in again, or the quiet sync status (SPEC Gmail errors). */
+function status(a: AccountInfo): string {
+  if (a.needsSignin) return " · Sign in again";
+  if (a.syncStatus === "retrying") return " · Can't reach Gmail";
+  return "";
+}
+
 function Avatar({ account }: { account: AccountInfo }) {
   const initial = (account.name || account.email).trim().charAt(0).toUpperCase();
   return (
@@ -54,7 +61,7 @@ export function Rail({ accounts }: { accounts: AccountInfo[] }) {
         {accounts.map((a, i) => (
           <button
             key={a.id}
-            title={`${a.email} (Ctrl+${i + 1})${a.needsSignin ? " · Sign in again" : ""}`}
+            title={`${a.email} (Ctrl+${i + 1})${status(a)}`}
             onClick={() => switchAccount(a.id)}
             className={`relative rounded-full p-0.5 ${a.id === account ? "ring-[1.5px] ring-accent" : ""}`}
           >
@@ -64,8 +71,18 @@ export function Rail({ accounts }: { accounts: AccountInfo[] }) {
                 {countLabel(a.inboxUnread)}
               </span>
             )}
-            {a.needsSignin && (
-              <span className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full bg-danger" />
+            {a.needsSignin ? (
+              <span
+                data-marker="signin"
+                className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full bg-danger"
+              />
+            ) : (
+              a.syncStatus === "retrying" && (
+                <span
+                  data-marker="retrying"
+                  className="absolute -right-0.5 -bottom-0.5 h-2 w-2 rounded-full bg-text-3"
+                />
+              )
             )}
           </button>
         ))}
