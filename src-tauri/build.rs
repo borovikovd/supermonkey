@@ -14,9 +14,12 @@ fn oauth_client() {
         Ok(text) => {
             let json: serde_json::Value = serde_json::from_str(&text)
                 .unwrap_or_else(|e| panic!("{} is not valid JSON: {e}", path.display()));
-            let client = json
-                .get("installed")
-                .unwrap_or_else(|| panic!("{} has no \"installed\" client. Download the JSON of a Desktop OAuth client.", path.display()));
+            let client = json.get("installed").unwrap_or_else(|| {
+                panic!(
+                    "{} has no \"installed\" client. Download the JSON of a Desktop OAuth client.",
+                    path.display()
+                )
+            });
             let field = |k: &str| {
                 client
                     .get(k)
@@ -28,7 +31,10 @@ fn oauth_client() {
         }
         // Tests and CI run against the fake Gmail server and need no real client.
         Err(_) if std::env::var("PROFILE").as_deref() != Ok("release") => {
-            println!("cargo:warning=No OAuth client at {}; real Google sign-in is disabled in this build", path.display());
+            println!(
+                "cargo:warning=No OAuth client at {}; real Google sign-in is disabled in this build",
+                path.display()
+            );
             (String::new(), String::new())
         }
         Err(e) => panic!(

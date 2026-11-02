@@ -15,7 +15,7 @@ export default defineConfig({
     ignorePatterns: ["src/bindings/**", "src-tauri/**", "dist/**"],
     rules: {
       "react/rules-of-hooks": "error",
-      "react/only-export-components": ["warn", { allowConstantExport: true }],
+      "react/only-export-components": "off",
       "vite-plus/prefer-vite-plus-imports": "error",
     },
     options: {

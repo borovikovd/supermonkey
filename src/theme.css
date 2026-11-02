@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+/* Every value from SPEC Look lives here. Own picks are marked in the spec. */
+@theme {
+  --color-bg: #ffffff;
+  --color-surface: #fcfaf7;
+  --color-fill: #f2f0eb;
+  --color-fill-half: #f8f7f5;
+  --color-border: #dedbd5;
+  --color-border-2: #edebe5;
+  --color-text: #141413;
+  --color-text-2: #73716d;
+  --color-text-3: #a3a09a;
+  --color-accent: #714cb6;
+  --color-accent-soft: #f7f5ff;
+  --color-link: #4198d2;
+  --color-unread: #71c0ea;
+  --color-hint: #edeefa;
+  --color-danger: #cd0037;
+
+  --color-palette-bg: #1f1e1d;
+  --color-palette-text: #f2f0eb;
+  --color-palette-text-2: #a3a09a;
+  --color-palette-hi: #33312e;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+
+  --text-hint: 11px;
+  --text-hint--line-height: 16px;
+  --text-time: 12px;
+  --text-time--line-height: 16px;
+  --text-row: 13px;
+  --text-row--line-height: 18px;
+  --text-body: 15px;
+  --text-body--line-height: 26px;
+  --text-subject: 18px;
+  --text-subject--line-height: 27px;
+  --text-zero: 15px;
+  --text-zero--line-height: 22px;
+
+  --radius-control: 6px;
+  --radius-sheet: 8px;
+
+  --shadow-float: 0 12px 40px rgb(20 20 19 / 0.18), 0 2px 8px rgb(20 20 19 / 0.08);
+
+  --spacing-row: 36px;
+  --spacing-rail: 40px;
+  --spacing-hintbar: 18px;
+  --spacing-split-header: 28px;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.fade-in {
+  animation: fade-in 150ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in {
+    animation: none;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* TipTap */
+.ProseMirror {
+  outline: none;
+  min-height: 120px;
+  font-size: 15px;
+  line-height: 26px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.ProseMirror p {
+  margin: 0;
+}
+.ProseMirror ul,
+.ProseMirror ol {
+  padding-left: 22px;
+  margin: 0;
+}
+.ProseMirror a {
+  color: var(--color-link);
+}
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-text-3);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+[cmdk-item][data-selected="true"] {
+  background: var(--color-palette-hi);
+}

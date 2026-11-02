@@ -1,0 +1,261 @@
+// Mail commands shared by the keyboard and the palette. Each resolves its
+// targets, sends a resolved action (never a toggle), and moves the highlight
+// when rows leave the list (SPEC Keyboard).
+
+import { act, subIdFor } from "./ipc/bridge";
+import type { ModifyAction, ModifyKind, SubKey, View } from "./ipc/types";
+import { useChrome, type Where } from "./store/chrome";
+import { listKey } from "./store/hooks";
+import { undoTarget, viewList } from "./store/mirror-core";
+import { useMirror } from "./store/mirror";
+
+export function currentListKey(): SubKey | null {
+  const c = useChrome.getState();
+  if (c.account === null) return null;
+  const cur = c.perAccount[c.account];
+  if (!cur) return null;
+  return listKey(c.account, cur.where);
+}
+
+export function currentView(): View | null {
+  const c = useChrome.getState();
+  const cur = c.account === null ? null : c.perAccount[c.account];
+  return cur?.where.kind === "view" ? cur.where.view : null;
+}
+
+export function visibleIds(): string[] {
+  const key = currentListKey();
+  const id = key ? subIdFor(key) : undefined;
+  if (!id) return [];
+  return viewList(useMirror.getState(), id).ids.map((e) => e.key);
+}
+
+export function rowOf(key: string) {
+  const key2 = currentListKey();
+  const id = key2 ? subIdFor(key2) : undefined;
+  if (!id) return useMirror.getState().rows[key];
+  return viewList(useMirror.getState(), id).rows[key];
+}
+
+/** Threads an action applies to: the selection, else the open conversation, else the highlight. */
+export function targets(): number[] {
+  const c = useChrome.getState();
+  const cur = c.account === null ? null : c.perAccount[c.account];
+  if (!cur) return [];
+  if (c.selection.length > 0 && cur.screen.kind === "list") {
+    return c.selection.map(Number).filter((n) => !Number.isNaN(n));
+  }
+  if (cur.screen.kind === "conversation") return [cur.screen.thread];
+  if (cur.highlight !== null && currentView()?.kind !== "drafts") {
+    const n = Number(cur.highlight);
+    return Number.isNaN(n) ? [] : [n];
+  }
+  return [];
+}
+
+/** Opens a conversation from the list. */
+export function openThread(thread: number) {
+  const c = useChrome.getState();
+  const view = currentView();
+  const trashMode = view?.kind === "trash" || view?.kind === "spam";
+  c.patchCurrent({
+    screen: { kind: "conversation", thread, trashMode },
+    highlight: String(thread),
+  });
+  c.set({
+    selectedMessage: null,
+    expanded: [],
+    unfolded: [],
+    expandAll: false,
+    link: null,
+    inline: null,
+    selection: [],
+  });
+}
+
+export function closeThread() {
+  const c = useChrome.getState();
+  c.patchCurrent({ screen: { kind: "list" } });
+  c.set({ inline: null, link: null, selectedMessage: null });
+}
+
+/**
+ * After rows leave the list: on the list the highlight moves to the next row
+ * (or the previous one if it was last); in an open conversation the next
+ * conversation opens; with none left, the empty list.
+ */
+function moveAfterRemoval(before: string[], removed: Set<string>) {
+  const c = useChrome.getState();
+  const cur = c.current();
+  if (!cur) return;
+  const after = visibleIds();
+  const focus = cur.screen.kind === "conversation" ? String(cur.screen.thread) : cur.highlight;
+  if (focus === null || after.includes(focus) || !removed.has(focus)) return;
+  const at = before.indexOf(focus);
+  let next: string | null = null;
+  for (let i = at + 1; i < before.length; i++) {
+    if (after.includes(before[i]!)) {
+      next = before[i]!;
+      break;
+    }
+  }
+  if (next === null) {
+    for (let i = at - 1; i >= 0; i--) {
+      if (after.includes(before[i]!)) {
+        next = before[i]!;
+        break;
+      }
+    }
+  }
+  if (cur.screen.kind === "conversation") {
+    if (next === null) closeThread();
+    else openThread(Number(next));
+  } else {
+    c.patchCurrent({ highlight: next });
+  }
+}
+
+export function modify(
+  kind: ModifyKind,
+  add: string[],
+  remove: string[],
+  opts: { snooze?: ModifyAction["snooze"]; threads?: number[]; undoable?: boolean } = {},
+) {
+  const c = useChrome.getState();
+  if (c.account === null) return;
+  const threads = opts.threads ?? targets();
+  if (threads.length === 0) return;
+  const before = visibleIds();
+  act({
+    type: "modify",
+    account: c.account,
+    kind,
+    threads,
+    add,
+    remove,
+    snooze: opts.snooze ?? null,
+    undoable: opts.undoable ?? true,
+  });
+  if (opts.undoable !== false) c.set({ selection: [] });
+  moveAfterRemoval(before, new Set(threads.map(String)));
+}
+
+const isSnoozed = (threads: number[]) => threads.some((t) => rowOf(String(t))?.snoozeUntil != null);
+
+export const markDone = () => {
+  const t = targets();
+  if (currentView()?.kind === "done") return;
+  modify("done", [], ["INBOX"], { snooze: isSnoozed(t) ? { kind: "clear" } : undefined });
+};
+
+export const returnToInbox = () => {
+  const view = currentView();
+  const t = targets();
+  const remove = view?.kind === "trash" ? ["TRASH"] : view?.kind === "spam" ? ["SPAM"] : [];
+  modify("returnToInbox", ["INBOX"], remove, {
+    snooze: isSnoozed(t) ? { kind: "clear" } : undefined,
+  });
+};
+
+export const trash = () => {
+  if (currentView()?.kind === "trash") return;
+  modify("trash", ["TRASH"], ["INBOX", "SPAM"]);
+};
+
+export const spam = () => {
+  if (currentView()?.kind === "spam") return;
+  modify("spam", ["SPAM"], ["INBOX", "TRASH"]);
+};
+
+export const snooze = (at: number) =>
+  modify("snooze", [], ["INBOX"], { snooze: { kind: "set", at } });
+
+const allHave = (field: "starred" | "unread") => {
+  const t = targets();
+  return t.length > 0 && t.every((id) => rowOf(String(id))?.[field] === true);
+};
+
+export const toggleStar = () => {
+  if (allHave("starred")) modify("unstar", [], ["STARRED"]);
+  else modify("star", ["STARRED"], []);
+};
+
+export const toggleRead = () => {
+  if (allHave("unread")) modify("read", [], ["UNREAD"]);
+  else modify("unread", ["UNREAD"], []);
+};
+
+/** `l`: if every target has the label it is removed from all, else added to all. */
+export function applyLabel(labelId: string) {
+  const t = targets();
+  const all = t.length > 0 && t.every((id) => rowOf(String(id))?.labels.includes(labelId));
+  if (all) modify("removeLabel", [], [labelId]);
+  else modify("label", [labelId], []);
+}
+
+/** `y`: remove the current view's label when it can be removed. */
+export function removeViewLabel() {
+  const view = currentView();
+  const label =
+    view?.kind === "inbox"
+      ? "INBOX"
+      : view?.kind === "starred"
+        ? "STARRED"
+        : view?.kind === "trash"
+          ? "TRASH"
+          : view?.kind === "spam"
+            ? "SPAM"
+            : view?.kind === "label"
+              ? view.label
+              : null;
+  if (!label) return;
+  modify("removeLabel", [], [label]);
+}
+
+export function undo() {
+  const c = useChrome.getState();
+  if (c.account === null) return;
+  const entry = undoTarget(useMirror.getState(), c.account);
+  if (entry === null) return;
+  act({ type: "undo", account: c.account, entry });
+}
+
+/** Marks the open thread read; not an undo entry. */
+export function markReadOnOpen(thread: number) {
+  const row = rowOf(String(thread));
+  if (row && !row.unread) return;
+  modify("read", [], ["UNREAD"], { threads: [thread], undoable: false });
+}
+
+export function goTo(where: Where) {
+  const c = useChrome.getState();
+  if (c.account === null) return;
+  c.patchCurrent({ where, highlight: null, screen: { kind: "list" } });
+  c.set({ selection: [], inline: null, search: where.kind === "search" ? c.search : null });
+}
+
+/**
+ * Marking read on open is an action the UI sends after the conversation's
+ * first load, or at once if it was prefetched.
+ */
+export function markReadOnOpenWhenLoaded(thread: number) {
+  const loaded = () =>
+    Object.values(useMirror.getState().subs).some(
+      (s) =>
+        s.type === "conversation" &&
+        s.key.type === "conversation" &&
+        s.key.thread === thread &&
+        s.data,
+    );
+  if (loaded()) {
+    markReadOnOpen(thread);
+    return;
+  }
+  const unsub = useMirror.subscribe(() => {
+    if (loaded()) {
+      unsub();
+      markReadOnOpen(thread);
+    }
+  });
+  setTimeout(unsub, 10_000);
+}

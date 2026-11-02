@@ -1,0 +1,43 @@
+{
+  "partId": "",
+  "mimeType": "text/plain",
+  "filename": "",
+  "headers": [
+    {
+      "name": "From",
+      "value": "\"M=?ISO-8859-1?Q?=FC?=ller, Hans\" <hans@example.de>"
+    },
+    {
+      "name": "To",
+      "value": "undisclosed-recipients:;"
+    },
+    {
+      "name": "Subject",
+      "value": "=?ISO-8859-1?Q?Gr=FC=DFe?="
+    },
+    {
+      "name": "Date",
+      "value": "Tue, 07 Jan 2025 08:30:00 +0000 (UTC)"
+    },
+    {
+      "name": "Message-Id",
+      "value": "<latin1@example.de>"
+    },
+    {
+      "name": "List-Unsubscribe",
+      "value": "<mailto:unsub@example.de>"
+    },
+    {
+      "name": "Content-Type",
+      "value": "text/plain; charset=ISO-8859-1"
+    },
+    {
+      "name": "Content-Transfer-Encoding",
+      "value": "8bit"
+    }
+  ],
+  "body": {
+    "size": 21,
+    "data": "R3L832UgYXVzIEv2bG4gLSBjYWbp"
+  }
+}

@@ -1,8 +1,6 @@
-import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <div>Ubermensch</div>
-  </StrictMode>,
-);
+import "./theme.css";
+import { App } from "./App";
+
+createRoot(document.getElementById("root")!).render(<App />);
