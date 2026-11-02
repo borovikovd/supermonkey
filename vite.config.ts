@@ -10,12 +10,12 @@ export default defineConfig({
   build: { target: "safari17", outDir: "dist", chunkSizeWarningLimit: 2048 },
 
   fmt: {
-    ignorePatterns: ["src/bindings/**", "src-tauri/**", "SPEC.md"],
+    ignorePatterns: ["src/bindings/**", "src-tauri/**", "SPEC.md", ".claude/**"],
   },
 
   lint: {
     plugins: ["react", "typescript", "oxc", "unicorn", "import", "jsx-a11y", "promise", "vitest"],
-    ignorePatterns: ["src/bindings/**", "src-tauri/**", "dist/**"],
+    ignorePatterns: ["src/bindings/**", "src-tauri/**", "dist/**", ".claude/**"],
     categories: {
       correctness: "error",
       suspicious: "error",
