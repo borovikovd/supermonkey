@@ -100,12 +100,13 @@ enum Roll {
     Year,
 }
 
+/// The span after `in`.
 #[derive(Clone, Copy)]
-enum Unit {
-    Minutes,
-    Hours,
-    Days,
-    Weeks,
+enum Span {
+    /// Minutes or hours: an exact offset from now.
+    Minutes(i64),
+    /// Days or weeks: a later date at the current time of day.
+    Days(i64),
 }
 
 /// `dec 24 [2026]` or `24 dec [2026]` at the start of `toks`: the date, the
@@ -203,25 +204,17 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<
             continue;
         }
         if t == "in" {
-            let (amount, unit, used) = parse_amount(&toks[i..])?;
+            let (span, used) = parse_span(&toks[i..])?;
             i += used;
-            match unit {
-                Unit::Minutes | Unit::Hours => {
-                    let minutes = match unit {
-                        Unit::Hours => amount.checked_mul(60)?,
-                        _ => amount,
-                    };
+            match span {
+                Span::Minutes(minutes) => {
                     let rest_is_filler = toks[i..].iter().all(|t| matches!(*t, "at" | "on"));
                     if date.is_some() || time.is_some() || !rest_is_filler {
                         return None;
                     }
                     return now.checked_add_signed(TimeDelta::try_minutes(minutes)?);
                 }
-                Unit::Days | Unit::Weeks => {
-                    let days = match unit {
-                        Unit::Weeks => amount.checked_mul(7)?,
-                        _ => amount,
-                    };
+                Span::Days(days) => {
                     set(
                         &mut date,
                         today.checked_add_days(Days::new(u64::try_from(days).ok()?))?,
@@ -258,8 +251,6 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<
             set(&mut time, named)?;
             continue;
         }
-        let next = toks.get(i).copied();
-        let next_is_meridiem = next.is_some_and(is_meridiem);
         if let Some((d, used, rolls)) = parse_month_day(&toks[i - 1..], today) {
             i += used - 1;
             if rolls {
@@ -268,7 +259,7 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<
             set(&mut date, d)?;
             continue;
         }
-        let meridiem = if next_is_meridiem { next } else { None };
+        let meridiem = toks.get(i).copied().filter(|next| is_meridiem(next));
         if let Some(parsed) = parse_time(t, meridiem) {
             if meridiem.is_some() {
                 i += 1;
@@ -288,8 +279,8 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<
     )
 }
 
-/// `2 hours`, `2h`, `2hours`, `an hour`, `a day`: amount, unit, tokens used.
-fn parse_amount(toks: &[&str]) -> Option<(i64, Unit, usize)> {
+/// `2 hours`, `2h`, `2hours`, `an hour`, `a day`: the span and the tokens used.
+fn parse_span(toks: &[&str]) -> Option<(Span, usize)> {
     let first = *toks.first()?;
     let (amount, unit_text, used) = if first == "a" || first == "an" {
         (1, *toks.get(1)?, 2)
@@ -303,17 +294,17 @@ fn parse_amount(toks: &[&str]) -> Option<(i64, Unit, usize)> {
             rest => (amount, rest, 1),
         }
     };
-    let unit = match unit_text {
-        "m" | "min" | "mins" | "minute" | "minutes" => Unit::Minutes,
-        "h" | "hr" | "hrs" | "hour" | "hours" => Unit::Hours,
-        "d" | "day" | "days" => Unit::Days,
-        "w" | "wk" | "wks" | "week" | "weeks" => Unit::Weeks,
-        _ => return None,
-    };
-    if amount <= 0 || amount > 100_000 {
+    if !(1..=100_000).contains(&amount) {
         return None;
     }
-    Some((amount, unit, used))
+    let span = match unit_text {
+        "m" | "min" | "mins" | "minute" | "minutes" => Span::Minutes(amount),
+        "h" | "hr" | "hrs" | "hour" | "hours" => Span::Minutes(amount * 60),
+        "d" | "day" | "days" => Span::Days(amount),
+        "w" | "wk" | "wks" | "week" | "weeks" => Span::Days(amount * 7),
+        _ => return None,
+    };
+    Some((span, used))
 }
 
 fn is_meridiem(t: &str) -> bool {

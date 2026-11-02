@@ -10,7 +10,7 @@ use reqwest::{Method, StatusCode};
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::error::{self, GmailError, Outcome};
+use crate::error::{self, GmailError, Outcome, ReadResponse};
 use crate::oauth::TokenSource;
 use crate::types::{
     Draft, Format, Label, ListDraftsResponse, ListHistoryResponse, ListThreadsResponse, Message,
@@ -130,13 +130,12 @@ impl Gmail {
         start_history_id: u64,
         page_token: Option<&str>,
     ) -> Result<ListHistoryResponse, GmailError> {
+        let start_history_id = start_history_id.to_string();
         let mut query = vec![
-            ("startHistoryId", start_history_id.to_string()),
-            ("maxResults", "500".to_owned()),
+            ("startHistoryId", start_history_id.as_str()),
+            ("maxResults", "500"),
         ];
-        if let Some(token) = page_token {
-            query.push(("pageToken", token.to_owned()));
-        }
+        query.extend(page_token.map(|token| ("pageToken", token)));
         self.get("history", &query).await
     }
 
@@ -145,21 +144,19 @@ impl Gmail {
         &self,
         params: &ThreadListQuery,
     ) -> Result<ListThreadsResponse, GmailError> {
+        let max_results = params.max_results.map(|max| max.to_string());
         let mut query = Vec::new();
-        if let Some(q) = &params.q {
-            query.push(("q", q.clone()));
-        }
-        for id in &params.label_ids {
-            query.push(("labelIds", id.clone()));
-        }
-        if let Some(token) = &params.page_token {
-            query.push(("pageToken", token.clone()));
-        }
-        if let Some(max) = params.max_results {
-            query.push(("maxResults", max.to_string()));
-        }
+        query.extend(params.q.as_deref().map(|q| ("q", q)));
+        query.extend(params.label_ids.iter().map(|id| ("labelIds", id.as_str())));
+        query.extend(
+            params
+                .page_token
+                .as_deref()
+                .map(|token| ("pageToken", token)),
+        );
+        query.extend(max_results.as_deref().map(|max| ("maxResults", max)));
         if params.include_spam_trash {
-            query.push(("includeSpamTrash", "true".to_owned()));
+            query.push(("includeSpamTrash", "true"));
         }
         self.get("threads", &query).await
     }
@@ -172,20 +169,19 @@ impl Gmail {
         format: Format,
         metadata_headers: &[&str],
     ) -> Result<Thread, GmailError> {
-        let mut query = vec![("format", format.as_str().to_owned())];
-        for header in metadata_headers {
-            query.push(("metadataHeaders", (*header).to_owned()));
-        }
+        let mut query = vec![("format", format.as_str())];
+        query.extend(
+            metadata_headers
+                .iter()
+                .map(|&header| ("metadataHeaders", header)),
+        );
         self.get(&format!("threads/{id}"), &query).await
     }
 
     /// `users.messages.get`. Cost 20, or 60 with [`Format::Full`] or [`Format::Raw`].
     pub async fn get_message(&self, id: &str, format: Format) -> Result<Message, GmailError> {
-        self.get(
-            &format!("messages/{id}"),
-            &[("format", format.as_str().to_owned())],
-        )
-        .await
+        self.get(&format!("messages/{id}"), &[("format", format.as_str())])
+            .await
     }
 
     /// `users.messages.attachments.get`, decoded to bytes. Cost 20.
@@ -236,20 +232,15 @@ impl Gmail {
         &self,
         page_token: Option<&str>,
     ) -> Result<ListDraftsResponse, GmailError> {
-        let mut query = vec![("maxResults", "500".to_owned())];
-        if let Some(token) = page_token {
-            query.push(("pageToken", token.to_owned()));
-        }
+        let mut query = vec![("maxResults", "500")];
+        query.extend(page_token.map(|token| ("pageToken", token)));
         self.get("drafts", &query).await
     }
 
     /// `users.drafts.get`. Cost 20, or 60 with [`Format::Full`] or [`Format::Raw`].
     pub async fn get_draft(&self, id: &str, format: Format) -> Result<Draft, GmailError> {
-        self.get(
-            &format!("drafts/{id}"),
-            &[("format", format.as_str().to_owned())],
-        )
-        .await
+        self.get(&format!("drafts/{id}"), &[("format", format.as_str())])
+            .await
     }
 
     /// `users.drafts.create` from RFC 822 bytes. Cost 10. Not safe to repeat after
@@ -293,7 +284,7 @@ impl Gmail {
     async fn get<T: DeserializeOwned>(
         &self,
         path: &str,
-        query: &[(&str, String)],
+        query: &[(&str, &str)],
     ) -> Result<T, GmailError> {
         self.json(Method::GET, path, query, None).await
     }
@@ -302,7 +293,7 @@ impl Gmail {
         &self,
         method: Method,
         path: &str,
-        query: &[(&str, String)],
+        query: &[(&str, &str)],
         body: Option<&Value>,
     ) -> Result<T, GmailError> {
         let response = self.send(method, path, query, body).await?;
@@ -322,7 +313,7 @@ impl Gmail {
         &self,
         method: Method,
         path: &str,
-        query: &[(&str, String)],
+        query: &[(&str, &str)],
         body: Option<&Value>,
     ) -> Result<reqwest::Response, GmailError> {
         let url = format!("{}/gmail/v1/users/me/{path}", self.base_url);
@@ -332,23 +323,18 @@ impl Gmail {
             let token = self.tokens.refresh_after_401(&token).await?;
             response = self.attempt(&method, &url, query, body, &token).await?;
         }
-        let status = response.status();
-        if status.is_success() {
-            return Ok(response);
+        if response.status().is_success() {
+            Ok(response)
+        } else {
+            Err(ReadResponse::read(response).await?.to_error())
         }
-        let headers = response.headers().clone();
-        let text = response
-            .text()
-            .await
-            .map_err(|e| error::from_transport(&e))?;
-        Err(error::from_status(status, &headers, &text))
     }
 
     async fn attempt(
         &self,
         method: &Method,
         url: &str,
-        query: &[(&str, String)],
+        query: &[(&str, &str)],
         body: Option<&Value>,
         token: &str,
     ) -> Result<reqwest::Response, GmailError> {

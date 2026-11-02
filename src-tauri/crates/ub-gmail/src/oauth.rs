@@ -12,12 +12,13 @@ use std::time::{Duration, Instant};
 
 use oauth2::basic::BasicClient;
 use oauth2::{AuthUrl, ClientId, CsrfToken, PkceCodeChallenge, RedirectUrl, Scope};
+use reqwest::StatusCode;
 use serde::Deserialize;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 
-use crate::error::{self, GmailError, Outcome};
+use crate::error::{self, GmailError, Outcome, ReadResponse};
 
 /// The only scope the app asks for.
 pub const GMAIL_SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify";
@@ -165,7 +166,7 @@ pub async fn authorize(
     let response = token_request(http, &cfg.token_url, &form).await?;
     let refresh_token = response
         .refresh_token
-        .ok_or_else(|| rejected(200, "Google returned no refresh token".into()))?;
+        .ok_or_else(|| rejected(200, "Google returned no refresh token"))?;
     Ok(AuthResult {
         refresh_token: RefreshToken(refresh_token),
         access_token: access_token_from(response.access_token, response.expires_in),
@@ -199,27 +200,29 @@ pub async fn revoke(
     http: &reqwest::Client,
     token: &str,
 ) -> Result<(), GmailError> {
-    let response = http
-        .post(&cfg.revoke_url)
-        .form(&[("token", token)])
-        .send()
-        .await
-        .map_err(|e| error::from_transport(&e))?;
-    let status = response.status();
-    if status.is_success() {
+    let response = post_form(http, &cfg.revoke_url, &[("token", token)]).await?;
+    if response.status().is_success() {
         return Ok(());
     }
-    let headers = response.headers().clone();
-    let body = response
-        .text()
-        .await
-        .map_err(|e| error::from_transport(&e))?;
-    if let Ok(err) = serde_json::from_str::<TokenErrorBody>(&body)
+    let response = ReadResponse::read(response).await?;
+    if let Ok(err) = serde_json::from_str::<TokenErrorBody>(&response.body)
         && err.error == "invalid_token"
     {
         return Ok(());
     }
-    Err(error::from_status(status, &headers, &body))
+    Err(response.to_error())
+}
+
+async fn post_form(
+    http: &reqwest::Client,
+    url: &str,
+    form: &[(&str, &str)],
+) -> Result<reqwest::Response, GmailError> {
+    http.post(url)
+        .form(form)
+        .send()
+        .await
+        .map_err(|e| error::from_transport(&e))
 }
 
 async fn token_request(
@@ -227,29 +230,19 @@ async fn token_request(
     url: &str,
     form: &[(&str, &str)],
 ) -> Result<TokenResponse, GmailError> {
-    let response = http
-        .post(url)
-        .form(form)
-        .send()
-        .await
-        .map_err(|e| error::from_transport(&e))?;
-    let status = response.status();
-    let headers = response.headers().clone();
-    let body = response
-        .text()
-        .await
-        .map_err(|e| error::from_transport(&e))?;
+    let response = ReadResponse::read(post_form(http, url, form).await?).await?;
+    let status = response.status;
     if status.is_success() {
-        return serde_json::from_str(&body).map_err(|e| {
+        return serde_json::from_str(&response.body).map_err(|e| {
             GmailError::with_detail(Outcome::NoResponse, format!("token response: {e}"))
         });
     }
     // OAuth errors are `{"error": "...", "error_description": "..."}`, not Google API errors.
-    if let Ok(err) = serde_json::from_str::<TokenErrorBody>(&body) {
+    if let Ok(err) = serde_json::from_str::<TokenErrorBody>(&response.body) {
         if err.error == "invalid_grant" {
             return Err(Outcome::InvalidGrant.into());
         }
-        if status.is_client_error() && status.as_u16() != 429 {
+        if status.is_client_error() && status != StatusCode::TOO_MANY_REQUESTS {
             let description = err.error_description.unwrap_or_default();
             return Err(rejected(
                 status.as_u16(),
@@ -257,7 +250,7 @@ async fn token_request(
             ));
         }
     }
-    Err(error::from_status(status, &headers, &body))
+    Err(response.to_error())
 }
 
 fn access_token_from(token: String, expires_in: Option<u64>) -> AccessToken {
@@ -267,8 +260,12 @@ fn access_token_from(token: String, expires_in: Option<u64>) -> AccessToken {
     }
 }
 
-fn rejected(status: u16, message: String) -> GmailError {
-    Outcome::Rejected { status, message }.into()
+fn rejected(status: u16, message: impl Into<String>) -> GmailError {
+    Outcome::Rejected {
+        status,
+        message: message.into(),
+    }
+    .into()
 }
 
 const DONE_PAGE: &str = "<!doctype html><meta charset=utf-8><title>Ubermensch</title>\
@@ -297,21 +294,28 @@ async fn wait_for_code(listener: &TcpListener, expected_state: &str) -> Result<S
                 .find(|(k, _)| k == name)
                 .map(|(_, v)| v.into_owned())
         };
-        let (code, error, state) = (param("code"), param("error"), param("state"));
-        if code.is_none() && error.is_none() {
-            respond(&mut stream, "404 Not Found", "").await;
-            continue;
-        }
-        if state.as_deref() != Some(expected_state) {
+        let answer = match (param("code"), param("error")) {
+            (_, Some(error)) => Err(error),
+            (Some(code), None) => Ok(code),
+            (None, None) => {
+                respond(&mut stream, "404 Not Found", "").await;
+                continue;
+            }
+        };
+        if param("state").as_deref() != Some(expected_state) {
             respond(&mut stream, "400 Bad Request", FAILED_PAGE).await;
-            return Err(rejected(400, "OAuth state mismatch".into()));
+            return Err(rejected(400, "OAuth state mismatch"));
         }
-        if let Some(error) = error {
-            respond(&mut stream, "200 OK", FAILED_PAGE).await;
-            return Err(rejected(400, format!("authorization failed: {error}")));
-        }
-        respond(&mut stream, "200 OK", DONE_PAGE).await;
-        return Ok(code.unwrap_or_default());
+        return match answer {
+            Ok(code) => {
+                respond(&mut stream, "200 OK", DONE_PAGE).await;
+                Ok(code)
+            }
+            Err(error) => {
+                respond(&mut stream, "200 OK", FAILED_PAGE).await;
+                Err(rejected(400, format!("authorization failed: {error}")))
+            }
+        };
     }
 }
 
@@ -327,9 +331,12 @@ async fn read_request_target(stream: &mut TcpStream) -> Option<String> {
         buf.extend_from_slice(&chunk[..n]);
     }
     let head = String::from_utf8_lossy(&buf);
-    let mut parts = head.lines().next()?.split_whitespace();
-    let _method = parts.next()?;
-    parts.next().map(str::to_owned)
+    // The request line is `METHOD target HTTP/1.1`.
+    head.lines()
+        .next()?
+        .split_whitespace()
+        .nth(1)
+        .map(str::to_owned)
 }
 
 async fn respond(stream: &mut TcpStream, status: &str, body: &str) {
@@ -385,16 +392,15 @@ impl OAuthTokens {
         refresh_token: impl Into<String>,
         access_token: AccessToken,
     ) -> Self {
-        let tokens = OAuthTokens::new(cfg, http, refresh_token);
-        *tokens.cached.try_lock().expect("new mutex") = Some(access_token);
-        tokens
+        OAuthTokens {
+            cached: Mutex::new(Some(access_token)),
+            ..OAuthTokens::new(cfg, http, refresh_token)
+        }
     }
 
     async fn refresh_into(&self, cached: &mut Option<AccessToken>) -> Result<String, GmailError> {
         let token = refresh(&self.cfg, &self.http, &self.refresh_token).await?;
-        let value = token.token.clone();
-        *cached = Some(token);
-        Ok(value)
+        Ok(cached.insert(token).token.clone())
     }
 }
 

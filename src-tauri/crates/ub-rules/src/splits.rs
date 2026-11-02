@@ -1,5 +1,7 @@
 //! The Important rule and the starter custom splits.
 
+const CATEGORY_PREFIX: &str = "CATEGORY_";
+
 /// Category labels that keep a message out of Important.
 const NON_PERSONAL_CATEGORIES: &[&str] = &[
     "CATEGORY_PROMOTIONS",
@@ -22,8 +24,8 @@ pub fn is_person_to_person(message_label_ids: &[&str], is_list: bool) -> bool {
         return false;
     }
     let any_category = message_label_ids.iter().any(|l| {
-        l.get(..9)
-            .is_some_and(|p| p.eq_ignore_ascii_case("CATEGORY_"))
+        l.get(..CATEGORY_PREFIX.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(CATEGORY_PREFIX))
     });
     has("CATEGORY_PERSONAL") || !any_category
 }
