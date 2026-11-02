@@ -165,6 +165,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   const fileRef = useRef<HTMLInputElement>(null);
   const linkRef = useRef<HTMLInputElement>(null);
 
+  // useCallback stays: the effects below register these as handlers and list
+  // them as dependencies.
   const scheduleSave = useCallback(() => {
     dirty.current = true;
     if (timer.current) clearTimeout(timer.current);

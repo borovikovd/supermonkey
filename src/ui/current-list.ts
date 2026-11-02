@@ -15,7 +15,7 @@ export function useSplitCounts() {
   const summary = useSummary(account);
   const list = useCurrentList();
   const forced = useChrome((s) => s.forcedSplit);
-  // Memoized by hand: ListView, which the compiler skips, keys its effects off
+  // Explicit memo, not left to the compiler: ListView keys its effects off
   // this array's identity.
   return useMemo(() => {
     const counts = new Map<number, number>();

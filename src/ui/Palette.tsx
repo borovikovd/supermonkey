@@ -65,6 +65,12 @@ function useCommands(mode: PaletteMode, query: string): { items: Item[]; placeho
   const summary = useSummary(account);
   const app = useAppState();
   const [snoozes, setSnoozes] = useState<{ label: string; at: number }[]>([]);
+  // What the palette acts on, read once when it opens: keys go to the palette
+  // while it is open, so the selection cannot move under it.
+  const [opened] = useState(() => {
+    const threads = targets();
+    return { threads, rows: threads.map((id) => rowOf(String(id))) };
+  });
 
   useEffect(() => {
     if (mode.kind !== "snooze") return;
@@ -187,9 +193,9 @@ function useCommands(mode: PaletteMode, query: string): { items: Item[]; placeho
       return { items, placeholder: "Type a command" };
     }
     case "labels": {
-      const t = targets();
       const items: Item[] = userLabels.map((l) => {
-        const all = t.length > 0 && t.every((id) => rowOf(String(id))?.labels.includes(l.id));
+        const all =
+          opened.rows.length > 0 && opened.rows.every((row) => row?.labels.includes(l.id));
         return { id: l.id, label: `${all ? "✓ " : ""}${l.name}`, run: () => applyLabel(l.id) };
       });
       const q = query.trim();
@@ -211,7 +217,7 @@ function useCommands(mode: PaletteMode, query: string): { items: Item[]; placeho
               apply: {
                 account,
                 kind: "label",
-                threads: targets(),
+                threads: opened.threads,
                 add: [id],
                 remove: [],
                 snooze: null,
@@ -248,8 +254,7 @@ function useCommands(mode: PaletteMode, query: string): { items: Item[]; placeho
         placeholder: "Switch account",
       };
     case "addToSplit": {
-      const t = targets()[0];
-      const row = t !== undefined ? rowOf(String(t)) : undefined;
+      const row = opened.rows[0];
       if (!row || account === null) return { items: [], placeholder: "Nothing selected" };
       const email = row.senderEmail.toLowerCase();
       const domain = email.split("@")[1] ?? "";

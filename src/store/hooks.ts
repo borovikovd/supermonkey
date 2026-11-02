@@ -56,8 +56,8 @@ export function useListView(
   const rows = useMirror((s) => s.rows);
   const pending = useMirror((s) => s.pending);
   const removals = useMirror((s) => s.removals);
-  // Manual memo: the compiler does not memoize viewList, which builds new arrays
-  // whenever pending actions apply, and callers depend on a stable `ids`.
+  // Explicit memo, not left to the compiler: `ids` feeds effect dependencies in
+  // ListView, and the compiler's caching is an optimization, not a guarantee.
   return useMemo(() => {
     if (!id || sub?.type !== "list") {
       return { ids: [], rows: {}, loaded: false, searching: false, more: false };
