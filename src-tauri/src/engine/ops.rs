@@ -67,7 +67,7 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
         }
         let Some(op) = next_op(&e, rt.id) else {
             attempt = 0;
-            super::wait(&rt.ops_kick, Duration::from_secs(30)).await;
+            rt.ops_kick.wait(Duration::from_secs(30)).await;
             continue;
         };
         let result = execute(&e, &rt, &op).await;
@@ -91,7 +91,7 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
                     .log_err("store narrowed op");
             }
             Err(err) => match err.outcome {
-                Outcome::Offline => super::wait(&rt.ops_kick, Duration::from_secs(10)).await,
+                Outcome::Offline => rt.ops_kick.wait(Duration::from_secs(10)).await,
                 Outcome::InvalidGrant => return,
                 Outcome::Rejected {
                     status,
@@ -108,7 +108,7 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
                 _ => {
                     let d = ub_gmail::backoff(attempt, err.retry_after());
                     attempt = attempt.saturating_add(1);
-                    super::wait(&rt.ops_kick, d).await;
+                    rt.ops_kick.wait(d).await;
                 }
             },
         }

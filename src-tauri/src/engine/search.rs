@@ -39,8 +39,9 @@ pub fn start(
     };
     // A newer query cancels the older one's queued fetches.
     cancel(e, &sub);
-    let handle = tauri::async_runtime::spawn(list_page(e.clone(), rt, sub.clone(), query, page));
-    e.searches.lock().insert(sub, handle);
+    if let Some(handle) = e.spawn("search", list_page(e.clone(), rt, sub.clone(), query, page)) {
+        e.searches.lock().insert(sub, handle);
+    }
 }
 
 /// Lists one page, fetches metadata for hits not cached at their historyId,
@@ -54,7 +55,7 @@ async fn list_page(
 ) {
     if matches!(query, GmailListQuery::Search(_)) && page.is_none() {
         // The Gmail query runs once typing pauses for 300 ms.
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        crate::clock::sleep(Duration::from_millis(300)).await;
     }
     let q = thread_list_query(query, page);
     let res = rt

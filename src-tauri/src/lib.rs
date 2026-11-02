@@ -3,6 +3,7 @@
 pub mod accounts;
 pub mod actions;
 pub mod api;
+pub mod clock;
 pub mod commands;
 pub mod db;
 pub mod drafts;

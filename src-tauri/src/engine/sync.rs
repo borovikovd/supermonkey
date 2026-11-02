@@ -3,7 +3,7 @@
 use crate::LogErr as _;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use rusqlite::{OptionalExtension, params};
 use ub_gmail::{Format, GmailError, Outcome, Priority, ThreadListQuery, cost};
@@ -58,12 +58,12 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
                     if matches!(err.outcome, Outcome::InvalidGrant) {
                         return;
                     }
-                    super::wait(&rt.poll_kick, RETRY).await;
+                    rt.poll_kick.wait(RETRY).await;
                 }
             }
         }
     }
-    let mut last = Instant::now();
+    let mut last = crate::clock::now_ms();
     let mut polls = 0u32;
     while !rt.is_stopped() {
         let r = poll(&e, &rt).await;
@@ -79,13 +79,15 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
             refresh_send_as(&e, &rt).await.log_err("refresh_send_as");
         }
         let online = e.online.load(std::sync::atomic::Ordering::Relaxed);
-        super::wait(&rt.poll_kick, if online { POLL } else { RETRY }).await;
-        // A long gap means the Mac slept: wake due snoozes before the list shows.
-        if last.elapsed() > POLL * 3 {
+        rt.poll_kick.wait(if online { POLL } else { RETRY }).await;
+        // A long gap in app time means the Mac slept: wake due snoozes before the
+        // list shows. (Timers stand still while it sleeps; the wall clock does not.)
+        let now = crate::clock::now_ms();
+        if Duration::from_millis((now - last).unsigned_abs()) > POLL * 3 {
             super::snooze::wake_due(&e);
-            rt.outbox_kick.notify_one();
+            rt.outbox_kick.kick();
         }
-        last = Instant::now();
+        last = now;
     }
 }
 

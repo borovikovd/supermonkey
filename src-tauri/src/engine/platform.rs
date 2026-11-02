@@ -9,13 +9,14 @@ use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::LogErr as _;
+use crate::notify::Notification;
 
 pub trait Platform: Send + Sync + 'static {
-    /// Opens a URL in the default browser (the Google sign-in page).
+    /// Opens a URL in the default browser (the Google sign-in page, a link in mail).
     fn open_url(&self, url: &str);
     /// Opens a file with its default app (an attachment).
     fn open_path(&self, path: &Path) -> anyhow::Result<()>;
-    fn notify(&self, title: &str, body: &str);
+    fn notify(&self, n: &Notification);
     /// The Dock badge; `None` clears it.
     fn set_badge(&self, count: Option<i64>);
     /// Brings the main window forward (after a sign-in completes).
@@ -30,7 +31,7 @@ impl Platform for NoPlatform {
     fn open_path(&self, _path: &Path) -> anyhow::Result<()> {
         Ok(())
     }
-    fn notify(&self, _title: &str, _body: &str) {}
+    fn notify(&self, _n: &Notification) {}
     fn set_badge(&self, _count: Option<i64>) {}
     fn focus_window(&self) {}
 }
@@ -52,12 +53,12 @@ impl Platform for TauriPlatform {
         Ok(())
     }
 
-    fn notify(&self, title: &str, body: &str) {
+    fn notify(&self, n: &Notification) {
         self.0
             .notification()
             .builder()
-            .title(title)
-            .body(body)
+            .title(&n.title)
+            .body(n.text())
             .show()
             .log_err("show notification");
     }

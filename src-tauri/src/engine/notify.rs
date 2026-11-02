@@ -99,7 +99,6 @@ pub fn from_poll(
 }
 
 pub fn show(e: &EngineRef, n: &Notification) {
-    *e.last_notification.lock() = Some((n.clone(), crate::db::now_ms()));
-    e.platform
-        .notify(&n.title, &format!("{} · {}", n.account_email, n.body));
+    *e.last_notification.lock() = Some((n.clone(), crate::clock::now_ms()));
+    e.platform.notify(n);
 }

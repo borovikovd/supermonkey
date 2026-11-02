@@ -1,7 +1,9 @@
 //! The E2E test server (see `engine::testserver`).
 //!
-//! `e2e-server [--port N] [--dist PATH]`: port 0 picks a free one; the UI
-//! comes from `dist/` (build it with `vp build`).
+//! `e2e-server [--port N] [--dist PATH] [--now MS]`: port 0 picks a free one;
+//! the UI comes from `dist/` (build it with `vp build`); app time starts at
+//! `MS` (Unix milliseconds, default the system clock). Set `TZ` for the local
+//! time zone.
 
 use std::path::PathBuf;
 
@@ -24,5 +26,9 @@ async fn main() -> anyhow::Result<()> {
         || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist"),
         PathBuf::from,
     );
-    ubermensch_lib::engine::testserver::run(port, dist).await
+    let now = match arg("--now") {
+        Some(ms) => ms.parse()?,
+        None => ubermensch_lib::clock::now_ms(),
+    };
+    ubermensch_lib::engine::testserver::run(port, dist, now).await
 }

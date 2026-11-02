@@ -154,7 +154,7 @@ fn body(rng: &mut StdRng) -> (String, String) {
 pub fn generate(path: &Path, size: &Size, accounts: &[&str]) -> anyhow::Result<()> {
     let mut conn = crate::db::open_writer(path)?;
     let mut rng = StdRng::seed_from_u64(7);
-    let now = crate::db::now_ms();
+    let now = crate::clock::now_ms();
     for (ai, email) in accounts.iter().enumerate() {
         let tx = conn.transaction()?;
         let mut subs = Subs::default();

@@ -28,7 +28,7 @@ pub fn suggest(
          LIMIT 2000",
     )?;
     let mine = crate::db::queries::my_addresses(conn, account)?;
-    let now = crate::db::now_ms();
+    let now = crate::clock::now_ms();
     let mut out: Vec<(u8, f64, ContactSuggestion)> = Vec::new();
     let rows = stmt.query_map(params![account, like], |r| {
         Ok((

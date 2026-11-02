@@ -69,6 +69,17 @@ pub async fn open_attachment(e: &EngineRef, attachment: i64) -> CmdResult<()> {
         .map_err(err)
 }
 
+/// Opens a link from a message in the default browser or mail app: the web
+/// build's stand-in for the opener plugin, which the app's webview calls itself.
+pub fn open_url(e: &EngineRef, url: &str) -> CmdResult<()> {
+    let parsed = reqwest::Url::parse(url).map_err(err)?;
+    if !matches!(parsed.scheme(), "http" | "https" | "mailto") {
+        return Err(format!("not a web or mail link: {}", parsed.scheme()));
+    }
+    e.platform.open_url(url);
+    Ok(())
+}
+
 /// Copies a file the user picked into the draft's folder (SPEC Compose: attachments).
 pub fn add_attachment(
     draft: &DraftId,
@@ -123,7 +134,7 @@ pub fn perf_report(action: &str, ms: f64, budget: f64) {
 pub fn snooze_options(text: &str) -> Vec<SnoozeChoice> {
     use chrono::Local;
     use ub_rules::{SnoozeKind, parse_snooze_text, snooze_options};
-    let now = crate::db::now_local();
+    let now = crate::clock::now_local();
     let fmt = |d: &chrono::DateTime<Local>| d.format("%a %b %-d, %-I:%M %p").to_string();
     let mut out: Vec<SnoozeChoice> = Vec::new();
     let text = text.trim();

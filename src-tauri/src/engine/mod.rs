@@ -23,22 +23,22 @@ pub mod work;
 
 use crate::LogErr as _;
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
-use std::time::Duration;
 
 use parking_lot::Mutex;
 use tauri::{AppHandle, Manager};
 
 pub use platform::{NoPlatform, Platform, TauriPlatform};
-use tokio::sync::Notify;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::task::AbortHandle;
 use ub_gmail::{AccountScheduler, Gmail, GmailError, OAuthConfig, Outcome, Scheduler, TokenStore};
 
+use crate::clock::{Kick, now_ms};
 use crate::db::ReadPool;
 use crate::model::{AccountId, SubId};
-use crate::writer::{Effect, Writer};
+use crate::writer::{EffectReceiver, Writer};
 
 /// Endpoints and credentials. Debug builds may point at the fake Gmail server.
 #[derive(Clone)]
@@ -85,9 +85,9 @@ pub struct AccountRt {
     pub email: String,
     pub gmail: Gmail,
     pub sched: AccountScheduler,
-    pub ops_kick: Notify,
-    pub outbox_kick: Notify,
-    pub poll_kick: Notify,
+    pub ops_kick: Kick,
+    pub outbox_kick: Kick,
+    pub poll_kick: Kick,
     pub stopped: AtomicBool,
     pub work: work::WorkQueue,
     /// When retrying started, for the quiet sync status after 30 s.
@@ -118,13 +118,16 @@ pub struct Engine {
     pub store: Arc<dyn TokenStore>,
     pub accounts: Mutex<HashMap<AccountId, Arc<AccountRt>>>,
     pub online: AtomicBool,
-    pub searches: Mutex<HashMap<SubId, tauri::async_runtime::JoinHandle<()>>>,
+    pub searches: Mutex<HashMap<SubId, AbortHandle>>,
     /// The last notification shown, for click-through.
     pub last_notification: Mutex<Option<(crate::notify::Notification, i64)>>,
     /// When the window last lost focus (0 while focused).
     pub unfocused_since: AtomicI64,
     /// Wakes the snooze timer when a snooze time changes.
-    pub snooze_kick: Notify,
+    pub snooze_kick: Kick,
+    /// Every task the engine started, so [`Engine::shutdown`] can stop them.
+    tasks: Mutex<Vec<AbortHandle>>,
+    shut_down: AtomicBool,
 }
 
 pub type EngineRef = Arc<Engine>;
@@ -135,7 +138,7 @@ pub fn start(
     writer: Writer,
     reads: ReadPool,
     data_dir: PathBuf,
-    effects: UnboundedReceiver<Effect>,
+    effects: EffectReceiver,
 ) {
     let config = Config::from_env();
     let store: Arc<dyn TokenStore> =
@@ -183,28 +186,62 @@ impl Engine {
             searches: Mutex::new(HashMap::new()),
             last_notification: Mutex::new(None),
             unfocused_since: AtomicI64::new(0),
-            snooze_kick: Notify::new(),
+            snooze_kick: Kick::default(),
+            tasks: Mutex::new(Vec::new()),
+            shut_down: AtomicBool::new(false),
         })
     }
 
     /// Starts accounts and the effect loop.
-    pub fn run(self: &Arc<Self>, effects: UnboundedReceiver<Effect>) {
+    pub fn run(self: &Arc<Self>, effects: EffectReceiver) {
         launch(self);
-        tauri::async_runtime::spawn(dispatch(self.clone(), effects));
+        self.spawn("dispatch", dispatch(self.clone(), effects));
+    }
+
+    /// Runs `fut` as an engine task (see [`crate::clock::spawn`]). After
+    /// [`Engine::shutdown`] nothing starts.
+    pub fn spawn<F>(&self, label: &'static str, fut: F) -> Option<AbortHandle>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        let mut tasks = self.tasks.lock();
+        if self.shut_down.load(Ordering::Acquire) {
+            return None;
+        }
+        let handle = crate::clock::spawn(label, fut).inner().abort_handle();
+        tasks.retain(|t| !t.is_finished());
+        tasks.push(handle.clone());
+        Some(handle)
+    }
+
+    /// Stops every task and the writer at once, as quitting the app does. The
+    /// E2E server restarts the core in-process this way.
+    pub async fn shutdown(&self) {
+        self.shut_down.store(true, Ordering::Release);
+        for (_, rt) in self.accounts.lock().drain() {
+            rt.stop();
+        }
+        for (_, search) in self.searches.lock().drain() {
+            search.abort();
+        }
+        for task in self.tasks.lock().drain(..) {
+            task.abort();
+        }
+        self.writer.stop().await;
     }
 
     /// Replays every account's op queue and outbox now (back online, or app time moved).
     pub fn kick_queues(&self) {
         for rt in self.accounts.lock().values() {
-            rt.ops_kick.notify_one();
-            rt.outbox_kick.notify_one();
+            rt.ops_kick.kick();
+            rt.outbox_kick.kick();
         }
     }
 
     /// Polls every account's history now (new mail delivered in tests and demo mode).
     pub fn kick_polls(&self) {
         for rt in self.accounts.lock().values() {
-            rt.poll_kick.notify_one();
+            rt.poll_kick.kick();
         }
     }
 
@@ -234,7 +271,7 @@ impl Engine {
             }
             Outcome::InvalidGrant => self.needs_signin(rt.id),
             Outcome::RateLimited { .. } | Outcome::ServerError { .. } | Outcome::NoResponse => {
-                let now = crate::db::now_ms();
+                let now = now_ms();
                 let since = rt.retrying_since.load(Ordering::Relaxed);
                 if since == 0 {
                     rt.retrying_since.store(now, Ordering::Relaxed);
@@ -251,9 +288,9 @@ impl Engine {
             self.writer.set_online(online);
             if online {
                 for rt in self.accounts.lock().values() {
-                    rt.ops_kick.notify_one();
-                    rt.outbox_kick.notify_one();
-                    rt.poll_kick.notify_one();
+                    rt.ops_kick.kick();
+                    rt.outbox_kick.kick();
+                    rt.poll_kick.kick();
                 }
             }
         }
@@ -308,9 +345,9 @@ impl Engine {
             sched: self.scheduler.account(email.clone()),
             email,
             gmail,
-            ops_kick: Notify::new(),
-            outbox_kick: Notify::new(),
-            poll_kick: Notify::new(),
+            ops_kick: Kick::default(),
+            outbox_kick: Kick::default(),
+            poll_kick: Kick::default(),
             stopped: AtomicBool::new(false),
             work: work::WorkQueue::default(),
             retrying_since: AtomicI64::new(0),
@@ -319,11 +356,11 @@ impl Engine {
         if let Some(old) = replaced {
             old.stop();
         }
-        tauri::async_runtime::spawn(sync::run(self.clone(), rt.clone()));
-        tauri::async_runtime::spawn(ops::run(self.clone(), rt.clone()));
-        tauri::async_runtime::spawn(outbox::run(self.clone(), rt.clone()));
+        self.spawn("sync", sync::run(self.clone(), rt.clone()));
+        self.spawn("ops", ops::run(self.clone(), rt.clone()));
+        self.spawn("outbox", outbox::run(self.clone(), rt.clone()));
         for _ in 0..work::WORKERS {
-            tauri::async_runtime::spawn(work::worker(self.clone(), rt.clone()));
+            self.spawn("worker", work::worker(self.clone(), rt.clone()));
         }
     }
 
@@ -333,9 +370,9 @@ impl Engine {
             return;
         };
         rt.stop();
-        rt.ops_kick.notify_waiters();
-        rt.outbox_kick.notify_waiters();
-        rt.poll_kick.notify_waiters();
+        rt.ops_kick.kick_all();
+        rt.outbox_kick.kick_all();
+        rt.poll_kick.kick_all();
     }
 
     /// The window gained focus: poll every account, and treat focus that comes
@@ -344,10 +381,10 @@ impl Engine {
     pub fn on_focus(self: &Arc<Self>) -> Option<crate::notify::Notification> {
         let accounts: Vec<Arc<AccountRt>> = self.accounts.lock().values().cloned().collect();
         for rt in accounts {
-            rt.poll_kick.notify_one();
+            rt.poll_kick.kick();
             // Labels and sendAs addresses refresh on focus (SPEC Sync).
             let e = self.clone();
-            tauri::async_runtime::spawn(async move {
+            self.spawn("refresh", async move {
                 sync::refresh_labels(&e, &rt)
                     .await
                     .log_err("refresh_labels");
@@ -358,12 +395,11 @@ impl Engine {
         }
         let away = self.unfocused_since.swap(0, Ordering::Relaxed);
         let (n, at) = self.last_notification.lock().take()?;
-        (away > 0 && at >= away && crate::db::now_ms() - at < 30_000).then_some(n)
+        (away > 0 && at >= away && now_ms() - at < 30_000).then_some(n)
     }
 
     pub fn on_blur(&self) {
-        self.unfocused_since
-            .store(crate::db::now_ms(), Ordering::Relaxed);
+        self.unfocused_since.store(now_ms(), Ordering::Relaxed);
     }
 }
 
@@ -399,26 +435,29 @@ fn launch(engine: &EngineRef) {
         }
     }
     update_badge(engine);
-    tauri::async_runtime::spawn(snooze::run(engine.clone()));
+    engine.spawn("snooze", snooze::run(engine.clone()));
 }
 
-async fn dispatch(engine: EngineRef, mut effects: UnboundedReceiver<Effect>) {
-    while let Some(effect) = effects.recv().await {
+async fn dispatch(engine: EngineRef, mut effects: EffectReceiver) {
+    use crate::writer::Effect;
+    while let Some(tracked) = crate::clock::parked(effects.recv()).await {
+        // Busy until this effect is handled; the tasks it starts count on their own.
+        let (effect, _handling) = tracked.into_parts();
         let e = engine.clone();
         match effect {
             Effect::Ops(a) => {
                 if let Some(rt) = e.account(a) {
-                    rt.ops_kick.notify_one();
+                    rt.ops_kick.kick();
                 }
             }
             Effect::Outbox(a) => {
                 if let Some(rt) = e.account(a) {
-                    rt.outbox_kick.notify_one();
+                    rt.outbox_kick.kick();
                 }
             }
             Effect::FetchThread { account, thread } => {
                 if let Some(rt) = e.account(account) {
-                    tauri::async_runtime::spawn(sync::fetch_opened(e, rt, thread));
+                    engine.spawn("fetch thread", sync::fetch_opened(e, rt, thread));
                 }
             }
             Effect::GmailList {
@@ -429,16 +468,16 @@ async fn dispatch(engine: EngineRef, mut effects: UnboundedReceiver<Effect>) {
             } => search::start(&e, sub, account, query, page_token),
             Effect::CancelSub(sub) => search::cancel(&e, &sub),
             Effect::AccountRemoved { account, email } => {
-                tauri::async_runtime::spawn(auth::forget(e, account, email));
+                engine.spawn("forget account", auth::forget(e, account, email));
             }
             Effect::DraftParts { account, draft } => {
                 if e.account(account).is_some() {
-                    tauri::async_runtime::spawn(drafts::download_parts(e, draft));
+                    engine.spawn("draft parts", drafts::download_parts(e, draft));
                 }
             }
             Effect::ReadDraft { account, draft } => {
                 if let Some(rt) = e.account(account) {
-                    tauri::async_runtime::spawn(drafts::read_skipped(e, rt, draft));
+                    engine.spawn("read draft", drafts::read_skipped(e, rt, draft));
                 }
             }
             Effect::OnScreen(a) => {
@@ -448,10 +487,10 @@ async fn dispatch(engine: EngineRef, mut effects: UnboundedReceiver<Effect>) {
             }
             Effect::Badge => update_badge(&e),
             Effect::Notify(n) => notify::show(&e, &n),
-            Effect::Snoozes => e.snooze_kick.notify_one(),
+            Effect::Snoozes => e.snooze_kick.kick(),
             Effect::RefreshLabels(a) => {
                 if let Some(rt) = e.account(a) {
-                    tauri::async_runtime::spawn(async move {
+                    engine.spawn("refresh labels", async move {
                         sync::refresh_labels(&e, &rt)
                             .await
                             .log_err("refresh_labels");
@@ -477,9 +516,4 @@ fn update_badge(e: &Engine) {
         })
         .unwrap_or(0);
     e.platform.set_badge((count > 0).then_some(count));
-}
-
-/// Waits for a kick or a timeout.
-pub async fn wait(notify: &Notify, timeout: Duration) {
-    let _ = tokio::time::timeout(timeout, notify.notified()).await;
 }

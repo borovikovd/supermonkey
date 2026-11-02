@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use crossbeam_channel::{Receiver, Sender, select_biased, unbounded};
 use rusqlite::{Connection, Transaction, params};
 
+use crate::clock::{Busy, Tracked};
 use crate::model::{
     AccountId, ChannelMessage, DraftId, MessageId, NumberedAction, SubId, ThreadId,
 };
@@ -25,7 +26,13 @@ enum Job {
     Sync(SyncFn),
     Channel(Box<dyn Fn(ChannelMessage) + Send>),
     SetOnline(bool),
+    /// Stop after the UI jobs queued before it; acknowledged once the database is closed.
+    Stop(tokio::sync::oneshot::Sender<()>),
 }
+
+/// Post-commit work for the engine, each busy until the engine has handled it.
+pub type EffectSender = tokio::sync::mpsc::UnboundedSender<Tracked<Effect>>;
+pub type EffectReceiver = tokio::sync::mpsc::UnboundedReceiver<Tracked<Effect>>;
 
 /// Work for the async side after a commit.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -184,18 +191,18 @@ impl Ctx<'_> {
     }
 }
 
+/// A queued job, busy until the writer has run it and sent its effects.
+type Queued = (Job, Busy);
+
 #[derive(Clone)]
 pub struct Writer {
-    ui: Sender<Job>,
-    sync: Sender<Job>,
+    ui: Sender<Queued>,
+    sync: Sender<Queued>,
 }
 
 impl Writer {
     /// Starts the writer thread. `effects` receives post-commit work.
-    pub fn start(
-        db_path: &std::path::Path,
-        effects: tokio::sync::mpsc::UnboundedSender<Effect>,
-    ) -> anyhow::Result<Writer> {
+    pub fn start(db_path: &std::path::Path, effects: EffectSender) -> anyhow::Result<Writer> {
         let conn = crate::db::open_writer(db_path)?;
         let (ui_tx, ui_rx) = unbounded();
         let (sync_tx, sync_rx) = unbounded();
@@ -203,7 +210,13 @@ impl Writer {
             .name("writer".into())
             .spawn(move || {
                 let mut state = WriterState::new(conn, effects);
-                state.run(&ui_rx, &sync_rx);
+                let stopped = state.run(&ui_rx, &sync_rx);
+                // Close the database and drop unrun jobs before saying so.
+                drop(state);
+                drop((ui_rx, sync_rx));
+                if let Some(ack) = stopped {
+                    let _ = ack.send(());
+                }
             })?;
         Ok(Writer {
             ui: ui_tx,
@@ -211,14 +224,31 @@ impl Writer {
         })
     }
 
+    fn queue_ui(&self, job: Job) {
+        let _ = self.ui.send((job, Busy::new("writer")));
+    }
+
     /// Queues UI actions. Returns as soon as they are queued.
     pub fn actions(&self, actions: Vec<NumberedAction>) {
-        let _ = self.ui.send(Job::Actions(actions));
+        self.queue_ui(Job::Actions(actions));
     }
 
     /// Queues a sync job (runs after pending UI work).
     pub fn sync(&self, f: impl FnOnce(&mut Ctx<'_>) -> anyhow::Result<()> + Send + 'static) {
-        let _ = self.sync.send(Job::Sync(Box::new(f)));
+        let _ = self
+            .sync
+            .send((Job::Sync(Box::new(f)), Busy::new("writer")));
+    }
+
+    /// Stops the thread after the UI jobs queued so far, as quitting the app
+    /// would; queued sync jobs are dropped. Returns once the database is closed.
+    /// The E2E server restarts the core in-process this way.
+    pub async fn stop(&self) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.queue_ui(Job::Stop(tx));
+        if rx.await.is_err() {
+            log::debug!("writer was already stopped");
+        }
     }
 
     /// Runs a job and waits for its result.
@@ -245,11 +275,11 @@ impl Writer {
 
     /// Sets where channel messages go (the webview's channel).
     pub fn set_channel(&self, send: impl Fn(ChannelMessage) + Send + 'static) {
-        let _ = self.ui.send(Job::Channel(Box::new(send)));
+        self.queue_ui(Job::Channel(Box::new(send)));
     }
 
     pub fn set_online(&self, online: bool) {
-        let _ = self.ui.send(Job::SetOnline(online));
+        self.queue_ui(Job::SetOnline(online));
     }
 }
 
@@ -286,12 +316,12 @@ struct WriterState {
     ack: i64,
     subs: Subs,
     channel: Option<Box<dyn Fn(ChannelMessage) + Send>>,
-    effects: tokio::sync::mpsc::UnboundedSender<Effect>,
+    effects: EffectSender,
     online: bool,
 }
 
 impl WriterState {
-    fn new(conn: Connection, effects: tokio::sync::mpsc::UnboundedSender<Effect>) -> WriterState {
+    fn new(conn: Connection, effects: EffectSender) -> WriterState {
         let rev = conn
             .query_row("SELECT value FROM meta WHERE key = 'rev'", [], |r| r.get(0))
             .unwrap_or(0);
@@ -313,14 +343,21 @@ impl WriterState {
         }
     }
 
-    fn run(&mut self, ui: &Receiver<Job>, sync: &Receiver<Job>) {
+    /// Runs jobs until the queues close or a stop arrives, which it returns.
+    fn run(
+        &mut self,
+        ui: &Receiver<Queued>,
+        sync: &Receiver<Queued>,
+    ) -> Option<tokio::sync::oneshot::Sender<()>> {
         loop {
             let job = select_biased! {
                 recv(ui) -> j => j,
                 recv(sync) -> j => j,
             };
-            let Ok(job) = job else { return };
+            // The job's activity ends after it ran and sent its effects.
+            let Ok((job, _busy)) = job else { return None };
             match job {
+                Job::Stop(ack) => return Some(ack),
                 Job::Actions(actions) => {
                     for a in actions {
                         self.apply_action(a);
@@ -375,7 +412,7 @@ impl WriterState {
         let mut ctx = Ctx {
             tx: &tx,
             rev,
-            now: crate::db::now_ms(),
+            now: crate::clock::now_ms(),
             touched: Touched::default(),
             effects: Vec::new(),
             subs: &mut self.subs,
@@ -426,10 +463,10 @@ impl WriterState {
         }
         // Unread counts may have changed: refresh the Dock badge.
         if touched_app {
-            let _ = self.effects.send(Effect::Badge);
+            let _ = self.effects.send(Tracked::new("effect", Effect::Badge));
         }
         for e in effects {
-            let _ = self.effects.send(e);
+            let _ = self.effects.send(Tracked::new("effect", e));
         }
         Ok(())
     }

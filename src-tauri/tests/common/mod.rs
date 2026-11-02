@@ -112,7 +112,7 @@ impl Harness {
 
     pub fn poll(&self) {
         if let Some(rt) = self.engine.account(1) {
-            rt.poll_kick.notify_one();
+            rt.poll_kick.kick();
         }
     }
 

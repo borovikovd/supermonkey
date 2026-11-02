@@ -11,3 +11,10 @@ pub struct Notification {
     pub title: String,
     pub body: String,
 }
+
+impl Notification {
+    /// The text under the title: the account, then the body.
+    pub fn text(&self) -> String {
+        format!("{} · {}", self.account_email, self.body)
+    }
+}

@@ -10,10 +10,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use tokio::sync::Notify;
 use ub_gmail::{Format, GmailError, Outcome, Priority, ThreadListQuery, cost};
 
 use super::{AccountRt, EngineRef};
+use crate::clock::Kick;
 
 pub const WORKERS: usize = 4;
 
@@ -74,7 +74,7 @@ pub enum Work {
 #[derive(Default)]
 pub struct WorkQueue {
     inner: Mutex<Inner>,
-    kick: Notify,
+    kick: Kick,
     closed: AtomicBool,
 }
 
@@ -97,7 +97,7 @@ impl WorkQueue {
         q.items.insert(seq, work);
         q.heap.push(Reverse((slot, seq)));
         drop(q);
-        self.kick.notify_one();
+        self.kick.kick();
     }
 
     fn pop(&self) -> Option<(Slot, Work)> {
@@ -110,7 +110,7 @@ impl WorkQueue {
 
     pub fn close(&self) {
         self.closed.store(true, Ordering::Relaxed);
-        self.kick.notify_waiters();
+        self.kick.kick_all();
     }
 }
 
@@ -120,7 +120,7 @@ pub async fn worker(e: EngineRef, rt: Arc<AccountRt>) {
             return;
         }
         let Some((slot, work)) = rt.work.pop() else {
-            super::wait(&rt.work.kick, Duration::from_secs(5)).await;
+            rt.work.kick.wait(Duration::from_secs(5)).await;
             continue;
         };
         let mut attempt = 0;
@@ -141,12 +141,12 @@ pub async fn worker(e: EngineRef, rt: Arc<AccountRt>) {
                         Outcome::InvalidGrant => return,
                         Outcome::Offline => {
                             // Wait for the network, then retry.
-                            super::wait(&rt.poll_kick, Duration::from_secs(10)).await;
+                            rt.poll_kick.wait(Duration::from_secs(10)).await;
                         }
                         _ => {
                             let d = ub_gmail::backoff(attempt, err.retry_after());
                             attempt += 1;
-                            tokio::time::sleep(d).await;
+                            crate::clock::sleep(d).await;
                         }
                     }
                 }

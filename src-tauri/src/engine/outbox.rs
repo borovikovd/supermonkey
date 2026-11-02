@@ -58,7 +58,7 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
         if rt.is_stopped() {
             return;
         }
-        let now = crate::db::now_ms();
+        let now = crate::clock::now_ms();
         let mut next_due: Option<i64> = None;
         let mut failed: Option<GmailError> = None;
         for row in rows(&e, rt.id) {
@@ -86,11 +86,12 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
             }
             None => {
                 attempt = 0;
-                let ms = next_due.map_or(30_000, |d| (d - crate::db::now_ms()).clamp(50, 30_000));
+                let ms =
+                    next_due.map_or(30_000, |d| (d - crate::clock::now_ms()).clamp(50, 30_000));
                 Duration::from_millis(ms.unsigned_abs())
             }
         };
-        super::wait(&rt.outbox_kick, timeout).await;
+        rt.outbox_kick.wait(timeout).await;
     }
 }
 
@@ -144,7 +145,7 @@ fn touch_row_thread(
 }
 
 async fn send(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row) -> Result<(), GmailError> {
-    let late = crate::db::now_ms() > row.send_after + 5_000;
+    let late = crate::clock::now_ms() > row.send_after + 5_000;
     // Undone meanwhile: the row is gone.
     if !set_state(e, rt.id, row.id, "sending", late).await {
         return Ok(());
@@ -219,7 +220,7 @@ async fn send_draft(
         }
         // The draft is gone: the row stays sending and the next pass settles it.
         Outcome::NotFound => {
-            rt.outbox_kick.notify_one();
+            rt.outbox_kick.kick();
             Ok(())
         }
         Outcome::Rejected { message, .. } => {
@@ -261,7 +262,7 @@ async fn settle(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row) -> Result<(), Gma
     let Some(gid) = gid else {
         // Never reached Gmail: the next pass sends it from the start.
         set_state(e, rt.id, row.id, "waiting", true).await;
-        rt.outbox_kick.notify_one();
+        rt.outbox_kick.kick();
         return Ok(());
     };
     match rt

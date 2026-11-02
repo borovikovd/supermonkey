@@ -84,11 +84,13 @@ pub async fn run(e: EngineRef) {
             })
             .ok()
             .flatten();
-        let now = crate::db::now_ms();
+        let now = crate::clock::now_ms();
         let ms = next.map_or(60_000, |n| (n - now).clamp(250, 60_000));
         // A new snooze re-plans the timer.
-        super::wait(&e.snooze_kick, Duration::from_millis(ms.unsigned_abs())).await;
-        if next.is_some_and(|n| n <= crate::db::now_ms()) {
+        e.snooze_kick
+            .wait(Duration::from_millis(ms.unsigned_abs()))
+            .await;
+        if next.is_some_and(|n| n <= crate::clock::now_ms()) {
             wake_due(&e);
         }
     }

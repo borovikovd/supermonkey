@@ -199,7 +199,7 @@ pub async fn build_raw(e: &EngineRef, d: &DraftRow) -> Result<Vec<u8>, GmailErro
         ub_draft_id: d.id.clone(),
         attachments,
         inline,
-        date_ms: crate::db::now_ms(),
+        date_ms: crate::clock::now_ms(),
         message_id_domain: domain,
     }))
 }

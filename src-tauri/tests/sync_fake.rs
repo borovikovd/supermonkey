@@ -139,7 +139,7 @@ async fn offline_queues_and_replays() {
         0
     );
     h.fake.set_offline(false).await;
-    h.engine.account(1).unwrap().ops_kick.notify_one();
+    h.engine.account(1).unwrap().ops_kick.kick();
     h.until("replay after reconnect", |h| {
         h.q::<i64>("SELECT count(*) FROM ops") == 0
     })
@@ -223,7 +223,7 @@ async fn snooze_leaves_inbox_everywhere_and_wakes_back() {
     let h = Harness::start(seed).await;
     h.synced(2).await;
     let t: i64 = h.q("SELECT id FROM threads WHERE subject = 'Patch'");
-    let soon = ubermensch_lib::db::now_ms() + 1500;
+    let soon = ubermensch_lib::clock::now_ms() + 1500;
     snooze(&h, t, soon);
     h.until("snoozed", |h| {
         h.q::<i64>(&format!("SELECT in_inbox FROM threads WHERE id = {t}")) == 0
@@ -256,7 +256,7 @@ async fn a_new_message_from_outside_clears_a_snooze() {
     h.synced(2).await;
     let t: i64 = h.q("SELECT id FROM threads WHERE subject = 'Patch'");
     let gmail_thread: String = h.q(&format!("SELECT gmail_id FROM threads WHERE id = {t}"));
-    snooze(&h, t, ubermensch_lib::db::now_ms() + 3_600_000);
+    snooze(&h, t, ubermensch_lib::clock::now_ms() + 3_600_000);
     h.until("op done", |h| {
         h.q::<i64>("SELECT count(*) FROM ops") == 0
             && h.q::<i64>(&format!("SELECT in_inbox FROM threads WHERE id = {t}")) == 0
