@@ -1,10 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { keyString, subIdFor, subscribe, unsubscribe } from "../ipc/bridge";
+import { keyString, subscribe, unsubscribe } from "../ipc/bridge";
 import type { AccountSummary, AppState, ConversationData, DraftState, SubKey } from "../ipc/types";
 import { useChrome, type Where } from "./chrome";
 import { accountSummary, appState, viewList, type ListView } from "./mirror-core";
 import { useMirror } from "./mirror";
+
+/**
+ * The mirror's subscription id for a key. Read from the store, not the bridge's
+ * map, so a component re-renders when the subscription opens or closes.
+ */
+export function useSubId(key: SubKey | null): string | undefined {
+  const k = key ? keyString(key) : null;
+  return useMirror((s) => {
+    if (k === null) return undefined;
+    for (const [id, sub] of Object.entries(s.subs)) if (keyString(sub.key) === k) return id;
+    return undefined;
+  });
+}
 
 /** Keeps a subscription open while the component is mounted. */
 export function useSubscription(key: SubKey | null): string | undefined {
@@ -17,7 +30,7 @@ export function useSubscription(key: SubKey | null): string | undefined {
     subscribe(stable);
     return () => unsubscribe(stable);
   }, [stable]);
-  return key ? subIdFor(key) : undefined;
+  return useSubId(key);
 }
 
 export function useAppState(): AppState | null {
@@ -38,7 +51,7 @@ export function listKey(account: number, where: Where): SubKey {
 export function useListView(
   key: SubKey | null,
 ): ListView & { loaded: boolean; searching: boolean; more: boolean; sub?: string } {
-  const id = key ? subIdFor(key) : undefined;
+  const id = useSubId(key);
   const sub = useMirror((s) => (id ? s.subs[id] : undefined));
   const rows = useMirror((s) => s.rows);
   const pending = useMirror((s) => s.pending);
