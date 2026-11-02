@@ -79,3 +79,22 @@ written. Each keeps the spec's intent.
   shadows for the palette, sheets, and toasts). Recipients show as blue
   names, Cc/Bcc sit behind a chevron on the To row, and the footer has Send
   on the left and attach and discard icons on the right.
+
+## Decided while designing the E2E suite
+
+The full list is in `e2e/COVERAGE.md`, section 10. These depart from or add to
+the spec's wording:
+
+- **Split Inbox sheet.** Edits apply when the user presses Save, not at once,
+  and the save is an undo entry (splits are undoable per §Undo).
+- **Snooze date and time.** The "date-and-time choice" is a typed phrase in
+  the snooze picker (for example "fri 9am").
+- **Send with no recipients** is refused with an "Add a recipient" toast; the
+  draft stays.
+- **Held undo with no clear answer.** If `drafts.send` gets no clear answer
+  and `drafts.get` then finds the draft, an undo held during the send wins:
+  the draft is not sent again and returns as not sent.
+- **Testing.** End-to-end tests drive the built UI in WebKit (Playwright)
+  through the web bridge against the real core and the fake Gmail; Tauri's
+  WebDriver has no macOS support. Unit tests are kept only for complex pure
+  logic.
