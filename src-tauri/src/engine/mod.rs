@@ -423,9 +423,16 @@ impl Engine {
     /// The window gained focus: poll every account, and treat focus that comes
     /// soon after a notification shown in the background as a click on it
     /// (the notification plugin does not report clicks).
-    pub fn on_focus(&self) -> Option<crate::notify::Notification> {
-        for rt in self.accounts.lock().values() {
+    pub fn on_focus(self: &Arc<Self>) -> Option<crate::notify::Notification> {
+        let accounts: Vec<Arc<AccountRt>> = self.accounts.lock().values().cloned().collect();
+        for rt in accounts {
             rt.poll_kick.notify_one();
+            // Labels and sendAs addresses refresh on focus (SPEC Sync).
+            let e = self.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = sync::refresh_labels(&e, &rt).await;
+                let _ = sync::refresh_send_as(&e, &rt).await;
+            });
         }
         let away = self.unfocused_since.swap(0, Ordering::Relaxed);
         let last = self.last_notification.lock().take();
