@@ -1,6 +1,6 @@
 // To, Cc, and Bcc as chips with autocomplete (SPEC Recipients and autocomplete).
 
-import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import { useImperativeHandle, useRef, useState } from "react";
 
 import { autocomplete } from "../ipc/bridge";
 import type { Addr, ContactSuggestion } from "../ipc/types";
@@ -18,6 +18,9 @@ export function parseAddr(text: string): Addr | null {
     return { name: m[1].trim() || null, email: m[2].trim() };
   return { name: null, email: t };
 }
+
+/** `Name <a@b.c>`, or the bare address when there is no name. */
+export const formatAddr = (a: Addr) => (a.name ? `${a.name} <${a.email}>` : a.email);
 
 /** Splits pasted text into addresses (commas, semicolons, newlines). */
 export function splitAddrs(text: string): Addr[] {
@@ -43,18 +46,24 @@ function Highlight({ text, start, end }: { text: string; start: number; end: num
   );
 }
 
-export const RecipientField = forwardRef<
-  RecipientHandle,
-  {
-    label: string;
-    account: number;
-    value: Addr[];
-    onChange: (v: Addr[]) => void;
-    onTab?: (shift: boolean) => void;
-    /** Controls at the right end of the row (e.g. the Cc/Bcc toggle). */
-    right?: React.ReactNode;
-  }
->(function RecipientField({ label, account, value, onChange, onTab, right }, ref) {
+export function RecipientField({
+  ref,
+  label,
+  account,
+  value,
+  onChange,
+  onTab,
+  right,
+}: {
+  ref?: React.Ref<RecipientHandle>;
+  label: string;
+  account: number;
+  value: Addr[];
+  onChange: (v: Addr[]) => void;
+  onTab?: (shift: boolean) => void;
+  /** Controls at the right end of the row (e.g. the Cc/Bcc toggle). */
+  right?: React.ReactNode;
+}) {
   const [text, setText] = useState("");
   const [suggestions, setSuggestions] = useState<ContactSuggestion[]>([]);
   const [active, setActive] = useState(0);
@@ -74,11 +83,15 @@ export const RecipientField = forwardRef<
     onChange(next);
   };
 
+  const clearInput = () => {
+    setText("");
+    setSuggestions([]);
+  };
+
   /** Turns typed text into a chip; returns the full list. */
   const commit = (): Addr[] => {
     const a = parseAddr(text);
-    setText("");
-    setSuggestions([]);
+    clearInput();
     if (!a) return value;
     const next = value.some((x) => x.email.toLowerCase() === a.email.toLowerCase())
       ? value
@@ -106,8 +119,7 @@ export const RecipientField = forwardRef<
 
   const accept = (s: ContactSuggestion) => {
     addAll([{ name: s.name || null, email: s.email }]);
-    setText("");
-    setSuggestions([]);
+    clearInput();
   };
 
   const open = suggestions.length > 0;
@@ -152,8 +164,7 @@ export const RecipientField = forwardRef<
           if (/[,;]$/.test(v) || (/\s$/.test(v) && isValidEmail(v.trim()))) {
             const a = parseAddr(v);
             if (a) addAll([a]);
-            setText("");
-            setSuggestions([]);
+            clearInput();
             return;
           }
           setText(v);
@@ -164,8 +175,7 @@ export const RecipientField = forwardRef<
           if (/[,;\n]/.test(t) || t.includes("@")) {
             e.preventDefault();
             addAll(splitAddrs(text + t));
-            setText("");
-            setSuggestions([]);
+            clearInput();
           }
         }}
         onBlur={() => {
@@ -268,4 +278,4 @@ export const RecipientField = forwardRef<
       )}
     </div>
   );
-});
+}

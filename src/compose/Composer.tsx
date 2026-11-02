@@ -14,7 +14,7 @@ import { act, addAttachment } from "../ipc/bridge";
 import type { Addr, DraftAttachment, DraftFields } from "../ipc/types";
 import { useChrome } from "../store/chrome";
 import { useAppState, useDraft } from "../store/hooks";
-import { RecipientField, isValidEmail, type RecipientHandle } from "./RecipientField";
+import { RecipientField, formatAddr, isValidEmail, type RecipientHandle } from "./RecipientField";
 import { closeComposerOnScreen, discardOnScreen, openComposer, sendOnScreen } from "./start";
 
 const SAVE_DELAY = 500;
@@ -31,21 +31,8 @@ const HardBreakKeys = HardBreak.extend({
   },
 });
 
-const fmt = (a: Addr | null) => (a ? (a.name ? `${a.name} <${a.email}>` : a.email) : "");
-
 function QuoteBlock({ html }: { html: string }) {
   const [open, setOpen] = useState(false);
-  const frame = useRef<HTMLIFrameElement>(null);
-  useEffect(() => {
-    const el = frame.current;
-    if (!el || !open) return;
-    const fit = () => {
-      const doc = el.contentDocument;
-      if (doc) el.style.height = `${doc.documentElement.scrollHeight}px`;
-    };
-    el.addEventListener("load", fit);
-    return () => el.removeEventListener("load", fit);
-  }, [open]);
   return (
     <div className="mt-1">
       <button
@@ -58,11 +45,15 @@ function QuoteBlock({ html }: { html: string }) {
       </button>
       {open && (
         <iframe
-          ref={frame}
           title="quoted"
           sandbox="allow-same-origin"
           className="mt-2 w-full border-0"
           srcDoc={`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="script-src 'none'"><style>body{margin:0;font:13px/20px -apple-system,sans-serif;color:#73716D}</style></head><body>${html}</body></html>`}
+          onLoad={(e) => {
+            const el = e.currentTarget;
+            const doc = el.contentDocument;
+            if (doc) el.style.height = `${doc.documentElement.scrollHeight}px`;
+          }}
         />
       )}
     </div>
@@ -80,6 +71,69 @@ async function readFile(file: File): Promise<string> {
 }
 
 const commitField = (h: RecipientHandle | null, v: Addr[]) => (h ? h.commit() : v);
+
+function AttachmentList({
+  attachments,
+  onRemove,
+}: {
+  attachments: DraftAttachment[];
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {attachments.map((a) => (
+        <span
+          key={a.id}
+          className="flex items-center gap-1.5 rounded-control border border-border-2 px-2 py-1 text-row"
+        >
+          <Paperclip size={12} strokeWidth={1.5} className="text-text-3" />
+          <span className="max-w-[220px] truncate">{a.filename}</span>
+          <button
+            tabIndex={-1}
+            className="text-text-3 hover:text-text"
+            onClick={() => onRemove(a.id)}
+          >
+            <X size={12} />
+          </button>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** Send on the left, quiet icons on the right, under a hairline. */
+function Footer({ blurred, onAttach }: { blurred: boolean; onAttach: () => void }) {
+  return (
+    <div className="mt-6 flex items-center gap-5 border-t border-border-2 pt-3 text-row">
+      <button
+        tabIndex={-1}
+        onClick={sendOnScreen}
+        className="font-medium text-text hover:text-accent"
+        title="Send (⌘↵)"
+      >
+        Send
+      </button>
+      <span className="text-text-3">{blurred ? "Enter to edit · Esc to close" : "⌘↵ to send"}</span>
+      <div className="flex-1" />
+      <button
+        tabIndex={-1}
+        onClick={onAttach}
+        className="text-text-3 hover:text-text-2"
+        title="Attach (⌘⇧A)"
+      >
+        <Paperclip size={16} strokeWidth={1.5} />
+      </button>
+      <button
+        tabIndex={-1}
+        onClick={discardOnScreen}
+        className="text-text-3 hover:text-text-2"
+        title="Discard (⌘⇧,)"
+      >
+        <Trash2 size={16} strokeWidth={1.5} />
+      </button>
+    </div>
+  );
+}
 
 export function Composer({ draft, inline }: { draft: string; inline: boolean }) {
   const state = useDraft(draft);
@@ -129,6 +183,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     },
     [scheduleSave],
   );
+
+  const attach = useCallback(() => fileRef.current?.click(), []);
 
   const editor = useEditor({
     extensions: [
@@ -215,19 +271,17 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
         .map((a) => a.email);
     openComposer.focus = () => editor?.commands.focus("end");
     openComposer.setFrom = (from) => update({ from });
-    openComposer.attach = () => fileRef.current?.click();
+    openComposer.attach = attach;
     return () => {
       if (openComposer.draft === draft) openComposer.draft = null;
     };
-  }, [draft, editor, update]);
+  }, [draft, editor, update, attach]);
 
   // A reply scrolls fully into view with the editor focused; a new message starts in To.
   useEffect(() => {
     if (inline) root.current?.scrollIntoView({ block: "nearest" });
     else requestAnimationFrame(() => toRef.current?.focus());
   }, [inline]);
-
-  const attach = useCallback(() => fileRef.current?.click(), []);
 
   // Compose shortcuts work focused or blurred (SPEC Compose).
   useEffect(() => {
@@ -362,7 +416,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
             className="px-1 text-text-2 hover:text-text"
             onClick={() => useChrome.getState().set({ palette: { kind: "from", draft } })}
           >
-            {fmt(fields.from)}
+            {fields.from ? formatAddr(fields.from) : ""}
           </button>
         </div>
       )}
@@ -373,15 +427,12 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
         value={fields.to}
         onChange={(to) => update({ to })}
         right={ccToggle}
-        onTab={(shift) =>
-          shift
-            ? null
-            : showCc
-              ? ccRef.current?.focus()
-              : showSubject
-                ? subjectRef.current?.focus()
-                : editor?.commands.focus()
-        }
+        onTab={(shift) => {
+          if (shift) return;
+          if (showCc) ccRef.current?.focus();
+          else if (showSubject) subjectRef.current?.focus();
+          else editor?.commands.focus();
+        }}
       />
       {showCc && (
         <RecipientField
@@ -445,26 +496,12 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       </div>
       {state?.quoteHtml && <QuoteBlock html={state.quoteHtml} />}
       {fields.attachments.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {fields.attachments.map((a) => (
-            <span
-              key={a.id}
-              className="flex items-center gap-1.5 rounded-control border border-border-2 px-2 py-1 text-row"
-            >
-              <Paperclip size={12} strokeWidth={1.5} className="text-text-3" />
-              <span className="max-w-[220px] truncate">{a.filename}</span>
-              <button
-                tabIndex={-1}
-                className="text-text-3 hover:text-text"
-                onClick={() =>
-                  update({ attachments: latest.current.attachments.filter((x) => x.id !== a.id) })
-                }
-              >
-                <X size={12} />
-              </button>
-            </span>
-          ))}
-        </div>
+        <AttachmentList
+          attachments={fields.attachments}
+          onRemove={(id) =>
+            update({ attachments: latest.current.attachments.filter((x) => x.id !== id) })
+          }
+        />
       )}
       {/* Empty room in the card goes below the quote, as in Superhuman. */}
       <div className="flex-1" />
@@ -475,37 +512,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
         hidden
         onChange={(e) => void onFiles(e.target.files)}
       />
-      {/* Footer: Send on the left, quiet icons on the right, under a hairline. */}
-      <div className="mt-6 flex items-center gap-5 border-t border-border-2 pt-3 text-row">
-        <button
-          tabIndex={-1}
-          onClick={sendOnScreen}
-          className="font-medium text-text hover:text-accent"
-          title="Send (⌘↵)"
-        >
-          Send
-        </button>
-        <span className="text-text-3">
-          {blurred ? "Enter to edit · Esc to close" : "⌘↵ to send"}
-        </span>
-        <div className="flex-1" />
-        <button
-          tabIndex={-1}
-          onClick={attach}
-          className="text-text-3 hover:text-text-2"
-          title="Attach (⌘⇧A)"
-        >
-          <Paperclip size={16} strokeWidth={1.5} />
-        </button>
-        <button
-          tabIndex={-1}
-          onClick={discardOnScreen}
-          className="text-text-3 hover:text-text-2"
-          title="Discard (⌘⇧,)"
-        >
-          <Trash2 size={16} strokeWidth={1.5} />
-        </button>
-      </div>
+      <Footer blurred={blurred} onAttach={attach} />
     </div>
   );
 }

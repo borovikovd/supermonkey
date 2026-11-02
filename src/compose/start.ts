@@ -43,6 +43,22 @@ function flushSave(draft: string) {
 /** Screens a `c` composer returns to, per draft. */
 const returnTo = new Map<string, Screen>();
 
+/** The draft in the composer on screen, inline or full-screen. */
+function draftOnScreen(): string | null {
+  const c = useChrome.getState();
+  const cur = c.current();
+  return c.inline?.draft ?? (cur?.screen.kind === "compose" ? cur.screen.draft : null);
+}
+
+/** Opens a composer that replaces the screen. */
+function openScreen(draft: string) {
+  subscribe(composerKey(draft));
+  const c = useChrome.getState();
+  returnTo.set(draft, c.current()?.screen ?? { kind: "list" });
+  c.patchCurrent({ screen: { kind: "compose", draft } });
+  c.set({ composeBlurred: false, inline: null });
+}
+
 /** Opens the reply composer under the open conversation. */
 function openInline(draft: string, thread: number, target: number | null) {
   subscribe(composerKey(draft));
@@ -55,16 +71,12 @@ function openInline(draft: string, thread: number, target: number | null) {
   });
 }
 
-function newId() {
-  return crypto.randomUUID();
-}
-
 /** `c`: a new message that replaces the screen. */
 export function startCompose() {
   const c = useChrome.getState();
   if (c.account === null) return;
   closeComposerOnScreen();
-  const draft = newId();
+  const draft = crypto.randomUUID();
   act({
     type: "saveDraft",
     draft,
@@ -78,25 +90,17 @@ export function startCompose() {
       startedOnLatest: false,
     },
   });
-  subscribe(composerKey(draft));
-  const cur = c.current();
-  returnTo.set(draft, cur?.screen ?? { kind: "list" });
-  c.patchCurrent({ screen: { kind: "compose", draft } });
-  c.set({ composeBlurred: false, inline: null });
+  openScreen(draft);
 }
 
 /** Opens a draft from the Drafts list or a collapsed draft in a thread. */
 export function resumeDraft(draft: string, thread: number | null, target: number | null) {
-  const c = useChrome.getState();
   closeComposerOnScreen();
   if (thread === null) {
-    subscribe(composerKey(draft));
-    returnTo.set(draft, c.current()?.screen ?? { kind: "list" });
-    c.patchCurrent({ screen: { kind: "compose", draft } });
-    c.set({ composeBlurred: false, inline: null });
+    openScreen(draft);
     return;
   }
-  const cur = c.current();
+  const cur = useChrome.getState().current();
   if (cur?.screen.kind !== "conversation" || cur.screen.thread !== thread) {
     openThread(thread);
     markReadOnOpenWhenLoaded(thread);
@@ -179,7 +183,7 @@ export function startReply(mode: ReplyMode, draftId?: string) {
       openInline(resume.id, thread, resume.target);
       return;
     }
-    const draft = newId();
+    const draft = crypto.randomUUID();
     act({
       type: "saveDraft",
       draft,
@@ -205,17 +209,16 @@ function resumeDraftById(draft: string, thread: number | null) {
 
 /** Closes the composer on screen as a second Esc would: kept as a draft, or discarded if untouched. */
 export function closeComposerOnScreen() {
-  const c = useChrome.getState();
-  const cur = c.current();
-  const draft = c.inline?.draft ?? (cur?.screen.kind === "compose" ? cur.screen.draft : null);
+  const draft = draftOnScreen();
   if (!draft) return;
   flushSave(draft);
   act({ type: "closeComposer", draft });
-  forgetSub(composerKey(draft));
   leave(draft);
 }
 
+/** Drops the composer's subscription and takes it off screen. */
 function leave(draft: string) {
+  forgetSub(composerKey(draft));
   const c = useChrome.getState();
   if (c.inline?.draft === draft) c.set({ inline: null, composeBlurred: false });
   const cur = c.current();
@@ -229,9 +232,7 @@ function leave(draft: string) {
 
 /** Cmd+Enter: refuses with a toast while a recipient is invalid. */
 export function sendOnScreen() {
-  const c = useChrome.getState();
-  const cur = c.current();
-  const draft = c.inline?.draft ?? (cur?.screen.kind === "compose" ? cur.screen.draft : null);
+  const draft = draftOnScreen();
   if (!draft) return;
   const invalid = openComposer.draft === draft ? openComposer.invalid() : [];
   if (invalid.length > 0) {
@@ -252,18 +253,14 @@ export function sendOnScreen() {
   }
   flushSave(draft);
   act({ type: "sendDraft", draft });
-  forgetSub(composerKey(draft));
   leave(draft);
 }
 
 /** Cmd+Shift+,: discard locally and on Gmail. */
 export function discardOnScreen() {
-  const c = useChrome.getState();
-  const cur = c.current();
-  const draft = c.inline?.draft ?? (cur?.screen.kind === "compose" ? cur.screen.draft : null);
+  const draft = draftOnScreen();
   if (!draft) return;
   act({ type: "discardDraft", draft });
-  forgetSub(composerKey(draft));
   leave(draft);
   toast("Draft discarded");
 }
@@ -278,10 +275,6 @@ export function reopenDraft(account: number, draft: string, thread: number | nul
     closeComposerOnScreen();
     c.setAccount(account);
   }
-  if (thread === null) {
-    resumeDraft(draft, null, null);
-  } else {
-    // Even if the thread has left the current view.
-    resumeDraft(draft, thread, null);
-  }
+  // Reopens the thread even if it has left the current view.
+  resumeDraft(draft, thread, null);
 }
