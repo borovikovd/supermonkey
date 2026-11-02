@@ -98,8 +98,9 @@ async fn rate_limits_and_server_errors_retry() {
             retry_after_secs: Some(0),
         },
     );
+    // Faults count requests from injection, so the 503 is the second call.
     h.fake.inject(
-        Matcher::new("POST", "*/messages/batchModify").once(),
+        Matcher::new("POST", "*/messages/batchModify").nth(2),
         Fault::status(503, "backendError"),
     );
     let t: i64 = h.q("SELECT id FROM threads WHERE subject = 'Patch'");
@@ -120,7 +121,8 @@ async fn rate_limits_and_server_errors_retry() {
         .find(|m| m.header("Subject") == Some("Patch"))
         .unwrap();
     assert!(!msg.label_ids.iter().any(|l| l == "INBOX"));
-    assert!(h.fake.count("POST", "*/messages/batchModify") >= 3);
+    // 429, 503, then success, and the op is not sent again after it.
+    assert_eq!(h.fake.count("POST", "*/messages/batchModify"), 3);
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -166,6 +166,7 @@ pub fn generate(path: &Path, size: &Size, accounts: &[&str]) -> anyhow::Result<(
             effects: Vec::new(),
             subs: &mut subs,
             online: false,
+            on_commit: Vec::new(),
         };
         let account = crate::accounts::create(&mut ctx, email)?;
         let name = email.split('@').next().unwrap_or(email).to_string();

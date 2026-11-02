@@ -108,6 +108,9 @@ impl Touched {
     }
 }
 
+/// Runs once the job's transaction has committed (`Ok`) or failed to (`Err`).
+pub type OnCommit = Box<dyn FnOnce(Result<(), &anyhow::Error>)>;
+
 /// A job's view of the writer: the open transaction plus bookkeeping.
 pub struct Ctx<'a> {
     pub tx: &'a Transaction<'a>,
@@ -118,6 +121,8 @@ pub struct Ctx<'a> {
     pub effects: Vec<Effect>,
     pub subs: &'a mut Subs,
     pub online: bool,
+    /// Callbacks for after the commit; dropped if the job itself fails.
+    pub on_commit: Vec<OnCommit>,
 }
 
 impl Ctx<'_> {
@@ -222,7 +227,7 @@ impl Writer {
         f: impl FnOnce(&mut Ctx<'_>) -> anyhow::Result<T> + Send + 'static,
     ) -> anyhow::Result<T> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.sync(move |ctx| run_and_reply(ctx, f, |r| _ = tx.send(r)));
+        self.sync(move |ctx| run_and_reply(ctx, f, move |r| _ = tx.send(r)));
         rx.await
             .map_err(|e| anyhow::anyhow!("writer stopped: {e}"))?
     }
@@ -233,7 +238,7 @@ impl Writer {
         f: impl FnOnce(&mut Ctx<'_>) -> anyhow::Result<T> + Send + 'static,
     ) -> anyhow::Result<T> {
         let (tx, rx) = crossbeam_channel::bounded(1);
-        self.sync(move |ctx| run_and_reply(ctx, f, |r| _ = tx.send(r)));
+        self.sync(move |ctx| run_and_reply(ctx, f, move |r| _ = tx.send(r)));
         rx.recv()
             .map_err(|e| anyhow::anyhow!("writer stopped: {e}"))?
     }
@@ -250,18 +255,29 @@ impl Writer {
 
 /// Runs `f` and hands its result to the waiting caller. A failed `f` also
 /// fails the job, so its transaction rolls back.
-fn run_and_reply<T>(
+/// Replies with the job's result once its transaction has committed, so the
+/// caller's next read (from any connection) sees what the job wrote.
+fn run_and_reply<T: 'static>(
     ctx: &mut Ctx<'_>,
     f: impl FnOnce(&mut Ctx<'_>) -> anyhow::Result<T>,
-    reply: impl FnOnce(anyhow::Result<T>),
+    reply: impl FnOnce(anyhow::Result<T>) + 'static,
 ) -> anyhow::Result<()> {
-    let result = f(ctx);
-    let failed = result.is_err();
-    reply(result.map_err(|e| anyhow::anyhow!("{e:#}")));
-    if failed {
-        anyhow::bail!("job failed");
+    match f(ctx) {
+        Ok(value) => {
+            ctx.on_commit.push(Box::new(move |committed| {
+                reply(match committed {
+                    Ok(()) => Ok(value),
+                    Err(e) => Err(anyhow::anyhow!("commit failed: {e:#}")),
+                });
+            }));
+            Ok(())
+        }
+        // The transaction rolls back; nothing to wait for.
+        Err(e) => {
+            reply(Err(anyhow::anyhow!("{e:#}")));
+            anyhow::bail!("job failed")
+        }
     }
-    Ok(())
 }
 
 struct WriterState {
@@ -364,23 +380,36 @@ impl WriterState {
             effects: Vec::new(),
             subs: &mut self.subs,
             online: self.online,
+            on_commit: Vec::new(),
         };
         f(&mut ctx)?;
         let Ctx {
-            touched, effects, ..
+            touched,
+            effects,
+            on_commit,
+            ..
         } = ctx;
         let wrote = !touched.is_empty();
         let touched_app = touched.app;
         let ack = action.unwrap_or(self.ack).max(self.ack);
-        if let Some(n) = action {
-            tx.execute("UPDATE meta SET value = ?1 WHERE key = 'last_action'", [n])?;
+        let subs = &mut self.subs;
+        let online = self.online;
+        let committed = (move || -> anyhow::Result<_> {
+            if let Some(n) = action {
+                tx.execute("UPDATE meta SET value = ?1 WHERE key = 'last_action'", [n])?;
+            }
+            if wrote {
+                tx.execute("UPDATE meta SET value = ?1 WHERE key = 'rev'", [rev])?;
+            }
+            let mut updates = subs.updates(&tx, &touched, online)?;
+            updates.extend(subs.take_first_loads(&tx, online)?);
+            tx.commit()?;
+            Ok(updates)
+        })();
+        for done in on_commit {
+            done(committed.as_ref().map(|_| ()));
         }
-        if wrote {
-            tx.execute("UPDATE meta SET value = ?1 WHERE key = 'rev'", [rev])?;
-        }
-        let mut updates = self.subs.updates(&tx, &touched, self.online)?;
-        updates.extend(self.subs.take_first_loads(&tx, self.online)?);
-        tx.commit()?;
+        let updates = committed?;
         if wrote {
             self.rev = rev;
         }
