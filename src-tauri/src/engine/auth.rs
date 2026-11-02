@@ -10,8 +10,23 @@ use ub_gmail::{Gmail, OAuthTokens, Priority, cost};
 use super::EngineRef;
 use crate::model::AccountId;
 
-async fn sign_in(app: &AppHandle) -> anyhow::Result<(String, Arc<OAuthTokens>, String)> {
-    let e = app.state::<EngineRef>().inner().clone();
+/// A completed sign-in.
+struct SignIn {
+    email: String,
+    tokens: Arc<OAuthTokens>,
+    refresh_token: String,
+}
+
+impl SignIn {
+    /// Keeps the refresh token in the token store for the next launch.
+    fn store_token(&self, e: &EngineRef) -> anyhow::Result<()> {
+        e.store
+            .store_refresh_token(&self.email, &self.refresh_token)
+            .map_err(|err| anyhow::anyhow!("Keychain: {}", err.0))
+    }
+}
+
+async fn sign_in(app: &AppHandle, e: &EngineRef) -> anyhow::Result<SignIn> {
     if e.config.oauth.client_id.is_empty() {
         anyhow::bail!(
             "This build has no Google OAuth client. Put google-oauth-client.json in the project and rebuild."
@@ -19,15 +34,18 @@ async fn sign_in(app: &AppHandle) -> anyhow::Result<(String, Arc<OAuthTokens>, S
     }
     let opener = app.clone();
     let auth = ub_gmail::authorize(&e.config.oauth, &e.http, move |url| {
-        let _ = opener.opener().open_url(url, None::<&str>);
+        opener
+            .opener()
+            .open_url(url, None::<&str>)
+            .log_err("open the sign-in page");
     })
     .await
     .map_err(|err| anyhow::anyhow!("Sign-in failed: {:?}", err.outcome))?;
-    let refresh = auth.refresh_token.0.clone();
+    let refresh_token = auth.refresh_token.0;
     let tokens = Arc::new(OAuthTokens::with_access_token(
         e.config.oauth.clone(),
         e.http.clone(),
-        refresh.clone(),
+        refresh_token.clone(),
         auth.access_token,
     ));
     let gmail = Gmail::new(
@@ -42,23 +60,25 @@ async fn sign_in(app: &AppHandle) -> anyhow::Result<(String, Arc<OAuthTokens>, S
         .run(Priority::P1, cost::GET_PROFILE, gmail.get_profile())
         .await
         .map_err(|err| anyhow::anyhow!("Could not read the Gmail profile: {:?}", err.outcome))?;
-    Ok((profile.email_address, tokens, refresh))
+    Ok(SignIn {
+        email: profile.email_address,
+        tokens,
+        refresh_token,
+    })
 }
 
 pub async fn add_account(app: &AppHandle) -> anyhow::Result<AccountId> {
     let e = app.state::<EngineRef>().inner().clone();
-    let (email, tokens, refresh) = sign_in(app).await?;
-    e.store
-        .store_refresh_token(&email, &refresh)
-        .map_err(|err| anyhow::anyhow!("Keychain: {}", err.0))?;
-    let em = email.clone();
+    let signed_in = sign_in(app, &e).await?;
+    signed_in.store_token(&e)?;
+    let email = signed_in.email.clone();
     let id = e
         .writer
-        .call(move |ctx| crate::accounts::create(ctx, &em))
+        .call(move |ctx| crate::accounts::create(ctx, &email))
         .await?;
-    e.start_account(id, email, tokens);
+    e.start_account(id, signed_in.email, signed_in.tokens);
     if let Some(w) = app.get_webview_window("main") {
-        let _ = w.set_focus();
+        w.set_focus().log_err("focus the main window");
     }
     Ok(id)
 }
@@ -72,13 +92,12 @@ pub async fn sign_in_again(app: &AppHandle, account: AccountId) -> anyhow::Resul
             })?,
         )
     })?;
-    let (email, tokens, refresh) = sign_in(app).await?;
+    let signed_in = sign_in(app, &e).await?;
+    let email = &signed_in.email;
     if !email.eq_ignore_ascii_case(&expected) {
         anyhow::bail!("You signed in as {email}. Sign in as {expected} to reconnect this account.");
     }
-    e.store
-        .store_refresh_token(&email, &refresh)
-        .map_err(|err| anyhow::anyhow!("Keychain: {}", err.0))?;
+    signed_in.store_token(&e)?;
     e.writer
         .call(move |ctx| {
             ctx.tx.execute(
@@ -90,7 +109,7 @@ pub async fn sign_in_again(app: &AppHandle, account: AccountId) -> anyhow::Resul
             Ok(())
         })
         .await?;
-    e.start_account(account, email, tokens);
+    e.start_account(account, signed_in.email, signed_in.tokens);
     Ok(())
 }
 

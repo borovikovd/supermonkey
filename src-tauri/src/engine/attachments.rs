@@ -1,12 +1,13 @@
 //! Attachments download on demand into the app cache and open with the
 //! default app (SPEC Reading).
 
+use std::fmt;
 use std::path::PathBuf;
 
 use rusqlite::{OptionalExtension, params};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::OpenerExt;
-use ub_gmail::{Priority, cost};
+use ub_gmail::{Outcome, Priority, cost};
 
 use super::EngineRef;
 use crate::model::AccountId;
@@ -36,6 +37,26 @@ fn safe_name(name: &str) -> String {
     }
 }
 
+/// Why Gmail could not supply an attachment. Typed, so a draft write can tell
+/// waiting for the network from a real failure.
+#[derive(Debug)]
+pub enum DownloadError {
+    /// The account is not syncing: offline at launch, or signed out.
+    NoAccount,
+    Gmail(Outcome),
+}
+
+impl fmt::Display for DownloadError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DownloadError::NoAccount => f.write_str("The account is offline or signed out"),
+            DownloadError::Gmail(outcome) => write!(f, "Download failed: {outcome:?}"),
+        }
+    }
+}
+
+impl std::error::Error for DownloadError {}
+
 /// Downloads an attachment row if it is not cached yet. Returns its path.
 pub async fn ensure(e: &EngineRef, attachment: i64) -> anyhow::Result<PathBuf> {
     let row: Option<AttachmentRow> = e.reads.with(|c| {
@@ -53,9 +74,7 @@ pub async fn ensure(e: &EngineRef, attachment: i64) -> anyhow::Result<PathBuf> {
     if let Some(p) = local.map(PathBuf::from).filter(|p| p.exists()) {
         return Ok(p);
     }
-    let rt = e
-        .account(account)
-        .ok_or_else(|| anyhow::anyhow!("The account is offline or signed out"))?;
+    let rt = e.account(account).ok_or(DownloadError::NoAccount)?;
     let att_id = att_id.ok_or_else(|| anyhow::anyhow!("attachment has no Gmail id"))?;
     let bytes = rt
         .sched
@@ -65,12 +84,12 @@ pub async fn ensure(e: &EngineRef, attachment: i64) -> anyhow::Result<PathBuf> {
             rt.gmail.get_attachment(&gmail_msg, &att_id),
         )
         .await
-        .map_err(|err| anyhow::anyhow!("Download failed: {:?}", err.outcome))?;
+        .map_err(|err| DownloadError::Gmail(err.outcome))?;
     let dir = account_dir(e, account).join(&gmail_msg);
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(safe_name(&filename));
     std::fs::write(&path, &bytes)?;
-    let p = path.to_string_lossy().to_string();
+    let p = path.to_string_lossy().into_owned();
     e.writer
         .call(move |ctx| {
             ctx.tx.execute(
@@ -84,10 +103,9 @@ pub async fn ensure(e: &EngineRef, attachment: i64) -> anyhow::Result<PathBuf> {
 }
 
 pub async fn open(app: &AppHandle, attachment: i64) -> anyhow::Result<()> {
-    let e = app.state::<EngineRef>().inner().clone();
+    let e = app.state::<EngineRef>();
     let path = ensure(&e, attachment).await?;
     app.opener()
-        .open_path(path.to_string_lossy(), None::<&str>)
-        .map_err(|err| anyhow::anyhow!("{err}"))?;
+        .open_path(path.to_string_lossy(), None::<&str>)?;
     Ok(())
 }

@@ -114,7 +114,7 @@ pub fn add_attachment(
     store_attachment(&draft, &filename, &mime_type, &data).map_err(err)
 }
 
-pub fn store_attachment(
+fn store_attachment(
     draft: &str,
     filename: &str,
     mime_type: &str,
@@ -140,7 +140,7 @@ pub fn store_attachment(
             mime_type.to_string()
         },
         size: i64::try_from(bytes.len())?,
-        path: Some(path.to_string_lossy().to_string()),
+        path: Some(path.to_string_lossy().into_owned()),
         source: None,
     })
 }
@@ -178,13 +178,14 @@ pub fn snooze_options(text: String) -> Vec<SnoozeChoice> {
             at: at.timestamp_millis(),
         });
     }
+    let needle = text.to_lowercase();
     for o in snooze_options(&now) {
         let name = match o.kind {
             SnoozeKind::LaterToday => "Later today",
             SnoozeKind::TomorrowMorning => "Tomorrow morning",
             SnoozeKind::NextWeek => "Next week",
         };
-        if text.is_empty() || name.to_lowercase().contains(&text.to_lowercase()) {
+        if name.to_lowercase().contains(&needle) {
             out.push(SnoozeChoice {
                 label: format!("{name} · {}", fmt(&o.at)),
                 at: o.at.timestamp_millis(),

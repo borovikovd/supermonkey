@@ -23,6 +23,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::time::Duration;
 
 use parking_lot::Mutex;
 use tauri::{AppHandle, Manager};
@@ -92,6 +93,12 @@ impl AccountRt {
     pub fn is_stopped(&self) -> bool {
         self.stopped.load(Ordering::Relaxed)
     }
+
+    /// Ends the account's loops and workers at their next check.
+    fn stop(&self) {
+        self.stopped.store(true, Ordering::Relaxed);
+        self.work.close();
+    }
 }
 
 pub struct Engine {
@@ -117,134 +124,7 @@ pub struct Engine {
 
 pub type EngineRef = Arc<Engine>;
 
-impl Engine {
-    pub fn account(&self, id: AccountId) -> Option<Arc<AccountRt>> {
-        self.accounts.lock().get(&id).cloned()
-    }
-
-    /// Records a Gmail outcome for the online flag and the account's sync status.
-    pub fn note(&self, rt: &AccountRt, r: Result<(), &GmailError>) {
-        match r {
-            Ok(()) => {
-                rt.retrying_since.store(0, Ordering::Relaxed);
-                self.set_online(true);
-                self.set_status(rt.id, "idle");
-            }
-            Err(e) => match &e.outcome {
-                Outcome::Offline => {
-                    self.set_online(false);
-                    self.set_status(rt.id, "offline");
-                }
-                Outcome::InvalidGrant => self.needs_signin(rt.id),
-                Outcome::RateLimited { .. } | Outcome::ServerError { .. } | Outcome::NoResponse => {
-                    let now = crate::db::now_ms();
-                    let since = rt.retrying_since.load(Ordering::Relaxed);
-                    if since == 0 {
-                        rt.retrying_since.store(now, Ordering::Relaxed);
-                    } else if now - since > 30_000 {
-                        self.set_status(rt.id, "retrying");
-                    }
-                }
-                _ => {}
-            },
-        }
-    }
-
-    pub fn set_online(&self, online: bool) {
-        if self.online.swap(online, Ordering::Relaxed) != online {
-            self.writer.set_online(online);
-            if online {
-                for rt in self.accounts.lock().values() {
-                    rt.ops_kick.notify_one();
-                    rt.outbox_kick.notify_one();
-                    rt.poll_kick.notify_one();
-                }
-            }
-        }
-    }
-
-    pub fn set_status(&self, account: AccountId, status: &'static str) {
-        self.writer.sync(move |ctx| {
-            let n = ctx.tx.execute(
-                "UPDATE accounts SET sync_status = ?2 WHERE id = ?1 AND sync_status != ?2",
-                rusqlite::params![account, status],
-            )?;
-            if n > 0 {
-                ctx.touch_app();
-                ctx.touch_summary(account);
-            }
-            Ok(())
-        });
-    }
-
-    /// `invalid_grant`: the account shows Sign in again; its queue and outbox wait.
-    pub fn needs_signin(&self, account: AccountId) {
-        let removed = self.accounts.lock().remove(&account);
-        if let Some(rt) = removed {
-            rt.stopped.store(true, Ordering::Relaxed);
-            rt.work.close();
-        }
-        self.writer.sync(move |ctx| {
-            ctx.tx.execute(
-                "UPDATE accounts SET needs_signin = 1 WHERE id = ?1",
-                [account],
-            )?;
-            ctx.touch_app();
-            ctx.touch_summary(account);
-            Ok(())
-        });
-    }
-
-    /// Starts an account's sync, queue, and outbox.
-    pub fn start_account(
-        self: &Arc<Self>,
-        id: AccountId,
-        email: String,
-        tokens: Arc<dyn ub_gmail::TokenSource>,
-    ) {
-        let gmail = Gmail::new(
-            self.config.gmail_base.clone(),
-            email.clone(),
-            self.http.clone(),
-            tokens,
-        );
-        let rt = Arc::new(AccountRt {
-            id,
-            sched: self.scheduler.account(email.clone()),
-            email,
-            gmail,
-            ops_kick: Notify::new(),
-            outbox_kick: Notify::new(),
-            poll_kick: Notify::new(),
-            stopped: AtomicBool::new(false),
-            work: work::WorkQueue::default(),
-            retrying_since: AtomicI64::new(0),
-        });
-        let replaced = self.accounts.lock().insert(id, rt.clone());
-        if let Some(old) = replaced {
-            old.stopped.store(true, Ordering::Relaxed);
-            old.work.close();
-        }
-        let e = self.clone();
-        tauri::async_runtime::spawn(sync::run(e.clone(), rt.clone()));
-        tauri::async_runtime::spawn(ops::run(e.clone(), rt.clone()));
-        tauri::async_runtime::spawn(outbox::run(e.clone(), rt.clone()));
-        for _ in 0..work::WORKERS {
-            tauri::async_runtime::spawn(work::worker(e.clone(), rt.clone()));
-        }
-    }
-
-    pub fn stop_account(&self, id: AccountId) -> Option<Arc<AccountRt>> {
-        let rt = self.accounts.lock().remove(&id)?;
-        rt.stopped.store(true, Ordering::Relaxed);
-        rt.work.close();
-        rt.ops_kick.notify_waiters();
-        rt.outbox_kick.notify_waiters();
-        rt.poll_kick.notify_waiters();
-        Some(rt)
-    }
-}
-
+/// Builds the engine for the app window and starts it.
 pub fn start(
     app: &AppHandle,
     writer: Writer,
@@ -300,6 +180,164 @@ impl Engine {
         launch(self);
         tauri::async_runtime::spawn(dispatch(self.clone(), effects));
     }
+
+    pub fn account(&self, id: AccountId) -> Option<Arc<AccountRt>> {
+        self.accounts.lock().get(&id).cloned()
+    }
+
+    /// Records a Gmail outcome for the online flag and the account's sync status.
+    pub fn note<T>(&self, rt: &AccountRt, r: &Result<T, GmailError>) {
+        match r {
+            Ok(_) => self.note_ok(rt),
+            Err(err) => self.note_err(rt, err),
+        }
+    }
+
+    pub fn note_ok(&self, rt: &AccountRt) {
+        rt.retrying_since.store(0, Ordering::Relaxed);
+        self.set_online(true);
+        self.set_status(rt.id, "idle");
+    }
+
+    pub fn note_err(&self, rt: &AccountRt, err: &GmailError) {
+        match err.outcome {
+            Outcome::Offline => {
+                self.set_online(false);
+                self.set_status(rt.id, "offline");
+            }
+            Outcome::InvalidGrant => self.needs_signin(rt.id),
+            Outcome::RateLimited { .. } | Outcome::ServerError { .. } | Outcome::NoResponse => {
+                let now = crate::db::now_ms();
+                let since = rt.retrying_since.load(Ordering::Relaxed);
+                if since == 0 {
+                    rt.retrying_since.store(now, Ordering::Relaxed);
+                } else if now - since > 30_000 {
+                    self.set_status(rt.id, "retrying");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn set_online(&self, online: bool) {
+        if self.online.swap(online, Ordering::Relaxed) != online {
+            self.writer.set_online(online);
+            if online {
+                for rt in self.accounts.lock().values() {
+                    rt.ops_kick.notify_one();
+                    rt.outbox_kick.notify_one();
+                    rt.poll_kick.notify_one();
+                }
+            }
+        }
+    }
+
+    pub fn set_status(&self, account: AccountId, status: &'static str) {
+        self.writer.sync(move |ctx| {
+            let n = ctx.tx.execute(
+                "UPDATE accounts SET sync_status = ?2 WHERE id = ?1 AND sync_status != ?2",
+                rusqlite::params![account, status],
+            )?;
+            if n > 0 {
+                ctx.touch_app();
+                ctx.touch_summary(account);
+            }
+            Ok(())
+        });
+    }
+
+    /// `invalid_grant`: the account shows Sign in again; its queue and outbox wait.
+    pub fn needs_signin(&self, account: AccountId) {
+        let removed = self.accounts.lock().remove(&account);
+        if let Some(rt) = removed {
+            rt.stop();
+        }
+        self.writer.sync(move |ctx| {
+            ctx.tx.execute(
+                "UPDATE accounts SET needs_signin = 1 WHERE id = ?1",
+                [account],
+            )?;
+            ctx.touch_app();
+            ctx.touch_summary(account);
+            Ok(())
+        });
+    }
+
+    /// Starts an account's sync, queue, and outbox.
+    pub fn start_account(
+        self: &Arc<Self>,
+        id: AccountId,
+        email: String,
+        tokens: Arc<dyn ub_gmail::TokenSource>,
+    ) {
+        let gmail = Gmail::new(
+            self.config.gmail_base.clone(),
+            email.clone(),
+            self.http.clone(),
+            tokens,
+        );
+        let rt = Arc::new(AccountRt {
+            id,
+            sched: self.scheduler.account(email.clone()),
+            email,
+            gmail,
+            ops_kick: Notify::new(),
+            outbox_kick: Notify::new(),
+            poll_kick: Notify::new(),
+            stopped: AtomicBool::new(false),
+            work: work::WorkQueue::default(),
+            retrying_since: AtomicI64::new(0),
+        });
+        let replaced = self.accounts.lock().insert(id, rt.clone());
+        if let Some(old) = replaced {
+            old.stop();
+        }
+        tauri::async_runtime::spawn(sync::run(self.clone(), rt.clone()));
+        tauri::async_runtime::spawn(ops::run(self.clone(), rt.clone()));
+        tauri::async_runtime::spawn(outbox::run(self.clone(), rt.clone()));
+        for _ in 0..work::WORKERS {
+            tauri::async_runtime::spawn(work::worker(self.clone(), rt.clone()));
+        }
+    }
+
+    /// Stops an account's loops and wakes them so they exit now.
+    pub fn stop_account(&self, id: AccountId) {
+        let Some(rt) = self.accounts.lock().remove(&id) else {
+            return;
+        };
+        rt.stop();
+        rt.ops_kick.notify_waiters();
+        rt.outbox_kick.notify_waiters();
+        rt.poll_kick.notify_waiters();
+    }
+
+    /// The window gained focus: poll every account, and treat focus that comes
+    /// soon after a notification shown in the background as a click on it
+    /// (the notification plugin does not report clicks).
+    pub fn on_focus(self: &Arc<Self>) -> Option<crate::notify::Notification> {
+        let accounts: Vec<Arc<AccountRt>> = self.accounts.lock().values().cloned().collect();
+        for rt in accounts {
+            rt.poll_kick.notify_one();
+            // Labels and sendAs addresses refresh on focus (SPEC Sync).
+            let e = self.clone();
+            tauri::async_runtime::spawn(async move {
+                sync::refresh_labels(&e, &rt)
+                    .await
+                    .log_err("refresh_labels");
+                sync::refresh_send_as(&e, &rt)
+                    .await
+                    .log_err("refresh_send_as");
+            });
+        }
+        let away = self.unfocused_since.swap(0, Ordering::Relaxed);
+        let (n, at) = self.last_notification.lock().take()?;
+        (away > 0 && at >= away && crate::db::now_ms() - at < 30_000).then_some(n)
+    }
+
+    pub fn on_blur(&self) {
+        self.unfocused_since
+            .store(crate::db::now_ms(), Ordering::Relaxed);
+    }
 }
 
 /// On launch: start every signed-in account, wake due snoozes, settle the outbox.
@@ -312,11 +350,12 @@ fn launch(engine: &EngineRef) {
             let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
             Ok(rows.collect::<Result<_, _>>()?)
         })
+        .inspect_err(|err| log::warn!("read accounts at launch: {err:#}"))
         .unwrap_or_default();
     snooze::wake_due(engine);
     outbox::on_launch(engine);
-    for (id, email, needs) in accounts {
-        if needs {
+    for (id, email, needs_signin) in accounts {
+        if needs_signin {
             continue;
         }
         match engine.store.load_refresh_token(&email) {
@@ -332,7 +371,7 @@ fn launch(engine: &EngineRef) {
             _ => log::info!("no refresh token for account {id}; not syncing"),
         }
     }
-    update_badge(engine.app.as_ref(), &engine.reads);
+    update_badge(engine);
     tauri::async_runtime::spawn(snooze::run(engine.clone()));
 }
 
@@ -366,8 +405,8 @@ async fn dispatch(engine: EngineRef, mut effects: UnboundedReceiver<Effect>) {
                 tauri::async_runtime::spawn(auth::forget(e, account, email));
             }
             Effect::DraftParts { account, draft } => {
-                if let Some(rt) = e.account(account) {
-                    tauri::async_runtime::spawn(drafts::download_parts(e, rt, draft));
+                if e.account(account).is_some() {
+                    tauri::async_runtime::spawn(drafts::download_parts(e, draft));
                 }
             }
             Effect::ReadDraft { account, draft } => {
@@ -380,7 +419,7 @@ async fn dispatch(engine: EngineRef, mut effects: UnboundedReceiver<Effect>) {
                     e.scheduler.set_on_screen(Some(&rt.email));
                 }
             }
-            Effect::Badge => update_badge(e.app.as_ref(), &e.reads),
+            Effect::Badge => update_badge(&e),
             Effect::Notify(n) => notify::show(&e, &n),
             Effect::Snoozes => e.snooze_kick.notify_one(),
             Effect::RefreshLabels(a) => {
@@ -397,9 +436,10 @@ async fn dispatch(engine: EngineRef, mut effects: UnboundedReceiver<Effect>) {
 }
 
 /// The Dock badge: unread Inbox threads across accounts that are not muted.
-pub fn update_badge(app: Option<&AppHandle>, reads: &ReadPool) {
-    let Some(app) = app else { return };
-    let count: i64 = reads
+fn update_badge(e: &Engine) {
+    let Some(app) = &e.app else { return };
+    let count: i64 = e
+        .reads
         .with(|c| {
             Ok(c.query_row(
                 "SELECT count(*) FROM threads t JOIN accounts a ON a.id = t.account_id
@@ -411,44 +451,12 @@ pub fn update_badge(app: Option<&AppHandle>, reads: &ReadPool) {
         })
         .unwrap_or(0);
     if let Some(w) = app.get_webview_window("main") {
-        let _ = w.set_badge_count(if count > 0 { Some(count) } else { None });
+        w.set_badge_count((count > 0).then_some(count))
+            .log_err("set badge count");
     }
 }
 
 /// Waits for a kick or a timeout.
-pub async fn wait(notify: &Notify, ms: u64) {
-    let _ = tokio::time::timeout(std::time::Duration::from_millis(ms), notify.notified()).await;
-}
-
-impl Engine {
-    /// The window gained focus: poll every account, and treat focus that comes
-    /// soon after a notification shown in the background as a click on it
-    /// (the notification plugin does not report clicks).
-    pub fn on_focus(self: &Arc<Self>) -> Option<crate::notify::Notification> {
-        let accounts: Vec<Arc<AccountRt>> = self.accounts.lock().values().cloned().collect();
-        for rt in accounts {
-            rt.poll_kick.notify_one();
-            // Labels and sendAs addresses refresh on focus (SPEC Sync).
-            let e = self.clone();
-            tauri::async_runtime::spawn(async move {
-                sync::refresh_labels(&e, &rt)
-                    .await
-                    .log_err("refresh_labels");
-                sync::refresh_send_as(&e, &rt)
-                    .await
-                    .log_err("refresh_send_as");
-            });
-        }
-        let away = self.unfocused_since.swap(0, Ordering::Relaxed);
-        let last = self.last_notification.lock().take();
-        match last {
-            Some((n, at)) if away > 0 && at >= away && crate::db::now_ms() - at < 30_000 => Some(n),
-            _ => None,
-        }
-    }
-
-    pub fn on_blur(&self) {
-        self.unfocused_since
-            .store(crate::db::now_ms(), Ordering::Relaxed);
-    }
+pub async fn wait(notify: &Notify, timeout: Duration) {
+    let _ = tokio::time::timeout(timeout, notify.notified()).await;
 }

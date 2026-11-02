@@ -10,13 +10,13 @@ use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use futures_util::Stream;
 use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::Core;
+use crate::commands;
 use crate::model::{ChannelMessage, LaunchInfo};
 
 pub fn start(app: AppHandle) {
@@ -63,10 +63,9 @@ async fn events(State(app): State<AppHandle>) -> Response {
     app.state::<Core>().writer.set_channel(move |m| {
         let _ = tx.send(m);
     });
-    let stream: std::pin::Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>> = Box::pin(
-        UnboundedReceiverStream::new(rx)
-            .map(|m| Ok(Event::default().data(serde_json::to_string(&m).unwrap_or_default()))),
-    );
+    let stream = UnboundedReceiverStream::new(rx).map(|m| {
+        Ok::<_, Infallible>(Event::default().data(serde_json::to_string(&m).unwrap_or_default()))
+    });
     cors(Sse::new(stream).into_response())
 }
 
@@ -75,20 +74,18 @@ fn arg<T: serde::de::DeserializeOwned>(v: &Value, k: &str) -> Result<T, String> 
         .map_err(|e| format!("{k}: {e}"))
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "One short arm per command (debug only)."
-)]
+/// Runs a command by name with the same functions the Tauri commands use.
 async fn invoke(
     State(app): State<AppHandle>,
     Path(cmd): Path<String>,
     Json(args): Json<Value>,
 ) -> Response {
-    let core = app.state::<Core>();
     let result: Result<Value, String> = async {
         Ok(match cmd.as_str() {
+            // Unlike the Tauri command, events arrive on `/events` and no window is shown.
             "connect" => {
-                let last_action = core
+                let last_action = app
+                    .state::<Core>()
                     .reads
                     .with(crate::db::queries::last_action)
                     .map_err(|e| e.to_string())?;
@@ -98,59 +95,36 @@ async fn invoke(
                 })
             }
             "submit" => {
-                core.writer.actions(arg(&args, "actions")?);
+                commands::submit(app.state(), arg(&args, "actions")?);
                 Value::Null
             }
-            "fetch_rows" => {
-                let drafts: bool = arg(&args, "drafts")?;
-                let keys: Vec<String> = arg(&args, "keys")?;
-                json!(
-                    core.reads
-                        .with(|c| crate::db::queries::rows_for_keys(c, drafts, &keys))
-                        .map_err(|e| e.to_string())?
-                )
-            }
-            "get_bodies" => {
-                let ids: Vec<i64> = arg(&args, "ids")?;
-                json!(
-                    core.reads
-                        .with(|c| crate::db::queries::bodies(c, &ids))
-                        .map_err(|e| e.to_string())?
-                )
-            }
-            "autocomplete" => {
-                let account: i64 = arg(&args, "account")?;
-                let query: String = arg(&args, "query")?;
-                json!(
-                    core.reads
-                        .with(|c| crate::engine::contacts::suggest(c, account, &query, 6))
-                        .map_err(|e| e.to_string())?
-                )
-            }
-            "snooze_options" => json!(crate::commands::snooze_options(arg(&args, "text")?)),
+            "fetch_rows" => json!(commands::fetch_rows(
+                app.state(),
+                arg(&args, "drafts")?,
+                arg(&args, "keys")?,
+            )?),
+            "get_bodies" => json!(commands::get_bodies(app.state(), arg(&args, "ids")?)?),
+            "autocomplete" => json!(commands::autocomplete(
+                app.state(),
+                arg(&args, "account")?,
+                arg(&args, "query")?,
+            )?),
+            "snooze_options" => json!(commands::snooze_options(arg(&args, "text")?)),
             "perf_report" => {
-                crate::commands::perf_report(
+                commands::perf_report(
                     arg(&args, "action")?,
                     arg(&args, "ms")?,
                     arg(&args, "budget")?,
                 );
                 Value::Null
             }
-            "add_account" => json!(
-                crate::engine::auth::add_account(&app)
-                    .await
-                    .map_err(|e| e.to_string())?
-            ),
+            "add_account" => json!(commands::add_account(app.clone()).await?),
             "sign_in_again" => {
-                crate::engine::auth::sign_in_again(&app, arg(&args, "account")?)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                commands::sign_in_again(app.clone(), arg(&args, "account")?).await?;
                 Value::Null
             }
             "open_attachment" => {
-                crate::engine::attachments::open(&app, arg(&args, "attachment")?)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                commands::open_attachment(app.clone(), arg(&args, "attachment")?).await?;
                 Value::Null
             }
             "quit_now" => Value::Null,
@@ -167,15 +141,12 @@ async fn invoke(
                 }
                 Value::Null
             }
-            "add_attachment" => json!(
-                crate::commands::store_attachment(
-                    &arg::<String>(&args, "draft")?,
-                    &arg::<String>(&args, "filename")?,
-                    &arg::<String>(&args, "mimeType")?,
-                    &arg::<String>(&args, "data")?,
-                )
-                .map_err(|e| e.to_string())?
-            ),
+            "add_attachment" => json!(commands::add_attachment(
+                arg(&args, "draft")?,
+                arg(&args, "filename")?,
+                arg(&args, "mimeType")?,
+                arg(&args, "data")?,
+            )?),
             other => return Err(format!("unknown command {other}")),
         })
     }

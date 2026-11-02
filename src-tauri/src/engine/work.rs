@@ -7,10 +7,11 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use parking_lot::Mutex;
 use tokio::sync::Notify;
-use ub_gmail::{Format, Priority, ThreadListQuery, cost};
+use ub_gmail::{Format, GmailError, Outcome, Priority, ThreadListQuery, cost};
 
 use super::{AccountRt, EngineRef};
 
@@ -111,10 +112,6 @@ impl WorkQueue {
         self.closed.store(true, Ordering::Relaxed);
         self.kick.notify_waiters();
     }
-
-    pub fn is_empty(&self) -> bool {
-        self.inner.lock().heap.is_empty()
-    }
 }
 
 pub async fn worker(e: EngineRef, rt: Arc<AccountRt>) {
@@ -123,28 +120,28 @@ pub async fn worker(e: EngineRef, rt: Arc<AccountRt>) {
             return;
         }
         let Some((slot, work)) = rt.work.pop() else {
-            super::wait(&rt.work.kick, 5_000).await;
+            super::wait(&rt.work.kick, Duration::from_secs(5)).await;
             continue;
         };
         let mut attempt = 0;
         loop {
             match run(&e, &rt, slot, &work).await {
                 Ok(()) => {
-                    e.note(&rt, Ok(()));
+                    e.note_ok(&rt);
                     break;
                 }
                 Err(err) => {
-                    e.note(&rt, Err(&err));
+                    e.note_err(&rt, &err);
                     if rt.is_stopped() {
                         return;
                     }
                     match err.outcome {
                         // Gone or not ours to fetch: drop it, no toast.
-                        ub_gmail::Outcome::NotFound | ub_gmail::Outcome::Rejected { .. } => break,
-                        ub_gmail::Outcome::InvalidGrant => return,
-                        ub_gmail::Outcome::Offline => {
+                        Outcome::NotFound | Outcome::Rejected { .. } => break,
+                        Outcome::InvalidGrant => return,
+                        Outcome::Offline => {
                             // Wait for the network, then retry.
-                            super::wait(&rt.poll_kick, 10_000).await;
+                            super::wait(&rt.poll_kick, Duration::from_secs(10)).await;
                         }
                         _ => {
                             let d = ub_gmail::backoff(attempt, err.retry_after());
@@ -167,7 +164,7 @@ async fn run(
     rt: &Arc<AccountRt>,
     slot: Slot,
     work: &Work,
-) -> Result<(), ub_gmail::GmailError> {
+) -> Result<(), GmailError> {
     match work {
         Work::List {
             label,
@@ -222,9 +219,7 @@ async fn run(
             history,
             body,
         } => {
-            let cached = super::sync::cached_history(e, rt.id, thread);
-            let fresh = matches!((cached, history), (Some(c), Some(h)) if c == *h);
-            if !fresh {
+            if !super::sync::is_current(e, rt.id, thread, *history) {
                 super::sync::fetch_thread(e, rt, thread, Format::Metadata, prio(slot)).await?;
             }
             if let Some(b) = body {

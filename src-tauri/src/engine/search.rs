@@ -2,15 +2,17 @@
 //! (SPEC Search, Views). Pages of 15 threads at priority 2.
 
 use crate::LogErr as _;
+use std::sync::Arc;
 use std::time::Duration;
 
 use rusqlite::params;
 use ub_gmail::{Format, Priority, ThreadListQuery, cost};
 
-use super::EngineRef;
 use super::work::{self, Work};
-use crate::model::{AccountId, SubId};
-use crate::writer::GmailListQuery;
+use super::{AccountRt, EngineRef};
+use crate::model::{AccountId, SubId, ThreadId};
+use crate::subs::Sub;
+use crate::writer::{Ctx, GmailListQuery};
 
 const PAGE: u32 = 15;
 
@@ -29,98 +31,113 @@ pub fn start(
     page: Option<String>,
 ) {
     let Some(rt) = e.account(account) else {
-        let s = sub.clone();
         e.writer.sync(move |ctx| {
-            if let Some(x) = ctx.subs.map.get_mut(&s) {
-                x.searching = false;
-                ctx.touched.subs.insert(s);
-            }
+            settle(ctx, sub, |_| {});
             Ok(())
         });
         return;
     };
     // A newer query cancels the older one's queued fetches.
     cancel(e, &sub);
-    let e2 = e.clone();
-    let s = sub.clone();
-    let handle = tauri::async_runtime::spawn(async move {
-        if matches!(query, GmailListQuery::Search(_)) && page.is_none() {
-            // The Gmail query runs once typing pauses for 300 ms.
-            tokio::time::sleep(Duration::from_millis(300)).await;
-        }
-        let q = match &query {
-            GmailListQuery::Search(q) => ThreadListQuery {
-                q: Some(q.clone()),
-                page_token: page,
-                max_results: Some(PAGE),
-                ..Default::default()
-            },
-            GmailListQuery::Label {
-                label_gmail_id,
-                include_spam_trash,
-            } => ThreadListQuery {
-                label_ids: vec![label_gmail_id.clone()],
-                page_token: page,
-                max_results: Some(PAGE),
-                include_spam_trash: *include_spam_trash,
-                ..Default::default()
-            },
-        };
-        let res = rt
-            .sched
-            .run(Priority::P2, cost::THREADS_LIST, rt.gmail.list_threads(&q))
-            .await;
-        e2.note(&rt, res.as_ref().map(|_| ()));
-        let (threads, next) = match res {
-            Ok(r) => (r.threads, r.next_page_token),
-            Err(_) => (vec![], None),
-        };
-        // A hit already cached needs no fetch; others get metadata at priority 2.
-        let fetches = threads.iter().filter(|t| {
-            let cached = super::sync::cached_history(&e2, account, &t.id);
-            cached.is_none() || cached != t.history_id
-        });
-        let futs = fetches
-            .map(|t| super::sync::fetch_thread(&e2, &rt, &t.id, Format::Metadata, Priority::P2));
-        for r in futures_util::future::join_all(futs).await {
-            r.log_err("search hit metadata");
-        }
-        for t in &threads {
-            if super::sync::needs_bodies(&e2, account, &t.id) {
-                rt.work.push(
-                    work::LATE_BODIES,
-                    Work::Body {
-                        thread: t.id.clone(),
-                    },
-                );
-            }
-        }
-        let gids: Vec<String> = threads.into_iter().map(|t| t.id).collect();
-        let sub2 = s.clone();
-        e2.writer.sync(move |ctx| {
-            let mut ids = Vec::new();
-            for g in &gids {
-                if let Ok(id) = ctx.tx.query_row(
-                    "SELECT id FROM threads WHERE account_id = ?1 AND gmail_id = ?2",
-                    params![account, g],
-                    |r| r.get::<_, i64>(0),
-                ) {
-                    ids.push(id);
-                }
-            }
-            if let Some(x) = ctx.subs.map.get_mut(&sub2) {
-                for id in ids {
-                    if !x.gmail_hits.contains(&id) {
-                        x.gmail_hits.push(id);
-                    }
-                }
-                x.next_page = next;
-                x.searching = false;
-                ctx.touched.subs.insert(sub2);
-            }
-            Ok(())
-        });
-        e2.searches.lock().remove(&s);
-    });
+    let handle = tauri::async_runtime::spawn(list_page(e.clone(), rt, sub.clone(), query, page));
     e.searches.lock().insert(sub, handle);
+}
+
+/// Lists one page, fetches metadata for hits not cached at their historyId,
+/// and adds the hits to the subscription.
+async fn list_page(
+    e: EngineRef,
+    rt: Arc<AccountRt>,
+    sub: SubId,
+    query: GmailListQuery,
+    page: Option<String>,
+) {
+    if matches!(query, GmailListQuery::Search(_)) && page.is_none() {
+        // The Gmail query runs once typing pauses for 300 ms.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    let q = thread_list_query(query, page);
+    let res = rt
+        .sched
+        .run(Priority::P2, cost::THREADS_LIST, rt.gmail.list_threads(&q))
+        .await;
+    e.note(&rt, &res);
+    let (threads, next) = res
+        .map(|r| (r.threads, r.next_page_token))
+        .unwrap_or_default();
+    let account = rt.id;
+    // A hit already cached needs no fetch; others get metadata at priority 2.
+    let fetches = threads
+        .iter()
+        .filter(|t| !super::sync::is_current(&e, account, &t.id, t.history_id))
+        .map(|t| super::sync::fetch_thread(&e, &rt, &t.id, Format::Metadata, Priority::P2));
+    for r in futures_util::future::join_all(fetches).await {
+        r.log_err("search hit metadata");
+    }
+    for t in &threads {
+        if super::sync::needs_bodies(&e, account, &t.id) {
+            rt.work.push(
+                work::LATE_BODIES,
+                Work::Body {
+                    thread: t.id.clone(),
+                },
+            );
+        }
+    }
+    let gids: Vec<String> = threads.into_iter().map(|t| t.id).collect();
+    let s = sub.clone();
+    e.writer.sync(move |ctx| {
+        let ids: Vec<ThreadId> = gids
+            .iter()
+            .filter_map(|g| {
+                ctx.tx
+                    .query_row(
+                        "SELECT id FROM threads WHERE account_id = ?1 AND gmail_id = ?2",
+                        params![account, g],
+                        |r| r.get(0),
+                    )
+                    .ok()
+            })
+            .collect();
+        settle(ctx, s, |x| {
+            for id in ids {
+                if !x.gmail_hits.contains(&id) {
+                    x.gmail_hits.push(id);
+                }
+            }
+            x.next_page = next;
+        });
+        Ok(())
+    });
+    e.searches.lock().remove(&sub);
+}
+
+fn thread_list_query(query: GmailListQuery, page: Option<String>) -> ThreadListQuery {
+    match query {
+        GmailListQuery::Search(q) => ThreadListQuery {
+            q: Some(q),
+            page_token: page,
+            max_results: Some(PAGE),
+            ..Default::default()
+        },
+        GmailListQuery::Label {
+            label_gmail_id,
+            include_spam_trash,
+        } => ThreadListQuery {
+            label_ids: vec![label_gmail_id],
+            page_token: page,
+            max_results: Some(PAGE),
+            include_spam_trash,
+            ..Default::default()
+        },
+    }
+}
+
+/// Ends the subscription's search after `update` records its results.
+fn settle(ctx: &mut Ctx<'_>, sub: SubId, update: impl FnOnce(&mut Sub)) {
+    if let Some(x) = ctx.subs.map.get_mut(&sub) {
+        update(x);
+        x.searching = false;
+        ctx.touched.subs.insert(sub);
+    }
 }

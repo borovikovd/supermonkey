@@ -1,5 +1,6 @@
 //! macOS notifications (SPEC Notifications).
 
+use crate::LogErr as _;
 use std::collections::HashSet;
 
 use rusqlite::params;
@@ -102,10 +103,10 @@ pub fn from_poll(
 pub fn show(e: &EngineRef, n: &Notification) {
     *e.last_notification.lock() = Some((n.clone(), crate::db::now_ms()));
     let Some(app) = &e.app else { return };
-    let _ = app
-        .notification()
+    app.notification()
         .builder()
         .title(&n.title)
         .body(format!("{} · {}", n.account_email, n.body))
-        .show();
+        .show()
+        .log_err("show notification");
 }

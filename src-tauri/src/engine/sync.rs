@@ -16,6 +16,8 @@ use crate::model::{AccountId, SendAs, ThreadId};
 use crate::writer::Effect;
 
 const POLL: Duration = Duration::from_secs(45);
+/// How soon to try again while offline or before the first connect succeeds.
+const RETRY: Duration = Duration::from_secs(10);
 const METADATA_HEADERS: &[&str] = &[
     "From",
     "To",
@@ -52,11 +54,11 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
             match connect(&e, &rt).await {
                 Ok(()) => break,
                 Err(err) => {
-                    e.note(&rt, Err(&err));
+                    e.note_err(&rt, &err);
                     if matches!(err.outcome, Outcome::InvalidGrant) {
                         return;
                     }
-                    super::wait(&rt.poll_kick, 10_000).await;
+                    super::wait(&rt.poll_kick, RETRY).await;
                 }
             }
         }
@@ -65,7 +67,7 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
     let mut polls = 0u32;
     while !rt.is_stopped() {
         let r = poll(&e, &rt).await;
-        e.note(&rt, r.as_ref().map(drop));
+        e.note(&rt, &r);
         if let Err(err) = &r {
             if matches!(err.outcome, Outcome::InvalidGrant) {
                 return;
@@ -76,16 +78,8 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
         if polls.is_multiple_of(20) {
             refresh_send_as(&e, &rt).await.log_err("refresh_send_as");
         }
-        let offline = !e.online.load(std::sync::atomic::Ordering::Relaxed);
-        super::wait(
-            &rt.poll_kick,
-            if offline {
-                10_000
-            } else {
-                u64::try_from(POLL.as_millis()).unwrap_or(45_000)
-            },
-        )
-        .await;
+        let online = e.online.load(std::sync::atomic::Ordering::Relaxed);
+        super::wait(&rt.poll_kick, if online { POLL } else { RETRY }).await;
         // A long gap means the Mac slept: wake due snoozes before the list shows.
         if last.elapsed() > POLL * 3 {
             super::snooze::wake_due(&e);
@@ -95,20 +89,48 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
     }
 }
 
+/// The first `threads.list` page of a label or query: listed threads get
+/// metadata at `meta`, then bodies at `body`.
+fn first_page(label: Option<&str>, q: Option<&str>, meta: work::Slot, body: work::Slot) -> Work {
+    Work::List {
+        label: label.map(str::to_string),
+        q: q.map(str::to_string),
+        page: None,
+        meta,
+        body: Some(body),
+        include_spam_trash: false,
+    }
+}
+
+/// Lists Inbox, newest first, metadata then bodies (SPEC Sync).
+fn queue_inbox(rt: &AccountRt) {
+    rt.work.push(
+        work::INBOX_META,
+        first_page(Some("INBOX"), None, work::INBOX_META, work::INBOX_BODIES),
+    );
+}
+
+/// Lists Starred and the last 90 days of Sent, behind Inbox.
+fn queue_starred_and_sent(rt: &AccountRt) {
+    rt.work.push(
+        work::OTHER_META,
+        first_page(Some("STARRED"), None, work::OTHER_META, work::LATE_BODIES),
+    );
+    rt.work.push(
+        work::LATE_BODIES,
+        first_page(
+            None,
+            Some("in:sent newer_than:90d"),
+            work::LATE_BODIES,
+            work::LATE_BODIES,
+        ),
+    );
+}
+
 /// After a restart: re-list Inbox (cheap; unchanged threads are skipped) and
 /// finish any bodies the connect sync did not get to.
 fn resume(rt: &AccountRt) {
-    rt.work.push(
-        work::INBOX_META,
-        Work::List {
-            label: Some("INBOX".into()),
-            q: None,
-            page: None,
-            meta: work::INBOX_META,
-            body: Some(work::INBOX_BODIES),
-            include_spam_trash: false,
-        },
-    );
+    queue_inbox(rt);
 }
 
 pub async fn connect(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> {
@@ -132,40 +154,8 @@ pub async fn connect(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailErro
         })
         .await
         .log_err("connect");
-    // Newest first, metadata then body (SPEC Sync).
-    rt.work.push(
-        work::INBOX_META,
-        Work::List {
-            label: Some("INBOX".into()),
-            q: None,
-            page: None,
-            meta: work::INBOX_META,
-            body: Some(work::INBOX_BODIES),
-            include_spam_trash: false,
-        },
-    );
-    rt.work.push(
-        work::OTHER_META,
-        Work::List {
-            label: Some("STARRED".into()),
-            q: None,
-            page: None,
-            meta: work::OTHER_META,
-            body: Some(work::LATE_BODIES),
-            include_spam_trash: false,
-        },
-    );
-    rt.work.push(
-        work::LATE_BODIES,
-        Work::List {
-            label: None,
-            q: Some("in:sent newer_than:90d".into()),
-            page: None,
-            meta: work::LATE_BODIES,
-            body: Some(work::LATE_BODIES),
-            include_spam_trash: false,
-        },
-    );
+    queue_inbox(rt);
+    queue_starred_and_sent(rt);
     super::drafts::sync_list(e, rt).await?;
     rt.work.push(work::BACKFILL, Work::Backfill { page: None });
     Ok(())
@@ -250,8 +240,19 @@ pub async fn refresh_labels(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), Gm
     Ok(())
 }
 
+/// Whether the cached thread is already at Gmail's `history`, so a metadata
+/// fetch would change nothing.
+pub fn is_current(
+    e: &EngineRef,
+    account: AccountId,
+    gmail_thread: &str,
+    history: Option<u64>,
+) -> bool {
+    history.is_some() && cached_history(e, account, gmail_thread) == history
+}
+
 /// The cached thread's Gmail historyId, if any.
-pub fn cached_history(e: &EngineRef, account: AccountId, gmail_thread: &str) -> Option<u64> {
+fn cached_history(e: &EngineRef, account: AccountId, gmail_thread: &str) -> Option<u64> {
     e.reads
         .with(|c| {
             Ok(c.query_row(
@@ -348,7 +349,7 @@ pub async fn fetch_thread(
     let gid = gmail_thread.to_string();
     match get_thread(rt, gmail_thread, format, prio).await {
         Ok((history, msgs)) => {
-            let r = e
+            let stored = e
                 .writer
                 .call(move |ctx| {
                     let pending = PendingOps::load(ctx.tx, account)?;
@@ -357,8 +358,9 @@ pub async fn fetch_thread(
                     super::snooze::apply_rule(ctx, &[t], &pending)?;
                     Ok(t)
                 })
-                .await;
-            Ok(r.ok())
+                .await
+                .inspect_err(|err| log::warn!("store thread {gmail_thread}: {err:#}"));
+            Ok(stored.ok())
         }
         Err(err) if matches!(err.outcome, Outcome::NotFound) => {
             e.writer
@@ -411,7 +413,7 @@ pub async fn fetch_opened(e: EngineRef, rt: Arc<AccountRt>, thread: ThreadId) {
         return;
     }
     let r = fetch_thread(&e, &rt, &gid, Format::Full, Priority::P2).await;
-    e.note(&rt, r.as_ref().map(|_| ()));
+    e.note(&rt, &r);
 }
 
 /// Every `history.list` record since `start` and the newest historyId, or
@@ -490,16 +492,17 @@ impl HistoryBatch {
 
 /// Writes one poll's history in a single transaction: deletes, fetched
 /// threads, and label changes, with pending ops re-applied on top. Then the
-/// snooze rule on net labels, the new cursor, and notifications.
+/// snooze rule on net labels, the new cursor, and notifications. A thread in
+/// `fetched` with no messages is gone from Gmail.
 fn apply_history(
     ctx: &mut crate::writer::Ctx<'_>,
     account: AccountId,
     batch: &HistoryBatch,
     fetched: &[(String, Option<u64>, Vec<Incoming>)],
-    fetch_threads: &HashSet<String>,
     latest: u64,
 ) -> anyhow::Result<()> {
     let pending = PendingOps::load(ctx.tx, account)?;
+    let refetched: HashSet<&str> = fetched.iter().map(|(gid, ..)| gid.as_str()).collect();
     let mut touched: Vec<ThreadId> = Vec::new();
     for gid in &batch.deleted {
         let row: Option<(i64, i64)> = ctx
@@ -525,7 +528,7 @@ fn apply_history(
         }
     }
     for (msg, (thread, labels)) in &batch.label_sets {
-        if fetch_threads.contains(thread) || batch.deleted.contains(msg) {
+        if refetched.contains(thread.as_str()) || batch.deleted.contains(msg) {
             continue;
         }
         if let Some(t) = ingest::set_labels_from_gmail(ctx, account, msg, labels, &pending)? {
@@ -574,33 +577,27 @@ pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> 
         }
         return Ok(());
     }
-    let HistoryBatch {
-        label_sets,
-        added,
-        deleted,
-        draft_change,
-    } = HistoryBatch::from_records(&records);
-    let known: HashSet<String> = {
-        let ids: Vec<String> = label_sets.keys().cloned().collect();
-        e.reads
-            .with(|c| {
-                let mut stmt = c.prepare_cached(
-                    "SELECT 1 FROM messages WHERE account_id = ?1 AND gmail_id = ?2",
-                )?;
-                Ok(ids
-                    .into_iter()
-                    .filter(|id| stmt.exists(params![rt.id, id]).unwrap_or(false))
-                    .collect())
-            })
-            .unwrap_or_default()
-    };
+    let batch = HistoryBatch::from_records(&records);
+    let draft_change = batch.draft_change;
+    let known: HashSet<&String> = e
+        .reads
+        .with(|c| {
+            let mut stmt =
+                c.prepare_cached("SELECT 1 FROM messages WHERE account_id = ?1 AND gmail_id = ?2")?;
+            Ok(batch
+                .label_sets
+                .keys()
+                .filter(|id| stmt.exists(params![rt.id, id]).unwrap_or(false))
+                .collect())
+        })
+        .unwrap_or_default();
     // Threads with new or unknown messages get a metadata fetch at priority 3.
-    let mut fetch: HashSet<String> = HashSet::new();
-    for (msg, (thread, _)) in &label_sets {
-        if !known.contains(msg) && !deleted.contains(msg) {
-            fetch.insert(thread.clone());
-        }
-    }
+    let fetch: HashSet<String> = batch
+        .label_sets
+        .iter()
+        .filter(|(msg, _)| !known.contains(msg) && !batch.deleted.contains(*msg))
+        .map(|(_, (thread, _))| thread.clone())
+        .collect();
     let mut fetched: Vec<(String, Option<u64>, Vec<Incoming>)> = Vec::new();
     for t in &fetch {
         match get_thread(rt, t, Format::Metadata, Priority::P3).await {
@@ -613,22 +610,18 @@ pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> 
     }
 
     let account = rt.id;
-    let batch = HistoryBatch {
-        label_sets,
-        added,
-        deleted,
-        draft_change,
-    };
-    let fetch_threads = fetch.clone();
-    let res = e
+    let applied = e
         .writer
-        .call(move |ctx| apply_history(ctx, account, &batch, &fetched, &fetch_threads, latest))
+        .call(move |ctx| apply_history(ctx, account, &batch, &fetched, latest))
         .await;
-    // Bodies of new messages, at priority 4 ahead of the rest.
-    if res.is_ok() {
-        for t in fetch {
-            rt.work.push(work::POLL_BODIES, Work::Body { thread: t });
+    match applied {
+        // Bodies of new messages, at priority 4 ahead of the rest.
+        Ok(()) => {
+            for t in fetch {
+                rt.work.push(work::POLL_BODIES, Work::Body { thread: t });
+            }
         }
+        Err(err) => log::warn!("apply history for {}: {err:#}", rt.email),
     }
     // Draft messages changed: reconcile drafts (SPEC Drafts).
     if draft_change {
@@ -760,28 +753,7 @@ pub async fn full_resync(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), Gmail
 
     reconcile_cached(e, rt, &listed, started_rev).await?;
     // New threads the connect sync would fetch: starred and recent sent.
-    rt.work.push(
-        work::OTHER_META,
-        Work::List {
-            label: Some("STARRED".into()),
-            q: None,
-            page: None,
-            meta: work::OTHER_META,
-            body: Some(work::LATE_BODIES),
-            include_spam_trash: false,
-        },
-    );
-    rt.work.push(
-        work::LATE_BODIES,
-        Work::List {
-            label: None,
-            q: Some("in:sent newer_than:90d".into()),
-            page: None,
-            meta: work::LATE_BODIES,
-            body: Some(work::LATE_BODIES),
-            include_spam_trash: false,
-        },
-    );
+    queue_starred_and_sent(rt);
     // 5. Drafts.
     super::drafts::sync_list(e, rt).await?;
     // 6. The snooze rule runs as each thread's metadata is stored.
