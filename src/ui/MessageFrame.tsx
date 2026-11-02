@@ -1,5 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { memo, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { getBodies, inTauri } from "../ipc/bridge";
 import type { MessageBody } from "../ipc/types";
@@ -16,7 +16,7 @@ async function fetchBody(id: number): Promise<void> {
   }
 }
 
-export function loadBody(id: number): Promise<void> {
+function loadBody(id: number): Promise<void> {
   if (bodies.has(id)) return Promise.resolve();
   let p = waiting.get(id);
   if (!p) {
@@ -25,8 +25,6 @@ export function loadBody(id: number): Promise<void> {
   }
   return p;
 }
-
-export const bodyOf = (id: number) => bodies.get(id);
 
 const BASE_STYLE = `
 html,body{margin:0;padding:0;background:transparent}
@@ -49,12 +47,8 @@ function srcdoc(body: MessageBody, remoteImages: boolean, quoteOpen: boolean): s
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><style>${BASE_STYLE}</style></head><body>${body.html}${quote}</body></html>`;
 }
 
-/**
- * An expanded message body in a sandboxed `srcdoc` iframe. `allow-scripts`
- * is only there so WebKit fires the parent's listeners (bug 218086); the
- * CSP blocks every script in the message.
- */
-export const MessageFrame = memo(function MessageFrame({
+/** An expanded message body in a sandboxed `srcdoc` iframe, sized to its content. */
+export function MessageFrame({
   id,
   hasBody,
   remoteImages,
@@ -149,4 +143,4 @@ export const MessageFrame = memo(function MessageFrame({
       style={{ height: 40 }}
     />
   );
-});
+}

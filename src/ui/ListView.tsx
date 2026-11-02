@@ -1,35 +1,26 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Paperclip, Star } from "lucide-react";
-import { memo, useEffect, useMemo, useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 
 import { markReadOnOpenWhenLoaded, openThread } from "../commands";
 import { startReply } from "../compose/start";
 import { act, fetchRows } from "../ipc/bridge";
 import type { ListRow } from "../ipc/types";
 import { useChrome } from "../store/chrome";
-import { listKey, useCurrent, useListView, useSummary } from "../store/hooks";
+import { useCurrent } from "../store/hooks";
 import { useMirror } from "../store/mirror";
-import { countLabel, useSplitCounts } from "./TopBar";
+import { useCurrentList, useSplitCounts } from "./current-list";
+import { countLabel, formatTime } from "./format";
 
 const ROW = 36;
 const HEADER = 28;
-
-export function formatTime(ms: number): string {
-  const d = new Date(ms);
-  const now = new Date();
-  if (d.toDateString() === now.toDateString()) {
-    return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  }
-  if (d.getFullYear() === now.getFullYear()) {
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  }
-  return d.toLocaleDateString(undefined, { year: "2-digit", month: "numeric", day: "numeric" });
-}
 
 type Item =
   | { type: "row"; key: string }
   | { type: "header"; split: number; name: string; count: number };
 
+// Memoized by hand: ListView is not compiled (see useVirtualizer) and
+// re-renders on every scroll.
 const Row = memo(function Row({
   row,
   rowKey,
@@ -43,14 +34,7 @@ const Row = memo(function Row({
   selected: boolean;
   onClick: (key: string) => void;
 }) {
-  const bg =
-    highlighted && selected
-      ? "bg-fill"
-      : highlighted
-        ? "bg-accent-soft"
-        : selected
-          ? "bg-fill"
-          : "hover:bg-fill-half";
+  const bg = selected ? "bg-fill" : highlighted ? "bg-accent-soft" : "hover:bg-fill-half";
   return (
     // An ARIA listbox option: focus stays on the listbox (aria-activedescendant)
     // and j / k / Enter drive it through the global shortcut handler. Rows are
@@ -96,6 +80,15 @@ const Row = memo(function Row({
   );
 });
 
+function SplitHeader({ split, name, count }: { split: number; name: string; count: number }) {
+  return (
+    <div data-split={split} className="flex h-split-header items-end gap-1.5 px-4 pb-1 text-hint">
+      <span className="font-medium text-text-2">{name}</span>
+      {count > 0 && <span className="tabular text-text-3">{countLabel(count)}</span>}
+    </div>
+  );
+}
+
 function Empty({ inbox, loaded }: { inbox: boolean; loaded: boolean }) {
   if (!loaded) return null;
   return (
@@ -109,14 +102,13 @@ function Empty({ inbox, loaded }: { inbox: boolean; loaded: boolean }) {
 }
 
 export function ListView() {
-  const { account, cur } = useCurrent();
-  const key = account !== null && cur ? listKey(account, cur.where) : null;
-  const list = useListView(key);
+  const { cur } = useCurrent();
+  const list = useCurrentList();
   const selection = useChrome((s) => s.selection);
-  const summary = useSummary(account);
-  const splits = useSplitCounts(account);
-  const isInbox = cur?.where.kind === "view" && cur.where.view.kind === "inbox";
-  const isDrafts = cur?.where.kind === "view" && cur.where.view.kind === "drafts";
+  const splits = useSplitCounts();
+  const viewKind = cur?.where.kind === "view" ? cur.where.view.kind : null;
+  const isInbox = viewKind === "inbox";
+  const isDrafts = viewKind === "drafts";
   const highlight = cur?.highlight ?? null;
   const forced = useChrome((s) => s.forcedSplit);
 
@@ -216,10 +208,9 @@ export function ListView() {
     }
   }, [virtual, items.length, list.more, list.sub]);
 
-  const onClick = useMemo(
-    () => (k: string) => {
-      const c = useChrome.getState();
-      c.patchCurrent({ highlight: k });
+  const onClick = useCallback(
+    (k: string) => {
+      useChrome.getState().patchCurrent({ highlight: k });
       if (isDrafts) {
         startReply("resumeDraft", k);
         return;
@@ -230,16 +221,15 @@ export function ListView() {
     [isDrafts],
   );
 
-  const sel = useMemo(() => new Set(selection), [selection]);
-  const searching = list.searching;
+  const selected = useMemo(() => new Set(selection), [selection]);
 
   if (items.length === 0) {
     return (
       <div className="flex flex-1 flex-col">
-        {cur?.where.kind === "search" && searching && (
+        {cur?.where.kind === "search" && list.searching && (
           <div className="px-4 py-3 text-row text-text-3">Searching Gmail…</div>
         )}
-        <Empty inbox={isInbox} loaded={list.loaded && !searching} />
+        <Empty inbox={isInbox} loaded={list.loaded && !list.searching} />
       </div>
     );
   }
@@ -269,21 +259,13 @@ export function ListView() {
               }}
             >
               {it.type === "header" ? (
-                <div
-                  data-split={it.split}
-                  className="flex h-split-header items-end gap-1.5 px-4 pb-1 text-hint"
-                >
-                  <span className="font-medium text-text-2">{it.name}</span>
-                  {it.count > 0 && (
-                    <span className="tabular text-text-3">{countLabel(it.count)}</span>
-                  )}
-                </div>
+                <SplitHeader split={it.split} name={it.name} count={it.count} />
               ) : (
                 <Row
                   row={rows[it.key]}
                   rowKey={it.key}
                   highlighted={it.key === highlight}
-                  selected={sel.has(it.key)}
+                  selected={selected.has(it.key)}
                   onClick={onClick}
                 />
               )}
@@ -291,7 +273,6 @@ export function ListView() {
           );
         })}
       </div>
-      {summary === null && null}
     </div>
   );
 }

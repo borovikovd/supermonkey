@@ -1,10 +1,12 @@
-// Undo on a send (SPEC Send and undo). For a waiting send, the composer
-// reopens once the outbox row is gone; SendToastList watches for that.
+// Undo on a send (SPEC Send and undo).
 
 import { act } from "../ipc/bridge";
 import type { OutboxRow } from "../ipc/types";
 
-/** Undo on a waiting send: the composer opens once the row is gone from the outbox. */
+/**
+ * Waiting sends being undone, by outbox id. SendToasts reopens the composer
+ * once the row is gone from the outbox.
+ */
 export const reopenWhenGone = new Map<
   number,
   { account: number; draft: string; thread: number | null }

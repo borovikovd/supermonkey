@@ -1,16 +1,16 @@
 import { File, Paperclip } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 import { markReadOnOpen } from "../commands";
+import { Composer } from "../compose/Composer";
 import { startReply } from "../compose/start";
 import { openAttachment } from "../ipc/bridge";
-import type { ConversationData, MessageSummary } from "../ipc/types";
+import type { AttachmentInfo, DraftSummary, MessageSummary, OutboxRow } from "../ipc/types";
 import { onKeyDown } from "../keyboard/keys";
 import { appHooks, conversationRef } from "../keyboard/refs";
 import { useChrome } from "../store/chrome";
 import { useAppState, useConversation, useSubscription } from "../store/hooks";
-import { InlineComposer } from "./InlineComposer";
-import { formatTime } from "./ListView";
+import { formatTime } from "./format";
 import { MessageFrame } from "./MessageFrame";
 
 const name = (m: MessageSummary) => m.from.name || m.from.email;
@@ -142,7 +142,6 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
   const remoteImages = useAppState()?.settings.remoteImages ?? true;
   const known = useRef<Set<number> | null>(null);
   const latestRef = useRef<number | null>(null);
-  const scroller = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     conversationRef.data = data;
@@ -193,10 +192,6 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
     if (added.some((m) => m.unread) && document.hasFocus()) markReadOnOpen(thread);
   }, [data, thread]);
 
-  const expanded = useMemo(() => new Set(expandedArr), [expandedArr]);
-  const unfolded = useMemo(() => new Set(unfoldedArr), [unfoldedArr]);
-  const forward = useCallback((e: KeyboardEvent) => onKeyDown(e), []);
-
   if (!data) return <div className="flex-1" />;
   if (data.gone)
     return (
@@ -205,78 +200,91 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
       </div>
     );
 
-  const shownExpanded = expandAll ? new Set(data.messages.map((m) => m.id)) : expanded;
-  const list = blocks(
-    data.messages,
-    shownExpanded,
-    new Set([...unfolded, ...(selected !== null ? [selected] : [])]),
-  );
+  const expanded = new Set(expandAll ? data.messages.map((m) => m.id) : expandedArr);
+  // The selected message never hides in a fold.
+  const unfolded = new Set(selected === null ? unfoldedArr : [...unfoldedArr, selected]);
 
   return (
-    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+    <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto w-full max-w-[768px] min-w-[520px] px-16 pt-[11px] pb-24">
         <h1 className="selectable mb-6 text-subject font-semibold">
           {data.subject || "(no subject)"}
         </h1>
-        {list.map((b) =>
+        {blocks(data.messages, expanded, unfolded).map((b) =>
           b.type === "fold" ? (
-            <button
-              key={`fold-${b.ids[0]}`}
-              onClick={() => useChrome.getState().set({ unfolded: [...unfoldedArr, ...b.ids] })}
-              // Reads as one more collapsed row: same height, same divider.
-              className="flex h-row w-full items-center gap-3 border-b border-border-2 text-left text-row text-text-2 hover:bg-fill-half"
-            >
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-fill px-1.5 text-hint font-medium text-text-2">
-                {b.ids.length}
-              </span>
-              older messages
-            </button>
+            <Fold key={`fold-${b.ids[0]}`} ids={b.ids} />
           ) : (
             <Message
               key={b.m.id}
               m={b.m}
-              expanded={shownExpanded.has(b.m.id)}
+              expanded={expanded.has(b.m.id)}
               selected={selected === b.m.id}
               remoteImages={remoteImages}
               quoteOpen={expandAll}
-              onToggle={toggle}
-              onSelect={select}
-              onKey={forward}
             />
           ),
         )}
         {data.outbox
           .filter((o) => o.state !== "sent")
           .map((o) => (
-            <div
-              key={`ob${o.id}`}
-              className="my-2 flex items-center gap-3 rounded-control bg-surface px-4 py-2 text-row"
-            >
-              <span className="font-medium">Me</span>
-              <span className="truncate text-text-2">{o.snippet}</span>
-              <span className="ml-auto text-hint text-accent">
-                {o.delayed ? "Email delayed" : "Sending"}
-              </span>
-            </div>
+            <PendingSend key={`ob${o.id}`} row={o} />
           ))}
         {data.drafts
           .filter((d) => d.id !== inline?.draft)
           .map((d) => (
-            <button
-              key={d.id}
-              onClick={() => startReply("resumeDraft", d.id)}
-              className="my-1 flex w-full items-center gap-3 rounded-control bg-surface px-4 py-2 text-left text-row hover:bg-fill-half"
-            >
-              <File size={14} strokeWidth={1.5} className="text-danger" />
-              <span className="font-medium text-danger">Draft</span>
-              <span className="truncate text-text-2">
-                {d.snippet || (d.kind === "forward" ? "Forward" : "Reply")}
-              </span>
-            </button>
+            <DraftStub key={d.id} draft={d} />
           ))}
-        {inline?.thread === thread && <InlineComposer draft={inline.draft} />}
+        {inline?.thread === thread && <Composer key={inline.draft} draft={inline.draft} inline />}
       </div>
     </div>
+  );
+}
+
+/** A folded run of collapsed messages; a click unfolds it. */
+function Fold({ ids }: { ids: number[] }) {
+  return (
+    <button
+      onClick={() => {
+        const c = useChrome.getState();
+        c.set({ unfolded: [...c.unfolded, ...ids] });
+      }}
+      // Reads as one more collapsed row: same height, same divider.
+      className="flex h-row w-full items-center gap-3 border-b border-border-2 text-left text-row text-text-2 hover:bg-fill-half"
+    >
+      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-fill px-1.5 text-hint font-medium text-text-2">
+        {ids.length}
+      </span>
+      older messages
+    </button>
+  );
+}
+
+/** A send still in the outbox, shown at the end of its thread. */
+function PendingSend({ row }: { row: OutboxRow }) {
+  return (
+    <div className="my-2 flex items-center gap-3 rounded-control bg-surface px-4 py-2 text-row">
+      <span className="font-medium">Me</span>
+      <span className="truncate text-text-2">{row.snippet}</span>
+      <span className="ml-auto text-hint text-accent">
+        {row.delayed ? "Email delayed" : "Sending"}
+      </span>
+    </div>
+  );
+}
+
+/** A closed reply or forward draft; a click reopens it. */
+function DraftStub({ draft }: { draft: DraftSummary }) {
+  return (
+    <button
+      onClick={() => startReply("resumeDraft", draft.id)}
+      className="my-1 flex w-full items-center gap-3 rounded-control bg-surface px-4 py-2 text-left text-row hover:bg-fill-half"
+    >
+      <File size={14} strokeWidth={1.5} className="text-danger" />
+      <span className="font-medium text-danger">Draft</span>
+      <span className="truncate text-text-2">
+        {draft.snippet || (draft.kind === "forward" ? "Forward" : "Reply")}
+      </span>
+    </button>
   );
 }
 
@@ -286,18 +294,12 @@ function Message({
   selected,
   remoteImages,
   quoteOpen,
-  onToggle,
-  onSelect,
-  onKey,
 }: {
   m: MessageSummary;
   expanded: boolean;
   selected: boolean;
   remoteImages: boolean;
   quoteOpen: boolean;
-  onToggle: (id: number) => void;
-  onSelect: (id: number) => void;
-  onKey: (e: KeyboardEvent) => void;
 }) {
   const bar = selected ? (
     <span className="absolute top-2 bottom-2 -left-5 w-[2px] rounded-full bg-accent" />
@@ -308,7 +310,7 @@ function Message({
         type="button"
         data-message={m.id}
         aria-expanded={false}
-        onClick={() => onToggle(m.id)}
+        onClick={() => toggle(m.id)}
         className="relative flex h-row w-full items-center gap-3 border-b border-border-2 text-left text-row hover:bg-fill-half"
       >
         {bar}
@@ -322,20 +324,21 @@ function Message({
       </button>
     );
   }
+  const files = m.attachments.filter((a) => !a.inline);
   return (
     // Clicking selects the message, a pointer shortcut for `n` / `p`.
     // oxlint-disable-next-line jsx-a11y/no-static-element-interactions
     <div
       data-message={m.id}
       className="relative border-b border-border-2 py-4"
-      onMouseDown={() => onSelect(m.id)}
+      onMouseDown={() => select(m.id)}
     >
       {bar}
       <button
         type="button"
         aria-expanded
         className="mb-5 flex w-full items-baseline gap-2 text-left text-row"
-        onClick={() => onToggle(m.id)}
+        onClick={() => toggle(m.id)}
       >
         <span className="font-semibold">{name(m)}</span>
         <span className="truncate text-text-3">{recipients(m)}</span>
@@ -345,33 +348,31 @@ function Message({
         <MessageFrame
           id={m.id}
           hasBody={m.hasBody}
-          onSelect={onSelect}
+          onSelect={select}
           remoteImages={remoteImages}
           quoteOpen={quoteOpen}
-          onKey={onKey}
+          onKey={onKeyDown}
         />
       </div>
-      {m.attachments.some((a) => !a.inline) && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {m.attachments
-            .filter((a) => !a.inline)
-            .map((a) => (
-              <button
-                key={a.id}
-                onClick={() => void openAttachment(a.id)}
-                className="flex items-center gap-2 rounded-control border border-border px-2 py-1 text-row hover:bg-fill-half"
-              >
-                <Paperclip size={12} strokeWidth={1.5} className="text-text-3" />
-                <span className="max-w-[200px] truncate">{a.filename}</span>
-                <span className="text-hint text-text-3">
-                  {Math.max(1, Math.round(a.size / 1024))} KB
-                </span>
-              </button>
-            ))}
-        </div>
-      )}
+      {files.length > 0 && <Attachments files={files} />}
     </div>
   );
 }
 
-export type { ConversationData };
+function Attachments({ files }: { files: AttachmentInfo[] }) {
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {files.map((a) => (
+        <button
+          key={a.id}
+          onClick={() => void openAttachment(a.id)}
+          className="flex items-center gap-2 rounded-control border border-border px-2 py-1 text-row hover:bg-fill-half"
+        >
+          <Paperclip size={12} strokeWidth={1.5} className="text-text-3" />
+          <span className="max-w-[200px] truncate">{a.filename}</span>
+          <span className="text-hint text-text-3">{Math.max(1, Math.round(a.size / 1024))} KB</span>
+        </button>
+      ))}
+    </div>
+  );
+}

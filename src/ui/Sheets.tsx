@@ -250,14 +250,14 @@ function Splits() {
   const { account } = useCurrent();
   const summary = useSummary(account);
   // Unedited, the sheet shows the live splits; the first edit takes a copy.
-  const [draft, setRows] = useState<SplitInfo[] | null>(null);
+  const [edited, setEdited] = useState<SplitInfo[] | null>(null);
   const [deleted, setDeleted] = useState<number[]>([]);
   // New splits get negative ids until saved.
   const nextNewId = useRef(-1);
   if (!summary || account === null) return null;
-  const rows = draft ?? summary.splits;
+  const rows = edited ?? summary.splits;
   const update = (i: number, patch: Partial<SplitInfo>) =>
-    setRows(rows.map((r, j) => (i === j ? { ...r, ...patch } : r)));
+    setEdited(rows.map((r, j) => (i === j ? { ...r, ...patch } : r)));
   const move = (i: number, d: number) => {
     const j = i + d;
     const a = rows[i];
@@ -267,11 +267,11 @@ function Splits() {
     const next = [...rows];
     next[i] = b;
     next[j] = a;
-    setRows(next);
+    setEdited(next);
   };
   const add = (name: string, query: string) => {
     const id = nextNewId.current--;
-    setRows((current) => {
+    setEdited((current) => {
       const r = current ?? summary.splits;
       // Custom splits come first, then Important, then Other.
       const fixed = r.findIndex((x) => x.kind !== "custom");
@@ -336,7 +336,7 @@ function Splits() {
               className="text-danger"
               onClick={() => {
                 if (s.id > 0) setDeleted([...deleted, s.id]);
-                setRows(rows.filter((_, j) => j !== i));
+                setEdited(rows.filter((_, j) => j !== i));
               }}
             >
               ×
@@ -365,7 +365,7 @@ function Splits() {
           className="rounded-control bg-accent px-3 py-1 text-row text-white"
           onClick={() => {
             act({ type: "saveSplits", account, splits: rows, deleted });
-            useChrome.getState().set({ sheet: null });
+            closeSheet();
           }}
         >
           Save
