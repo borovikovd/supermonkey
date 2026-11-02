@@ -67,7 +67,7 @@ fn random_inputs() -> impl Iterator<Item = String> {
     (0..3000).map(move |_| {
         let len = (next() % 40) as usize;
         (0..len)
-            .map(|_| PIECES[(next() % PIECES.len() as u64) as usize])
+            .map(|_| PIECES[usize::try_from(next()).unwrap_or(0) % PIECES.len()])
             .collect()
     })
 }

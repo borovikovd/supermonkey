@@ -39,7 +39,7 @@ fn hour(h: u32) -> NaiveTime {
 
 /// The picker's fixed choices for `now`, in display order. Later today is
 /// left out at or after 18:00 local.
-pub fn snooze_options<Tz: TimeZone>(now: DateTime<Tz>) -> Vec<SnoozeOption<Tz>> {
+pub fn snooze_options<Tz: TimeZone>(now: &DateTime<Tz>) -> Vec<SnoozeOption<Tz>> {
     let tz = now.timezone();
     let local = now.naive_local();
     let today = local.date();
@@ -108,6 +108,65 @@ enum Unit {
     Weeks,
 }
 
+/// `dec 24 [2026]` or `24 dec [2026]` at the start of `toks`: the date, the
+/// tokens used, and whether it rolls to next year (no year given).
+fn parse_month_day(toks: &[&str], today: NaiveDate) -> Option<(NaiveDate, usize, bool)> {
+    let first = *toks.first()?;
+    let second = toks.get(1).copied();
+    let (m, d) = match (month(first), day_number(first), second) {
+        // Not `dec 9 am`: a bare hour after a month is ambiguous.
+        (Some(m), _, Some(n)) if !toks.get(2).copied().is_some_and(is_meridiem) => {
+            (m, day_number(n)?)
+        }
+        (None, Some(d), Some(n)) => (month(n)?, d),
+        _ => return None,
+    };
+    match toks.get(2).and_then(|y| year_number(y)) {
+        Some(y) => Some((NaiveDate::from_ymd_opt(y, m, d)?, 3, false)),
+        None => Some((NaiveDate::from_ymd_opt(today.year(), m, d)?, 2, true)),
+    }
+}
+
+/// Setting a date or a time twice is an error.
+fn set<T>(slot: &mut Option<T>, value: T) -> Option<()> {
+    if slot.is_some() {
+        return None;
+    }
+    *slot = Some(value);
+    Some(())
+}
+
+/// Turns a parsed date and time into the next matching instant after `now`,
+/// rolling forward by a day, week, or year when the moment has passed.
+fn resolve_parsed<Tz: TimeZone>(
+    now: &DateTime<Tz>,
+    date: Option<NaiveDate>,
+    wall_time: NaiveTime,
+    has_time: bool,
+    mut roll: Roll,
+) -> Option<DateTime<Tz>> {
+    if date.is_none() && !has_time {
+        return None;
+    }
+    if date.is_none() {
+        roll = Roll::Day;
+    }
+    let day = date.unwrap_or_else(|| now.naive_local().date());
+    let tz = now.timezone();
+    let at = resolve_local(&tz, day.and_time(wall_time));
+    if at > *now {
+        return Some(at);
+    }
+    let later_day = match roll {
+        Roll::Never => return None,
+        Roll::Day => day.checked_add_days(Days::new(1))?,
+        Roll::Week => day.checked_add_days(Days::new(7))?,
+        Roll::Year => day.with_year(day.year() + 1)?,
+    };
+    let at = resolve_local(&tz, later_day.and_time(wall_time));
+    (at > *now).then_some(at)
+}
+
 /// Parses the picker's date-and-time text relative to `now`. Returns `None`
 /// unless the text is understood completely and names a future instant.
 ///
@@ -136,17 +195,6 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<
     let mut roll = Roll::Never;
     let mut default_time = hour(MORNING_HOUR);
 
-    // Setting a date or a time twice is an error.
-    #[allow(clippy::items_after_statements)] // Local helper, kept next to its only use.
-    fn set<T>(slot: &mut Option<T>, value: T) -> Option<()> {
-        if slot.is_some() {
-            None
-        } else {
-            *slot = Some(value);
-            Some(())
-        }
-    }
-
     let mut i = 0;
     while i < toks.len() {
         let t = toks[i];
@@ -174,7 +222,10 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<
                         Unit::Weeks => amount.checked_mul(7)?,
                         _ => amount,
                     };
-                    set(&mut date, today.checked_add_days(Days::new(days as u64))?)?;
+                    set(
+                        &mut date,
+                        today.checked_add_days(Days::new(u64::try_from(days).ok()?))?,
+                    )?;
                     default_time = NaiveTime::from_hms_opt(local.hour(), local.minute(), 0)?;
                 }
             }
@@ -209,25 +260,12 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<
         }
         let next = toks.get(i).copied();
         let next_is_meridiem = next.is_some_and(is_meridiem);
-        // `dec 24 [2026]` or `24 dec [2026]`
-        let month_day = match (month(t), day_number(t), next) {
-            (Some(m), _, Some(n)) if !toks.get(i + 1).copied().is_some_and(is_meridiem) => {
-                day_number(n).map(|d| (m, d))
-            }
-            (None, Some(d), Some(n)) => month(n).map(|m| (m, d)),
-            _ => None,
-        };
-        if let Some((m, d)) = month_day {
-            i += 1;
-            let year = toks.get(i).and_then(|y| year_number(y));
-            let y = if let Some(y) = year {
-                i += 1;
-                y
-            } else {
+        if let Some((d, used, rolls)) = parse_month_day(&toks[i - 1..], today) {
+            i += used - 1;
+            if rolls {
                 roll = Roll::Year;
-                today.year()
-            };
-            set(&mut date, NaiveDate::from_ymd_opt(y, m, d)?)?;
+            }
+            set(&mut date, d)?;
             continue;
         }
         let meridiem = if next_is_meridiem { next } else { None };
@@ -241,27 +279,13 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<
         return None;
     }
 
-    if date.is_none() && time.is_none() {
-        return None;
-    }
-    if date.is_none() {
-        roll = Roll::Day;
-    }
-    let day = date.unwrap_or(today);
-    let wall_time = time.unwrap_or(default_time);
-    let tz = now.timezone();
-    let at = resolve_local(&tz, day.and_time(wall_time));
-    if at > now {
-        return Some(at);
-    }
-    let later_day = match roll {
-        Roll::Never => return None,
-        Roll::Day => day.checked_add_days(Days::new(1))?,
-        Roll::Week => day.checked_add_days(Days::new(7))?,
-        Roll::Year => day.with_year(day.year() + 1)?,
-    };
-    let at = resolve_local(&tz, later_day.and_time(wall_time));
-    (at > now).then_some(at)
+    resolve_parsed(
+        &now,
+        date,
+        time.unwrap_or(default_time),
+        time.is_some(),
+        roll,
+    )
 }
 
 /// `2 hours`, `2h`, `2hours`, `an hour`, `a day`: amount, unit, tokens used.
@@ -430,7 +454,7 @@ mod tests {
     #[test]
     fn options_before_six() {
         // 2026-11-03 is a Tuesday.
-        let options = snooze_options(ny(2026, 11, 3, 17, 59));
+        let options = snooze_options(&ny(2026, 11, 3, 17, 59));
         assert_eq!(
             kinds(&options),
             [
@@ -450,19 +474,19 @@ mod tests {
     #[test]
     fn later_today_omitted_at_and_after_six() {
         for (h, m) in [(18, 0), (18, 1), (23, 59)] {
-            let options = snooze_options(ny(2026, 11, 3, h, m));
+            let options = snooze_options(&ny(2026, 11, 3, h, m));
             assert_eq!(
                 kinds(&options),
                 [SnoozeKind::TomorrowMorning, SnoozeKind::NextWeek]
             );
         }
-        let late = snooze_options(ny(2026, 11, 3, 23, 59));
+        let late = snooze_options(&ny(2026, 11, 3, 23, 59));
         assert_eq!(
             at(&late, SnoozeKind::TomorrowMorning),
             ny(2026, 11, 4, 8, 0)
         );
         // Just after midnight, tomorrow is the next calendar day, not today.
-        let early = snooze_options(ny(2026, 11, 4, 0, 5));
+        let early = snooze_options(&ny(2026, 11, 4, 0, 5));
         assert_eq!(
             at(&early, SnoozeKind::TomorrowMorning),
             ny(2026, 11, 5, 8, 0)
@@ -482,7 +506,7 @@ mod tests {
             (9, 16), // Monday
         ];
         for (day, monday) in cases {
-            let options = snooze_options(ny(2026, 11, day, 10, 0));
+            let options = snooze_options(&ny(2026, 11, day, 10, 0));
             assert_eq!(
                 at(&options, SnoozeKind::NextWeek),
                 ny(2026, 11, monday, 8, 0),
@@ -494,7 +518,7 @@ mod tests {
     #[test]
     fn options_across_dst_changes() {
         // Spring forward on Sunday 2026-03-08: Saturday's "tomorrow" is EDT.
-        let options = snooze_options(ny(2026, 3, 7, 10, 0));
+        let options = snooze_options(&ny(2026, 3, 7, 10, 0));
         let tomorrow = at(&options, SnoozeKind::TomorrowMorning);
         assert_eq!(tomorrow.naive_local(), ny(2026, 3, 8, 8, 0).naive_local());
         assert_eq!(tomorrow.naive_utc().to_string(), "2026-03-08 12:00:00");
@@ -503,7 +527,7 @@ mod tests {
         assert_eq!(later.naive_utc().to_string(), "2026-03-07 23:00:00");
 
         // Fall back on Sunday 2026-11-01: next week's Monday 08:00 is EST.
-        let options = snooze_options(ny(2026, 10, 31, 10, 0));
+        let options = snooze_options(&ny(2026, 10, 31, 10, 0));
         let monday = at(&options, SnoozeKind::NextWeek);
         assert_eq!(monday.naive_utc().to_string(), "2026-11-02 13:00:00");
     }
@@ -528,9 +552,9 @@ mod tests {
 
     #[test]
     fn works_with_local_and_utc() {
-        assert!(snooze_options(chrono::Local::now()).len() >= 2);
+        assert!(snooze_options(&chrono::Local::now()).len() >= 2);
         let utc = chrono::Utc.with_ymd_and_hms(2026, 11, 2, 9, 0, 0).unwrap();
-        assert_eq!(snooze_options(utc).len(), 3);
+        assert_eq!(snooze_options(&utc).len(), 3);
     }
 
     // --- free text --------------------------------------------------------

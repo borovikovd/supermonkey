@@ -18,7 +18,7 @@ impl T {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("t.db");
         let (etx, _erx) = tokio::sync::mpsc::unbounded_channel();
-        let writer = Writer::start(path.clone(), etx).unwrap();
+        let writer = Writer::start(&path, etx).unwrap();
         writer
             .call_blocking(|ctx| {
                 let a = ubermensch_lib::accounts::create(ctx, "me@example.com")?;

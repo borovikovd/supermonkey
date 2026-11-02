@@ -84,26 +84,20 @@ unused_qualifications = "warn"
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
-# Pedantic lints that only add noise here.
+# Pedantic lints that do not fit an application crate:
+# - names like `drafts::DraftRow` are clearer than renamed ones;
 module_name_repetitions = "allow"
+# - `#[must_use]` on every getter adds noise; real must-use types are marked;
 must_use_candidate = "allow"
+# - errors are anyhow chains with context, and nothing here is a published API;
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
-too_many_lines = "allow"
-similar_names = "allow"
-struct_excessive_bools = "allow"
-fn_params_excessive_bools = "allow"
+# - every hash map and set uses the default hasher; generic hashers would only add type noise.
 implicit_hasher = "allow"
-# Owned arguments move into spawned tasks, writer jobs, and builders.
-needless_pass_by_value = "allow"
-# SQLite stores i64; ids, counts, and millisecond times convert freely.
-cast_possible_truncation = "allow"
-cast_sign_loss = "allow"
-cast_possible_wrap = "allow"
-cast_precision_loss = "allow"
 # Restriction lints worth having in production code.
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
 unwrap_used = "warn"
 print_stdout = "warn"
+print_stderr = "warn"

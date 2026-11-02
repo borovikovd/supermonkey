@@ -162,7 +162,7 @@ pub fn refresh(ctx: &mut Ctx<'_>, thread: ThreadId) -> anyhow::Result<()> {
             if latest.from_name.is_empty() { &latest.from_email } else { &latest.from_name },
             latest.from_email,
             latest.date,
-            shown as i64,
+            i64::try_from(shown).unwrap_or(i64::MAX),
             msgs.iter().any(|m| m.live() && m.has("UNREAD")) || (live_count == 0 && msgs.iter().any(|m| m.has("UNREAD") && !m.is_draft)),
             labels.contains("STARRED"),
             msgs.iter().any(|m| !m.is_draft && m.has_attachments),

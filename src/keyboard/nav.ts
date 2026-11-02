@@ -135,7 +135,7 @@ export function selectMessage(data: ConversationData, delta: number) {
 
 export function toggleExpand(data: ConversationData) {
   const c = useChrome.getState();
-  const id = c.selectedMessage ?? data.messages[data.messages.length - 1]?.id;
+  const id = c.selectedMessage ?? data.messages.at(-1)?.id;
   if (id === undefined) return;
   const ex = new Set(c.expanded);
   if (ex.has(id)) ex.delete(id);

@@ -98,7 +98,7 @@ export function applyListPatch(
     let at = 0;
     if (m.after !== null) {
       // Moves arrive in new-list order, so `after` is usually just placed.
-      const prev = out.length > 0 && out[out.length - 1]?.key === m.after ? out.length - 1 : -1;
+      const prev = out.at(-1)?.key === m.after ? out.length - 1 : -1;
       const pos = prev >= 0 ? prev : out.findIndex((e) => e.key === m.after);
       at = pos >= 0 ? pos + 1 : out.length;
     }
@@ -283,8 +283,8 @@ export function viewList(s: MirrorState, subId: string): ListView {
   };
   for (const p of s.pending) {
     const a = p.action;
-    if (a.type === "modify" || (a.type === "createLabel" && a.apply)) {
-      const m = a.type === "modify" ? a : a.apply!;
+    const m = a.type === "modify" ? a : a.type === "createLabel" ? a.apply : null;
+    if (m) {
       for (const t of m.threads) {
         const k = String(t);
         const row = rows[k];
@@ -305,8 +305,12 @@ export function viewList(s: MirrorState, subId: string): ListView {
         const split = rows[r.key]?.split ?? null;
         ids = [...ids.slice(0, at), { key: r.key, split }, ...ids.slice(at)];
       }
-    } else if ((a.type === "sendDraft" || a.type === "discardDraft") && sub.key.type === "list") {
-      if (sub.key.view.kind === "drafts") ids = ids.filter((e) => e.key !== a.draft);
+    } else if (
+      (a.type === "sendDraft" || a.type === "discardDraft") &&
+      sub.key.type === "list" &&
+      sub.key.view.kind === "drafts"
+    ) {
+      ids = ids.filter((e) => e.key !== a.draft);
     }
   }
   return { ids, rows };

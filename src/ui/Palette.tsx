@@ -35,9 +35,9 @@ const view = (v: View) => () => goTo({ kind: "view", view: v });
 function Chip({ keys }: { keys: string }) {
   return (
     <span className="flex gap-1">
-      {keys.split(" ").map((k, i) => (
+      {keys.split(" ").map((k) => (
         <kbd
-          key={i}
+          key={k}
           className="rounded-[4px] bg-[#3a3835] px-1.5 text-hint font-medium text-palette-text-2"
         >
           {k}
@@ -300,10 +300,19 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
   const firstValue = items[0] ? itemValue(items[0]) : "";
   const selected = items.some((it) => itemValue(it) === picked) ? picked : firstValue;
   return (
-    <div className="fixed inset-0 z-40" onMouseDown={close}>
-      <div
-        className="fade-in absolute left-1/2 top-[33%] w-[680px] -translate-x-1/2 -translate-y-1/3 overflow-hidden rounded-sheet bg-palette-bg text-palette-text shadow-float"
-        onMouseDown={(e) => e.stopPropagation()}
+    // The backdrop closes on a click outside the palette; Esc closes from the keyboard.
+    <div
+      role="presentation"
+      className="fixed inset-0 z-40"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) close();
+      }}
+    >
+      <dialog
+        open
+        aria-modal="true"
+        aria-label={placeholder}
+        className="fade-in absolute top-[33%] left-1/2 m-0 w-[680px] -translate-x-1/2 -translate-y-1/3 overflow-hidden rounded-sheet border-0 bg-palette-bg p-0 text-palette-text shadow-float"
       >
         <Command
           shouldFilter={!filtered}
@@ -355,7 +364,7 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
             ))}
           </Command.List>
         </Command>
-      </div>
+      </dialog>
     </div>
   );
 }

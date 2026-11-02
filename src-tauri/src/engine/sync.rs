@@ -81,7 +81,7 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
             if offline {
                 10_000
             } else {
-                POLL.as_millis() as u64
+                u64::try_from(POLL.as_millis()).unwrap_or(45_000)
             },
         )
         .await;
@@ -412,6 +412,140 @@ pub async fn fetch_opened(e: EngineRef, rt: Arc<AccountRt>, thread: ThreadId, _o
     e.note(&rt, r.as_ref().map(|_| ()));
 }
 
+/// Every `history.list` record since `start` and the newest historyId, or
+/// None when Gmail answers 404 because the cursor is too old.
+async fn list_history_since(
+    rt: &AccountRt,
+    start: u64,
+) -> Result<Option<(Vec<ub_gmail::History>, u64)>, GmailError> {
+    let mut records = Vec::new();
+    let mut page: Option<String> = None;
+    loop {
+        let res = rt
+            .sched
+            .run(
+                Priority::P3,
+                cost::HISTORY_LIST,
+                rt.gmail.list_history(start, page.as_deref()),
+            )
+            .await;
+        match res {
+            Ok(res) => {
+                records.extend(res.history);
+                match res.next_page_token {
+                    Some(next) => page = Some(next),
+                    None => return Ok(Some((records, res.history_id))),
+                }
+            }
+            Err(err) if matches!(err.outcome, Outcome::NotFound) => return Ok(None),
+            Err(err) => return Err(err),
+        }
+    }
+}
+
+/// A poll's history, reduced: each message's latest label set (the last
+/// record wins), the messages added, and the messages deleted.
+struct HistoryBatch {
+    /// Gmail message id → (Gmail thread id, label ids).
+    label_sets: HashMap<String, (String, Vec<String>)>,
+    added: HashSet<String>,
+    deleted: HashSet<String>,
+    /// Draft versions are new messages with DRAFT; deletes may be old versions.
+    draft_change: bool,
+}
+
+impl HistoryBatch {
+    fn from_records(records: &[ub_gmail::History]) -> HistoryBatch {
+        let mut batch = HistoryBatch {
+            label_sets: HashMap::new(),
+            added: HashSet::new(),
+            deleted: HashSet::new(),
+            draft_change: false,
+        };
+        for h in records {
+            for m in &h.messages_added {
+                batch.added.insert(m.message.id.clone());
+                batch.draft_change |= m.message.label_ids.iter().any(|l| l == "DRAFT");
+                batch.label_sets.insert(
+                    m.message.id.clone(),
+                    (m.message.thread_id.clone(), m.message.label_ids.clone()),
+                );
+            }
+            for c in h.labels_added.iter().chain(&h.labels_removed) {
+                batch.label_sets.insert(
+                    c.message.id.clone(),
+                    (c.message.thread_id.clone(), c.message.label_ids.clone()),
+                );
+            }
+            for m in &h.messages_deleted {
+                batch.deleted.insert(m.message.id.clone());
+            }
+        }
+        batch.draft_change |= !batch.deleted.is_empty();
+        batch
+    }
+}
+
+/// Writes one poll's history in a single transaction: deletes, fetched
+/// threads, and label changes, with pending ops re-applied on top. Then the
+/// snooze rule on net labels, the new cursor, and notifications.
+fn apply_history(
+    ctx: &mut crate::writer::Ctx<'_>,
+    account: AccountId,
+    batch: &HistoryBatch,
+    fetched: &[(String, Option<u64>, Vec<Incoming>)],
+    fetch_threads: &HashSet<String>,
+    latest: u64,
+) -> anyhow::Result<()> {
+    let pending = PendingOps::load(ctx.tx, account)?;
+    let mut touched: Vec<ThreadId> = Vec::new();
+    for gid in &batch.deleted {
+        let row: Option<(i64, i64)> = ctx
+            .tx
+            .query_row(
+                "SELECT id, thread_id FROM messages WHERE account_id = ?1 AND gmail_id = ?2",
+                params![account, gid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        if let Some((id, t)) = row {
+            ingest::delete_message(ctx, id)?;
+            touched.push(t);
+        }
+    }
+    for (gid, h, msgs) in fetched {
+        if msgs.is_empty() {
+            drop_thread(ctx, account, gid)?;
+        } else {
+            touched.push(ingest::store_thread(
+                ctx, account, gid, *h, msgs, true, &pending,
+            )?);
+        }
+    }
+    for (msg, (thread, labels)) in &batch.label_sets {
+        if fetch_threads.contains(thread) || batch.deleted.contains(msg) {
+            continue;
+        }
+        if let Some(t) = ingest::set_labels_from_gmail(ctx, account, msg, labels, &pending)? {
+            touched.push(t);
+        }
+    }
+    touched.sort_unstable();
+    touched.dedup();
+    for &t in &touched {
+        crate::threads::refresh(ctx, t)?;
+    }
+    // The snooze rule, judged on net labels after the whole batch.
+    super::snooze::apply_rule(ctx, &touched, &pending)?;
+    ctx.tx.execute(
+        "UPDATE accounts SET history_id = ?2, last_sync = ?3 WHERE id = ?1",
+        params![account, latest.to_string(), ctx.now],
+    )?;
+    super::notify::from_poll(ctx, account, &batch.added)?;
+    ctx.effect(Effect::Badge);
+    Ok(())
+}
+
 /// One poll of `users.history.list` from the stored cursor.
 pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> {
     let start: Option<u64> = e
@@ -428,67 +562,22 @@ pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> 
         .and_then(|h| h.parse().ok());
     let Some(start) = start else { return Ok(()) };
 
-    let mut records = Vec::new();
-    let mut page: Option<String> = None;
-    let latest;
-    loop {
-        match rt
-            .sched
-            .run(
-                Priority::P3,
-                cost::HISTORY_LIST,
-                rt.gmail.list_history(start, page.as_deref()),
-            )
-            .await
-        {
-            Ok(res) => {
-                records.extend(res.history);
-                if res.next_page_token.is_none() {
-                    latest = res.history_id;
-                    break;
-                }
-                page = res.next_page_token;
-            }
-            Err(err) if matches!(err.outcome, Outcome::NotFound) => {
-                return full_resync(e, rt).await;
-            }
-            Err(err) => return Err(err),
-        }
-    }
+    let Some((records, latest)) = list_history_since(rt, start).await? else {
+        // The cursor is too old.
+        return full_resync(e, rt).await;
+    };
     if records.is_empty() {
         if latest != start {
             store_cursor(e, rt.id, latest).await;
         }
         return Ok(());
     }
-
-    // Net label sets per message (the last record wins), adds, and deletes.
-    let mut label_sets: HashMap<String, (String, Vec<String>)> = HashMap::new();
-    let mut added: Vec<ub_gmail::Message> = Vec::new();
-    let mut deleted: HashSet<String> = HashSet::new();
-    for h in &records {
-        for m in &h.messages_added {
-            added.push(m.message.clone());
-            label_sets.insert(
-                m.message.id.clone(),
-                (m.message.thread_id.clone(), m.message.label_ids.clone()),
-            );
-        }
-        for c in h.labels_added.iter().chain(&h.labels_removed) {
-            label_sets.insert(
-                c.message.id.clone(),
-                (c.message.thread_id.clone(), c.message.label_ids.clone()),
-            );
-        }
-        for m in &h.messages_deleted {
-            deleted.insert(m.message.id.clone());
-        }
-    }
-    // Draft versions are new messages with DRAFT; deletes may be old versions.
-    let draft_change = !deleted.is_empty()
-        || added
-            .iter()
-            .any(|m| m.label_ids.iter().any(|l| l == "DRAFT"));
+    let HistoryBatch {
+        label_sets,
+        added,
+        deleted,
+        draft_change,
+    } = HistoryBatch::from_records(&records);
     let known: HashSet<String> = {
         let ids: Vec<String> = label_sets.keys().cloned().collect();
         e.reads
@@ -522,61 +611,20 @@ pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> 
     }
 
     let account = rt.id;
-    let new_ids: HashSet<String> = added.iter().map(|m| m.id.clone()).collect();
-    let fetch_threads: HashSet<String> = fetch.clone();
+    let batch = HistoryBatch {
+        label_sets,
+        added,
+        deleted,
+        draft_change,
+    };
+    let fetch_threads = fetch.clone();
     let res = e
         .writer
-        .call(move |ctx| {
-            let pending = PendingOps::load(ctx.tx, account)?;
-            let mut touched: Vec<ThreadId> = Vec::new();
-            for gid in &deleted {
-                let row: Option<(i64, i64)> = ctx
-                    .tx
-                    .query_row(
-                        "SELECT id, thread_id FROM messages WHERE account_id = ?1 AND gmail_id = ?2",
-                        params![account, gid],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
-                    )
-                    .optional()?;
-                if let Some((id, t)) = row {
-                    ingest::delete_message(ctx, id)?;
-                    touched.push(t);
-                }
-            }
-            for (gid, h, msgs) in &fetched {
-                if msgs.is_empty() {
-                    drop_thread(ctx, account, gid)?;
-                } else {
-                    touched.push(ingest::store_thread(ctx, account, gid, *h, msgs, true, &pending)?);
-                }
-            }
-            for (msg, (thread, labels)) in &label_sets {
-                if fetch_threads.contains(thread) || deleted.contains(msg) {
-                    continue;
-                }
-                if let Some(t) = ingest::set_labels_from_gmail(ctx, account, msg, labels, &pending)? {
-                    touched.push(t);
-                }
-            }
-            touched.sort_unstable();
-            touched.dedup();
-            for &t in &touched {
-                crate::threads::refresh(ctx, t)?;
-            }
-            // The snooze rule, judged on net labels after the whole batch.
-            super::snooze::apply_rule(ctx, &touched, &pending)?;
-            ctx.tx.execute(
-                "UPDATE accounts SET history_id = ?2, last_sync = ?3 WHERE id = ?1",
-                params![account, latest.to_string(), ctx.now],
-            )?;
-            super::notify::from_poll(ctx, account, &new_ids)?;
-            ctx.effect(Effect::Badge);
-            Ok(fetch_threads)
-        })
+        .call(move |ctx| apply_history(ctx, account, &batch, &fetched, &fetch_threads, latest))
         .await;
     // Bodies of new messages, at priority 4 ahead of the rest.
-    if let Ok(threads) = res {
-        for t in threads {
+    if res.is_ok() {
+        for t in fetch {
             rt.work.push(work::POLL_BODIES, Work::Body { thread: t });
         }
     }
@@ -598,6 +646,63 @@ async fn store_cursor(e: &EngineRef, account: AccountId, history: u64) {
             Ok(())
         })
         .await;
+}
+
+/// Full resync steps 3 and 4: drop cached threads Gmail no longer has (only
+/// if unchanged since the resync started and Gmail confirms with a 404), and
+/// refetch metadata where the historyId changed.
+async fn reconcile_cached(
+    e: &EngineRef,
+    rt: &Arc<AccountRt>,
+    listed: &HashMap<String, Option<u64>>,
+    started_rev: i64,
+) -> Result<(), GmailError> {
+    let cached: Vec<(String, Option<String>, i64)> = e
+        .reads
+        .with(|c| {
+            let mut stmt =
+                c.prepare("SELECT gmail_id, history_id, rev FROM threads WHERE account_id = ?1")?;
+            let rows = stmt.query_map([rt.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            Ok(rows.collect::<Result<_, _>>()?)
+        })
+        .unwrap_or_default();
+    for (gid, hist, rev) in &cached {
+        match listed.get(gid) {
+            None if *rev <= started_rev => {
+                let r = rt
+                    .sched
+                    .run(
+                        Priority::P4,
+                        cost::threads_get(Format::Minimal),
+                        rt.gmail.get_thread(gid, Format::Minimal, &[]),
+                    )
+                    .await;
+                if let Err(err) = r
+                    && matches!(err.outcome, Outcome::NotFound)
+                {
+                    let account = rt.id;
+                    let gid = gid.clone();
+                    let _ = e
+                        .writer
+                        .call(move |ctx| drop_thread(ctx, account, &gid))
+                        .await;
+                }
+            }
+            // 4. Refetch metadata, which replaces labels, where historyId changed.
+            Some(h) if hist.as_deref().and_then(|x| x.parse::<u64>().ok()) != *h => {
+                rt.work.push(
+                    work::OTHER_META,
+                    Work::Meta {
+                        thread: gid.clone(),
+                        history: *h,
+                        body: None,
+                    },
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 /// `history.list` returned 404: the cursor is too old (SPEC Sync, full resync).
@@ -651,53 +756,7 @@ pub async fn full_resync(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), Gmail
         }
     }
 
-    // 3. Cached threads missing from the list are dropped only if unchanged
-    // since step 1 and Gmail confirms with a 404.
-    let cached: Vec<(String, Option<String>, i64)> = e
-        .reads
-        .with(|c| {
-            let mut stmt =
-                c.prepare("SELECT gmail_id, history_id, rev FROM threads WHERE account_id = ?1")?;
-            let rows = stmt.query_map([rt.id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
-            Ok(rows.collect::<Result<_, _>>()?)
-        })
-        .unwrap_or_default();
-    for (gid, hist, rev) in &cached {
-        match listed.get(gid) {
-            None if *rev <= started_rev => {
-                let r = rt
-                    .sched
-                    .run(
-                        Priority::P4,
-                        cost::threads_get(Format::Minimal),
-                        rt.gmail.get_thread(gid, Format::Minimal, &[]),
-                    )
-                    .await;
-                if let Err(err) = r
-                    && matches!(err.outcome, Outcome::NotFound)
-                {
-                    let account = rt.id;
-                    let gid = gid.clone();
-                    let _ = e
-                        .writer
-                        .call(move |ctx| drop_thread(ctx, account, &gid))
-                        .await;
-                }
-            }
-            // 4. Refetch metadata, which replaces labels, where historyId changed.
-            Some(h) if hist.as_deref().and_then(|x| x.parse::<u64>().ok()) != *h => {
-                rt.work.push(
-                    work::OTHER_META,
-                    Work::Meta {
-                        thread: gid.clone(),
-                        history: *h,
-                        body: None,
-                    },
-                );
-            }
-            _ => {}
-        }
-    }
+    reconcile_cached(e, rt, &listed, started_rev).await?;
     // New threads the connect sync would fetch: starred and recent sent.
     rt.work.push(
         work::OTHER_META,

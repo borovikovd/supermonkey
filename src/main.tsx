@@ -8,4 +8,6 @@ import { useMirror } from "./store/mirror";
 // Debug builds: the stores, for inspection in the web inspector.
 if (import.meta.env.DEV) Object.assign(window, { __ub: { useChrome, useMirror } });
 
-createRoot(document.getElementById("root")!).render(<App />);
+const root = document.querySelector("#root");
+if (!root) throw new Error("index.html has no #root element");
+createRoot(root).render(<App />);

@@ -73,6 +73,7 @@ fn arg<T: serde::de::DeserializeOwned>(v: &Value, k: &str) -> Result<T, String> 
         .map_err(|e| format!("{k}: {e}"))
 }
 
+#[allow(clippy::too_many_lines)] // One short arm per command (debug only).
 async fn invoke(
     State(app): State<AppHandle>,
     Path(cmd): Path<String>,

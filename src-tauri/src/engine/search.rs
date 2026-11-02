@@ -20,7 +20,7 @@ pub fn cancel(e: &EngineRef, sub: &str) {
 }
 
 pub fn start(
-    e: EngineRef,
+    e: &EngineRef,
     sub: SubId,
     account: AccountId,
     query: GmailListQuery,
@@ -38,7 +38,7 @@ pub fn start(
         return;
     };
     // A newer query cancels the older one's queued fetches.
-    cancel(&e, &sub);
+    cancel(e, &sub);
     let e2 = e.clone();
     let s = sub.clone();
     let handle = tauri::async_runtime::spawn(async move {

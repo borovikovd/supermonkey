@@ -14,7 +14,7 @@ pub fn record(
     account: AccountId,
     kind: &str,
     label: &str,
-    payload: serde_json::Value,
+    payload: &serde_json::Value,
 ) -> anyhow::Result<()> {
     ctx.tx.execute(
         "INSERT OR REPLACE INTO undo_entries (id, account_id, kind, label, payload) VALUES (?1, ?2, ?3, ?4, ?5)",

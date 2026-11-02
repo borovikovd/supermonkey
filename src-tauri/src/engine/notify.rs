@@ -99,7 +99,7 @@ pub fn from_poll(
     Ok(())
 }
 
-pub fn show(e: &EngineRef, n: Notification) {
+pub fn show(e: &EngineRef, n: &Notification) {
     *e.last_notification.lock() = Some((n.clone(), crate::db::now_ms()));
     let Some(app) = &e.app else { return };
     let _ = app

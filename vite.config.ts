@@ -26,45 +26,57 @@ export default defineConfig({
       "react/rules-of-hooks": "error",
       "react/exhaustive-deps": "error",
       "react/jsx-key": "error",
-      "react/no-array-index-key": "off",
+      "react/no-array-index-key": "error",
+      // Off: this rule is for the legacy JSX transform; tsconfig uses the automatic
+      // runtime ("jsx": "react-jsx"), so React is never in scope by design.
       "react/react-in-jsx-scope": "off",
+
       // Type-aware TypeScript.
       "typescript/no-floating-promises": "error",
       "typescript/no-misused-promises": "error",
       "typescript/await-thenable": "error",
       "typescript/no-explicit-any": "error",
-      "typescript/consistent-type-imports": "error",
+      "typescript/no-unsafe-argument": "error",
+      "typescript/no-non-null-assertion": "error",
       "typescript/no-unnecessary-type-assertion": "error",
+      "typescript/consistent-type-imports": "error",
       "typescript/switch-exhaustiveness-check": [
         "error",
         { considerDefaultExhaustiveForUnions: true },
       ],
       "typescript/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+      // `||` stays allowed on strings: an empty display name falls back to the address.
+      "typescript/prefer-nullish-coalescing": ["error", { ignorePrimitives: { string: true } }],
+      // Off: typescript-eslint recommends tsconfig's noImplicitReturns instead (on in
+      // tsconfig.app.json); this rule misfires on React effects that return a cleanup
+      // on some paths only.
+      "typescript/consistent-return": "off",
+
       // General.
       // `x != null` is the idiomatic null-or-undefined check.
       eqeqeq: ["error", "always", { null: "ignore" }],
-      // React effects return a cleanup only on some paths; noImplicitReturns covers the rest.
-      "typescript/consistent-return": "off",
-      "import/no-unassigned-import": ["error", { allow: ["**/*.css"] }],
       "no-console": ["error", { allow: ["warn", "error"] }],
       "no-debugger": "error",
       "import/no-cycle": "error",
       "import/no-duplicates": "error",
+      // CSS is imported for its side effect.
+      "import/no-unassigned-import": ["error", { allow: ["**/*.css"] }],
       "promise/no-return-in-finally": "error",
       "promise/always-return": ["error", { ignoreLastCallback: true }],
       "vite-plus/prefer-vite-plus-imports": "error",
-      // Keyboard-first app: every control is reachable from the keyboard
-      // through the shortcut table, so mouse handlers on rows are fine.
-      "jsx-a11y/click-events-have-key-events": "off",
-      "jsx-a11y/no-static-element-interactions": "off",
-      "jsx-a11y/no-autofocus": "off",
+
+      // Selected pedantic rules; the rest of that category is stylistic.
+      "unicorn/prefer-at": "error",
+      "unicorn/prefer-array-some": "error",
+      "unicorn/prefer-query-selector": "error",
+      "unicorn/prefer-code-point": "error",
+      "unicorn/no-lonely-if": "error",
+
+      // Accessibility.
+      "jsx-a11y/click-events-have-key-events": "error",
+      "jsx-a11y/no-static-element-interactions": "error",
+      "jsx-a11y/no-autofocus": "error",
     },
-    overrides: [
-      {
-        files: ["**/*.test.ts", "**/*.test.tsx"],
-        rules: { "typescript/no-non-null-assertion": "off" },
-      },
-    ],
     options: {
       typeAware: true,
       typeCheck: true,

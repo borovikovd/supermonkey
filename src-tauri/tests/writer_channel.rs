@@ -99,12 +99,13 @@ fn apply(list: &[ListEntry], removed: &[String], moved: &[ListMove]) -> Vec<List
     ubermensch_lib::subs::diff::apply(list, removed, moved)
 }
 
+#[allow(clippy::too_many_lines)] // The property harness: set up, replay ops, check.
 fn run(ops: Vec<Op>) -> Result<(), TestCaseError> {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("t.db");
     fixture::generate(&path, &SIZE, &["a@example.com"]).unwrap();
     let (etx, _erx) = tokio::sync::mpsc::unbounded_channel();
-    let writer = Writer::start(path.clone(), etx).unwrap();
+    let writer = Writer::start(&path, etx).unwrap();
 
     let state = Arc::new(Mutex::new(Rebuilt::default()));
     let views: Arc<Mutex<HashMap<String, View>>> = Arc::default();

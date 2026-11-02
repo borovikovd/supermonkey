@@ -243,7 +243,7 @@ impl Engine {
 }
 
 pub fn start(
-    app: AppHandle,
+    app: &AppHandle,
     writer: Writer,
     reads: ReadPool,
     data_dir: PathBuf,
@@ -294,13 +294,13 @@ impl Engine {
 
     /// Starts accounts and the effect loop.
     pub fn run(self: &Arc<Self>, effects: UnboundedReceiver<Effect>) {
-        launch(self.clone());
+        launch(self);
         tauri::async_runtime::spawn(dispatch(self.clone(), effects));
     }
 }
 
 /// On launch: start every signed-in account, wake due snoozes, settle the outbox.
-fn launch(engine: EngineRef) {
+fn launch(engine: &EngineRef) {
     let accounts: Vec<(AccountId, String, bool)> = engine
         .reads
         .with(|c| {
@@ -310,8 +310,8 @@ fn launch(engine: EngineRef) {
             Ok(rows.collect::<Result<_, _>>()?)
         })
         .unwrap_or_default();
-    snooze::wake_due(&engine);
-    outbox::on_launch(&engine);
+    snooze::wake_due(engine);
+    outbox::on_launch(engine);
     for (id, email, needs) in accounts {
         if needs {
             continue;
@@ -361,7 +361,7 @@ async fn dispatch(engine: EngineRef, mut effects: UnboundedReceiver<Effect>) {
                 account,
                 query,
                 page_token,
-            } => search::start(e, sub, account, query, page_token),
+            } => search::start(&e, sub, account, query, page_token),
             Effect::CancelSub(sub) => search::cancel(&e, &sub),
             Effect::AccountRemoved { account, email } => {
                 tauri::async_runtime::spawn(auth::forget(e, account, email));
@@ -382,7 +382,7 @@ async fn dispatch(engine: EngineRef, mut effects: UnboundedReceiver<Effect>) {
                 }
             }
             Effect::Badge => update_badge(e.app.as_ref(), &e.reads),
-            Effect::Notify(n) => notify::show(&e, n),
+            Effect::Notify(n) => notify::show(&e, &n),
             Effect::Snoozes => e.snooze_kick.notify_one(),
             Effect::RefreshLabels(a) => {
                 if let Some(rt) = e.account(a) {

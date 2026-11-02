@@ -78,14 +78,23 @@ function Sheet({
   wide?: boolean;
 }) {
   return (
-    <div className="fixed inset-0 z-30 bg-black/10" onMouseDown={closeSheet}>
-      <div
-        className={`fade-in absolute left-1/2 top-16 max-h-[80vh] -translate-x-1/2 overflow-y-auto rounded-sheet bg-bg px-8 py-5 shadow-float ${wide ? "w-[760px]" : "w-[550px]"}`}
-        onMouseDown={(e) => e.stopPropagation()}
+    // The backdrop closes on a click outside the sheet; Esc closes from the keyboard.
+    <div
+      role="presentation"
+      className="fixed inset-0 z-30 bg-black/10"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) closeSheet();
+      }}
+    >
+      <dialog
+        open
+        aria-modal="true"
+        aria-label={title}
+        className={`fade-in absolute top-16 left-1/2 m-0 max-h-[80vh] -translate-x-1/2 overflow-y-auto rounded-sheet border-0 bg-bg px-8 py-5 text-text shadow-float ${wide ? "w-[760px]" : "w-[550px]"}`}
       >
         <div className="mb-4 text-[15px] font-semibold">{title}</div>
         {children}
-      </div>
+      </dialog>
     </div>
   );
 }

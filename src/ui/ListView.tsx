@@ -52,7 +52,15 @@ const Row = memo(function Row({
           ? "bg-fill"
           : "hover:bg-fill-half";
   return (
+    // An ARIA listbox option: focus stays on the listbox (aria-activedescendant)
+    // and j / k / Enter drive it through the global shortcut handler. Rows are
+    // rich and virtualized, so a native <option> cannot render them.
+    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus
     <div
+      // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- rich rows; native elements cannot render them
+      role="option"
+      aria-selected={highlighted}
+      id={`row-${rowKey}`}
       onClick={() => onClick(rowKey)}
       className={`relative flex h-row items-center gap-3 px-4 text-row ${bg}`}
       data-row={rowKey}
@@ -238,7 +246,14 @@ export function ListView() {
 
   return (
     <div ref={parent} className="min-h-0 flex-1 overflow-y-auto" style={{ contain: "strict" }}>
-      <div style={{ height: v.getTotalSize(), position: "relative" }}>
+      <div
+        // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- rich rows; native elements cannot render them
+        role="listbox"
+        tabIndex={0}
+        aria-label="Conversations"
+        aria-activedescendant={highlight === null ? undefined : `row-${highlight}`}
+        style={{ height: v.getTotalSize(), position: "relative" }}
+      >
         {virtual.map((vi) => {
           const it = items[vi.index];
           if (!it) return null;

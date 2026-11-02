@@ -32,6 +32,7 @@ const PNG: &[u8] = &[
     0, 0, 0, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
 ];
 
+#[allow(clippy::too_many_lines)] // Demo mail, a flat list of sample messages.
 fn seed(u: &FakeUser, me: &str) {
     let receipts = u.add_label("Receipts");
     let travel = u.add_label("Travel");

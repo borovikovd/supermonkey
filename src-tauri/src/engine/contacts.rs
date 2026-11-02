@@ -60,8 +60,8 @@ pub fn suggest(
                     ub_rules::MatchField::Name => "name".into(),
                     ub_rules::MatchField::Email => "email".into(),
                 },
-                match_start: span.start as u32,
-                match_end: span.end as u32,
+                match_start: u32::try_from(span.start).unwrap_or(u32::MAX),
+                match_end: u32::try_from(span.end).unwrap_or(u32::MAX),
             },
         ));
     }

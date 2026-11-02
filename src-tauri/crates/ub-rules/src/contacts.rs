@@ -91,7 +91,10 @@ pub fn is_suggestible(sent_count: u32, list_only: bool, is_noreply: bool, is_own
 /// `0.5 ^ (age / 90 days)`: 1.0 for contact now, 0.5 at 90 days, 0.25 at
 /// 180. A last contact in the future counts as now.
 pub fn recency_factor(last_contact_ms: i64, now_ms: i64) -> f64 {
-    let age_days = now_ms.saturating_sub(last_contact_ms).max(0) as f64 / MS_PER_DAY;
+    let age_ms = now_ms.saturating_sub(last_contact_ms).max(0);
+    // Whole seconds fit in f64 exactly for any span this ranking sees.
+    let age_days =
+        f64::from(u32::try_from(age_ms / 1000).unwrap_or(u32::MAX)) * 1000.0 / MS_PER_DAY;
     0.5f64.powf(age_days / RECENCY_HALF_LIFE_DAYS)
 }
 

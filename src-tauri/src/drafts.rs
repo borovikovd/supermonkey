@@ -135,20 +135,85 @@ fn dedup(list: Vec<Addr>, skip: &HashSet<String>) -> Vec<Addr> {
 }
 
 /// Fills a fresh composer by the rules in SPEC Addressing.
-#[allow(clippy::too_many_arguments)]
-fn create(
-    ctx: &mut Ctx<'_>,
-    draft: &str,
+/// A fresh composer's first save (SPEC UI state → Actions).
+struct NewDraft<'a> {
+    draft: &'a str,
     account: AccountId,
     kind: DraftKind,
     reply_all: bool,
     thread: Option<ThreadId>,
-    target_id: Option<MessageId>,
+    target: Option<MessageId>,
     started_on_latest: bool,
-) -> anyhow::Result<()> {
-    let (list, default_from) = send_as(ctx, account)?;
-    let mine = queries::my_addresses(ctx.tx, account)?;
-    let target = match target_id {
+}
+
+/// From, To, and Cc for a reply (SPEC Addressing).
+fn reply_addressing(
+    t: &Target,
+    send_as: &[SendAs],
+    default_from: Addr,
+    mine: &HashSet<String>,
+    reply_all: bool,
+) -> (Addr, Vec<Addr>, Vec<Addr>) {
+    if mine.contains(&t.from.email.to_lowercase()) {
+        // Replying to my own message: send from its From, to its To.
+        let cc = if reply_all {
+            dedup(t.cc.clone(), mine)
+        } else {
+            vec![]
+        };
+        return (t.from.clone(), t.to.clone(), cc);
+    }
+    // From the sendAs address the message was sent to, else the default.
+    let from = send_as
+        .iter()
+        .find(|s| t.to.iter().chain(&t.cc).any(|a| same(&a.email, &s.email)))
+        .map_or(default_from, |s| Addr {
+            name: (!s.name.is_empty()).then(|| s.name.clone()),
+            email: s.email.clone(),
+        });
+    let to = if t.reply_to.is_empty() {
+        vec![t.from.clone()]
+    } else {
+        t.reply_to.clone()
+    };
+    let cc = if reply_all {
+        let mut skip = mine.clone();
+        skip.extend(to.iter().map(|a| a.email.to_lowercase()));
+        dedup(t.to.iter().chain(&t.cc).cloned().collect(), &skip)
+    } else {
+        vec![]
+    };
+    (from, to, cc)
+}
+
+/// A message's attachments as draft attachments: a forward carries its
+/// target's, and a draft read from Gmail carries its own.
+pub fn message_attachments(
+    ctx: &Ctx<'_>,
+    message: MessageId,
+) -> anyhow::Result<Vec<DraftAttachment>> {
+    let mut stmt = ctx.tx.prepare_cached(
+        "SELECT id, filename, mime_type, size, local_path FROM attachments WHERE message_id = ?1 AND inline = 0",
+    )?;
+    let rows = stmt.query_map([message], |r| {
+        let id: i64 = r.get(0)?;
+        Ok(DraftAttachment {
+            id: format!("src-{id}"),
+            filename: r.get(1)?,
+            mime_type: r.get(2)?,
+            size: r.get(3)?,
+            path: r.get(4)?,
+            source: Some(id),
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// Fills a fresh composer by the rules in SPEC Addressing.
+fn create(ctx: &mut Ctx<'_>, d: &NewDraft<'_>) -> anyhow::Result<()> {
+    let (send_as_list, default_from) = send_as(ctx, d.account)?;
+    let mine = queries::my_addresses(ctx.tx, d.account)?;
+    let target = match d.target {
         Some(t) => target(ctx, t)?,
         None => None,
     };
@@ -162,7 +227,6 @@ fn create(
     let mut attachments: Vec<DraftAttachment> = Vec::new();
 
     if let Some(t) = &target {
-        let sent_by_me = mine.contains(&t.from.email.to_lowercase());
         in_reply_to.clone_from(&t.message_id);
         references = format!(
             "{} {}",
@@ -171,42 +235,15 @@ fn create(
         )
         .trim()
         .to_string();
-        match kind {
+        match d.kind {
             DraftKind::Reply => {
                 subject = ub_mime::reply_subject(&t.subject);
                 quote = Some(ub_mime::reply_quote_html(
                     &quote_source(t),
                     tz_offset_minutes(),
                 ));
-                if sent_by_me {
-                    // Replying to my own message: send from its From, to its To.
-                    from = t.from.clone();
-                    to.clone_from(&t.to);
-                    if reply_all {
-                        cc = dedup(t.cc.clone(), &mine);
-                    }
-                } else {
-                    // From the sendAs address the message was sent to, else the default.
-                    if let Some(s) = list
-                        .iter()
-                        .find(|s| t.to.iter().chain(&t.cc).any(|a| same(&a.email, &s.email)))
-                    {
-                        from = Addr {
-                            name: (!s.name.is_empty()).then(|| s.name.clone()),
-                            email: s.email.clone(),
-                        };
-                    }
-                    to = if t.reply_to.is_empty() {
-                        vec![t.from.clone()]
-                    } else {
-                        t.reply_to.clone()
-                    };
-                    if reply_all {
-                        let mut skip = mine.clone();
-                        skip.extend(to.iter().map(|a| a.email.to_lowercase()));
-                        cc = dedup(t.to.iter().chain(&t.cc).cloned().collect(), &skip);
-                    }
-                }
+                (from, to, cc) =
+                    reply_addressing(t, &send_as_list, default_from, &mine, d.reply_all);
             }
             DraftKind::Forward => {
                 subject = ub_mime::forward_subject(&t.subject);
@@ -214,23 +251,7 @@ fn create(
                     &quote_source(t),
                     tz_offset_minutes(),
                 ));
-                // Forward carries the target's attachments.
-                let mut stmt = ctx.tx.prepare_cached(
-                    "SELECT id, filename, mime_type, size, local_path FROM attachments WHERE message_id = ?1 AND inline = 0",
-                )?;
-                attachments = stmt
-                    .query_map([t.id], |r| {
-                        let id: i64 = r.get(0)?;
-                        Ok(DraftAttachment {
-                            id: format!("src-{id}"),
-                            filename: r.get(1)?,
-                            mime_type: r.get(2)?,
-                            size: r.get(3)?,
-                            path: r.get(4)?,
-                            source: Some(id),
-                        })
-                    })?
-                    .collect::<Result<_, _>>()?;
+                attachments = message_attachments(ctx, t.id)?;
             }
             DraftKind::New => {}
         }
@@ -250,13 +271,13 @@ fn create(
             in_reply_to, references_hdr, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
-            draft,
-            account,
-            kind.as_str(),
-            reply_all,
-            thread,
-            target_id,
-            started_on_latest,
+            d.draft,
+            d.account,
+            d.kind.as_str(),
+            d.reply_all,
+            d.thread,
+            d.target,
+            d.started_on_latest,
             to_json(&Some(from)),
             to_json(&to),
             to_json(&cc),
@@ -269,9 +290,9 @@ fn create(
             ctx.now,
         ],
     )?;
-    ctx.touch_draft(account, draft)?;
-    if let Some(t) = thread {
-        ctx.touch_thread(account, t)?;
+    ctx.touch_draft(d.account, d.draft)?;
+    if let Some(t) = d.thread {
+        ctx.touch_thread(d.account, t)?;
     }
     Ok(())
 }
@@ -334,13 +355,15 @@ pub fn save(ctx: &mut Ctx<'_>, draft: &str, save: DraftSave) -> anyhow::Result<(
             }
             create(
                 ctx,
-                draft,
-                account,
-                kind,
-                reply_all,
-                thread,
-                target,
-                started_on_latest,
+                &NewDraft {
+                    draft,
+                    account,
+                    kind,
+                    reply_all,
+                    thread,
+                    target,
+                    started_on_latest,
+                },
             )
         }
         DraftSave::Update { fields } => {
@@ -374,30 +397,52 @@ pub fn save(ctx: &mut Ctx<'_>, draft: &str, save: DraftSave) -> anyhow::Result<(
     }
 }
 
+/// A draft's fields as stored (JSON columns unparsed), for the untouched check.
+struct StoredFields {
+    from: String,
+    to: String,
+    cc: String,
+    bcc: String,
+    subject: String,
+    body: String,
+    attachments: String,
+    defaults: Option<String>,
+}
+
 /// Untouched: subject, body, and attachments as the composer started them,
 /// and recipients and From the defaults.
 pub fn is_untouched(ctx: &Ctx<'_>, draft: &str) -> anyhow::Result<bool> {
-    let row: Option<(String, String, String, String, String, String, String, Option<String>)> = ctx
+    let row = ctx
         .tx
         .query_row(
             "SELECT from_json, to_json, cc_json, bcc_json, subject, body_html, attachments_json, defaults_json
              FROM drafts WHERE id = ?1",
             [draft],
             |r| {
-                Ok((
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get(3)?,
-                    r.get(4)?,
-                    r.get(5)?,
-                    r.get(6)?,
-                    r.get(7)?,
-                ))
+                Ok(StoredFields {
+                    from: r.get(0)?,
+                    to: r.get(1)?,
+                    cc: r.get(2)?,
+                    bcc: r.get(3)?,
+                    subject: r.get(4)?,
+                    body: r.get(5)?,
+                    attachments: r.get(6)?,
+                    defaults: r.get(7)?,
+                })
             },
         )
         .optional()?;
-    let Some((from, to, cc, bcc, subject, body, atts, defaults)) = row else {
+    let Some(StoredFields {
+        from,
+        to,
+        cc,
+        bcc,
+        subject,
+        body,
+        attachments: atts,
+        defaults,
+    }) = row
+    else {
         return Ok(false);
     };
     let Some(d) = defaults.and_then(|d| serde_json::from_str::<Defaults>(&d).ok()) else {

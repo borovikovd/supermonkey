@@ -110,7 +110,7 @@ pub fn parse(
         gmail_thread_id: m.thread_id.clone(),
         internal_date: m
             .internal_date
-            .map(|d| d as i64)
+            .and_then(|d| i64::try_from(d).ok())
             .or(parsed.date_ms)
             .unwrap_or(0),
         labels: m.label_ids.clone(),
@@ -378,7 +378,7 @@ fn store_parts(
             p.part_id,
             p.filename,
             p.mime_type,
-            p.size as i64,
+            i64::try_from(p.size).unwrap_or(i64::MAX),
             p.attachment_id,
             p.content_id,
             p.inline

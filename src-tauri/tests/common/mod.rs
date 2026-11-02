@@ -34,7 +34,7 @@ impl Harness {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("t.db");
         let (etx, erx) = tokio::sync::mpsc::unbounded_channel();
-        let writer = Writer::start(path.clone(), etx).unwrap();
+        let writer = Writer::start(&path, etx).unwrap();
         let reads = ReadPool::new(&path, 2);
         let config = Config {
             gmail_base: fake.base_url(),

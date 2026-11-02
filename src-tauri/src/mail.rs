@@ -40,7 +40,60 @@ pub struct ModifyOp {
     pub threads: Vec<ThreadChange>,
 }
 
-pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: ModifyAction) -> anyhow::Result<()> {
+/// What one message's labels become under an action, or None when nothing
+/// changes. Mark unread touches the latest message only, as Gmail does.
+fn label_change(
+    msg: &threads::Msg,
+    add: &BTreeSet<String>,
+    remove: &BTreeSet<String>,
+    latest_live: Option<MessageId>,
+) -> Option<(Vec<String>, MsgChange)> {
+    let added: Vec<String> = add
+        .iter()
+        .filter(|l| {
+            !(l.as_str() == "UNREAD" && latest_live.is_some() && Some(msg.id) != latest_live)
+        })
+        .filter(|l| !msg.has(l))
+        .cloned()
+        .collect();
+    let removed: Vec<String> = remove.iter().filter(|l| msg.has(l)).cloned().collect();
+    if added.is_empty() && removed.is_empty() {
+        return None;
+    }
+    let mut labels: Vec<String> = msg
+        .labels
+        .iter()
+        .filter(|l| !removed.contains(l))
+        .cloned()
+        .collect();
+    labels.extend(added.iter().cloned());
+    Some((
+        labels,
+        MsgChange {
+            msg: msg.id,
+            added,
+            removed,
+        },
+    ))
+}
+
+/// The thread's snooze time after an action. Archive, trash, and spam also clear a snooze.
+fn snooze_after(m: &ModifyAction, before: Option<i64>) -> Option<i64> {
+    match &m.snooze {
+        Some(SnoozeChange::Set(at)) => Some(*at),
+        Some(SnoozeChange::Clear) => None,
+        None if matches!(
+            m.kind,
+            ModifyKind::Done | ModifyKind::Trash | ModifyKind::Spam
+        ) =>
+        {
+            None
+        }
+        None => before,
+    }
+}
+
+pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: &ModifyAction) -> anyhow::Result<()> {
     let add: BTreeSet<String> = m.add.iter().cloned().collect();
     let remove: BTreeSet<String> = m
         .remove
@@ -77,52 +130,14 @@ pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: ModifyAction) -> anyhow::Result<()> 
             ..Default::default()
         };
         for msg in msgs.iter().filter(|x| !x.is_draft) {
-            // Mark unread touches the latest message only, as Gmail does.
-            let add_here: Vec<&String> = add
-                .iter()
-                .filter(|l| {
-                    !(l.as_str() == "UNREAD"
-                        && Some(msg.id) != latest_live
-                        && latest_live.is_some())
-                })
-                .collect();
-            let added: Vec<String> = add_here
-                .iter()
-                .filter(|l| !msg.has(l))
-                .map(|l| (*l).clone())
-                .collect();
-            let removed: Vec<String> = remove.iter().filter(|l| msg.has(l)).cloned().collect();
-            if added.is_empty() && removed.is_empty() {
-                // Still part of the op: a queued action applies to the messages it recorded.
-                gmail_ids.push(msg.gmail_id.clone());
-                continue;
-            }
-            let mut labels: Vec<String> = msg
-                .labels
-                .iter()
-                .filter(|l| !removed.contains(l))
-                .cloned()
-                .collect();
-            labels.extend(added.iter().cloned());
-            threads::set_message_labels(ctx, msg.id, &labels)?;
+            // Every message is part of the op: a queued action applies to the messages it recorded.
             gmail_ids.push(msg.gmail_id.clone());
-            tc.changes.push(MsgChange {
-                msg: msg.id,
-                added,
-                removed,
-            });
+            if let Some((labels, change)) = label_change(msg, &add, &remove, latest_live) {
+                threads::set_message_labels(ctx, msg.id, &labels)?;
+                tc.changes.push(change);
+            }
         }
-        // Archive, trash, and spam also clear a snooze.
-        let clears = matches!(
-            m.kind,
-            ModifyKind::Done | ModifyKind::Trash | ModifyKind::Spam
-        );
-        tc.snooze_after = match &m.snooze {
-            Some(SnoozeChange::Set(at)) => Some(*at),
-            Some(SnoozeChange::Clear) => None,
-            None if clears => None,
-            None => snooze_before,
-        };
+        tc.snooze_after = snooze_after(m, snooze_before);
         if tc.snooze_after != snooze_before {
             ctx.tx.execute(
                 "UPDATE threads SET snooze_until = ?2 WHERE id = ?1",
@@ -141,7 +156,7 @@ pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: ModifyAction) -> anyhow::Result<()> 
             m.account,
             "mail",
             m.kind.label(),
-            serde_json::json!({ "threads": changes }),
+            &serde_json::json!({ "threads": changes }),
         )?;
     }
     let any_label_change = changes.iter().any(|c| !c.changes.is_empty());

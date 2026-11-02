@@ -9,7 +9,6 @@
 //! UI actions and first loads run before any queued sync job.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
 
 use crossbeam_channel::{Receiver, Sender, select_biased, unbounded};
 use rusqlite::{Connection, Transaction, params};
@@ -188,17 +187,17 @@ pub struct Writer {
 impl Writer {
     /// Starts the writer thread. `effects` receives post-commit work.
     pub fn start(
-        db_path: PathBuf,
+        db_path: &std::path::Path,
         effects: tokio::sync::mpsc::UnboundedSender<Effect>,
     ) -> anyhow::Result<Writer> {
-        let conn = crate::db::open_writer(&db_path)?;
+        let conn = crate::db::open_writer(db_path)?;
         let (ui_tx, ui_rx) = unbounded();
         let (sync_tx, sync_rx) = unbounded();
         std::thread::Builder::new()
             .name("writer".into())
             .spawn(move || {
                 let mut state = WriterState::new(conn, effects);
-                state.run(ui_rx, sync_rx);
+                state.run(&ui_rx, &sync_rx);
             })?;
         Ok(Writer {
             ui: ui_tx,
@@ -298,7 +297,7 @@ impl WriterState {
         }
     }
 
-    fn run(&mut self, ui: Receiver<Job>, sync: Receiver<Job>) {
+    fn run(&mut self, ui: &Receiver<Job>, sync: &Receiver<Job>) {
         loop {
             let job = select_biased! {
                 recv(ui) -> j => j,

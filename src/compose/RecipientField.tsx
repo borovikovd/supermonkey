@@ -118,7 +118,7 @@ export const RecipientField = forwardRef<
         const bad = !isValidEmail(a.email);
         return (
           <span
-            key={`${a.email}-${i}`}
+            key={a.email.toLowerCase()}
             title={a.email}
             className={`group flex items-center gap-0.5 rounded-control px-1 ${
               bad ? "text-danger" : "text-link"
@@ -138,6 +138,11 @@ export const RecipientField = forwardRef<
       })}
       <input
         ref={input}
+        role="combobox"
+        aria-label={label}
+        aria-expanded={open}
+        aria-controls={`${label}-suggestions`}
+        aria-activedescendant={open ? `${label}-suggestion-${active}` : undefined}
         className="min-w-[120px] flex-1 bg-transparent px-1 outline-none"
         value={text}
         onChange={(e) => {
@@ -221,10 +226,22 @@ export const RecipientField = forwardRef<
       />
       {right && <div className="ml-auto flex items-center gap-1 self-start pt-1">{right}</div>}
       {open && (
-        <div className="fade-in absolute top-full left-20 z-20 mt-1 w-[420px] overflow-hidden rounded-sheet bg-bg py-1 shadow-float">
+        // The combobox pattern: focus stays in the input (aria-activedescendant),
+        // and suggestions show name and address, which a native <datalist> cannot.
+        <div
+          // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- rich rows; native elements cannot render them
+          role="listbox"
+          id={`${label}-suggestions`}
+          className="fade-in absolute top-full left-20 z-20 mt-1 w-[420px] overflow-hidden rounded-sheet bg-bg py-1 shadow-float"
+        >
           {suggestions.map((s, i) => (
+            // oxlint-disable-next-line jsx-a11y/interactive-supports-focus -- see the listbox
             <div
               key={s.email}
+              // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- rich rows; native elements cannot render them
+              role="option"
+              id={`${label}-suggestion-${i}`}
+              aria-selected={i === active}
               onMouseDown={(e) => {
                 e.preventDefault();
                 accept(s);

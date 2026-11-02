@@ -166,7 +166,7 @@ export function startReply(mode: ReplyMode, draftId?: string) {
   const account = c.account;
   whenLoaded(thread, (data) => {
     const msgs = data.messages;
-    const latest = msgs[msgs.length - 1]?.id ?? null;
+    const latest = msgs.at(-1)?.id ?? null;
     const selected = fromList ? latest : (useChrome.getState().selectedMessage ?? latest);
     const kind: DraftKind = mode === "forward" ? "forward" : "reply";
     const ofKind = data.drafts
@@ -200,7 +200,7 @@ export function startReply(mode: ReplyMode, draftId?: string) {
 function resumeDraftById(draft: string, thread: number | null) {
   const data = conversationRef.data;
   const own = data?.drafts.find((d) => d.id === draft);
-  resumeDraft(draft, own ? data!.thread : thread, own?.target ?? null);
+  resumeDraft(draft, own && data ? data.thread : thread, own?.target ?? null);
 }
 
 /** Closes the composer on screen as a second Esc would: kept as a draft, or discarded if untouched. */

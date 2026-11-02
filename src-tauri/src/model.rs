@@ -153,6 +153,7 @@ pub struct AttachmentInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
+#[allow(clippy::struct_excessive_bools)] // Independent flags the UI reads per message.
 pub struct MessageSummary {
     #[ts(type = "number")]
     pub id: MessageId,

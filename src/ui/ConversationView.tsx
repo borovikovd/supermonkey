@@ -89,9 +89,10 @@ function linkKey(e: KeyboardEvent): boolean {
     }
     for (const [, a] of links) a.classList.remove("ub-link-focus");
     if (links.length === 0) return true;
-    let at = c.link
+    const current = c.link;
+    let at = current
       ? links.findIndex(
-          ([id], i) => id === c.link![0] && i - links.findIndex(([x]) => x === id) === c.link![1],
+          ([id], i) => id === current[0] && i - links.findIndex(([x]) => x === id) === current[1],
         )
       : -1;
     at = (at + (e.shiftKey ? -1 : 1) + links.length) % links.length;
@@ -159,7 +160,7 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
     if (!data || data.gone) return;
     const c = useChrome.getState();
     const msgs = data.messages;
-    const latest = msgs[msgs.length - 1]?.id ?? null;
+    const latest = msgs.at(-1)?.id ?? null;
     if (known.current === null) {
       known.current = new Set(msgs.map((m) => m.id));
       const expanded = msgs.filter((m) => m.unread).map((m) => m.id);
@@ -175,8 +176,9 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
       });
       return;
     }
-    const added = msgs.filter((m) => !known.current!.has(m.id));
-    for (const m of added) known.current.add(m.id);
+    const seen = known.current;
+    const added = msgs.filter((m) => !seen.has(m.id));
+    for (const m of added) seen.add(m.id);
     let expanded = c.expanded;
     let sel = c.selectedMessage;
     const fresh = added.filter((m) => m.id === latest || m.unread).map((m) => m.id);
@@ -302,10 +304,12 @@ function Message({
   ) : null;
   if (!expanded) {
     return (
-      <div
+      <button
+        type="button"
         data-message={m.id}
+        aria-expanded={false}
         onClick={() => onToggle(m.id)}
-        className="relative flex h-row items-center gap-3 border-b border-border-2 text-row hover:bg-fill-half"
+        className="relative flex h-row w-full items-center gap-3 border-b border-border-2 text-left text-row hover:bg-fill-half"
       >
         {bar}
         <span
@@ -315,21 +319,28 @@ function Message({
         </span>
         <span className="flex-1 truncate text-text-2">{m.snippet}</span>
         <span className="tabular shrink-0 text-time text-text-3">{formatTime(m.date)}</span>
-      </div>
+      </button>
     );
   }
   return (
+    // Clicking selects the message, a pointer shortcut for `n` / `p`.
+    // oxlint-disable-next-line jsx-a11y/no-static-element-interactions
     <div
       data-message={m.id}
       className="relative border-b border-border-2 py-4"
       onMouseDown={() => onSelect(m.id)}
     >
       {bar}
-      <div className="mb-5 flex items-baseline gap-2 text-row" onClick={() => onToggle(m.id)}>
+      <button
+        type="button"
+        aria-expanded
+        className="mb-5 flex w-full items-baseline gap-2 text-left text-row"
+        onClick={() => onToggle(m.id)}
+      >
         <span className="font-semibold">{name(m)}</span>
         <span className="truncate text-text-3">{recipients(m)}</span>
         <span className="tabular ml-auto shrink-0 text-time text-text-3">{fullDate(m.date)}</span>
-      </div>
+      </button>
       <div className="selectable">
         <MessageFrame
           id={m.id}
@@ -340,7 +351,7 @@ function Message({
           onKey={onKey}
         />
       </div>
-      {m.attachments.filter((a) => !a.inline).length > 0 && (
+      {m.attachments.some((a) => !a.inline) && (
         <div className="mt-3 flex flex-wrap gap-2">
           {m.attachments
             .filter((a) => !a.inline)

@@ -13,18 +13,31 @@ use crate::writer::{Ctx, Effect};
 pub static DELAY_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(10_000);
 
 pub fn send(ctx: &mut Ctx<'_>, n: i64, draft: &str) -> anyhow::Result<()> {
-    let row: Option<(AccountId, Option<ThreadId>, Option<String>, String, String, String)> = ctx
+    let row = ctx
         .tx
         .query_row(
             "SELECT account_id, thread_id, gmail_draft_id, to_json, cc_json, bcc_json FROM drafts WHERE id = ?1",
             [draft],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+            |r| {
+                Ok(SendSource {
+                    account: r.get(0)?,
+                    thread: r.get(1)?,
+                    gmail_draft: r.get(2)?,
+                    recipients: [r.get(3)?, r.get(4)?, r.get(5)?],
+                })
+            },
         )
         .optional()?;
-    let Some((account, thread, gmail_draft, to, cc, bcc)) = row else {
+    let Some(SendSource {
+        account,
+        thread,
+        gmail_draft,
+        recipients,
+    }) = row
+    else {
         anyhow::bail!("draft {draft} is gone");
     };
-    let all: Vec<Addr> = [to, cc, bcc]
+    let all: Vec<Addr> = recipients
         .iter()
         .flat_map(|j| from_json::<Vec<Addr>>(j))
         .collect();
@@ -58,7 +71,7 @@ pub fn send(ctx: &mut Ctx<'_>, n: i64, draft: &str) -> anyhow::Result<()> {
         account,
         "send",
         "Sent",
-        serde_json::json!({ "outbox": outbox }),
+        &serde_json::json!({ "outbox": outbox }),
     )?;
     ctx.touch_outbox(account, outbox)?;
     ctx.touch_draft(account, draft)?;
@@ -69,23 +82,46 @@ pub fn send(ctx: &mut Ctx<'_>, n: i64, draft: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn row(
-    ctx: &Ctx<'_>,
-    outbox: i64,
-) -> anyhow::Result<Option<(AccountId, String, Option<ThreadId>, String, Option<String>)>> {
+/// The draft fields `send` reads.
+struct SendSource {
+    account: AccountId,
+    thread: Option<ThreadId>,
+    gmail_draft: Option<String>,
+    /// To, Cc, and Bcc as JSON.
+    recipients: [String; 3],
+}
+
+/// An outbox row as undo and toasts need it.
+struct OutboxRef {
+    account: AccountId,
+    draft: String,
+    thread: Option<ThreadId>,
+    state: String,
+    sent_message: Option<String>,
+}
+
+fn row(ctx: &Ctx<'_>, outbox: i64) -> anyhow::Result<Option<OutboxRef>> {
     Ok(ctx
         .tx
         .query_row(
             "SELECT account_id, draft_id, thread_id, state, sent_message_id FROM outbox WHERE id = ?1",
             [outbox],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            |r| {
+                Ok(OutboxRef {
+                    account: r.get(0)?,
+                    draft: r.get(1)?,
+                    thread: r.get(2)?,
+                    state: r.get(3)?,
+                    sent_message: r.get(4)?,
+                })
+            },
         )
         .optional()?)
 }
 
 /// Closing a send toast tells Rust; once sent, its entry leaves the history.
 pub fn close_toast(ctx: &mut Ctx<'_>, outbox: i64) -> anyhow::Result<()> {
-    let Some((account, _, _, state, _)) = row(ctx, outbox)? else {
+    let Some(OutboxRef { account, state, .. }) = row(ctx, outbox)? else {
         return Ok(());
     };
     ctx.tx
@@ -100,7 +136,14 @@ pub fn close_toast(ctx: &mut Ctx<'_>, outbox: i64) -> anyhow::Result<()> {
 /// Undo on a send: waiting cancels it and the composer reopens; sending is
 /// held until the send resolves; sent trashes only that sent message.
 pub fn undo_send(ctx: &mut Ctx<'_>, account: AccountId, outbox: i64) -> anyhow::Result<()> {
-    let Some((acc, draft, thread, state, sent_id)) = row(ctx, outbox)? else {
+    let Some(OutboxRef {
+        account: acc,
+        draft,
+        thread,
+        state,
+        sent_message: sent_id,
+    }) = row(ctx, outbox)?
+    else {
         anyhow::bail!("outbox row {outbox} is gone");
     };
     anyhow::ensure!(acc == account, "outbox row belongs to another account");

@@ -147,6 +147,7 @@ fn body(rng: &mut StdRng) -> (String, String) {
 }
 
 /// Writes fixture data into the database at `path` (created if missing).
+#[allow(clippy::too_many_lines)] // Linear test-data generation, read top to bottom.
 pub fn generate(path: &Path, size: &Size, accounts: &[&str]) -> anyhow::Result<()> {
     let mut conn = crate::db::open_writer(path)?;
     let mut rng = StdRng::seed_from_u64(7);
@@ -201,7 +202,7 @@ pub fn generate(path: &Path, size: &Size, accounts: &[&str]) -> anyhow::Result<(
             };
             let subject = SUBJECTS[rng.random_range(0..SUBJECTS.len())];
             let (sender_name, sender_email) = person(&mut rng);
-            let base = now - (t as i64) * 37 * 60_000 - rng.random_range(0..600_000);
+            let base = now - i64::try_from(t)? * 37 * 60_000 - rng.random_range(0..600_000);
             let category = match rng.random_range(0..10) {
                 0..=4 => None,
                 5 | 6 => Some("CATEGORY_UPDATES"),
@@ -253,8 +254,8 @@ pub fn generate(path: &Path, size: &Size, accounts: &[&str]) -> anyhow::Result<(
                     labels.push(l);
                 }
                 let (html, text) = body(&mut rng);
-                let date = base - ((count - 1 - m) as i64) * 3_600_000;
-                let subj = if m == 0 {
+                let date = base - i64::try_from(count - 1 - m)? * 3_600_000;
+                let msg_subject = if m == 0 {
                     subject.to_string()
                 } else {
                     format!("Re: {subject}")
@@ -271,7 +272,7 @@ pub fn generate(path: &Path, size: &Size, accounts: &[&str]) -> anyhow::Result<(
                         fname,
                         femail,
                         crate::db::to_json(&to),
-                        subj,
+                        msg_subject,
                         text.chars().take(140).collect::<String>(),
                         format!("<m{ai}.{t}.{m}@fixture>"),
                         is_list,
@@ -283,7 +284,7 @@ pub fn generate(path: &Path, size: &Size, accounts: &[&str]) -> anyhow::Result<(
                 let mid = ctx.tx.last_insert_rowid();
                 ctx.tx.execute(
                     "INSERT INTO messages_fts (rowid, from_text, to_text, cc_text, subject, body) VALUES (?1, ?2, ?3, '', ?4, ?5)",
-                    params![mid, format!("{fname} {femail}"), to.iter().map(|a| a.email.clone()).collect::<Vec<_>>().join(" "), subj, text],
+                    params![mid, format!("{fname} {femail}"), to.iter().map(|a| a.email.clone()).collect::<Vec<_>>().join(" "), msg_subject, text],
                 )?;
             }
         }

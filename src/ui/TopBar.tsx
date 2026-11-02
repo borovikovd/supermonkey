@@ -66,6 +66,8 @@ function SearchField() {
       <Search size={14} strokeWidth={1.5} className="text-text-3" />
       <input
         ref={ref}
+        // Focus moves into search because the user just pressed `/`.
+        // oxlint-disable-next-line jsx-a11y/no-autofocus
         autoFocus
         className="w-72 bg-transparent text-row outline-none placeholder:text-text-3"
         placeholder="Search"

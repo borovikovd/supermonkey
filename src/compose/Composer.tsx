@@ -62,7 +62,7 @@ async function readFile(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
   for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    binary += String.fromCodePoint(...bytes.subarray(i, i + 0x8000));
   }
   return btoa(binary);
 }
@@ -268,7 +268,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       if (e.metaKey && e.key.toLowerCase() === "k") {
         e.preventDefault();
         if (!blurredNow && editor?.isFocused) {
-          setLink(editor.getAttributes("link").href ?? "");
+          const href: unknown = editor.getAttributes("link").href;
+          setLink(typeof href === "string" ? href : "");
           requestAnimationFrame(() => linkRef.current?.focus());
         } else {
           useChrome.getState().set({ palette: { kind: "commands", draftActions: true } });
@@ -347,7 +348,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       className={`selectable flex flex-col rounded-[10px] bg-bg px-10 pt-4 pb-3 shadow-[0_6px_28px_rgb(20_20_19/0.09),0_0_0_1px_rgb(20_20_19/0.05)] ${
         inline ? "mt-6 min-h-[220px]" : "min-h-[440px]"
       } ${blurred ? "opacity-95" : ""}`}
-      onMouseDown={() => useChrome.getState().set({ composeBlurred: false })}
+      onFocusCapture={() => useChrome.getState().set({ composeBlurred: false })}
     >
       {sendAs.length > 1 && (
         <div className="flex min-h-10 items-center text-body">

@@ -80,12 +80,12 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
             Some(err) => {
                 let d = ub_gmail::backoff(attempt, err.retry_after());
                 attempt = attempt.saturating_add(1);
-                d.as_millis() as u64
+                u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
             }
             None => {
                 attempt = 0;
                 next_due.map_or(30_000, |d| {
-                    (d - crate::db::now_ms()).clamp(50, 30_000) as u64
+                    (d - crate::db::now_ms()).clamp(50, 30_000).unsigned_abs()
                 })
             }
         };

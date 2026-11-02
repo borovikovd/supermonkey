@@ -54,7 +54,7 @@ pub fn wake_due(e: &EngineRef) {
             crate::mail::modify(
                 ctx,
                 0,
-                ModifyAction {
+                &ModifyAction {
                     account,
                     kind: ModifyKind::ReturnToInbox,
                     threads: vec![thread],
@@ -85,7 +85,9 @@ pub async fn run(e: EngineRef) {
             .ok()
             .flatten();
         let now = crate::db::now_ms();
-        let wait_ms = next.map_or(60_000, |n| (n - now).clamp(0, 60_000)) as u64;
+        let wait_ms = next
+            .map_or(60_000, |n| (n - now).clamp(0, 60_000))
+            .unsigned_abs();
         // A new snooze re-plans the timer.
         let _ = tokio::time::timeout(
             std::time::Duration::from_millis(wait_ms.max(250)),

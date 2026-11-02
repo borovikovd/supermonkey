@@ -255,6 +255,59 @@ fn attachments_of(conn: &Connection, message: MessageId) -> anyhow::Result<Vec<A
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+/// A thread's non-draft messages, oldest first. Outside trash mode, messages
+/// in trash or spam are left out (SPEC Reading).
+fn conversation_messages(
+    conn: &Connection,
+    thread: ThreadId,
+    trash_mode: bool,
+    mine: &HashSet<String>,
+) -> anyhow::Result<Vec<MessageSummary>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, internal_date,
+                label_ids, has_body, rev, is_plain
+         FROM messages WHERE thread_id = ?1 AND is_draft = 0 ORDER BY internal_date, id",
+    )?;
+    let rows = stmt.query_map([thread], |r| {
+        let from_name: String = r.get(1)?;
+        let from_email: String = r.get(2)?;
+        let labels = label_ids_of(&r.get::<_, String>(9)?);
+        let has = |l: &str| labels.iter().any(|x| x == l);
+        Ok(MessageSummary {
+            id: r.get(0)?,
+            from_me: mine.contains(&from_email.to_lowercase()),
+            from: Addr {
+                name: (!from_name.is_empty()).then_some(from_name),
+                email: from_email,
+            },
+            to: from_json(&r.get::<_, String>(3)?),
+            cc: from_json(&r.get::<_, String>(4)?),
+            bcc: from_json(&r.get::<_, String>(5)?),
+            subject: r.get(6)?,
+            snippet: r.get(7)?,
+            date: r.get(8)?,
+            unread: has("UNREAD"),
+            starred: has("STARRED"),
+            in_trash: has("TRASH"),
+            in_spam: has("SPAM"),
+            has_body: r.get(10)?,
+            plain: r.get(12)?,
+            attachments: Vec::new(),
+            rev: r.get(11)?,
+        })
+    })?;
+    let mut out = Vec::new();
+    for row in rows {
+        let mut m = row?;
+        if !trash_mode && (m.in_trash || m.in_spam) {
+            continue;
+        }
+        m.attachments = attachments_of(conn, m.id)?;
+        out.push(m);
+    }
+    Ok(out)
+}
+
 pub fn conversation(
     conn: &Connection,
     thread: ThreadId,
@@ -295,76 +348,7 @@ pub fn conversation(
         stmt.query_map([thread], |r| r.get(0))?
             .collect::<Result<_, _>>()?
     };
-    let mut messages = Vec::new();
-    {
-        let mut stmt = conn.prepare_cached(
-            "SELECT id, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, internal_date,
-                    label_ids, has_body, rev, is_plain
-             FROM messages WHERE thread_id = ?1 AND is_draft = 0 ORDER BY internal_date, id",
-        )?;
-        let rows = stmt.query_map([thread], |r| {
-            Ok((
-                r.get::<_, i64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, String>(4)?,
-                r.get::<_, String>(5)?,
-                r.get::<_, String>(6)?,
-                r.get::<_, String>(7)?,
-                r.get::<_, i64>(8)?,
-                r.get::<_, String>(9)?,
-                r.get::<_, bool>(10)?,
-                r.get::<_, i64>(11)?,
-                r.get::<_, bool>(12)?,
-            ))
-        })?;
-        for row in rows {
-            let (
-                id,
-                from_name,
-                from_email,
-                to,
-                cc,
-                bcc,
-                subject,
-                snippet,
-                date,
-                labels,
-                has_body,
-                rev,
-                plain,
-            ) = row?;
-            let labels = label_ids_of(&labels);
-            let in_trash = labels.iter().any(|l| l == "TRASH");
-            let in_spam = labels.iter().any(|l| l == "SPAM");
-            if !trash_mode && (in_trash || in_spam) {
-                continue;
-            }
-            messages.push(MessageSummary {
-                id,
-                from_me: mine.contains(&from_email.to_lowercase()),
-                from: Addr {
-                    name: (!from_name.is_empty()).then_some(from_name),
-                    email: from_email,
-                },
-                to: from_json(&to),
-                cc: from_json(&cc),
-                bcc: from_json(&bcc),
-                subject,
-                snippet,
-                date,
-                unread: labels.iter().any(|l| l == "UNREAD"),
-                starred: labels.iter().any(|l| l == "STARRED"),
-                in_trash,
-                in_spam,
-                has_body,
-                plain,
-                attachments: attachments_of(conn, id)?,
-                rev,
-            });
-        }
-    }
+    let messages = conversation_messages(conn, thread, trash_mode, &mine)?;
     let drafts = thread_drafts(conn, thread)?;
     let outbox = outbox_rows(conn, OutboxFilter::Thread(thread))?;
     Ok(ConversationData {
@@ -403,13 +387,14 @@ fn thread_drafts(conn: &Connection, thread: ThreadId) -> anyhow::Result<Vec<Draf
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
+#[derive(Debug, Clone, Copy)]
 pub enum OutboxFilter {
     Thread(ThreadId),
     Account(AccountId),
 }
 
 pub fn outbox_rows(conn: &Connection, filter: OutboxFilter) -> anyhow::Result<Vec<OutboxRow>> {
-    let (cond, arg) = match filter {
+    let (filter_sql, key) = match filter {
         // A sent row shows until its message is stored on the thread.
         OutboxFilter::Thread(t) => (
             "o.thread_id = ?1 AND NOT (o.state = 'sent' AND EXISTS
@@ -422,10 +407,10 @@ pub fn outbox_rows(conn: &Connection, filter: OutboxFilter) -> anyhow::Result<Ve
         "SELECT o.id, o.account_id, o.draft_id, o.thread_id, o.send_after, o.state, o.sent_message_id,
                 o.undo_requested, o.toast_closed, o.delayed, d.to_json, d.body_html, d.subject,
                 (SELECT u.id FROM undo_entries u WHERE u.kind = 'send' AND json_extract(u.payload, '$.outbox') = o.id)
-         FROM outbox o LEFT JOIN drafts d ON d.id = o.draft_id WHERE {cond} ORDER BY o.id"
+         FROM outbox o LEFT JOIN drafts d ON d.id = o.draft_id WHERE {filter_sql} ORDER BY o.id"
     );
     let mut stmt = conn.prepare_cached(&sql)?;
-    let rows = stmt.query_map([arg], |r| {
+    let rows = stmt.query_map([key], |r| {
         let state: String = r.get(5)?;
         Ok(OutboxRow {
             id: r.get(0)?,
@@ -545,7 +530,7 @@ pub fn accounts(conn: &Connection) -> anyhow::Result<Vec<AccountInfo>> {
             id: r.get(0)?,
             email: r.get(1)?,
             name: r.get(2)?,
-            hue: HUES[(hue.rem_euclid(HUES.len() as i64)) as usize].to_string(),
+            hue: HUES[usize::try_from(hue).unwrap_or(0) % HUES.len()].to_string(),
             position: r.get(4)?,
             needs_signin: needs,
             sync_status: sync_status(&r.get::<_, String>(6)?, needs),

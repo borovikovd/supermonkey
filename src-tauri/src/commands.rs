@@ -137,7 +137,7 @@ pub fn store_attachment(
         } else {
             mime_type.to_string()
         },
-        size: bytes.len() as i64,
+        size: i64::try_from(bytes.len())?,
         path: Some(path.to_string_lossy().to_string()),
         source: None,
     })
@@ -176,7 +176,7 @@ pub fn snooze_options(text: String) -> Vec<SnoozeChoice> {
             at: at.timestamp_millis(),
         });
     }
-    for o in snooze_options(now) {
+    for o in snooze_options(&now) {
         let name = match o.kind {
             SnoozeKind::LaterToday => "Later today",
             SnoozeKind::TomorrowMorning => "Tomorrow morning",

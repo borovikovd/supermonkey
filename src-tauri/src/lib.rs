@@ -1,8 +1,5 @@
 //! Ubermensch: a keyboard-first Gmail client for macOS.
 
-// SQL rows are read into plain tuples throughout.
-#![allow(clippy::type_complexity)]
-
 pub mod accounts;
 pub mod actions;
 pub mod commands;
@@ -65,14 +62,14 @@ pub fn run() {
             let _ = drafts::DRAFT_FILES.set(data_dir.join("drafts"));
             let path = db_path(&data_dir);
             let (effects_tx, effects_rx) = tokio::sync::mpsc::unbounded_channel();
-            let writer = Writer::start(path.clone(), effects_tx)?;
+            let writer = Writer::start(&path, effects_tx)?;
             let reads = db::ReadPool::new(&path, 4);
             app.manage(Core {
                 writer: writer.clone(),
                 reads: reads.clone(),
                 data_dir: data_dir.clone(),
             });
-            engine::start(app.handle().clone(), writer, reads, data_dir, effects_rx);
+            engine::start(app.handle(), writer, reads, data_dir, effects_rx);
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -141,6 +138,7 @@ fn env_logger_init() -> Result<(), log::SetLoggerError> {
         fn enabled(&self, m: &log::Metadata<'_>) -> bool {
             m.level() <= log::Level::Info || m.target().starts_with("ubermensch")
         }
+        #[allow(clippy::print_stderr)] // The debug logger writes to stderr by design.
         fn log(&self, r: &log::Record<'_>) {
             if self.enabled(r.metadata()) {
                 eprintln!("[{}] {}: {}", r.level(), r.target(), r.args());

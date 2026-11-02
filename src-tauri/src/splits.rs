@@ -238,7 +238,7 @@ pub fn pin(
         account,
         "pin",
         &format!("Moved to {name}"),
-        serde_json::json!({ "kind": kind.as_str(), "value": value, "split": split, "replaced": replaced }),
+        &serde_json::json!({ "kind": kind.as_str(), "value": value, "split": split, "replaced": replaced }),
     )?;
     reroute_inbox(ctx, account)
 }
@@ -271,7 +271,7 @@ pub fn undo_pin(
 pub fn save(
     ctx: &mut Ctx<'_>,
     account: AccountId,
-    splits: Vec<SplitInfo>,
+    splits: &[SplitInfo],
     deleted: Vec<SplitId>,
 ) -> anyhow::Result<()> {
     for id in deleted {
@@ -283,7 +283,7 @@ pub fn save(
     }
     // Custom splits come first, then Important, then Other.
     let mut custom_index = 0i64;
-    for s in &splits {
+    for s in splits {
         let position = match s.kind {
             SplitKind::Other => 1_000_000,
             SplitKind::Important => 900_000,

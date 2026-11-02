@@ -5,6 +5,7 @@ use rusqlite::params;
 use crate::model::{AccountId, Action, SubId, SubKey, View};
 use crate::writer::{Ctx, Effect, GmailListQuery};
 
+#[allow(clippy::too_many_lines)] // One short arm per action variant.
 pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
     match action {
         Action::Reset => {
@@ -26,7 +27,7 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
             ctx.effect(Effect::CancelSub(sub));
             Ok(())
         }
-        Action::Modify(m) => crate::mail::modify(ctx, n, m),
+        Action::Modify(m) => crate::mail::modify(ctx, n, &m),
         Action::Undo { account, entry } => crate::undo::undo(ctx, n, account, entry),
         Action::CreateLabel {
             account,
@@ -36,7 +37,7 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
         } => {
             crate::labels::create(ctx, n, account, &id, &name)?;
             if let Some(m) = apply {
-                crate::mail::modify(ctx, n, m)?;
+                crate::mail::modify(ctx, n, &m)?;
             }
             Ok(())
         }
@@ -109,7 +110,7 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
             account,
             splits,
             deleted,
-        } => crate::splits::save(ctx, account, splits, deleted),
+        } => crate::splits::save(ctx, account, &splits, deleted),
         Action::RemoveAccount { account } => crate::accounts::remove(ctx, account),
         Action::MoreResults { sub } => {
             if let Some(s) = ctx.subs.map.get(&sub)

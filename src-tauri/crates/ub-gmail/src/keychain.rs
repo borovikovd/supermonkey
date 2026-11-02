@@ -28,31 +28,33 @@ pub struct Keychain;
 
 impl Keychain {
     fn entry(email: &str) -> Result<keyring::Entry, TokenStoreError> {
-        keyring::Entry::new(KEYCHAIN_SERVICE, email).map_err(store_error)
+        keyring::Entry::new(KEYCHAIN_SERVICE, email).map_err(|e| store_error(&e))
     }
 }
 
-fn store_error(e: keyring::Error) -> TokenStoreError {
+fn store_error(e: &keyring::Error) -> TokenStoreError {
     TokenStoreError(e.to_string())
 }
 
 impl TokenStore for Keychain {
     fn store_refresh_token(&self, email: &str, token: &str) -> Result<(), TokenStoreError> {
-        Self::entry(email)?.set_password(token).map_err(store_error)
+        Self::entry(email)?
+            .set_password(token)
+            .map_err(|e| store_error(&e))
     }
 
     fn load_refresh_token(&self, email: &str) -> Result<Option<String>, TokenStoreError> {
         match Self::entry(email)?.get_password() {
             Ok(token) => Ok(Some(token)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(store_error(e)),
+            Err(e) => Err(store_error(&e)),
         }
     }
 
     fn delete_refresh_token(&self, email: &str) -> Result<(), TokenStoreError> {
         match Self::entry(email)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(store_error(e)),
+            Err(e) => Err(store_error(&e)),
         }
     }
 }
