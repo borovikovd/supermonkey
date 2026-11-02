@@ -211,9 +211,13 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
             <button
               key={`fold-${b.ids[0]}`}
               onClick={() => useChrome.getState().set({ unfolded: [...unfoldedArr, ...b.ids] })}
-              className="my-1 w-full border-y border-border-2 py-1.5 text-center text-hint text-text-2 hover:bg-fill-half"
+              // Reads as one more collapsed row: same height, same divider.
+              className="flex h-row w-full items-center gap-3 border-b border-border-2 text-left text-row text-text-2 hover:bg-fill-half"
             >
-              {b.ids.length} older messages
+              <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-fill px-1.5 text-hint font-medium text-text-2">
+                {b.ids.length}
+              </span>
+              older messages
             </button>
           ) : (
             <Message
