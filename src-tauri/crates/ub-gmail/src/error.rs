@@ -17,7 +17,7 @@ use std::fmt;
 use std::time::Duration;
 
 use reqwest::StatusCode;
-use reqwest::header::{HeaderMap, RETRY_AFTER};
+use reqwest::header::RETRY_AFTER;
 
 /// What happened to a Gmail or OAuth call.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,8 +59,7 @@ impl fmt::Display for Outcome {
 }
 
 /// The error of every call in this crate.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{outcome}{}", detail.as_deref().map(|d| format!(": {d}")).unwrap_or_default())]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GmailError {
     pub outcome: Outcome,
     /// What went wrong underneath, for logs (e.g. why a body did not parse).
@@ -102,12 +101,21 @@ impl GmailError {
     }
 }
 
+impl fmt::Display for GmailError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.outcome)?;
+        if let Some(detail) = &self.detail {
+            write!(f, ": {detail}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::error::Error for GmailError {}
+
 impl From<Outcome> for GmailError {
     fn from(outcome: Outcome) -> Self {
-        GmailError {
-            outcome,
-            detail: None,
-        }
+        GmailError::new(outcome)
     }
 }
 
@@ -120,34 +128,56 @@ pub(crate) fn from_transport(err: &reqwest::Error) -> GmailError {
     }
 }
 
-/// Classifies a non-success HTTP status with its Google-shaped JSON body.
-pub(crate) fn from_status(status: StatusCode, headers: &HeaderMap, body: &str) -> GmailError {
-    let code = status.as_u16();
-    let (message, reason) = google_error(body);
-    let retry_after = headers
-        .get(RETRY_AFTER)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .map(Duration::from_secs);
-    let outcome = match code {
-        401 => Outcome::Unauthorized,
-        404 => Outcome::NotFound,
-        409 => Outcome::Conflict,
-        429 => Outcome::RateLimited { retry_after },
-        403 if matches!(
-            reason.as_deref(),
-            Some("rateLimitExceeded" | "userRateLimitExceeded" | "backendError")
-        ) =>
-        {
-            Outcome::RateLimited { retry_after }
-        }
-        500..=599 => Outcome::ServerError { status: code },
-        _ => Outcome::Rejected {
-            status: code,
-            message: message.unwrap_or_else(|| status.to_string()),
-        },
-    };
-    outcome.into()
+/// A response read to the end: what classifying a failure (or reading a token answer) needs.
+pub(crate) struct ReadResponse {
+    pub(crate) status: StatusCode,
+    retry_after: Option<Duration>,
+    pub(crate) body: String,
+}
+
+impl ReadResponse {
+    /// Reads the body as text.
+    pub(crate) async fn read(response: reqwest::Response) -> Result<Self, GmailError> {
+        let status = response.status();
+        let retry_after = response
+            .headers()
+            .get(RETRY_AFTER)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse().ok())
+            .map(Duration::from_secs);
+        let body = response.text().await.map_err(|e| from_transport(&e))?;
+        Ok(ReadResponse {
+            status,
+            retry_after,
+            body,
+        })
+    }
+
+    /// Classifies a non-success status with its Google-shaped JSON body.
+    pub(crate) fn to_error(&self) -> GmailError {
+        let code = self.status.as_u16();
+        let retry_after = self.retry_after;
+        let (message, reason) = google_error(&self.body);
+        let outcome = match code {
+            401 => Outcome::Unauthorized,
+            404 => Outcome::NotFound,
+            409 => Outcome::Conflict,
+            429 => Outcome::RateLimited { retry_after },
+            403 if matches!(
+                reason.as_deref(),
+                Some("rateLimitExceeded" | "userRateLimitExceeded" | "backendError")
+            ) =>
+            {
+                Outcome::RateLimited { retry_after }
+            }
+            500..=599 => Outcome::ServerError { status: code },
+            _ => Outcome::Rejected {
+                status: code,
+                message: message.unwrap_or_else(|| self.status.to_string()),
+            },
+        };
+        outcome.into()
+    }
 }
 
 /// Reads `error.message` and the first `error.errors[].reason` of a Google API error body.
