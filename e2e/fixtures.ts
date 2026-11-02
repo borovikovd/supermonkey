@@ -9,11 +9,16 @@ import { test as base, expect } from "@playwright/test";
 
 import { App } from "./app.ts";
 import { Control } from "./control.ts";
+import { ANCHOR, TZ } from "./seeds.ts";
 
 const SERVER = path.resolve(import.meta.dirname, "../src-tauri/target/debug/e2e-server");
 
+/** A fresh server: app time at the anchor, in the test time zone. */
 async function startServer(): Promise<{ proc: ChildProcess; url: string; log: string[] }> {
-  const proc = spawn(SERVER, ["--port", "0"], { stdio: ["ignore", "pipe", "pipe"] });
+  const proc = spawn(SERVER, ["--port", "0", "--now", String(ANCHOR)], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, TZ },
+  });
   const log: string[] = [];
   proc.stderr?.on("data", (b: Buffer) => log.push(b.toString()));
   const lines = createInterface({ input: proc.stdout });

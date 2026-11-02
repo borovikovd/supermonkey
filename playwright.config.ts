@@ -15,6 +15,8 @@ export default defineConfig({
   use: {
     ...devices["Desktop Safari"],
     viewport: { width: 1280, height: 800 },
+    // The core runs in the same zone (e2e/fixtures.ts).
+    timezoneId: "America/New_York",
     trace: "retain-on-failure",
   },
   projects: [{ name: "webkit", use: { browserName: "webkit" } }],
