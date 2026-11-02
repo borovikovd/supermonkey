@@ -10,7 +10,7 @@ import { ChevronDown, Paperclip, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { act, addAttachment } from "../ipc/bridge";
+import { act, addAttachment, later } from "../ipc/bridge";
 import type { Addr, DraftAttachment, DraftFields } from "../ipc/types";
 import { useChrome } from "../store/chrome";
 import { useAppState, useDraft } from "../store/hooks";
@@ -90,6 +90,7 @@ function AttachmentList({
           <span className="max-w-[220px] truncate">{a.filename}</span>
           <button
             tabIndex={-1}
+            aria-label={`Remove ${a.filename}`}
             className="text-text-3 hover:text-text"
             onClick={() => onRemove(a.id)}
           >
@@ -156,7 +157,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   const [link, setLink] = useState<string | null>(null);
   const dirty = useRef(false);
   const latest = useRef(fields);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Cancels the scheduled save. */
+  const timer = useRef<(() => void) | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const toRef = useRef<RecipientHandle>(null);
   const ccRef = useRef<RecipientHandle>(null);
@@ -169,8 +171,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   // them as dependencies.
   const scheduleSave = useCallback(() => {
     dirty.current = true;
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
+    timer.current?.();
+    timer.current = later(() => {
       timer.current = null;
       const pending = openComposer.pending();
       if (pending) act({ type: "saveDraft", draft, save: { type: "update", fields: pending } });
@@ -254,10 +256,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     openComposer.draft = draft;
     openComposer.pending = () => {
       if (!dirty.current) return null;
-      if (timer.current) {
-        clearTimeout(timer.current);
-        timer.current = null;
-      }
+      timer.current?.();
+      timer.current = null;
       dirty.current = false;
       const f = latest.current;
       return {

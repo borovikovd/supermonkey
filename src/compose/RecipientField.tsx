@@ -132,6 +132,9 @@ export function RecipientField({
           <span
             key={a.email.toLowerCase()}
             title={a.email}
+            data-chip={a.email}
+            aria-invalid={bad || undefined}
+            data-selected={selectedChip === i || undefined}
             className={`group flex items-center gap-0.5 rounded-control px-1 ${
               bad ? "text-danger" : "text-link"
             } ${selectedChip === i ? "bg-accent-soft" : ""}`}
@@ -140,6 +143,7 @@ export function RecipientField({
             {i < value.length - 1 && <span className="text-text-3">,</span>}
             <button
               tabIndex={-1}
+              aria-label={`Remove ${a.email}`}
               className="invisible text-text-3 group-hover:visible hover:text-text"
               onClick={() => onChange(value.filter((_, j) => j !== i))}
             >

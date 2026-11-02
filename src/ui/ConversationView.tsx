@@ -310,6 +310,7 @@ function Message({
         type="button"
         data-message={m.id}
         aria-expanded={false}
+        aria-current={selected || undefined}
         onClick={() => toggle(m.id)}
         className="relative flex h-row w-full items-center gap-3 border-b border-border-2 text-left text-row hover:bg-fill-half"
       >
@@ -330,6 +331,7 @@ function Message({
     // oxlint-disable-next-line jsx-a11y/no-static-element-interactions
     <div
       data-message={m.id}
+      aria-current={selected || undefined}
       className="relative border-b border-border-2 py-4"
       onMouseDown={() => select(m.id)}
     >

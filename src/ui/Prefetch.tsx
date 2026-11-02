@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { visibleIds } from "../commands";
-import { subscribe, unsubscribe } from "../ipc/bridge";
+import { later, subscribe, unsubscribe } from "../ipc/bridge";
 import type { SubKey } from "../ipc/types";
 import { useChrome } from "../store/chrome";
 
@@ -25,7 +25,7 @@ export function Prefetch() {
   useEffect(() => {
     const center = thread === null ? row : String(thread);
     if (center === null) return;
-    const t = setTimeout(() => {
+    return later(() => {
       const ids = visibleIds();
       const at = ids.indexOf(center);
       const where = useChrome.getState().current()?.where;
@@ -39,7 +39,6 @@ export function Prefetch() {
         around.map((x) => ({ type: "conversation", thread: Number(x), trashMode, open: false })),
       );
     }, 100);
-    return () => clearTimeout(t);
   }, [thread, openTrashMode, row]);
 
   useEffect(() => {

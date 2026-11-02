@@ -1,7 +1,7 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useRef, useState } from "react";
 
-import { getBodies, inTauri } from "../ipc/bridge";
+import { getBodies, inTauri, openUrlInCore } from "../ipc/bridge";
 import type { MessageBody } from "../ipc/types";
 
 /** Bodies never change, so a loaded body is kept for the session. */
@@ -108,7 +108,7 @@ export function MessageFrame({
           const href = a.getAttribute("href");
           if (href && /^(https?:|mailto:)/i.test(href)) {
             if (inTauri) void openUrl(href);
-            else window.open(href, "_blank", "noopener");
+            else void openUrlInCore(href);
           }
         }
       });

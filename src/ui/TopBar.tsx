@@ -92,11 +92,12 @@ function SplitTitles() {
   const highlightSplit =
     list.ids.find((e) => e.key === highlight)?.split ?? list.ids[0]?.split ?? null;
   return (
-    <div className="flex items-center gap-1 text-row">
+    <div role="toolbar" aria-label="Splits" className="flex items-center gap-1 text-row">
       {splits.map((s, i) => (
         <span key={s.id} className="flex items-center gap-1">
           {i > 0 && <span className="text-text-3">·</span>}
           <button
+            aria-current={s.id === highlightSplit || undefined}
             className={s.id === highlightSplit ? "font-semibold text-text" : "text-text-2"}
             onClick={() =>
               document.querySelector(`[data-split="${s.id}"]`)?.scrollIntoView({ block: "start" })

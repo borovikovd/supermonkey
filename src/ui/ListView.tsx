@@ -48,6 +48,9 @@ const Row = memo(function Row({
       onClick={() => onClick(rowKey)}
       className={`relative flex h-row items-center gap-3 px-4 text-row ${bg}`}
       data-row={rowKey}
+      data-selected={selected ? true : undefined}
+      data-unread={row?.unread ? true : undefined}
+      data-starred={row?.starred ? true : undefined}
     >
       {highlighted && <span className="absolute top-0 bottom-0 left-0 w-[3px] bg-accent" />}
       <span className="flex w-[5px] shrink-0 justify-center">
@@ -82,10 +85,14 @@ const Row = memo(function Row({
 
 function SplitHeader({ split, name, count }: { split: number; name: string; count: number }) {
   return (
-    <div data-split={split} className="flex h-split-header items-end gap-1.5 px-4 pb-1 text-hint">
+    <h2
+      data-split={split}
+      aria-label={count > 0 ? `${name} ${countLabel(count)}` : name}
+      className="flex h-split-header items-end gap-1.5 px-4 pb-1 text-hint"
+    >
       <span className="font-medium text-text-2">{name}</span>
       {count > 0 && <span className="tabular text-text-3">{countLabel(count)}</span>}
-    </div>
+    </h2>
   );
 }
 
