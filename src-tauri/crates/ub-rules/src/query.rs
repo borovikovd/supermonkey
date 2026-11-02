@@ -149,10 +149,10 @@ pub struct Address {
 }
 
 impl Address {
-    pub fn new(name: &str, email: &str) -> Self {
+    pub fn new(name: impl Into<String>, email: impl Into<String>) -> Self {
         Address {
-            name: name.to_owned(),
-            email: email.to_owned(),
+            name: name.into(),
+            email: email.into(),
         }
     }
 }
@@ -223,10 +223,9 @@ pub fn parse(input: &str) -> Query {
 /// an empty query, unbalanced parentheses, an unclosed quote, a dangling
 /// `AND`/`OR`, an operator with no value, or an unsupported term.
 pub fn parse_strict(input: &str) -> Result<Query, ParseError> {
-    let (query, mut errors) = Parser::new(input).run();
-    if !errors.is_empty() {
-        errors.sort_by_key(|e| e.offset);
-        return Err(errors.swap_remove(0));
+    let (query, errors) = Parser::new(input).run();
+    if let Some(first) = errors.into_iter().min_by_key(|e| e.offset) {
+        return Err(first);
     }
     if query.expr == Expr::And(Vec::new()) {
         return Err(ParseError {
@@ -304,18 +303,16 @@ impl fmt::Display for Query {
 /// `(or (and from:"alice" subject:"q3 plan") "bob"*)`.
 impl fmt::Display for Expr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Expr::And(xs) | Expr::Or(xs) => {
-                f.write_str(if matches!(self, Expr::And(_)) {
-                    "(and"
-                } else {
-                    "(or"
-                })?;
-                for x in xs {
-                    write!(f, " {x}")?;
-                }
-                f.write_str(")")
+        let list = |f: &mut fmt::Formatter<'_>, op: &str, xs: &[Expr]| {
+            write!(f, "({op}")?;
+            for x in xs {
+                write!(f, " {x}")?;
             }
+            f.write_str(")")
+        };
+        match self {
+            Expr::And(xs) => list(f, "and", xs),
+            Expr::Or(xs) => list(f, "or", xs),
             Expr::Term(t) => {
                 let name = match t.field {
                     Field::Any => "",
@@ -585,13 +582,6 @@ fn lex(s: &str) -> Vec<Tok> {
 // ---------------------------------------------------------------------------
 // Parser
 
-/// What one word token means.
-enum WordMeaning {
-    Expr(Expr),
-    /// Nothing to match on, such as `from:` with no value or a lone `&`.
-    Nothing,
-}
-
 struct Parser<'a> {
     input: &'a str,
     toks: Vec<Tok>,
@@ -703,18 +693,18 @@ impl<'a> Parser<'a> {
                 TokKind::Word(word) => {
                     self.pos += 1;
                     let at_end = tok.end == self.input.len();
-                    if let WordMeaning::Expr(e) = self.word(word, tok.start, at_end) {
-                        items.push(e);
-                    }
+                    items.extend(self.word(word, tok.start, at_end));
                 }
             }
         }
         combine(items, true)
     }
 
-    fn word(&mut self, word: &str, offset: usize, at_end: bool) -> WordMeaning {
+    /// What one word token means: `None` when there is nothing to match on, such as
+    /// `from:` with no value or a lone `&`.
+    fn word(&mut self, word: &str, offset: usize, at_end: bool) -> Option<Expr> {
         if word.len() > 1 && word.starts_with('-') {
-            return self.unsupported(word, offset);
+            return Some(self.unsupported(word, offset));
         }
         let word = word.strip_prefix('+').unwrap_or(word);
 
@@ -730,17 +720,17 @@ impl<'a> Parser<'a> {
             "subject" => Field::Subject,
             "label" => Field::Label,
             "is" if raw_value.eq_ignore_ascii_case("list") => {
-                return WordMeaning::Expr(Expr::IsList);
+                return Some(Expr::IsList);
             }
-            "is" => return self.unsupported(word, offset),
+            "is" => return Some(self.unsupported(word, offset)),
             other if GMAIL_ONLY_OPERATORS.contains(&other) => {
-                return self.unsupported(word, offset);
+                return Some(self.unsupported(word, offset));
             }
             _ => return bare_word(word, at_end),
         };
 
         if raw_value.starts_with('(') {
-            return self.unsupported(word, offset);
+            return Some(self.unsupported(word, offset));
         }
         let (value, closed_quote) = match raw_value.strip_prefix('"') {
             Some(rest) => match rest.strip_suffix('"') {
@@ -755,26 +745,26 @@ impl<'a> Parser<'a> {
         };
         if value.trim().is_empty() {
             self.error(offset, format!("{op_lower}: needs a value"));
-            return WordMeaning::Nothing;
+            return None;
         }
-        WordMeaning::Expr(Expr::Term(Term {
+        Some(Expr::Term(Term {
             field,
             value: value.to_owned(),
             prefix: at_end && !closed_quote,
         }))
     }
 
-    fn unsupported(&mut self, word: &str, offset: usize) -> WordMeaning {
+    fn unsupported(&mut self, word: &str, offset: usize) -> Expr {
         self.error(offset, format!("{word} isn't supported in split rules"));
-        WordMeaning::Expr(Expr::Unsupported(word.to_owned()))
+        Expr::Unsupported(word.to_owned())
     }
 }
 
-fn bare_word(word: &str, at_end: bool) -> WordMeaning {
+fn bare_word(word: &str, at_end: bool) -> Option<Expr> {
     if !word.chars().any(char::is_alphanumeric) {
-        return WordMeaning::Nothing;
+        return None;
     }
-    WordMeaning::Expr(Expr::Term(Term {
+    Some(Expr::Term(Term {
         field: Field::Any,
         value: word.to_owned(),
         prefix: at_end,
