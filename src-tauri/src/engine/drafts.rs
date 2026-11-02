@@ -7,11 +7,13 @@
 
 use crate::LogErr as _;
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rusqlite::{OptionalExtension, params};
 use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
 
+use super::attachments::DownloadError;
 use super::ops::{Done, bad};
 use super::{AccountRt, EngineRef};
 use crate::db::{from_json, to_json};
@@ -80,9 +82,25 @@ fn mime_addr(a: &Addr) -> ub_mime::Addr {
     }
 }
 
-fn io(e: impl std::fmt::Display) -> GmailError {
-    // A local file problem is not Gmail's; surface it as a rejection.
-    bad(e)
+/// Downloads an attachment for a draft write. Offline and transient failures
+/// keep the write waiting; anything else rejects it.
+async fn download(e: &EngineRef, attachment: i64) -> Result<PathBuf, GmailError> {
+    super::attachments::ensure(e, attachment)
+        .await
+        .map_err(|err| match err.downcast_ref::<DownloadError>() {
+            Some(DownloadError::NoAccount | DownloadError::Gmail(Outcome::Offline)) => {
+                GmailError::new(Outcome::Offline)
+            }
+            Some(DownloadError::Gmail(
+                Outcome::NoResponse | Outcome::RateLimited { .. } | Outcome::ServerError { .. },
+            )) => GmailError::new(Outcome::NoResponse),
+            _ => bad(err),
+        })
+}
+
+/// A local file problem is not Gmail's; it surfaces as a rejection.
+fn read_file(path: &Path) -> Result<Vec<u8>, GmailError> {
+    std::fs::read(path).map_err(bad)
 }
 
 /// Bytes of every attachment, downloading those not cached yet.
@@ -93,42 +111,26 @@ async fn attachment_bytes(
     let mut out = Vec::new();
     for a in &d.attachments {
         let path = match (&a.path, a.source) {
-            (Some(p), _) if std::path::Path::new(p).exists() => std::path::PathBuf::from(p),
-            (_, Some(src)) => super::attachments::ensure(e, src)
-                .await
-                .map_err(|e| offline_or_bad(&e))?,
+            (Some(p), _) if Path::new(p).exists() => PathBuf::from(p),
+            (_, Some(src)) => download(e, src).await?,
             _ => continue,
         };
         out.push(ub_mime::OutAttachment {
             filename: a.filename.clone(),
             mime_type: a.mime_type.clone(),
-            data: std::fs::read(&path).map_err(io)?,
+            data: read_file(&path)?,
         });
     }
     Ok(out)
 }
 
-fn offline_or_bad(err: &anyhow::Error) -> GmailError {
-    let s = err.to_string();
-    if s.contains("Offline") || s.contains("offline") {
-        GmailError::new(Outcome::Offline)
-    } else if s.contains("NoResponse") || s.contains("RateLimited") || s.contains("ServerError") {
-        GmailError::new(Outcome::NoResponse)
-    } else {
-        bad(s)
-    }
-}
-
-/// Inline parts of the quoted message, for turning `data:` images back into `cid:`.
+/// Inline parts of the quoted message, for turning `data:` images in `html`
+/// back into `cid:`.
 async fn quoted_inline(
     e: &EngineRef,
     d: &DraftRow,
+    html: &str,
 ) -> Result<Vec<ub_mime::InlinePart>, GmailError> {
-    let html = format!(
-        "{}{}",
-        d.body_html,
-        d.quote_html.clone().unwrap_or_default()
-    );
     let Some(target) = d.target else {
         return Ok(vec![]);
     };
@@ -147,14 +149,12 @@ async fn quoted_inline(
         .unwrap_or_default();
     let mut out = Vec::new();
     for (id, cid, mime, name) in parts {
-        let path = super::attachments::ensure(e, id)
-            .await
-            .map_err(|e| offline_or_bad(&e))?;
+        let path = download(e, id).await?;
         out.push(ub_mime::InlinePart {
             content_id: cid,
             mime_type: mime,
             filename: Some(name),
-            data: std::fs::read(path).map_err(io)?,
+            data: read_file(&path)?,
         });
     }
     Ok(out)
@@ -163,17 +163,20 @@ async fn quoted_inline(
 /// Builds the draft's MIME with mail-builder (via ub-mime).
 pub async fn build_raw(e: &EngineRef, d: &DraftRow) -> Result<Vec<u8>, GmailError> {
     let attachments = attachment_bytes(e, d).await?;
-    let known = quoted_inline(e, d).await?;
     let html = format!(
         "{}{}",
         d.body_html,
-        d.quote_html.clone().unwrap_or_default()
+        d.quote_html.as_deref().unwrap_or_default()
     );
+    let known = quoted_inline(e, d, &html).await?;
     let (html, inline) = ub_mime::data_images_to_cid(&html, &known);
-    let from = d.from.clone().unwrap_or(Addr {
-        name: None,
-        email: String::new(),
-    });
+    let from = d.from.as_ref().map_or_else(
+        || ub_mime::Addr {
+            name: None,
+            email: String::new(),
+        },
+        mime_addr,
+    );
     let domain = from
         .email
         .split('@')
@@ -181,7 +184,7 @@ pub async fn build_raw(e: &EngineRef, d: &DraftRow) -> Result<Vec<u8>, GmailErro
         .unwrap_or("ubermensch.local")
         .to_string();
     Ok(ub_mime::build_mime(&ub_mime::Outgoing {
-        from: mime_addr(&from),
+        from,
         to: d.to.iter().map(mime_addr).collect(),
         cc: d.cc.iter().map(mime_addr).collect(),
         bcc: d.bcc.iter().map(mime_addr).collect(),
@@ -367,7 +370,6 @@ pub async fn store_ids(e: &EngineRef, local: &str, g: &ub_gmail::Draft) {
                 .query_row("SELECT account_id FROM drafts WHERE id = ?1", [&local], |r| r.get(0))
                 .optional()?;
             let Some(account) = account else { return Ok(()) };
-            // Another live Gmail draft for the same local draft is an extra copy.
             ctx.tx.execute(
                 "UPDATE drafts SET gmail_draft_id = ?2, gmail_message_id = ?3, gmail_thread_id = ?4 WHERE id = ?1",
                 params![local, id, msg, thread],
@@ -406,7 +408,7 @@ pub async fn execute_op(
                 return Ok(Done::Finished);
             }
             if d.needs_parts {
-                download_parts_now(e, rt, local).await?;
+                download_parts_now(e, local).await?;
             }
             let Some(d) = load(e, local) else {
                 return Ok(Done::Finished);
@@ -448,23 +450,20 @@ pub async fn execute_op(
 
 /// Downloads a Gmail draft's attachments and inline parts before its first
 /// upsert (SPEC Addressing).
-async fn download_parts_now(
-    e: &EngineRef,
-    _rt: &Arc<AccountRt>,
-    draft: &str,
-) -> Result<(), GmailError> {
-    let Some(d) = load(e, draft) else {
+async fn download_parts_now(e: &EngineRef, draft: &str) -> Result<(), GmailError> {
+    let Some(DraftRow {
+        attachments: mut atts,
+        ..
+    }) = load(e, draft)
+    else {
         return Ok(());
     };
-    let mut atts = d.attachments.clone();
     for a in &mut atts {
         if a.path.is_none()
             && let Some(src) = a.source
         {
-            let p = super::attachments::ensure(e, src)
-                .await
-                .map_err(|e| offline_or_bad(&e))?;
-            a.path = Some(p.to_string_lossy().to_string());
+            let p = download(e, src).await?;
+            a.path = Some(p.to_string_lossy().into_owned());
         }
     }
     let local = draft.to_string();
@@ -481,25 +480,29 @@ async fn download_parts_now(
     Ok(())
 }
 
-pub async fn download_parts(e: EngineRef, rt: Arc<AccountRt>, draft: DraftId) {
-    let _ = download_parts_now(&e, &rt, &draft).await;
+pub async fn download_parts(e: EngineRef, draft: DraftId) {
+    download_parts_now(&e, &draft)
+        .await
+        .log_err("download draft parts");
 }
 
 /// A Gmail change skipped while a composer had the draft open, read when that
 /// composer closes without edits.
 pub async fn read_skipped(e: EngineRef, rt: Arc<AccountRt>, draft: DraftId) {
-    let Some(d) = load(&e, &draft) else { return };
-    let Some(gid) = d.gmail_draft_id else { return };
-    if let Ok(g) = rt
+    let Some(gid) = load(&e, &draft).and_then(|d| d.gmail_draft_id) else {
+        return;
+    };
+    let read = rt
         .sched
         .run(
             Priority::P2,
             cost::drafts_get(Format::Full),
             rt.gmail.get_draft(&gid, Format::Full),
         )
-        .await
-    {
-        store_gmail_draft(&e, &rt, g).await;
+        .await;
+    match read {
+        Ok(g) => store_gmail_draft(&e, &rt, g).await,
+        Err(err) => log::warn!("read skipped draft change: {:?}", err.outcome),
     }
 }
 
@@ -580,33 +583,11 @@ pub async fn sync_list(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailEr
 
     // Drafts this app does not know, or whose message changed, are read again.
     for g in gmail {
-        let changed = match by_gmail.get(&g.id) {
-            None => true,
-            Some((_, msg)) => msg.as_deref() != Some(g.message.id.as_str()),
-        };
-        if !changed {
-            continue;
-        }
-        if let Some((local, _)) = by_gmail.get(&g.id) {
-            let open = {
-                let l = local.clone();
-                e.writer
-                    .call(move |ctx| Ok(ctx.subs.is_draft_open(&l)))
-                    .await
-                    .unwrap_or(false)
-            };
-            if open {
-                let l = local.clone();
-                e.writer
-                    .call(move |ctx| {
-                        ctx.tx.execute(
-                            "UPDATE drafts SET pending_gmail_read = 1 WHERE id = ?1",
-                            [&l],
-                        )?;
-                        Ok(())
-                    })
-                    .await
-                    .log_err("sync_list");
+        if let Some((local, msg)) = by_gmail.get(&g.id) {
+            if msg.as_deref() == Some(g.message.id.as_str()) {
+                continue;
+            }
+            if defer_if_open(e, local).await {
                 continue;
             }
         }
@@ -625,6 +606,27 @@ pub async fn sync_list(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailEr
         }
     }
     Ok(())
+}
+
+/// A composer has the draft open: mark the Gmail change for `read_skipped`
+/// instead of overwriting the text being edited.
+async fn defer_if_open(e: &EngineRef, draft: &str) -> bool {
+    let draft = draft.to_string();
+    e.writer
+        .call(move |ctx| {
+            if !ctx.subs.is_draft_open(&draft) {
+                return Ok(false);
+            }
+            ctx.tx.execute(
+                "UPDATE drafts SET pending_gmail_read = 1 WHERE id = ?1",
+                [&draft],
+            )?;
+            Ok(true)
+        })
+        .await
+        .inspect_err(|err| log::warn!("defer draft read: {err:#}"))
+        // Only the update can fail, and only for an open draft: leave it alone.
+        .unwrap_or(true)
 }
 
 /// The message a draft read from Gmail is aimed at: the one its `In-Reply-To`
@@ -717,7 +719,7 @@ pub async fn store_gmail_draft(e: &EngineRef, rt: &Arc<AccountRt>, g: ub_gmail::
     let body = ub_mime::sanitize_html(&above, &HashMap::new());
     let quote = quote.map(|q| ub_mime::sanitize_html(&q, &HashMap::new()));
     let account = rt.id;
-    let gmail_draft = g.id.clone();
+    let gmail_draft = g.id;
     e
         .writer
         .call(move |ctx| {
@@ -732,7 +734,6 @@ pub async fn store_gmail_draft(e: &EngineRef, rt: &Arc<AccountRt>, g: ub_gmail::
                 Some(row) => crate::drafts::message_attachments(ctx, row)?,
                 None => vec![],
             };
-            let from = m.from.clone();
             if let Some(local) = existing {
                 ctx.tx.execute(
                     "UPDATE drafts SET from_json = ?2, to_json = ?3, cc_json = ?4, bcc_json = ?5, subject = ?6,
@@ -742,7 +743,7 @@ pub async fn store_gmail_draft(e: &EngineRef, rt: &Arc<AccountRt>, g: ub_gmail::
                      WHERE id = ?1",
                     params![
                         local,
-                        to_json(&from),
+                        to_json(&m.from),
                         to_json(&m.to),
                         to_json(&m.cc),
                         to_json(&m.bcc),
@@ -775,7 +776,7 @@ pub async fn store_gmail_draft(e: &EngineRef, rt: &Arc<AccountRt>, g: ub_gmail::
                         if kind == DraftKind::New { None } else { Some(thread) },
                         if kind == DraftKind::New { None } else { target },
                         started_on_latest,
-                        to_json(&from),
+                        to_json(&m.from),
                         to_json(&m.to),
                         to_json(&m.cc),
                         to_json(&m.bcc),

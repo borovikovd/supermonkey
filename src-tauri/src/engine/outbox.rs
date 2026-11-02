@@ -8,6 +8,7 @@
 
 use crate::LogErr as _;
 use std::sync::Arc;
+use std::time::Duration;
 
 use rusqlite::{OptionalExtension, params};
 use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
@@ -15,11 +16,12 @@ use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
 use super::{AccountRt, EngineRef};
 use crate::model::AccountId;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct Row {
     id: i64,
     draft: String,
-    state: String,
+    /// Handed to Gmail with no clear answer yet; otherwise waiting.
+    sending: bool,
     send_after: i64,
 }
 
@@ -27,14 +29,14 @@ fn rows(e: &EngineRef, account: AccountId) -> Vec<Row> {
     e.reads
         .with(|c| {
             let mut stmt = c.prepare(
-                "SELECT id, draft_id, state, send_after FROM outbox
+                "SELECT id, draft_id, state = 'sending', send_after FROM outbox
                  WHERE account_id = ?1 AND state != 'sent' ORDER BY send_after, id",
             )?;
             let rows = stmt.query_map([account], |r| {
                 Ok(Row {
                     id: r.get(0)?,
                     draft: r.get(1)?,
-                    state: r.get(2)?,
+                    sending: r.get(2)?,
                     send_after: r.get(3)?,
                 })
             })?;
@@ -60,37 +62,35 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
         let mut next_due: Option<i64> = None;
         let mut failed: Option<GmailError> = None;
         for row in rows(&e, rt.id) {
-            let r = match row.state.as_str() {
-                "sending" => settle(&e, &rt, &row).await,
-                _ if row.send_after <= now => send(&e, &rt, &row).await,
-                _ => {
-                    next_due =
-                        Some(next_due.map_or(row.send_after, |d: i64| d.min(row.send_after)));
-                    Ok(())
-                }
+            let r = if row.sending {
+                settle(&e, &rt, &row).await
+            } else if row.send_after <= now {
+                send(&e, &rt, &row).await
+            } else {
+                next_due = Some(next_due.map_or(row.send_after, |d| d.min(row.send_after)));
+                Ok(())
             };
-            e.note(&rt, r.as_ref().map(drop));
+            e.note(&rt, &r);
             if let Err(err) = r {
                 failed = Some(err);
                 break;
             }
         }
-        let wait_ms = match &failed {
+        let timeout = match &failed {
             Some(err) if matches!(err.outcome, Outcome::InvalidGrant) => return,
-            Some(err) if matches!(err.outcome, Outcome::Offline) => 10_000,
+            Some(err) if matches!(err.outcome, Outcome::Offline) => Duration::from_secs(10),
             Some(err) => {
                 let d = ub_gmail::backoff(attempt, err.retry_after());
                 attempt = attempt.saturating_add(1);
-                u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+                d
             }
             None => {
                 attempt = 0;
-                next_due.map_or(30_000, |d| {
-                    (d - crate::db::now_ms()).clamp(50, 30_000).unsigned_abs()
-                })
+                let ms = next_due.map_or(30_000, |d| (d - crate::db::now_ms()).clamp(50, 30_000));
+                Duration::from_millis(ms.unsigned_abs())
             }
         };
-        super::wait(&rt.outbox_kick, wait_ms).await;
+        super::wait(&rt.outbox_kick, timeout).await;
     }
 }
 
@@ -114,6 +114,7 @@ async fn set_state(
             Ok(n > 0)
         })
         .await
+        .inspect_err(|err| log::warn!("set outbox {outbox} {state}: {err:#}"))
         .unwrap_or(false)
 }
 
@@ -155,8 +156,8 @@ async fn send(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row) -> Result<(), Gmail
     let draft = match super::drafts::write(e, rt, &d).await {
         Ok(g) => g,
         Err(err) => {
-            return if let Outcome::Rejected { ref message, .. } = err.outcome {
-                fail(e, rt.id, row, message.clone()).await;
+            return if let Outcome::Rejected { message, .. } = &err.outcome {
+                fail(e, rt.id, row, message).await;
                 Ok(())
             } else {
                 set_state(e, rt.id, row.id, "waiting", true).await;
@@ -195,7 +196,7 @@ async fn send_draft(
         not_sent(e, rt.id, row).await;
         return Ok(());
     }
-    match rt
+    let err = match rt
         .sched
         .run(
             Priority::P1,
@@ -206,34 +207,27 @@ async fn send_draft(
     {
         Ok(m) => {
             sent(e, rt, row, &m.id, &m.thread_id).await;
-            Ok(())
+            return Ok(());
         }
+        Err(err) => err,
+    };
+    match &err.outcome {
         // The request never left: back to waiting.
-        Err(err) if matches!(err.outcome, Outcome::Offline) => {
+        Outcome::Offline => {
             set_state(e, rt.id, row.id, "waiting", true).await;
             Err(err)
         }
-        // No clear answer: stay sending; drafts.get settles it.
-        Err(err)
-            if matches!(
-                err.outcome,
-                Outcome::NoResponse | Outcome::ServerError { .. }
-            ) =>
-        {
-            Err(err)
-        }
         // The draft is gone: the row stays sending and the next pass settles it.
-        Err(err) if matches!(err.outcome, Outcome::NotFound) => {
+        Outcome::NotFound => {
             rt.outbox_kick.notify_one();
             Ok(())
         }
-        Err(err) => match err.outcome {
-            Outcome::Rejected { message, .. } => {
-                fail(e, rt.id, row, message).await;
-                Ok(())
-            }
-            _ => Err(err),
-        },
+        Outcome::Rejected { message, .. } => {
+            fail(e, rt.id, row, message).await;
+            Ok(())
+        }
+        // No clear answer: stay sending; drafts.get settles it.
+        _ => Err(err),
     }
 }
 
@@ -386,7 +380,7 @@ async fn not_sent(e: &EngineRef, account: AccountId, row: &Row) {
 }
 
 /// Gmail rejected the message: a toast shows the error and the draft goes back to a composer.
-async fn fail(e: &EngineRef, account: AccountId, row: &Row, message: String) {
+async fn fail(e: &EngineRef, account: AccountId, row: &Row, message: &str) {
     notice_and_remove(
         e,
         account,

@@ -1,6 +1,6 @@
 //! Snooze waking and the snooze rule (SPEC Snooze).
 
-use rusqlite::params;
+use std::time::Duration;
 
 use super::EngineRef;
 use super::ingest::PendingOps;
@@ -85,27 +85,11 @@ pub async fn run(e: EngineRef) {
             .ok()
             .flatten();
         let now = crate::db::now_ms();
-        let wait_ms = next
-            .map_or(60_000, |n| (n - now).clamp(0, 60_000))
-            .unsigned_abs();
+        let ms = next.map_or(60_000, |n| (n - now).clamp(250, 60_000));
         // A new snooze re-plans the timer.
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_millis(wait_ms.max(250)),
-            e.snooze_kick.notified(),
-        )
-        .await;
+        super::wait(&e.snooze_kick, Duration::from_millis(ms.unsigned_abs())).await;
         if next.is_some_and(|n| n <= crate::db::now_ms()) {
             wake_due(&e);
         }
     }
-}
-
-pub fn snooze_count(ctx: &Ctx<'_>, account: AccountId) -> i64 {
-    ctx.tx
-        .query_row(
-            "SELECT count(*) FROM threads WHERE account_id = ?1 AND snooze_until IS NOT NULL",
-            params![account],
-            |r| r.get(0),
-        )
-        .unwrap_or(0)
 }
