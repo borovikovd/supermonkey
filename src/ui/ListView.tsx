@@ -145,6 +145,13 @@ export function ListView() {
     },
   });
 
+  // Debug builds: when the first rows paint after launch (cold launch budget).
+  useEffect(() => {
+    if (items.length > 0 && performance.getEntriesByName("first-rows").length === 0) {
+      requestAnimationFrame(() => performance.mark("first-rows"));
+    }
+  }, [items.length]);
+
   // First visit: the top row is highlighted.
   useEffect(() => {
     if (highlight === null && list.ids.length > 0 && cur?.screen.kind === "list") {
