@@ -201,3 +201,110 @@ async fn invalid_grant_asks_to_sign_in_again() {
     })
     .await;
 }
+
+fn snooze(h: &Harness, thread: i64, at: i64) {
+    h.act(ubermensch_lib::model::Action::Modify(
+        ubermensch_lib::model::ModifyAction {
+            account: 1,
+            kind: ubermensch_lib::model::ModifyKind::Snooze,
+            threads: vec![thread],
+            add: vec![],
+            remove: vec!["INBOX".into()],
+            snooze: Some(ubermensch_lib::model::SnoozeChange::Set(at)),
+            undoable: true,
+        },
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn snooze_leaves_inbox_everywhere_and_wakes_back() {
+    let h = Harness::start(seed).await;
+    h.synced(2).await;
+    let t: i64 = h.q("SELECT id FROM threads WHERE subject = 'Patch'");
+    let soon = ubermensch_lib::db::now_ms() + 1500;
+    snooze(&h, t, soon);
+    h.until("snoozed", |h| {
+        h.q::<i64>(&format!("SELECT in_inbox FROM threads WHERE id = {t}")) == 0
+    })
+    .await;
+    h.until("Gmail lost INBOX", |h| {
+        h.user.messages().iter().any(|m| {
+            m.header("Subject") == Some("Patch") && !m.label_ids.iter().any(|l| l == "INBOX")
+        })
+    })
+    .await;
+    // Only this app wakes it: INBOX comes back locally and on Gmail.
+    h.until("woke", |h| {
+        h.q::<i64>(&format!("SELECT in_inbox FROM threads WHERE id = {t}")) == 1
+            && h.q::<Option<i64>>(&format!("SELECT snooze_until FROM threads WHERE id = {t}"))
+                .is_none()
+    })
+    .await;
+    h.until("Gmail has INBOX again", |h| {
+        h.user.messages().iter().any(|m| {
+            m.header("Subject") == Some("Patch") && m.label_ids.iter().any(|l| l == "INBOX")
+        })
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_new_message_from_outside_clears_a_snooze() {
+    let h = Harness::start(seed).await;
+    h.synced(2).await;
+    let t: i64 = h.q("SELECT id FROM threads WHERE subject = 'Patch'");
+    let gmail_thread: String = h.q(&format!("SELECT gmail_id FROM threads WHERE id = {t}"));
+    snooze(&h, t, ubermensch_lib::db::now_ms() + 3_600_000);
+    h.until("op done", |h| {
+        h.q::<i64>("SELECT count(*) FROM ops") == 0
+            && h.q::<i64>(&format!("SELECT in_inbox FROM threads WHERE id = {t}")) == 0
+    })
+    .await;
+    h.poll();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Our own label change came back through history: still snoozed.
+    assert!(
+        h.q::<Option<i64>>(&format!("SELECT snooze_until FROM threads WHERE id = {t}"))
+            .is_some()
+    );
+    h.user.add_message(NewMessage {
+        thread_id: Some(gmail_thread),
+        ..NewMessage::inbox("Linus <linus@kernel.org>", "Re: Patch", "v2 attached")
+    });
+    h.poll();
+    h.until("snooze cleared", |h| {
+        h.q::<Option<i64>>(&format!("SELECT snooze_until FROM threads WHERE id = {t}"))
+            .is_none()
+            && h.q::<i64>(&format!("SELECT in_inbox FROM threads WHERE id = {t}")) == 1
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn new_inbox_mail_notifies_unless_muted() {
+    let h = Harness::start(seed).await;
+    h.synced(2).await;
+    h.user
+        .add_message(NewMessage::inbox("Ken <ken@bell.com>", "Ping", "hello"));
+    h.poll();
+    h.until("notified", |h| h.engine.last_notification.lock().is_some())
+        .await;
+    let n = h.engine.last_notification.lock().take().unwrap().0;
+    assert_eq!(n.title, "Ken");
+    assert!(n.thread.is_some());
+    // Muted: nothing.
+    h.act(ubermensch_lib::model::Action::SetSetting {
+        account: Some(1),
+        key: "muted".into(),
+        value: "on".into(),
+    });
+    h.user
+        .add_message(NewMessage::inbox("Ken <ken@bell.com>", "Ping 2", "hello"));
+    h.poll();
+    h.until("second message stored", |h| {
+        h.q::<i64>("SELECT count(*) FROM threads WHERE subject = 'Ping 2'") == 1
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(h.engine.last_notification.lock().is_none());
+}

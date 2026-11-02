@@ -58,3 +58,12 @@ written. Each keeps the spec's intent.
   never discarded as untouched.
 - Demo mode: debug builds with `--features fake` and `UBERMENSCH_FAKE=1`
   (`pnpm demo`) run an in-process fake Gmail with demo mail and two accounts.
+
+## Snooze, offline, notifications (step 6)
+
+- Notification clicks: the notification plugin does not report clicks on
+  macOS. When the window gains focus within 30 s of a notification shown while
+  the app was in the background, the app treats it as a click: it switches to
+  that account, opens Inbox, and highlights the thread.
+- The Dock badge refreshes after every commit that can change unread counts.
+- Wake from sleep is detected as a gap of more than three poll intervals.

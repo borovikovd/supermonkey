@@ -62,6 +62,8 @@ pub enum Effect {
     Notify(crate::notify::Notification),
     /// History or a fetch named a label id this account does not know.
     RefreshLabels(AccountId),
+    /// A snooze time was set or changed; re-plan the wake timer.
+    Snoozes,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -365,6 +367,7 @@ impl WriterState {
             touched, effects, ..
         } = ctx;
         let wrote = !touched.is_empty();
+        let touched_app = touched.app;
         let ack = action.unwrap_or(self.ack).max(self.ack);
         if let Some(n) = action {
             tx.execute("UPDATE meta SET value = ?1 WHERE key = 'last_action'", [n])?;
@@ -388,6 +391,10 @@ impl WriterState {
                 ack,
                 updates,
             });
+        }
+        // Unread counts may have changed: refresh the Dock badge.
+        if touched_app {
+            let _ = self.effects.send(Effect::Badge);
         }
         for e in effects {
             let _ = self.effects.send(e);

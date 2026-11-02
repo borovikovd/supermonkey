@@ -128,6 +128,7 @@ pub fn modify(ctx: &mut Ctx, n: i64, m: ModifyAction) -> anyhow::Result<()> {
                 "UPDATE threads SET snooze_until = ?2 WHERE id = ?1",
                 params![thread, tc.snooze_after],
             )?;
+            ctx.effect(crate::writer::Effect::Snoozes);
         }
         threads::refresh(ctx, thread)?;
         changes.push(tc);

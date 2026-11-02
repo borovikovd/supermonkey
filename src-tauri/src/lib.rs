@@ -77,14 +77,28 @@ pub fn run() {
             engine::start(app.handle().clone(), writer, reads, data_dir, effects_rx);
             Ok(())
         })
-        .on_window_event(|window, event| {
+        .on_window_event(|window, event| match event {
             // Closing the window hides it; the app keeps syncing in the Dock.
-            if let WindowEvent::CloseRequested { api, .. } = event
-                && window.label() == "main"
-            {
+            WindowEvent::CloseRequested { api, .. } if window.label() == "main" => {
                 api.prevent_close();
                 let _ = window.hide();
             }
+            WindowEvent::Focused(focused) => {
+                let Some(engine) = window.app_handle().try_state::<engine::EngineRef>() else {
+                    return;
+                };
+                if *focused {
+                    if let Some(n) = engine.on_focus() {
+                        let _ = window.app_handle().emit(
+                            "notification-open",
+                            serde_json::json!({ "account": n.account, "thread": n.thread }),
+                        );
+                    }
+                } else {
+                    engine.on_blur();
+                }
+            }
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             commands::connect,

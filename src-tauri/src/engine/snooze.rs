@@ -82,7 +82,12 @@ pub async fn run(e: EngineRef) {
             .flatten();
         let now = crate::db::now_ms();
         let wait_ms = next.map(|n| (n - now).clamp(0, 60_000)).unwrap_or(60_000) as u64;
-        tokio::time::sleep(std::time::Duration::from_millis(wait_ms.max(250))).await;
+        // A new snooze re-plans the timer.
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_millis(wait_ms.max(250)),
+            e.snooze_kick.notified(),
+        )
+        .await;
         if next.is_some_and(|n| n <= crate::db::now_ms()) {
             wake_due(&e);
         }

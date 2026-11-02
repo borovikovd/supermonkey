@@ -288,10 +288,19 @@ export function Palette() {
   return <PaletteBody key={JSON.stringify(mode)} mode={mode} />;
 }
 
+const itemValue = (it: Item) => `${it.label} ${it.id}`;
+
 function PaletteBody({ mode }: { mode: PaletteMode }) {
   const [query, setQuery] = useState("");
   const { items, placeholder } = useCommands(mode, query);
   const filtered = mode.kind === "snooze";
+  // Snooze options arrive from Rust after each keystroke: keep the first one
+  // selected so Enter always picks something.
+  const [selected, setSelected] = useState("");
+  const firstValue = items[0] ? itemValue(items[0]) : "";
+  useEffect(() => {
+    if (filtered) setSelected(firstValue);
+  }, [filtered, firstValue]);
   return (
     <div className="fixed inset-0 z-40" onMouseDown={close}>
       <div
@@ -300,6 +309,8 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
       >
         <Command
           shouldFilter={!filtered}
+          value={filtered ? selected : undefined}
+          onValueChange={filtered ? setSelected : undefined}
           loop
           onKeyDown={(e) => {
             const start = performance.now();
@@ -324,7 +335,7 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
             {items.map((it) => (
               <Command.Item
                 key={it.id}
-                value={`${it.label} ${it.id}`}
+                value={itemValue(it)}
                 onSelect={() => {
                   const start = performance.now();
                   if (!it.keep) close();

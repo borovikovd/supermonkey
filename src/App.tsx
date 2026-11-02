@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Toaster } from "sonner";
 
 import { connect, inTauri, quitNow, subscribe } from "./ipc/bridge";
+import { goTo } from "./commands";
 import { appHooks, onKeyDown } from "./keyboard/keys";
 import { closeComposerOnScreen } from "./compose/start";
 import { useChrome, type PaletteMode } from "./store/chrome";
@@ -64,6 +65,13 @@ export function App() {
     window.addEventListener("keydown", onKeyDown);
     // Cmd+Q: close an open composer as a second Esc would, then quit once it commits.
     if (inTauri) {
+      // A notification click: that account, Inbox, the thread selected.
+      void listen<{ account: number; thread: number | null }>("notification-open", (e) => {
+        switchAccount(e.payload.account);
+        goTo({ kind: "view", view: { kind: "inbox" } });
+        if (e.payload.thread !== null)
+          useChrome.getState().patchCurrent({ highlight: String(e.payload.thread) });
+      });
       void listen("quit-requested", () => {
         closeComposerOnScreen();
         setTimeout(() => void quitNow(), 150);

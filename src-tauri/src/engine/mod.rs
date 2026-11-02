@@ -108,6 +108,10 @@ pub struct Engine {
     pub searches: Mutex<HashMap<SubId, tauri::async_runtime::JoinHandle<()>>>,
     /// The last notification shown, for click-through.
     pub last_notification: Mutex<Option<(crate::notify::Notification, i64)>>,
+    /// When the window last lost focus (0 while focused).
+    pub unfocused_since: AtomicI64,
+    /// Wakes the snooze timer when a snooze time changes.
+    pub snooze_kick: Notify,
 }
 
 pub type EngineRef = Arc<Engine>;
@@ -283,6 +287,8 @@ impl Engine {
             online: AtomicBool::new(true),
             searches: Mutex::new(HashMap::new()),
             last_notification: Mutex::new(None),
+            unfocused_since: AtomicI64::new(0),
+            snooze_kick: Notify::new(),
         })
     }
 
@@ -377,6 +383,7 @@ async fn dispatch(engine: EngineRef, mut effects: UnboundedReceiver<Effect>) {
             }
             Effect::Badge => update_badge(e.app.as_ref(), &e.reads),
             Effect::Notify(n) => notify::show(&e, n),
+            Effect::Snoozes => e.snooze_kick.notify_one(),
             Effect::RefreshLabels(a) => {
                 if let Some(rt) = e.account(a) {
                     tauri::async_runtime::spawn(async move {
@@ -410,4 +417,26 @@ pub fn update_badge(app: Option<&AppHandle>, reads: &ReadPool) {
 /// Waits for a kick or a timeout.
 pub async fn wait(notify: &Notify, ms: u64) {
     let _ = tokio::time::timeout(std::time::Duration::from_millis(ms), notify.notified()).await;
+}
+
+impl Engine {
+    /// The window gained focus: poll every account, and treat focus that comes
+    /// soon after a notification shown in the background as a click on it
+    /// (the notification plugin does not report clicks).
+    pub fn on_focus(&self) -> Option<crate::notify::Notification> {
+        for rt in self.accounts.lock().values() {
+            rt.poll_kick.notify_one();
+        }
+        let away = self.unfocused_since.swap(0, Ordering::Relaxed);
+        let last = self.last_notification.lock().take();
+        match last {
+            Some((n, at)) if away > 0 && at >= away && crate::db::now_ms() - at < 30_000 => Some(n),
+            _ => None,
+        }
+    }
+
+    pub fn on_blur(&self) {
+        self.unfocused_since
+            .store(crate::db::now_ms(), Ordering::Relaxed);
+    }
 }
