@@ -3,18 +3,22 @@
 
 import {
   closeThread,
-  currentListKey,
+  currentListView,
   currentView,
   goTo,
   markReadOnOpenWhenLoaded,
   openThread,
   visibleIds,
 } from "../commands";
-import { subIdFor } from "../ipc/bridge";
 import type { ConversationData } from "../ipc/types";
 import { useChrome } from "../store/chrome";
-import { viewList } from "../store/mirror-core";
-import { useMirror } from "../store/mirror";
+
+/** Adds `x` if missing, else removes it. */
+function toggled<T>(xs: readonly T[], x: T): T[] {
+  const set = new Set(xs);
+  if (!set.delete(x)) set.add(x);
+  return [...set];
+}
 
 export function moveHighlight(delta: number) {
   const c = useChrome.getState();
@@ -44,10 +48,7 @@ export function toggleSelect() {
   const c = useChrome.getState();
   const h = c.current()?.highlight;
   if (!h) return;
-  const sel = new Set(c.selection);
-  if (sel.has(h)) sel.delete(h);
-  else sel.add(h);
-  c.set({ selection: [...sel] });
+  c.set({ selection: toggled(c.selection, h) });
 }
 
 export function extendSelection(delta: number) {
@@ -65,11 +66,10 @@ export function extendSelection(delta: number) {
 
 /** Visible splits of the Inbox list in order, with their first conversation. */
 export function visibleSplits(): { split: number; first: string }[] {
-  const key = currentListKey();
-  const id = key ? subIdFor(key) : undefined;
-  if (!id || currentView()?.kind !== "inbox") return [];
+  const list = currentListView();
+  if (!list || currentView()?.kind !== "inbox") return [];
   const out: { split: number; first: string }[] = [];
-  for (const e of viewList(useMirror.getState(), id).ids) {
+  for (const e of list.ids) {
     if (e.split !== null && !out.some((s) => s.split === e.split))
       out.push({ split: e.split, first: e.key });
   }
@@ -83,19 +83,11 @@ export function jumpSplit(delta: number) {
   if (!cur || cur.screen.kind !== "list") return;
   const splits = visibleSplits();
   if (splits.length === 0) return;
-  const ids = visibleIds();
-  const key = currentListKey();
-  const id = key ? subIdFor(key) : undefined;
-  const entries = id ? viewList(useMirror.getState(), id).ids : [];
+  const entries = currentListView()?.ids ?? [];
   const hSplit = entries.find((e) => e.key === cur.highlight)?.split ?? null;
   const at = splits.findIndex((s) => s.split === hSplit);
-  const next = at + delta;
-  const first = splits[0];
-  if (at < 0 && delta > 0 && ids.length > 0 && first) {
-    c.patchCurrent({ highlight: first.first });
-    return;
-  }
-  const target = splits[next];
+  // Outside any split, forward goes to the first one.
+  const target = splits[at < 0 && delta > 0 ? 0 : at + delta];
   if (target) c.patchCurrent({ highlight: target.first });
 }
 
@@ -116,7 +108,7 @@ export function goSplit(kind: "important" | "other", splitIdOf: (kind: string) =
 
 // ------------------------------------------------------------ conversation
 
-/** Messages that can be selected (no collapsed drafts, no Sending row). */
+/** Messages `n`/`p` select; drafts and the Sending row are not in `messages`. */
 export function selectable(data: ConversationData): number[] {
   return data.messages.map((m) => m.id);
 }
@@ -138,10 +130,7 @@ export function toggleExpand(data: ConversationData) {
   const c = useChrome.getState();
   const id = c.selectedMessage ?? data.messages.at(-1)?.id;
   if (id === undefined) return;
-  const ex = new Set(c.expanded);
-  if (ex.has(id)) ex.delete(id);
-  else ex.add(id);
-  c.set({ expanded: [...ex] });
+  c.set({ expanded: toggled(c.expanded, id) });
 }
 
 export function toggleExpandAll() {
