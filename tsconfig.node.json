@@ -16,6 +16,8 @@
     /* Type safety */
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    // No exactOptionalPropertyTypes here: vite-plus's `lazyPlugins` returns
+    // `PluginOption[] | undefined`, which its own UserConfig rejects under that flag.
     "noImplicitReturns": true,
     "noImplicitOverride": true,
     "useUnknownInCatchVariables": true,

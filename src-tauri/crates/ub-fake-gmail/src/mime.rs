@@ -4,6 +4,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE};
 use serde_json::{Value, json};
+use std::fmt::Write as _;
 
 use crate::{NewAttachment, NewMessage};
 
@@ -25,7 +26,7 @@ pub(crate) fn parse(raw: &[u8], new_id: &mut dyn FnMut() -> String) -> Parsed {
         plain: None,
         html: None,
     };
-    let (payload, headers) = parse_part(raw, String::new(), &mut ctx);
+    let (payload, headers) = parse_part(raw, "", &mut ctx);
     let text = ctx
         .plain
         .or_else(|| ctx.html.map(|h| strip_tags(&h)))
@@ -45,7 +46,7 @@ struct Ctx<'a> {
     html: Option<String>,
 }
 
-fn parse_part(bytes: &[u8], part_id: String, ctx: &mut Ctx<'_>) -> (Value, Vec<(String, String)>) {
+fn parse_part(bytes: &[u8], part_id: &str, ctx: &mut Ctx<'_>) -> (Value, Vec<(String, String)>) {
     let (head, body) = split_head(bytes);
     let headers = parse_headers(&String::from_utf8_lossy(head));
     let (mime_type, params) = header(&headers, "Content-Type")
@@ -79,7 +80,7 @@ fn parse_part(bytes: &[u8], part_id: String, ctx: &mut Ctx<'_>) -> (Value, Vec<(
                 } else {
                     format!("{part_id}.{i}")
                 };
-                parse_part(part, id, ctx).0
+                parse_part(part, &id, ctx).0
             })
             .collect();
         node["body"] = json!({ "size": 0 });
@@ -322,7 +323,7 @@ pub(crate) fn build(msg: &NewMessage, date_ms: u64, message_id: &str) -> Vec<u8>
     let mut out = String::new();
     let mut push = |name: &str, value: &str| {
         if !value.is_empty() {
-            out.push_str(&format!("{name}: {value}\r\n"));
+            let _ = write!(out, "{name}: {value}\r\n");
         }
     };
     push("From", &msg.from);
@@ -398,7 +399,7 @@ fn attachment(a: &NewAttachment) -> String {
 fn leaf(content_type: &str, data: &[u8], extra: &[(String, String)]) -> String {
     let mut out = format!("Content-Type: {content_type}\r\nContent-Transfer-Encoding: base64\r\n");
     for (name, value) in extra {
-        out.push_str(&format!("{name}: {value}\r\n"));
+        let _ = write!(out, "{name}: {value}\r\n");
     }
     out.push_str("\r\n");
     let encoded = STANDARD.encode(data);
@@ -412,9 +413,9 @@ fn leaf(content_type: &str, data: &[u8], extra: &[(String, String)]) -> String {
 fn multipart(subtype: &str, boundary: &str, parts: &[String]) -> String {
     let mut out = format!("Content-Type: multipart/{subtype}; boundary=\"{boundary}\"\r\n\r\n");
     for part in parts {
-        out.push_str(&format!("--{boundary}\r\n{part}\r\n"));
+        let _ = write!(out, "--{boundary}\r\n{part}\r\n");
     }
-    out.push_str(&format!("--{boundary}--\r\n"));
+    let _ = write!(out, "--{boundary}--\r\n");
     out
 }
 
@@ -433,7 +434,7 @@ fn rfc2822_date(ms: u64) -> String {
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
     ];
     let secs = ms / 1000;
-    let days = (secs / 86_400) as i64;
+    let days = i64::try_from(secs / 86_400).unwrap_or(0);
     let rem = secs % 86_400;
     // Howard Hinnant's civil_from_days.
     let z = days + 719_468;
@@ -447,9 +448,9 @@ fn rfc2822_date(ms: u64) -> String {
     let year = yoe + era * 400 + i64::from(month <= 2);
     format!(
         "{}, {:02} {} {} {:02}:{:02}:{:02} +0000",
-        DAYS[(days % 7) as usize],
+        DAYS[usize::try_from(days.rem_euclid(7)).unwrap_or(0)],
         day,
-        MONTHS[(month - 1) as usize],
+        MONTHS[usize::try_from(month - 1).unwrap_or(0)],
         year,
         rem / 3600,
         rem % 3600 / 60,

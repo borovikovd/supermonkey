@@ -1,8 +1,10 @@
 //! The Tauri command surface. Every argument and result type is generated
 //! into `src/bindings/` by ts-rs.
 
-// Tauri commands receive owned arguments by design.
-#![allow(clippy::needless_pass_by_value)]
+#![expect(
+    clippy::needless_pass_by_value,
+    reason = "Tauri commands receive owned arguments by design."
+)]
 
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};

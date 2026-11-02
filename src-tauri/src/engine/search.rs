@@ -1,6 +1,7 @@
 //! Gmail search and the `threads.list` of Label, Trash, and Spam views
 //! (SPEC Search, Views). Pages of 15 threads at priority 2.
 
+use crate::LogErr as _;
 use std::time::Duration;
 
 use rusqlite::params;
@@ -14,7 +15,8 @@ use crate::writer::GmailListQuery;
 const PAGE: u32 = 15;
 
 pub fn cancel(e: &EngineRef, sub: &str) {
-    if let Some(h) = e.searches.lock().remove(sub) {
+    let running = e.searches.lock().remove(sub);
+    if let Some(h) = running {
         h.abort();
     }
 }
@@ -80,7 +82,9 @@ pub fn start(
         });
         let futs = fetches
             .map(|t| super::sync::fetch_thread(&e2, &rt, &t.id, Format::Metadata, Priority::P2));
-        let _ = futures_util::future::join_all(futs).await;
+        for r in futures_util::future::join_all(futs).await {
+            r.log_err("search hit metadata");
+        }
         for t in &threads {
             if super::sync::needs_bodies(&e2, account, &t.id) {
                 rt.work.push(

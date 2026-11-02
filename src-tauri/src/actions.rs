@@ -5,7 +5,7 @@ use rusqlite::params;
 use crate::model::{AccountId, Action, SubId, SubKey, View};
 use crate::writer::{Ctx, Effect, GmailListQuery};
 
-#[allow(clippy::too_many_lines)] // One short arm per action variant.
+#[expect(clippy::too_many_lines, reason = "One short arm per action variant.")]
 pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
     match action {
         Action::Reset => {
@@ -179,7 +179,6 @@ fn subscribe(ctx: &mut Ctx<'_>, sub: SubId, key: SubKey) -> anyhow::Result<()> {
                 ctx.effect(Effect::FetchThread {
                     account,
                     thread: *thread,
-                    open: *open,
                 });
                 if *open {
                     ctx.effect(Effect::OnScreen(account));

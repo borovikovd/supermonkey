@@ -2,6 +2,7 @@
 //! fake Gmail with demo mail and two signed-in accounts, so every flow can be
 //! exercised without Google.
 
+use crate::LogErr as _;
 use std::sync::{Arc, OnceLock};
 
 use ub_fake_gmail::{FakeGmail, FakeUser, NewAttachment, NewMessage};
@@ -32,13 +33,16 @@ const PNG: &[u8] = &[
     0, 0, 0, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
 ];
 
-#[allow(clippy::too_many_lines)] // Demo mail, a flat list of sample messages.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Demo mail, a flat list of sample messages."
+)]
 fn seed(u: &FakeUser, me: &str) {
     let receipts = u.add_label("Receipts");
     let travel = u.add_label("Travel");
     for (i, (name, email)) in PEOPLE.iter().enumerate() {
         let from = format!("{name} <{email}>");
-        let first = u.add_message(NewMessage {
+        let first = u.add_message(&NewMessage {
             from: from.clone(),
             to: vec![me.to_string()],
             subject: [
@@ -63,7 +67,7 @@ fn seed(u: &FakeUser, me: &str) {
         });
         if i % 2 == 0 {
             // A reply from me, then theirs: a three-message thread.
-            let mine = u.add_message(NewMessage {
+            let mine = u.add_message(&NewMessage {
                 from: me.to_string(),
                 to: vec![from.clone()],
                 subject: "Re: Q3 planning".into(),
@@ -73,7 +77,7 @@ fn seed(u: &FakeUser, me: &str) {
                 in_reply_to: Some(first.rfc822_message_id.clone()),
                 ..Default::default()
             });
-            u.add_message(NewMessage {
+            u.add_message(&NewMessage {
                 from: from.clone(),
                 to: vec![me.to_string()],
                 cc: vec![PEOPLE[(i + 1) % PEOPLE.len()].1.to_string()],
@@ -105,7 +109,7 @@ fn seed(u: &FakeUser, me: &str) {
         }
     }
     for i in 0..6 {
-        u.add_message(NewMessage {
+        u.add_message(&NewMessage {
             from: "Weekly Digest <digest@news.example>".into(),
             to: vec![me.to_string()],
             subject: format!("This week in tech #{}", 100 + i),
@@ -117,7 +121,7 @@ fn seed(u: &FakeUser, me: &str) {
             ..Default::default()
         });
     }
-    u.add_message(NewMessage {
+    u.add_message(&NewMessage {
         from: "Acme Store <orders@acme.shop>".into(),
         to: vec![me.to_string()],
         subject: "Your receipt #4821".into(),
@@ -125,7 +129,7 @@ fn seed(u: &FakeUser, me: &str) {
         labels: vec!["INBOX".into(), "CATEGORY_PROMOTIONS".into(), receipts],
         ..Default::default()
     });
-    u.add_message(NewMessage {
+    u.add_message(&NewMessage {
         from: "Airline <trips@fly.example>".into(),
         to: vec![me.to_string()],
         subject: "Your trip to Lisbon".into(),
@@ -133,7 +137,7 @@ fn seed(u: &FakeUser, me: &str) {
         labels: vec!["STARRED".into(), travel],
         ..Default::default()
     });
-    u.add_message(NewMessage {
+    u.add_message(&NewMessage {
         from: "Mallory <mallory@evil.example>".into(),
         to: vec![me.to_string()],
         subject: "Totally safe message".into(),
@@ -153,16 +157,18 @@ pub fn setup(writer: &Writer) -> Option<(Config, Arc<dyn TokenStore>)> {
     if !cfg!(debug_assertions) || std::env::var("UBERMENSCH_FAKE").as_deref() != Ok("1") {
         return None;
     }
-    let fake = tauri::async_runtime::block_on(FakeGmail::start());
+    let fake = tauri::async_runtime::block_on(async { FakeGmail::start() });
     let store = Arc::new(MemoryTokenStore::default());
     let mut users = Vec::new();
     for email in ACCOUNTS {
         let u = fake.add_user(email);
         u.set_display_name(email.split('@').next().unwrap_or(email));
         seed(&u, email);
-        let _ = store.store_refresh_token(email, u.refresh_token());
+        store
+            .store_refresh_token(email, u.refresh_token())
+            .log_err("demo token");
         let e = email.to_string();
-        let _ = writer.call_blocking(move |ctx| {
+        let created = writer.call_blocking(move |ctx| {
             let known: bool = ctx.tx.query_row(
                 "SELECT EXISTS (SELECT 1 FROM accounts WHERE email = ?1)",
                 [&e],
@@ -173,6 +179,7 @@ pub fn setup(writer: &Writer) -> Option<(Config, Arc<dyn TokenStore>)> {
             }
             Ok(())
         });
+        created.log_err("demo account");
         users.push(u);
     }
     let config = Config {
@@ -196,7 +203,7 @@ pub fn deliver(subject: &str) {
     if let Some((_, users)) = FAKE.get()
         && let Some(u) = users.first()
     {
-        u.add_message(NewMessage::inbox(
+        u.add_message(&NewMessage::inbox(
             "Ada Lovelace <ada@analytical.io>",
             subject,
             "A new message arrived.",

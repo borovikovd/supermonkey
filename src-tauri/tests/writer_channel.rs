@@ -3,7 +3,7 @@
 //! a list built from its first load plus patches equals a fresh first load at
 //! that `rev`.
 
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+#![expect(clippy::unwrap_used, reason = "Tests fail loudly on purpose.")]
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -99,7 +99,10 @@ fn apply(list: &[ListEntry], removed: &[String], moved: &[ListMove]) -> Vec<List
     ubermensch_lib::subs::diff::apply(list, removed, moved)
 }
 
-#[allow(clippy::too_many_lines)] // The property harness: set up, replay ops, check.
+#[expect(
+    clippy::too_many_lines,
+    reason = "The property harness: set up, replay ops, check."
+)]
 fn run(ops: Vec<Op>) -> Result<(), TestCaseError> {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("t.db");

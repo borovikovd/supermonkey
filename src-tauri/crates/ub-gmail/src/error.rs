@@ -60,15 +60,28 @@ impl fmt::Display for Outcome {
 
 /// The error of every call in this crate.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{outcome}")]
+#[error("{outcome}{}", detail.as_deref().map(|d| format!(": {d}")).unwrap_or_default())]
 pub struct GmailError {
     pub outcome: Outcome,
+    /// What went wrong underneath, for logs (e.g. why a body did not parse).
+    pub detail: Option<String>,
 }
 
 impl GmailError {
     /// Wraps an outcome.
     pub fn new(outcome: Outcome) -> Self {
-        GmailError { outcome }
+        GmailError {
+            outcome,
+            detail: None,
+        }
+    }
+
+    /// An outcome with the underlying cause kept for logs.
+    pub fn with_detail(outcome: Outcome, detail: impl fmt::Display) -> Self {
+        GmailError {
+            outcome,
+            detail: Some(detail.to_string()),
+        }
     }
 
     /// True for the outcomes the spec retries with backoff: rate limits, 5xx and no response.
@@ -91,7 +104,10 @@ impl GmailError {
 
 impl From<Outcome> for GmailError {
     fn from(outcome: Outcome) -> Self {
-        GmailError { outcome }
+        GmailError {
+            outcome,
+            detail: None,
+        }
     }
 }
 

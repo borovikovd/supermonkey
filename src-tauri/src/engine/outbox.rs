@@ -6,6 +6,7 @@
 //! waiting. No clear answer from `drafts.send` keeps it sending until
 //! `drafts.get` settles it: 404 means sent.
 
+use crate::LogErr as _;
 use std::sync::Arc;
 
 use rusqlite::{OptionalExtension, params};
@@ -166,13 +167,12 @@ async fn send(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row) -> Result<(), Gmail
     super::drafts::store_ids(e, &row.draft, &draft).await;
     record_gmail_draft(e, row.id, &draft.id).await;
     // 4: drafts.send.
-    send_draft(e, rt, row, &draft.id, draft.message.thread_id.clone()).await
+    send_draft(e, rt, row, &draft.id).await
 }
 
 async fn record_gmail_draft(e: &EngineRef, outbox: i64, gid: &str) {
     let gid = gid.to_string();
-    let _ = e
-        .writer
+    e.writer
         .call(move |ctx| {
             ctx.tx.execute(
                 "UPDATE outbox SET gmail_draft_id = ?2 WHERE id = ?1",
@@ -180,7 +180,8 @@ async fn record_gmail_draft(e: &EngineRef, outbox: i64, gid: &str) {
             )?;
             Ok(())
         })
-        .await;
+        .await
+        .log_err("record_gmail_draft");
 }
 
 async fn send_draft(
@@ -188,7 +189,6 @@ async fn send_draft(
     rt: &Arc<AccountRt>,
     row: &Row,
     gmail_draft: &str,
-    gmail_thread: String,
 ) -> Result<(), GmailError> {
     // A held undo before drafts.send: do not send.
     if undo_requested(e, row.id) {
@@ -220,7 +220,6 @@ async fn send_draft(
                 Outcome::NoResponse | Outcome::ServerError { .. }
             ) =>
         {
-            let _ = gmail_thread;
             Err(err)
         }
         // The draft is gone: the row stays sending and the next pass settles it.
@@ -280,7 +279,7 @@ async fn settle(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row) -> Result<(), Gma
         )
         .await
     {
-        Ok(d) => send_draft(e, rt, row, &gid, d.message.thread_id).await,
+        Ok(_) => send_draft(e, rt, row, &gid).await,
         Err(err) if matches!(err.outcome, Outcome::NotFound) => {
             // Sent: the message is the newest SENT message from this account on the thread.
             let thread = e
@@ -329,8 +328,7 @@ async fn sent(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row, message: &str, gmai
     let outbox = row.id;
     let draft = row.draft.clone();
     let msg = message.to_string();
-    let held = e
-        .writer
+    e.writer
         .call(move |ctx| {
             ctx.tx.execute(
                 "UPDATE outbox SET state = 'sent', sent_message_id = ?2 WHERE id = ?1",
@@ -359,16 +357,15 @@ async fn sent(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row, message: &str, gmai
             ctx.touch_outbox(account, outbox)?;
             touch_row_thread(ctx, account, outbox)?;
             crate::drafts::account_of(ctx, &draft)?;
-            Ok(held)
+            Ok(())
         })
         .await
-        .unwrap_or(false);
+        .log_err("sent");
     if !gmail_thread.is_empty() {
         let stored =
             super::sync::fetch_thread(e, rt, gmail_thread, Format::Full, Priority::P1).await;
         if let Ok(Some(thread)) = stored {
-            let _ = e
-                .writer
+            e.writer
                 .call(move |ctx| {
                     ctx.tx.execute(
                         "UPDATE outbox SET thread_id = coalesce(thread_id, ?2) WHERE id = ?1",
@@ -377,10 +374,10 @@ async fn sent(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row, message: &str, gmai
                     touch_row_thread(ctx, account, outbox)?;
                     crate::outbox::cleanup(ctx, account)
                 })
-                .await;
+                .await
+                .log_err("sent");
         }
     }
-    let _ = held;
 }
 
 /// A held undo resolved as not sent: the draft goes back to a composer.
@@ -409,8 +406,7 @@ async fn notice_and_remove(
 ) {
     let outbox = row.id;
     let draft = row.draft.clone();
-    let _ = e
-        .writer
+    e.writer
         .call(move |ctx| {
             touch_row_thread(ctx, account, outbox)?;
             crate::undo::drop_send_entry(ctx, account, outbox)?;
@@ -438,5 +434,6 @@ async fn notice_and_remove(
             ctx.touch_summary(account);
             Ok(())
         })
-        .await;
+        .await
+        .log_err("notice_and_remove");
 }

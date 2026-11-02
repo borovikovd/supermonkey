@@ -19,6 +19,20 @@ pub mod threads;
 pub mod undo;
 pub mod writer;
 
+/// Logs a failure that has no caller to report to (background sync and
+/// bookkeeping writes), instead of dropping it silently.
+pub(crate) trait LogErr {
+    fn log_err(self, what: &str);
+}
+
+impl<T, E: std::fmt::Display> LogErr for Result<T, E> {
+    fn log_err(self, what: &str) {
+        if let Err(e) = self {
+            log::warn!("{what}: {e:#}");
+        }
+    }
+}
+
 use std::path::PathBuf;
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
@@ -54,9 +68,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                let _ = env_logger_init();
-            }
+            // Only fails when a logger is already set (tests, a host embedding us).
+            let _ = stderr_logger_init();
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let _ = drafts::DRAFT_FILES.set(data_dir.join("drafts"));
@@ -132,13 +145,16 @@ pub fn run() {
     });
 }
 
-fn env_logger_init() -> Result<(), log::SetLoggerError> {
+fn stderr_logger_init() -> Result<(), log::SetLoggerError> {
     struct Stderr;
     impl log::Log for Stderr {
         fn enabled(&self, m: &log::Metadata<'_>) -> bool {
             m.level() <= log::Level::Info || m.target().starts_with("ubermensch")
         }
-        #[allow(clippy::print_stderr)] // The debug logger writes to stderr by design.
+        #[expect(
+            clippy::print_stderr,
+            reason = "The app logger writes to stderr by design."
+        )]
         fn log(&self, r: &log::Record<'_>) {
             if self.enabled(r.metadata()) {
                 eprintln!("[{}] {}: {}", r.level(), r.target(), r.args());
@@ -146,5 +162,11 @@ fn env_logger_init() -> Result<(), log::SetLoggerError> {
         }
         fn flush(&self) {}
     }
-    log::set_logger(&Stderr).map(|()| log::set_max_level(log::LevelFilter::Debug))
+    // Release builds keep warnings and errors; debug builds also show our debug lines.
+    let max = if cfg!(debug_assertions) {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Warn
+    };
+    log::set_logger(&Stderr).map(|()| log::set_max_level(max))
 }

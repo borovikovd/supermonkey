@@ -27,6 +27,7 @@ export function moveHighlight(delta: number) {
   if (at < 0) at = delta > 0 ? -1 : ids.length;
   const next = Math.min(ids.length - 1, Math.max(0, at + delta));
   const key = ids[next];
+  if (key === undefined) return;
   if (cur.screen.kind === "conversation") {
     if (key !== focus) {
       openThread(Number(key));

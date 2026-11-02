@@ -3,6 +3,7 @@
 //! A queued action stays until Gmail accepts or rejects it. Only a rejection
 //! rolls it back and shows an error toast; everything else retries.
 
+use crate::LogErr as _;
 use std::sync::Arc;
 
 use rusqlite::{OptionalExtension, params};
@@ -68,8 +69,7 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
             }
             Ok(Done::Retry(payload)) => {
                 let id = op.id;
-                let _ = e
-                    .writer
+                e.writer
                     .call(move |ctx| {
                         ctx.tx.execute(
                             "UPDATE ops SET payload = ?2 WHERE id = ?1",
@@ -77,7 +77,8 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
                         )?;
                         Ok(())
                     })
-                    .await;
+                    .await
+                    .log_err("run");
             }
             Err(err) => match err.outcome {
                 Outcome::Offline => super::wait(&rt.ops_kick, 10_000).await,
@@ -108,14 +109,14 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
 }
 
 async fn finish(e: &EngineRef, account: AccountId, op: i64) {
-    let _ = e
-        .writer
+    e.writer
         .call(move |ctx| {
             ctx.tx.execute("DELETE FROM ops WHERE id = ?1", [op])?;
             ctx.touch_summary(account);
             Ok(())
         })
-        .await;
+        .await
+        .log_err("finish");
 }
 
 /// Gmail rejected the op: roll back its local effect, drop its undo entry,
@@ -123,7 +124,7 @@ async fn finish(e: &EngineRef, account: AccountId, op: i64) {
 async fn reject(e: &EngineRef, account: AccountId, op: &Op, status: u16, message: &str) {
     let op = op.clone();
     let text = format!("Gmail rejected a change ({status}): {message}");
-    let _ = e
+    e
         .writer
         .call(move |ctx| {
             match op.kind.as_str() {
@@ -152,7 +153,8 @@ async fn reject(e: &EngineRef, account: AccountId, op: &Op, status: u16, message
             ctx.touch_summary(account);
             Ok(())
         })
-        .await;
+        .await
+        .log_err("reject");
 }
 
 /// Local label id → Gmail label id. A label still waiting for its create has none yet.
@@ -247,10 +249,10 @@ async fn execute(e: &EngineRef, rt: &Arc<AccountRt>, op: &Op) -> Result<Done, Gm
                 Err(err) => return Err(err),
             };
             let account = rt.id;
-            let _ = e
-                .writer
+            e.writer
                 .call(move |ctx| map_label(ctx, account, &local, &gmail_id))
-                .await;
+                .await
+                .log_err("execute");
             Ok(Done::Finished)
         }
         other => super::drafts::execute_op(e, rt, other, &op.payload).await,

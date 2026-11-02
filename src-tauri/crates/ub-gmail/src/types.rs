@@ -240,7 +240,10 @@ impl Format {
 mod string_u64 {
     use serde::{Deserialize, Deserializer, Serializer, de::Error};
 
-    #[allow(clippy::trivially_copy_pass_by_ref)] // serde's serialize_with signature.
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde's serialize_with signature."
+    )]
     pub fn serialize<S: Serializer>(v: &u64, s: S) -> Result<S::Ok, S::Error> {
         s.serialize_str(&v.to_string())
     }
@@ -257,7 +260,7 @@ mod string_u64 {
 mod opt_string_u64 {
     use serde::{Deserialize, Deserializer, Serializer};
 
-    #[allow(clippy::ref_option)] // serde's serialize_with signature.
+    #[expect(clippy::ref_option, reason = "serde's serialize_with signature.")]
     pub fn serialize<S: Serializer>(v: &Option<u64>, s: S) -> Result<S::Ok, S::Error> {
         match v {
             Some(v) => s.serialize_str(&v.to_string()),

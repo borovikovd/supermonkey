@@ -5,6 +5,7 @@
 //! app writes carries `X-Ubermensch-Draft` with the local id, which is how a
 //! create with no clear answer is recovered.
 
+use crate::LogErr as _;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -318,14 +319,14 @@ async fn recover_create(
     let mut it = ours.into_iter();
     let keep = it.next();
     for extra in it {
-        let _ = rt
-            .sched
+        rt.sched
             .run(
                 Priority::P1,
                 cost::DRAFTS_DELETE,
                 rt.gmail.delete_draft(&extra.id),
             )
-            .await;
+            .await
+            .log_err("recover_create");
     }
     Ok(keep)
 }
@@ -358,7 +359,7 @@ pub async fn store_ids(e: &EngineRef, local: &str, g: &ub_gmail::Draft) {
         g.message.thread_id.clone(),
     );
     let local = local.to_string();
-    let _ = e
+    e
         .writer
         .call(move |ctx| {
             let account: Option<i64> = ctx
@@ -374,7 +375,8 @@ pub async fn store_ids(e: &EngineRef, local: &str, g: &ub_gmail::Draft) {
             ctx.touch_draft(account, &local)?;
             Ok(())
         })
-        .await;
+        .await
+        .log_err("store_ids");
 }
 
 pub async fn execute_op(
@@ -466,8 +468,7 @@ async fn download_parts_now(
         }
     }
     let local = draft.to_string();
-    let _ = e
-        .writer
+    e.writer
         .call(move |ctx| {
             ctx.tx.execute(
                 "UPDATE drafts SET attachments_json = ?2, needs_parts = 0 WHERE id = ?1",
@@ -475,7 +476,8 @@ async fn download_parts_now(
             )?;
             Ok(())
         })
-        .await;
+        .await
+        .log_err("download_parts_now");
     Ok(())
 }
 
@@ -570,10 +572,10 @@ pub async fn sync_list(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailEr
         .collect();
     if !gone.is_empty() {
         let account = rt.id;
-        let _ = e
-            .writer
+        e.writer
             .call(move |ctx| drop_gone(ctx, account, gone))
-            .await;
+            .await
+            .log_err("sync_list");
     }
 
     // Drafts this app does not know, or whose message changed, are read again.
@@ -595,8 +597,7 @@ pub async fn sync_list(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailEr
             };
             if open {
                 let l = local.clone();
-                let _ = e
-                    .writer
+                e.writer
                     .call(move |ctx| {
                         ctx.tx.execute(
                             "UPDATE drafts SET pending_gmail_read = 1 WHERE id = ?1",
@@ -604,7 +605,8 @@ pub async fn sync_list(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailEr
                         )?;
                         Ok(())
                     })
-                    .await;
+                    .await
+                    .log_err("sync_list");
                 continue;
             }
         }
@@ -716,7 +718,7 @@ pub async fn store_gmail_draft(e: &EngineRef, rt: &Arc<AccountRt>, g: ub_gmail::
     let quote = quote.map(|q| ub_mime::sanitize_html(&q, &HashMap::new()));
     let account = rt.id;
     let gmail_draft = g.id.clone();
-    let _ = e
+    e
         .writer
         .call(move |ctx| {
             // The thread and message rows for the draft (and its siblings).
@@ -795,5 +797,6 @@ pub async fn store_gmail_draft(e: &EngineRef, rt: &Arc<AccountRt>, g: ub_gmail::
             ctx.touch_thread(account, thread)?;
             Ok(())
         })
-        .await;
+        .await
+        .log_err("store_gmail_draft");
 }

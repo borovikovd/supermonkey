@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+#![expect(clippy::unwrap_used, reason = "Tests fail loudly on purpose.")]
 use std::collections::HashMap;
 
 use serde_json::Value;
@@ -29,7 +29,7 @@ fn full_message_with_nested_parts() {
         vec![Addr::new("carol@example.com"), Addr::new("dan@example.com")]
     );
     assert_eq!(msg.reply_to, vec![Addr::new("replies@example.fr")]);
-    assert_eq!(msg.bcc, [] as [Addr; 0]);
+    assert_eq!(msg.bcc, Vec::<Addr>::new());
     assert_eq!(msg.subject, "Q1 résumé and chart");
     assert_eq!(msg.date_ms, Some(1_736_157_600_000));
     assert_eq!(msg.message_id.as_deref(), Some("CAF=abc123@mail.gmail.com"));
@@ -58,7 +58,7 @@ fn full_message_with_nested_parts() {
     assert!(image.inline);
     assert_eq!(image.attachment_id, None);
     let data = image.data.as_ref().unwrap();
-    assert_eq!(data.len() as u64, image.size);
+    assert_eq!(u64::try_from(data.len()).unwrap(), image.size);
     assert!(data.starts_with(b"\x89PNG"));
 
     let pdf = &msg.parts[1];
@@ -105,13 +105,13 @@ fn latin1_single_part_message() {
     let msg = parse_gmail_payload(&fixture("latin1_plain.json"));
     assert_eq!(msg.text.as_deref(), Some("Grüße aus Köln - café"));
     assert_eq!(msg.html, None);
-    assert_eq!(msg.parts, [] as [ub_mime::PartInfo; 0]);
+    assert_eq!(msg.parts, Vec::<ub_mime::PartInfo>::new());
     assert_eq!(msg.subject, "Grüße");
     assert_eq!(
         msg.from,
         Some(Addr::named("Müller, Hans", "hans@example.de"))
     );
-    assert_eq!(msg.to, [] as [Addr; 0]);
+    assert_eq!(msg.to, Vec::<Addr>::new());
     assert_eq!(msg.date_ms, Some(1_736_238_600_000));
     assert_eq!(msg.message_id.as_deref(), Some("latin1@example.de"));
     assert!(msg.is_list);
@@ -141,7 +141,7 @@ fn metadata_only_payload() {
     assert_eq!(msg.date_ms, Some(1_736_345_700_000));
     assert_eq!(msg.html, None);
     assert_eq!(msg.text, None);
-    assert_eq!(msg.parts, [] as [ub_mime::PartInfo; 0]);
+    assert_eq!(msg.parts, Vec::<ub_mime::PartInfo>::new());
 }
 
 #[test]
@@ -155,6 +155,6 @@ fn empty_and_odd_payloads_do_not_panic() {
     ] {
         let msg = parse_gmail_payload(&payload);
         assert_eq!(msg.html, None);
-        assert_eq!(msg.parts, [] as [ub_mime::PartInfo; 0]);
+        assert_eq!(msg.parts, Vec::<ub_mime::PartInfo>::new());
     }
 }

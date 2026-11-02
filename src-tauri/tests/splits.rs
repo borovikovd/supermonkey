@@ -1,6 +1,6 @@
 //! Split routing (SPEC Split Inbox → Where a conversation lands).
 
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+#![expect(clippy::unwrap_used, reason = "Tests fail loudly on purpose.")]
 
 use rusqlite::params;
 use ubermensch_lib::model::*;
@@ -143,12 +143,6 @@ fn custom_splits_come_first_and_pins_beat_rules() {
         .find(|s| s.kind == SplitKind::Other)
         .unwrap()
         .id;
-    let important = t
-        .splits()
-        .into_iter()
-        .find(|s| s.kind == SplitKind::Important)
-        .unwrap()
-        .id;
     t.act(Action::Pin {
         account: 1,
         kind: PinKind::Label,
@@ -177,8 +171,6 @@ fn custom_splits_come_first_and_pins_beat_rules() {
     });
     assert_eq!(t.split_kind(ada), "other:Other");
     assert_eq!(t.split_kind(news), "other:Other");
-    // Undo restores the pin it replaced (none), so the label pin wins again.
-    let _ = important;
 }
 
 #[test]

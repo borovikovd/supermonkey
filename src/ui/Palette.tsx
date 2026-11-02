@@ -316,8 +316,7 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
       >
         <Command
           shouldFilter={!filtered}
-          value={filtered ? selected : undefined}
-          onValueChange={filtered ? setSelected : undefined}
+          {...(filtered ? { value: selected, onValueChange: setSelected } : {})}
           loop
           onKeyDown={(e) => {
             const start = performance.now();

@@ -1,7 +1,10 @@
 //! Shared harness for tests against the fake Gmail server.
 
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
-#![allow(dead_code)]
+#![expect(clippy::unwrap_used, reason = "Tests fail loudly on purpose.")]
+#![allow(
+    dead_code,
+    reason = "Shared by several test binaries; each uses a different subset."
+)]
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -27,7 +30,7 @@ pub struct Harness {
 
 impl Harness {
     pub async fn start(seed: impl FnOnce(&FakeUser)) -> Harness {
-        let fake = FakeGmail::start().await;
+        let fake = FakeGmail::start();
         let user = fake.add_user(ME);
         user.set_display_name("Me");
         seed(&user);
@@ -123,17 +126,17 @@ impl Harness {
 }
 
 pub fn seed(u: &FakeUser) {
-    let a = u.add_message(NewMessage::inbox(
+    let a = u.add_message(&NewMessage::inbox(
         "Ada <ada@acme.io>",
         "Q3 plan",
         "Numbers attached.",
     ));
-    u.add_message(NewMessage {
+    u.add_message(&NewMessage {
         thread_id: Some(a.thread_id.clone()),
         in_reply_to: Some(a.rfc822_message_id.clone()),
         ..NewMessage::inbox("Grace <grace@acme.io>", "Re: Q3 plan", "Looks good.")
     });
-    u.add_message(NewMessage {
+    u.add_message(&NewMessage {
         html: Some("<p>Hello <b>there</b><script>alert(1)</script></p>".into()),
         text: None,
         ..NewMessage::inbox("Linus <linus@kernel.org>", "Patch", "")

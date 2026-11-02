@@ -38,7 +38,6 @@ pub enum Effect {
     FetchThread {
         account: AccountId,
         thread: ThreadId,
-        open: bool,
     },
     /// Run a Gmail search or view listing for a subscription.
     GmailList {
@@ -232,7 +231,8 @@ impl Writer {
                 Ok(())
             }
         });
-        rx.await.map_err(|_| anyhow::anyhow!("writer stopped"))?
+        rx.await
+            .map_err(|e| anyhow::anyhow!("writer stopped: {e}"))?
     }
 
     /// Blocking variant of `call` for non-async code (tests, setup).
@@ -251,7 +251,8 @@ impl Writer {
                 Ok(())
             }
         });
-        rx.recv().map_err(|_| anyhow::anyhow!("writer stopped"))?
+        rx.recv()
+            .map_err(|e| anyhow::anyhow!("writer stopped: {e}"))?
     }
 
     /// Sets where channel messages go (the webview's channel).
@@ -336,7 +337,9 @@ impl WriterState {
         if let Err(e) = result {
             log::warn!("action {n} rejected: {e:#}");
             // The rejected action still moves ack, so the mirror falls back to Rust's state.
-            let _ = self.transact(Some(n), |_| Ok(()));
+            if let Err(e) = self.transact(Some(n), |_| Ok(())) {
+                log::error!("ack for rejected action {n} failed: {e:#}");
+            }
         }
     }
 

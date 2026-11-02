@@ -2,8 +2,8 @@
 name = "ubermensch"
 version = "0.1.0"
 description = "A keyboard-first Gmail client for macOS"
-edition = "2024"
-rust-version = "1.90"
+edition.workspace = true
+rust-version.workspace = true
 default-run = "ubermensch"
 
 [lib]
@@ -35,20 +35,13 @@ rusqlite = { version = "0.40", features = ["bundled", "functions"] }
 crossbeam-channel = "0.5"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util"] }
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "query", "form"] }
-oauth2 = { version = "5", default-features = false }
-keyring = "4"
-ammonia = "4"
-mail-builder = "2"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
-thiserror = "2"
 anyhow = "1"
 log = "0.4"
 rand = "0.9"
-url = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 html-escape = "0.3"
-regex = "1"
 parking_lot = "0.12"
 axum = "0.8"
 tokio-stream = "0.1"
@@ -71,6 +64,11 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "test-
 [lints]
 workspace = true
 
+[workspace.package]
+# An application, not a library: its minimum Rust is the pinned toolchain.
+edition = "2024"
+rust-version = "1.99"
+
 [workspace]
 members = [".", "crates/ub-mime", "crates/ub-gmail", "crates/ub-fake-gmail", "crates/ub-rules"]
 resolver = "3"
@@ -85,8 +83,6 @@ unused_qualifications = "warn"
 all = { level = "deny", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 # Pedantic lints that do not fit an application crate:
-# - names like `drafts::DraftRow` are clearer than renamed ones;
-module_name_repetitions = "allow"
 # - `#[must_use]` on every getter adds noise; real must-use types are marked;
 must_use_candidate = "allow"
 # - errors are anyhow chains with context, and nothing here is a published API;
@@ -101,3 +97,12 @@ unimplemented = "deny"
 unwrap_used = "warn"
 print_stdout = "warn"
 print_stderr = "warn"
+# Exceptions are `#[expect(lint, reason = "...")]`, so a stale one is reported.
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+# A guard held through a `match` or `if let` body is a deadlock waiting to happen.
+significant_drop_in_scrutinee = "warn"
+# Keep the cause when mapping errors.
+map_err_ignore = "warn"
+# Numeric conversions are explicit (`From` / `try_from`), never `as`.
+as_conversions = "warn"

@@ -30,6 +30,12 @@ export default defineConfig({
       // Off: this rule is for the legacy JSX transform; tsconfig uses the automatic
       // runtime ("jsx": "react-jsx"), so React is never in scope by design.
       "react/react-in-jsx-scope": "off",
+      "react/no-danger": "error",
+      "react/jsx-no-target-blank": "error",
+      // Surface components the React Compiler skips instead of silently leaving them unmemoized.
+      "react/todo": "error",
+      "react/unsupported-syntax": "error",
+      "react/rule-suppression": "error",
 
       // Type-aware TypeScript.
       "typescript/no-floating-promises": "error",
@@ -37,13 +43,24 @@ export default defineConfig({
       "typescript/await-thenable": "error",
       "typescript/no-explicit-any": "error",
       "typescript/no-unsafe-argument": "error",
+      "typescript/no-unsafe-assignment": "error",
+      "typescript/no-unsafe-call": "error",
+      "typescript/no-unsafe-member-access": "error",
+      "typescript/no-unsafe-return": "error",
+      "typescript/no-unsafe-function-type": "error",
+      "typescript/no-empty-object-type": "error",
+      "typescript/only-throw-error": "error",
+      "typescript/prefer-promise-reject-errors": "error",
+      "typescript/restrict-plus-operands": "error",
+      "typescript/require-await": "error",
+      "typescript/return-await": ["error", "in-try-catch"],
+      "typescript/no-deprecated": "error",
+      "typescript/use-unknown-in-catch-callback-variable": "error",
+      "typescript/ban-ts-comment": "error",
       "typescript/no-non-null-assertion": "error",
       "typescript/no-unnecessary-type-assertion": "error",
       "typescript/consistent-type-imports": "error",
-      "typescript/switch-exhaustiveness-check": [
-        "error",
-        { considerDefaultExhaustiveForUnions: true },
-      ],
+      "typescript/switch-exhaustiveness-check": "error",
       "typescript/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
       // `||` stays allowed on strings: an empty display name falls back to the address.
       "typescript/prefer-nullish-coalescing": ["error", { ignorePrimitives: { string: true } }],
@@ -57,6 +74,15 @@ export default defineConfig({
       eqeqeq: ["error", "always", { null: "ignore" }],
       "no-console": ["error", { allow: ["warn", "error"] }],
       "no-debugger": "error",
+      "no-empty": "error",
+      "no-var": "error",
+      "prefer-const": "error",
+      "no-throw-literal": "error",
+      "array-callback-return": "error",
+      "no-self-compare": "error",
+      "no-param-reassign": "error",
+      // A disable must name the rules it turns off.
+      "unicorn/no-abusive-eslint-disable": "error",
       "import/no-cycle": "error",
       "import/no-duplicates": "error",
       // CSS is imported for its side effect.
@@ -94,7 +120,7 @@ export default defineConfig({
 
   // Pre-commit: format and lint the staged files.
   staged: {
-    "*.{ts,tsx,js,json,css,md,html}": "vp check --fix",
+    "*.{ts,tsx,js,json,css,md,html}": "vp check --fix --no-error-on-unmatched-pattern",
     "*.rs": "rustfmt --edition 2024",
   },
 

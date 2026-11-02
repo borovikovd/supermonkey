@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 
 import { act, signInAgain } from "../ipc/bridge";
 import type { AccountInfo, SplitInfo } from "../ipc/types";
@@ -249,14 +249,13 @@ const STARTERS: [string, string][] = [
 function Splits() {
   const { account } = useCurrent();
   const summary = useSummary(account);
-  const [rows, setRows] = useState<SplitInfo[]>([]);
+  // Unedited, the sheet shows the live splits; the first edit takes a copy.
+  const [draft, setRows] = useState<SplitInfo[] | null>(null);
   const [deleted, setDeleted] = useState<number[]>([]);
-  useEffect(() => {
-    if (summary) setRows(summary.splits);
-    // Only on open.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summary === null]);
+  // New splits get negative ids until saved.
+  const nextNewId = useRef(-1);
   if (!summary || account === null) return null;
+  const rows = draft ?? summary.splits;
   const update = (i: number, patch: Partial<SplitInfo>) =>
     setRows(rows.map((r, j) => (i === j ? { ...r, ...patch } : r)));
   const move = (i: number, d: number) => {
@@ -270,13 +269,14 @@ function Splits() {
     next[j] = a;
     setRows(next);
   };
-  let tmp = -1;
-  const add = (name: string, query: string) =>
-    setRows((r) => {
+  const add = (name: string, query: string) => {
+    const id = nextNewId.current--;
+    setRows((current) => {
+      const r = current ?? summary.splits;
       // Custom splits come first, then Important, then Other.
       const fixed = r.findIndex((x) => x.kind !== "custom");
       const s: SplitInfo = {
-        id: tmp--,
+        id,
         name,
         kind: "custom",
         query,
@@ -286,6 +286,7 @@ function Splits() {
       };
       return fixed < 0 ? [...r, s] : [...r.slice(0, fixed), s, ...r.slice(fixed)];
     });
+  };
   return (
     <Sheet title={`Split Inbox · ${summary.account.email}`}>
       {rows.map((s, i) => (

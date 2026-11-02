@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+#![expect(clippy::unwrap_used, reason = "Tests fail loudly on purpose.")]
 use mail_parser::{MessageParser, MessagePart};
 use ub_mime::{
     Addr, InlinePart, OutAttachment, Outgoing, QuoteSource, build_mime, data_images_to_cid,

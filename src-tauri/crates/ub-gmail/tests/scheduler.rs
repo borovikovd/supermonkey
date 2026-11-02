@@ -1,7 +1,5 @@
 //! Priority order, the in-flight cap, and the quota bucket rules, on tokio's paused clock.
 
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

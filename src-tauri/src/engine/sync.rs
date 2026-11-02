@@ -1,5 +1,6 @@
 //! Connect sync, history polling, and full resync (SPEC Sync).
 
+use crate::LogErr as _;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -73,7 +74,7 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
         }
         polls += 1;
         if polls.is_multiple_of(20) {
-            let _ = refresh_send_as(&e, &rt).await;
+            refresh_send_as(&e, &rt).await.log_err("refresh_send_as");
         }
         let offline = !e.online.load(std::sync::atomic::Ordering::Relaxed);
         super::wait(
@@ -120,8 +121,7 @@ pub async fn connect(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailErro
     refresh_labels(e, rt).await?;
     let account = rt.id;
     let history = profile.history_id.to_string();
-    let _ = e
-        .writer
+    e.writer
         .call(move |ctx| {
             ctx.tx.execute(
                 "UPDATE accounts SET history_id = ?2, connected = 1, last_sync = ?3 WHERE id = ?1",
@@ -130,7 +130,8 @@ pub async fn connect(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailErro
             ctx.touch_summary(account);
             Ok(())
         })
-        .await;
+        .await
+        .log_err("connect");
     // Newest first, metadata then body (SPEC Sync).
     rt.work.push(
         work::INBOX_META,
@@ -208,7 +209,7 @@ pub async fn refresh_labels(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), Gm
         .run(Priority::P3, cost::LABELS_LIST, rt.gmail.list_labels())
         .await?;
     let account = rt.id;
-    let _ = e
+    e
         .writer
         .call(move |ctx| {
             let gmail_ids: HashSet<String> = labels.iter().map(|l| l.id.clone()).collect();
@@ -244,7 +245,8 @@ pub async fn refresh_labels(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), Gm
             ctx.touch_summary(account);
             Ok(())
         })
-        .await;
+        .await
+        .log_err("refresh_labels");
     Ok(())
 }
 
@@ -359,10 +361,10 @@ pub async fn fetch_thread(
             Ok(r.ok())
         }
         Err(err) if matches!(err.outcome, Outcome::NotFound) => {
-            let _ = e
-                .writer
+            e.writer
                 .call(move |ctx| drop_thread(ctx, account, &gid))
-                .await;
+                .await
+                .log_err("fetch_thread");
             Ok(None)
         }
         Err(err) => Err(err),
@@ -390,8 +392,8 @@ pub fn drop_thread(
     crate::threads::refresh(ctx, t)
 }
 
-/// A thread the user opens (priority 2), or a prefetched neighbor.
-pub async fn fetch_opened(e: EngineRef, rt: Arc<AccountRt>, thread: ThreadId, _open: bool) {
+/// A thread the user opens, or a prefetched neighbor: both priority 2.
+pub async fn fetch_opened(e: EngineRef, rt: Arc<AccountRt>, thread: ThreadId) {
     let gid: Option<String> = e
         .reads
         .with(|c| {
@@ -636,8 +638,7 @@ pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> 
 }
 
 async fn store_cursor(e: &EngineRef, account: AccountId, history: u64) {
-    let _ = e
-        .writer
+    e.writer
         .call(move |ctx| {
             ctx.tx.execute(
                 "UPDATE accounts SET history_id = ?2, last_sync = ?3 WHERE id = ?1",
@@ -645,7 +646,8 @@ async fn store_cursor(e: &EngineRef, account: AccountId, history: u64) {
             )?;
             Ok(())
         })
-        .await;
+        .await
+        .log_err("store_cursor");
 }
 
 /// Full resync steps 3 and 4: drop cached threads Gmail no longer has (only
@@ -682,10 +684,10 @@ async fn reconcile_cached(
                 {
                     let account = rt.id;
                     let gid = gid.clone();
-                    let _ = e
-                        .writer
+                    e.writer
                         .call(move |ctx| drop_thread(ctx, account, &gid))
-                        .await;
+                        .await
+                        .log_err("reconcile_cached");
                 }
             }
             // 4. Refetch metadata, which replaces labels, where historyId changed.

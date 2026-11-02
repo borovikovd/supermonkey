@@ -31,7 +31,9 @@ pub fn start(app: AppHandle) {
         match tokio::net::TcpListener::bind("127.0.0.1:1430").await {
             Ok(listener) => {
                 log::info!("web bridge on http://127.0.0.1:1430");
-                let _ = axum::serve(listener, router).await;
+                if let Err(e) = axum::serve(listener, router).await {
+                    log::warn!("web bridge stopped: {e}");
+                }
             }
             Err(e) => log::warn!("web bridge: {e}"),
         }
@@ -73,7 +75,10 @@ fn arg<T: serde::de::DeserializeOwned>(v: &Value, k: &str) -> Result<T, String> 
         .map_err(|e| format!("{k}: {e}"))
 }
 
-#[allow(clippy::too_many_lines)] // One short arm per command (debug only).
+#[expect(
+    clippy::too_many_lines,
+    reason = "One short arm per command (debug only)."
+)]
 async fn invoke(
     State(app): State<AppHandle>,
     Path(cmd): Path<String>,

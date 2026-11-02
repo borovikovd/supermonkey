@@ -1,6 +1,6 @@
 //! Sign-in, refresh, revoke and token storage against the fake's OAuth endpoints.
 
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+#![expect(clippy::unwrap_used, reason = "Tests fail loudly on purpose.")]
 
 mod common;
 
@@ -25,7 +25,7 @@ fn browser(http: &reqwest::Client) -> impl FnOnce(&str) + use<> {
 
 #[tokio::test]
 async fn loopback_sign_in_end_to_end() {
-    let fake = FakeGmail::start().await;
+    let fake = FakeGmail::start();
     fake.add_user(ME);
     let cfg = oauth_config(&fake);
     let http = default_http_client();
@@ -73,7 +73,7 @@ async fn loopback_sign_in_end_to_end() {
 
 #[tokio::test]
 async fn sign_in_rejects_a_wrong_state() {
-    let fake = FakeGmail::start().await;
+    let fake = FakeGmail::start();
     fake.add_user(ME);
     let http = default_http_client();
     let forger = http.clone();
@@ -102,7 +102,7 @@ async fn sign_in_rejects_a_wrong_state() {
 
 #[tokio::test]
 async fn sign_in_reports_a_denied_consent() {
-    let fake = FakeGmail::start().await;
+    let fake = FakeGmail::start();
     let http = default_http_client();
     let browser = http.clone();
     let result = authorize(&oauth_config(&fake), &http, move |url: &str| {
@@ -128,7 +128,7 @@ async fn sign_in_reports_a_denied_consent() {
 
 #[tokio::test]
 async fn token_source_caches_and_refreshes_before_expiry() {
-    let fake = FakeGmail::start().await;
+    let fake = FakeGmail::start();
     let user = fake.add_user(ME);
     let http = default_http_client();
     let tokens = OAuthTokens::new(oauth_config(&fake), http.clone(), user.refresh_token());
@@ -148,7 +148,7 @@ async fn token_source_caches_and_refreshes_before_expiry() {
 
 #[tokio::test]
 async fn concurrent_401s_share_one_refresh() {
-    let (fake, _user, gmail) = setup().await;
+    let (fake, _user, gmail) = setup();
     gmail.get_profile().await.unwrap();
     fake.expire_access_tokens();
     let handles: Vec<_> = (0..6)
@@ -165,7 +165,7 @@ async fn concurrent_401s_share_one_refresh() {
 
 #[tokio::test]
 async fn refresh_maps_invalid_grant() {
-    let fake = FakeGmail::start().await;
+    let fake = FakeGmail::start();
     let user = fake.add_user(ME);
     let http = default_http_client();
     let cfg = oauth_config(&fake);
@@ -181,7 +181,7 @@ async fn refresh_maps_invalid_grant() {
 
 #[tokio::test]
 async fn revoke_kills_the_grant_and_is_idempotent() {
-    let fake = FakeGmail::start().await;
+    let fake = FakeGmail::start();
     let user = fake.add_user(ME);
     let http = default_http_client();
     let cfg = oauth_config(&fake);

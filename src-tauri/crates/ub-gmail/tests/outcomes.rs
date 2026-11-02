@@ -1,7 +1,5 @@
 //! Every Gmail call ends in one Outcome (SPEC: Gmail errors), checked against the fake.
 
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
-
 mod common;
 
 use std::time::Duration;
@@ -16,7 +14,7 @@ fn outcome<T: std::fmt::Debug>(result: Result<T, GmailError>) -> Outcome {
 
 #[tokio::test]
 async fn refused_connection_is_offline_and_recovers() {
-    let (fake, _user, gmail) = setup().await;
+    let (fake, _user, gmail) = setup();
     gmail.get_profile().await.unwrap();
 
     fake.set_offline(true).await;
@@ -28,7 +26,7 @@ async fn refused_connection_is_offline_and_recovers() {
 
 #[tokio::test]
 async fn dropped_connection_after_send_is_no_response() {
-    let (fake, _user, gmail) = setup().await;
+    let (fake, _user, gmail) = setup();
     fake.inject(Matcher::new("GET", "*/profile").once(), Fault::Drop);
     assert_eq!(outcome(gmail.get_profile().await), Outcome::NoResponse);
     assert!(gmail.get_profile().await.is_ok());
@@ -36,7 +34,7 @@ async fn dropped_connection_after_send_is_no_response() {
 
 #[tokio::test]
 async fn read_timeout_is_no_response() {
-    let (fake, user, _) = setup().await;
+    let (fake, user, _) = setup();
     let http = reqwest::Client::builder()
         .read_timeout(Duration::from_millis(200))
         .build()
@@ -56,7 +54,7 @@ async fn read_timeout_is_no_response() {
 
 #[tokio::test]
 async fn expired_token_refreshes_once_and_retries() {
-    let (fake, _user, gmail) = setup().await;
+    let (fake, _user, gmail) = setup();
     gmail.get_profile().await.unwrap();
     assert_eq!(fake.count("POST", "/token"), 1);
 
@@ -68,7 +66,7 @@ async fn expired_token_refreshes_once_and_retries() {
 
 #[tokio::test]
 async fn persistent_401_is_unauthorized_after_one_refresh() {
-    let (fake, _user, gmail) = setup().await;
+    let (fake, _user, gmail) = setup();
     fake.inject(
         Matcher::new("GET", "*/profile"),
         Fault::status(401, "authError"),
@@ -80,7 +78,7 @@ async fn persistent_401_is_unauthorized_after_one_refresh() {
 
 #[tokio::test]
 async fn rejected_refresh_token_is_invalid_grant() {
-    let (fake, user, gmail) = setup().await;
+    let (fake, user, gmail) = setup();
     gmail.get_profile().await.unwrap();
     user.set_invalid_grant(true);
     fake.expire_access_tokens();
@@ -89,7 +87,7 @@ async fn rejected_refresh_token_is_invalid_grant() {
 
 #[tokio::test]
 async fn rate_limits_classify_with_retry_after() {
-    let (fake, _user, gmail) = setup().await;
+    let (fake, _user, gmail) = setup();
     fake.inject(
         Matcher::new("GET", "*/labels").once(),
         Fault::Status {
@@ -122,7 +120,7 @@ async fn rate_limits_classify_with_retry_after() {
 
 #[tokio::test]
 async fn other_403_is_a_rejection() {
-    let (fake, _user, gmail) = setup().await;
+    let (fake, _user, gmail) = setup();
     fake.inject(
         Matcher::new("GET", "*/labels").once(),
         Fault::status(403, "insufficientPermissions"),
@@ -136,7 +134,7 @@ async fn other_403_is_a_rejection() {
 
 #[tokio::test]
 async fn server_errors_classify_as_server_error() {
-    let (fake, _user, gmail) = setup().await;
+    let (fake, _user, gmail) = setup();
     for status in [500, 502, 503] {
         fake.inject(
             Matcher::new("GET", "*/profile").once(),
@@ -151,7 +149,7 @@ async fn server_errors_classify_as_server_error() {
 
 #[tokio::test]
 async fn missing_items_are_not_found() {
-    let (_fake, _user, gmail) = setup().await;
+    let (_fake, _user, gmail) = setup();
     assert_eq!(
         outcome(
             gmail
@@ -180,7 +178,7 @@ async fn missing_items_are_not_found() {
 
 #[tokio::test]
 async fn duplicate_label_is_conflict() {
-    let (_fake, _user, gmail) = setup().await;
+    let (_fake, _user, gmail) = setup();
     let label = gmail.create_label("Receipts").await.unwrap();
     assert_eq!(label.name, "Receipts");
     assert_eq!(label.label_type, Some(ub_gmail::LabelType::User));
@@ -192,8 +190,8 @@ async fn duplicate_label_is_conflict() {
 
 #[tokio::test]
 async fn other_4xx_is_rejected_with_googles_message() {
-    let (_fake, user, gmail) = setup().await;
-    let msg = user.add_message(ub_fake_gmail::NewMessage::inbox("a@x.com", "Hi", "Body"));
+    let (_fake, user, gmail) = setup();
+    let msg = user.add_message(&ub_fake_gmail::NewMessage::inbox("a@x.com", "Hi", "Body"));
     let outcome = outcome(
         gmail
             .batch_modify(&[msg.id], &["Label_404".into()], &[])
@@ -210,9 +208,9 @@ async fn other_4xx_is_rejected_with_googles_message() {
 
 #[tokio::test]
 async fn history_older_than_the_floor_is_not_found() {
-    let (_fake, user, gmail) = setup().await;
+    let (_fake, user, gmail) = setup();
     let start = gmail.get_profile().await.unwrap().history_id;
-    user.add_message(ub_fake_gmail::NewMessage::inbox("a@x.com", "Hi", "Body"));
+    user.add_message(&ub_fake_gmail::NewMessage::inbox("a@x.com", "Hi", "Body"));
     assert_eq!(
         gmail.list_history(start, None).await.unwrap().history.len(),
         1
@@ -227,8 +225,8 @@ async fn history_older_than_the_floor_is_not_found() {
 
 #[tokio::test]
 async fn send_with_no_response_still_sends_and_drafts_get_says_404() {
-    let (fake, user, gmail) = setup().await;
-    let thread = user.add_message(ub_fake_gmail::NewMessage::inbox(
+    let (fake, user, gmail) = setup();
+    let thread = user.add_message(&ub_fake_gmail::NewMessage::inbox(
         "ann@example.com",
         "Plan",
         "Hi",
@@ -261,7 +259,7 @@ async fn send_with_no_response_still_sends_and_drafts_get_says_404() {
 
 #[tokio::test]
 async fn create_with_no_response_leaves_a_draft_findable_by_header() {
-    let (fake, user, gmail) = setup().await;
+    let (fake, user, gmail) = setup();
     fake.inject(Matcher::new("POST", "*/drafts").once(), Fault::NoResponse);
     assert_eq!(
         outcome(

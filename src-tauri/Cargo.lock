@@ -5389,7 +5389,6 @@ dependencies = [
 name = "ubermensch"
 version = "0.1.0"
 dependencies = [
- "ammonia",
  "anyhow",
  "axum",
  "base64 0.22.1",
@@ -5397,14 +5396,10 @@ dependencies = [
  "crossbeam-channel",
  "futures-util",
  "html-escape",
- "keyring",
  "log",
- "mail-builder",
- "oauth2",
  "parking_lot",
  "proptest",
  "rand 0.9.5",
- "regex",
  "reqwest",
  "rusqlite",
  "serde",
@@ -5416,7 +5411,6 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
  "tempfile",
- "thiserror 2.0.21",
  "tokio",
  "tokio-stream",
  "ts-rs",
@@ -5424,7 +5418,6 @@ dependencies = [
  "ub-gmail",
  "ub-mime",
  "ub-rules",
- "url",
  "uuid",
 ]
 

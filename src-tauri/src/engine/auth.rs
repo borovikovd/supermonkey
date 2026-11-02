@@ -1,5 +1,6 @@
 //! Google sign-in (SPEC Accounts): system browser, loopback redirect, PKCE.
 
+use crate::LogErr as _;
 use std::sync::Arc;
 
 use tauri::{AppHandle, Manager};
@@ -97,8 +98,17 @@ pub async fn sign_in_again(app: &AppHandle, account: AccountId) -> anyhow::Resul
 pub async fn forget(e: EngineRef, account: AccountId, email: String) {
     e.stop_account(account);
     if let Ok(Some(token)) = e.store.load_refresh_token(&email) {
-        let _ = ub_gmail::revoke(&e.config.oauth, &e.http, &token).await;
+        ub_gmail::revoke(&e.config.oauth, &e.http, &token)
+            .await
+            .log_err("revoke token");
     }
-    let _ = e.store.delete_refresh_token(&email);
-    let _ = std::fs::remove_dir_all(super::attachments::account_dir(&e, account));
+    e.store
+        .delete_refresh_token(&email)
+        .log_err("delete refresh token");
+    match std::fs::remove_dir_all(super::attachments::account_dir(&e, account)) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+            log::warn!("delete attachments of account {account}: {err}");
+        }
+        _ => {}
+    }
 }

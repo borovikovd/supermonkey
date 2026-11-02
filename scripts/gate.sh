@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
 # Gates before a build step is called done (SPEC Testing):
-# vp check (format, lint, type check), vp test, cargo fmt, cargo test
-# (which regenerates the bindings), cargo clippy with and without the demo feature,
+# cargo test first (it regenerates the bindings the TypeScript checks read),
+# then vp check (format, lint, type check), tsc on both projects, vp test,
+# cargo fmt, cargo clippy with and without the demo feature, rustdoc warnings,
 # and the committed bindings must match the generated ones.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+(cd src-tauri && cargo test --workspace -q)
 vp check
+node_modules/.bin/tsc -p tsconfig.app.json --noEmit
+node_modules/.bin/tsc -p tsconfig.node.json --noEmit
 vp test
 (
   cd src-tauri
   cargo fmt --all --check
-  cargo test --workspace -q
   cargo clippy --workspace --all-targets -q -- -D warnings
   cargo clippy --workspace --all-targets --features fake -q -- -D warnings
+  RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps -q
 )
 if [ -n "$(git status --porcelain src/bindings)" ] && git rev-parse HEAD >/dev/null 2>&1 && git ls-files --error-unmatch src/bindings >/dev/null 2>&1; then
   git diff --stat -- src/bindings

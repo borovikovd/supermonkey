@@ -272,7 +272,7 @@ impl Mailbox {
     }
 
     /// A message in the shape `format` asks for.
-    pub fn message_json(&self, msg: &Msg, format: &str, metadata_headers: &[String]) -> Value {
+    pub fn message_json(msg: &Msg, format: &str, metadata_headers: &[String]) -> Value {
         let mut out = json!({
             "id": msg.id,
             "threadId": msg.thread_id,
@@ -327,7 +327,7 @@ impl Mailbox {
             "id": thread_id,
             "snippet": last.snippet,
             "historyId": messages.iter().map(|m| m.history_id).max().unwrap_or_default().to_string(),
-            "messages": messages.iter().map(|m| self.message_json(m, format, headers)).collect::<Vec<_>>(),
+            "messages": messages.iter().map(|m| Mailbox::message_json(m, format, headers)).collect::<Vec<_>>(),
         }))
     }
 

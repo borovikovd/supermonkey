@@ -240,7 +240,9 @@ async fn token_request(
         .await
         .map_err(|e| error::from_transport(&e))?;
     if status.is_success() {
-        return serde_json::from_str(&body).map_err(|_| Outcome::NoResponse.into());
+        return serde_json::from_str(&body).map_err(|e| {
+            GmailError::with_detail(Outcome::NoResponse, format!("token response: {e}"))
+        });
     }
     // OAuth errors are `{"error": "...", "error_description": "..."}`, not Google API errors.
     if let Ok(err) = serde_json::from_str::<TokenErrorBody>(&body) {

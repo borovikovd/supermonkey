@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { keyString, subIdFor, subscribe, unsubscribe } from "../ipc/bridge";
 import type { AccountSummary, AppState, ConversationData, DraftState, SubKey } from "../ipc/types";
@@ -8,13 +8,15 @@ import { useMirror } from "./mirror";
 
 /** Keeps a subscription open while the component is mounted. */
 export function useSubscription(key: SubKey | null): string | undefined {
+  // Callers build a fresh key object on every render; keep one per value.
+  const [stable, setStable] = useState(key);
   const k = key ? keyString(key) : null;
+  if (k !== (stable ? keyString(stable) : null)) setStable(key);
   useEffect(() => {
-    if (!key) return;
-    subscribe(key);
-    return () => unsubscribe(key);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [k]);
+    if (!stable) return;
+    subscribe(stable);
+    return () => unsubscribe(stable);
+  }, [stable]);
   return key ? subIdFor(key) : undefined;
 }
 

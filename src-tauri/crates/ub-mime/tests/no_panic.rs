@@ -1,7 +1,5 @@
 //! Random input built from the characters these parsers care about must never panic.
 
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
-
 use std::collections::HashMap;
 
 use ub_mime::{
@@ -65,7 +63,7 @@ fn random_inputs() -> impl Iterator<Item = String> {
         state
     };
     (0..3000).map(move |_| {
-        let len = (next() % 40) as usize;
+        let len = usize::try_from(next() % 40).unwrap_or(0);
         (0..len)
             .map(|_| PIECES[usize::try_from(next()).unwrap_or(0) % PIECES.len()])
             .collect()

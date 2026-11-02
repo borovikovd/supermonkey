@@ -169,7 +169,10 @@ const viewLabel = (view: View): string | null => {
       return "SPAM";
     case "label":
       return view.label;
-    default:
+    // Views not backed by one Gmail label.
+    case "done":
+    case "drafts":
+    case "snoozed":
       return null;
   }
 };
@@ -198,7 +201,11 @@ export function removesFrom(m: ModifyAction, key: SubKey): boolean {
       const label = viewLabel(key.view);
       return label !== null && m.remove.includes(label);
     }
-    default:
+    // Read state, stars, and added labels keep a row where it is.
+    case "label":
+    case "read":
+    case "star":
+    case "unread":
       return false;
   }
 }

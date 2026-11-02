@@ -148,7 +148,7 @@ const isSnoozed = (threads: number[]) => threads.some((t) => rowOf(String(t))?.s
 export const markDone = () => {
   const t = targets();
   if (currentView()?.kind === "done") return;
-  modify("done", [], ["INBOX"], { snooze: isSnoozed(t) ? { kind: "clear" } : undefined });
+  modify("done", [], ["INBOX"], { snooze: isSnoozed(t) ? { kind: "clear" } : null });
 };
 
 export const returnToInbox = () => {
@@ -156,7 +156,7 @@ export const returnToInbox = () => {
   const t = targets();
   const remove = view?.kind === "trash" ? ["TRASH"] : view?.kind === "spam" ? ["SPAM"] : [];
   modify("returnToInbox", ["INBOX"], remove, {
-    snooze: isSnoozed(t) ? { kind: "clear" } : undefined,
+    snooze: isSnoozed(t) ? { kind: "clear" } : null,
   });
 };
 

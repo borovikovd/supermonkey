@@ -19,6 +19,18 @@ import { closeComposerOnScreen, discardOnScreen, openComposer, sendOnScreen } fr
 
 const SAVE_DELAY = 500;
 
+// Re-added with keys that do not clash with the compose table.
+const StrikeKeys = Strike.extend({
+  addKeyboardShortcuts() {
+    return { "Mod-Shift-x": () => this.editor.commands.toggleStrike() };
+  },
+});
+const HardBreakKeys = HardBreak.extend({
+  addKeyboardShortcuts() {
+    return { "Shift-Enter": () => this.editor.commands.setHardBreak() };
+  },
+});
+
 const fmt = (a: Addr | null) => (a ? (a.name ? `${a.name} <${a.email}>` : a.email) : "");
 
 function QuoteBlock({ html }: { html: string }) {
@@ -131,16 +143,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
         horizontalRule: false,
         link: { openOnClick: false, autolink: true },
       }),
-      Strike.extend({
-        addKeyboardShortcuts() {
-          return { "Mod-Shift-x": () => this.editor.commands.toggleStrike() };
-        },
-      }),
-      HardBreak.extend({
-        addKeyboardShortcuts() {
-          return { "Shift-Enter": () => this.editor.commands.setHardBreak() };
-        },
-      }),
+      StrikeKeys,
+      HardBreakKeys,
       Placeholder.configure({ placeholder: inline ? "Write a reply…" : "Write a message…" }),
     ],
     content: "",

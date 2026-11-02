@@ -34,8 +34,10 @@ Lint setup:
 - TypeScript: Oxlint through Vite+ with type-aware rules and type checking
   (`vite.config.ts`). Correctness, suspicious, and perf rules are errors, and
   warnings fail the check. `tsconfig` is `strict` with
-  `noUncheckedIndexedAccess`. The React Compiler (the Rust port,
-  `oxc-transform-react`) compiles every component.
+  `noUncheckedIndexedAccess` and `exactOptionalPropertyTypes`. The React
+  Compiler (the Rust port, `oxc-transform-react`) compiles every component
+  except the list, which TanStack Virtual keeps out (marked in `ListView.tsx`);
+  lint fails on any other component the compiler would skip.
 - Rust: workspace lints in `src-tauri/Cargo.toml`. Clippy `all` is denied and
   `pedantic` is on, `unsafe_code` is forbidden, and `unwrap` is flagged
   outside tests. `rustfmt.toml` and `clippy.toml` sit next to it.

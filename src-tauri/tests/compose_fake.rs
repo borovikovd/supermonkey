@@ -1,7 +1,7 @@
 //! Drafts, the outbox, undo send, and `drafts.create` recovery against the
 //! fake Gmail server (SPEC Testing → Fake Gmail).
 
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+#![expect(clippy::unwrap_used, reason = "Tests fail loudly on purpose.")]
 
 mod common;
 

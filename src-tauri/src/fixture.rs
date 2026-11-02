@@ -147,7 +147,10 @@ fn body(rng: &mut StdRng) -> (String, String) {
 }
 
 /// Writes fixture data into the database at `path` (created if missing).
-#[allow(clippy::too_many_lines)] // Linear test-data generation, read top to bottom.
+#[expect(
+    clippy::too_many_lines,
+    reason = "Linear test-data generation, read top to bottom."
+)]
 pub fn generate(path: &Path, size: &Size, accounts: &[&str]) -> anyhow::Result<()> {
     let mut conn = crate::db::open_writer(path)?;
     let mut rng = StdRng::seed_from_u64(7);

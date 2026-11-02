@@ -126,7 +126,7 @@ mod tests {
         let old = entries(&[1, 2, 3, 4, 5], |_| None);
         let new = entries(&[1, 3, 4, 2, 5], |_| None);
         let (removed, moved) = diff(&old, &new);
-        assert_eq!(removed, [] as [String; 0]);
+        assert_eq!(removed, Vec::<String>::new());
         assert_eq!(moved.len(), 1);
         assert_eq!(moved[0].key, "2");
         assert_eq!(apply(&old, &removed, &moved), new);

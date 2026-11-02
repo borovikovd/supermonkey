@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "Shared by several test binaries; each uses a different subset."
+)]
 
 use std::sync::Arc;
 
@@ -19,8 +22,8 @@ pub fn oauth_config(fake: &FakeGmail) -> OAuthConfig {
 }
 
 /// A fake with one user and a client wired as the app wires it.
-pub async fn setup() -> (FakeGmail, FakeUser, Gmail) {
-    let fake = FakeGmail::start().await;
+pub fn setup() -> (FakeGmail, FakeUser, Gmail) {
+    let fake = FakeGmail::start();
     let user = fake.add_user(ME);
     let gmail = client_for(&fake, &user);
     (fake, user, gmail)

@@ -17,7 +17,7 @@ use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig, URL_
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::mailbox::{Mailbox, label_json};
+use crate::mailbox::{Mailbox, Missing, label_json};
 use crate::{AuthCode, Shared};
 
 type AppState = Arc<Shared>;
@@ -205,7 +205,8 @@ fn paginate<T: Clone>(items: &[T], (offset, size): (usize, usize)) -> (Vec<T>, O
 }
 
 fn json_body(body: &Bytes) -> ApiResult<Value> {
-    serde_json::from_slice(body).map_err(|_| bad_request("Invalid JSON payload received."))
+    serde_json::from_slice(body)
+        .map_err(|e| bad_request(&format!("Invalid JSON payload received: {e}")))
 }
 
 fn string_list(value: &Value) -> Vec<String> {
@@ -277,7 +278,7 @@ async fn list_history(
             .get("startHistoryId")
             .and_then(|v| v.parse().ok())
             .ok_or_else(|| bad_request("Missing startHistoryId"))?;
-        let records = mb.history_after(start).map_err(|_| not_found())?;
+        let records = mb.history_after(start).map_err(|Missing| not_found())?;
         let (page, next) = paginate(&records, params.page());
         let mut out = json!({ "historyId": mb.history_id.to_string() });
         if !page.is_empty() {
@@ -338,7 +339,7 @@ async fn get_message(
     let params = Params::new(query);
     with_mailbox(&s, &headers, &user, |mb| {
         let msg = mb.messages.get(&id).ok_or_else(not_found)?;
-        Ok(Json(mb.message_json(
+        Ok(Json(Mailbox::message_json(
             msg,
             params.format(),
             &params.all("metadataHeaders"),
@@ -394,8 +395,12 @@ async fn trash_message(
 ) -> ApiResult {
     with_mailbox(&s, &headers, &user, |mb| {
         mb.modify(&id, &["TRASH".into()], &["INBOX".into(), "SPAM".into()])
-            .map_err(|_| not_found())?;
-        Ok(Json(mb.message_json(&mb.messages[&id], "minimal", &[])))
+            .map_err(|Missing| not_found())?;
+        Ok(Json(Mailbox::message_json(
+            &mb.messages[&id],
+            "minimal",
+            &[],
+        )))
     })
 }
 
@@ -404,7 +409,7 @@ fn draft_json(mb: &Mailbox, draft_id: &str, format: &str) -> Value {
     let message = if format == "minimal" {
         json!({ "id": msg.id, "threadId": msg.thread_id, "labelIds": msg.label_ids })
     } else {
-        mb.message_json(msg, format, &[])
+        Mailbox::message_json(msg, format, &[])
     };
     json!({ "id": draft_id, "message": message })
 }
@@ -416,7 +421,7 @@ fn draft_input(body: &Value, mb: &Mailbox) -> ApiResult<(Vec<u8>, Option<String>
         .ok_or_else(|| bad_request("Missing draft message"))?;
     let raw = BASE64URL_LENIENT
         .decode(raw.trim())
-        .map_err(|_| bad_request("Invalid value for ByteString"))?;
+        .map_err(|e| bad_request(&format!("Invalid value for ByteString: {e}")))?;
     let thread_id = body["message"]["threadId"].as_str().map(str::to_owned);
     if let Some(thread) = &thread_id
         && !mb.messages.values().any(|m| &m.thread_id == thread)
@@ -524,7 +529,11 @@ async fn send_draft(
         mb.drafts.remove(id);
         let _ = mb.delete(&old);
         let sent = mb.insert_raw(raw, Some(thread_id), vec!["SENT".into()], None);
-        Ok(Json(mb.message_json(&mb.messages[&sent], "minimal", &[])))
+        Ok(Json(Mailbox::message_json(
+            &mb.messages[&sent],
+            "minimal",
+            &[],
+        )))
     })
 }
 

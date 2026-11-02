@@ -3,9 +3,9 @@
 //! ```no_run
 //! # async fn demo() {
 //! use ub_fake_gmail::*;
-//! let fake = FakeGmail::start().await;
+//! let fake = FakeGmail::start();
 //! let me = fake.add_user("me@example.com");
-//! me.add_message(NewMessage::inbox("Ann <ann@example.com>", "Hello", "Hi there"));
+//! me.add_message(&NewMessage::inbox("Ann <ann@example.com>", "Hello", "Hi there"));
 //! fake.inject(Matcher::new("POST", "*/drafts/send").once(), Fault::NoResponse);
 //! // Point the client at fake.base_url(), fake.token_url(), fake.revoke_url(), fake.auth_url().
 //! # }
@@ -23,8 +23,10 @@
 //! A real "offline" (connection refused, nothing sent) cannot depend on a request the server
 //! has not read yet, so it is server-wide: [`FakeGmail::set_offline`].
 
-#![allow(clippy::unwrap_used)] // A test double: panics are test failures.
-#![allow(clippy::pedantic)] // Test support code, not shipped.
+#![expect(
+    clippy::unwrap_used,
+    reason = "A test double: panics are test failures."
+)]
 
 mod mailbox;
 mod mime;
@@ -142,18 +144,21 @@ impl Matcher {
     }
 
     /// Only the `n`th matching request (1-based, counted from injection).
+    #[must_use]
     pub fn nth(mut self, n: usize) -> Self {
         self.nth = Some(n);
         self
     }
 
     /// Only the first `n` matching requests.
+    #[must_use]
     pub fn times(mut self, n: usize) -> Self {
         self.times = Some(n);
         self
     }
 
     /// Only the next matching request.
+    #[must_use]
     pub fn once(self) -> Self {
         self.times(1)
     }
@@ -308,7 +313,8 @@ fn snapshot(msg: &mailbox::Msg) -> FakeMessage {
 
 impl FakeGmail {
     /// Starts the fake on `127.0.0.1` on a free port.
-    pub async fn start() -> FakeGmail {
+    /// Must be called inside a Tokio runtime: the server task is spawned on it.
+    pub fn start() -> FakeGmail {
         let listener = bind("127.0.0.1:0".parse().unwrap()).expect("bind the fake");
         let addr = listener.local_addr().unwrap();
         let shared = Arc::new(Shared {
@@ -498,7 +504,7 @@ impl FakeUser {
 
     /// Sets the primary send-as display name.
     pub fn set_display_name(&self, name: &str) {
-        self.with(|mb| mb.send_as[0].display_name = name.to_owned());
+        self.with(|mb| name.clone_into(&mut mb.send_as[0].display_name));
     }
 
     /// Adds a send-as alias.
@@ -528,14 +534,14 @@ impl FakeUser {
     }
 
     /// Stores a message as if it arrived, recording `messagesAdded`.
-    pub fn add_message(&self, msg: NewMessage) -> AddedMessage {
+    pub fn add_message(&self, msg: &NewMessage) -> AddedMessage {
         self.with(|mb| {
             let date = msg.internal_date.unwrap_or_else(|| mb.next_date());
             let rfc822_message_id = msg
                 .message_id
                 .clone()
                 .unwrap_or_else(|| format!("<{}@fake.example>", mb.new_id()));
-            let raw = mime::build(&msg, date, &rfc822_message_id);
+            let raw = mime::build(msg, date, &rfc822_message_id);
             let id = mb.insert_raw(raw, msg.thread_id.clone(), msg.labels.clone(), Some(date));
             AddedMessage {
                 thread_id: mb.messages[&id].thread_id.clone(),

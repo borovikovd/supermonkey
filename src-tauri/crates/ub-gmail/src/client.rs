@@ -202,7 +202,9 @@ impl Gmail {
             .await?;
         BASE64URL_LENIENT
             .decode(body.data.unwrap_or_default())
-            .map_err(|_| Outcome::NoResponse.into())
+            .map_err(|e| {
+                GmailError::with_detail(Outcome::NoResponse, format!("attachment data: {e}"))
+            })
     }
 
     /// `users.messages.batchModify`. Cost 50. One unknown id fails the whole call with
@@ -309,7 +311,9 @@ impl Gmail {
             .await
             .map_err(|e| error::from_transport(&e))?;
         // A 2xx whose body does not parse is no clear answer.
-        serde_json::from_slice(&bytes).map_err(|_| Outcome::NoResponse.into())
+        serde_json::from_slice(&bytes).map_err(|e| {
+            GmailError::with_detail(Outcome::NoResponse, format!("response body: {e}"))
+        })
     }
 
     /// Sends one request, refreshing the token and retrying once on 401, and classifies

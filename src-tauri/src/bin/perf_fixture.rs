@@ -2,7 +2,10 @@
 //!
 //!     cargo run --bin perf-fixture -- <db path> [perf|demo]
 
-#![allow(clippy::print_stdout)] // A command-line tool reports on stdout.
+#![expect(
+    clippy::print_stdout,
+    reason = "A command-line tool reports on stdout."
+)]
 
 fn main() -> anyhow::Result<()> {
     let mut args = std::env::args().skip(1);

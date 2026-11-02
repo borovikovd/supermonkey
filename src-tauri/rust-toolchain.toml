@@ -1,0 +1,5 @@
+# Pinned so a new stable release cannot break the gate (clippy `all` is denied).
+# Bump deliberately: update `channel` and `rust-version` in Cargo.toml together.
+[toolchain]
+channel = "1.99.0"
+components = ["clippy", "rustfmt"]

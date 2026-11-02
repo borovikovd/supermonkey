@@ -1,8 +1,6 @@
 //! Sync, the op queue, and Gmail error handling against the fake Gmail server
 //! (SPEC Testing → Fake Gmail).
 
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
-
 mod common;
 
 use std::time::Duration;
@@ -48,7 +46,7 @@ async fn poll_picks_up_new_mail_and_remote_changes() {
     h.synced(2).await;
     let added = h
         .user
-        .add_message(NewMessage::inbox("Ken <ken@bell.com>", "Unix", "Hi"));
+        .add_message(&NewMessage::inbox("Ken <ken@bell.com>", "Unix", "Hi"));
     h.poll();
     h.until("new mail", |h| {
         h.q::<i64>("SELECT count(*) FROM threads WHERE subject = 'Unix'") == 1
@@ -158,7 +156,7 @@ async fn queued_action_wins_over_a_poll() {
     h.archive(t);
     // A poll while the archive is still pending must not bring the row back.
     h.user
-        .add_message(NewMessage::inbox("Ken <ken@bell.com>", "Other", "x"));
+        .add_message(&NewMessage::inbox("Ken <ken@bell.com>", "Other", "x"));
     h.poll();
     h.until("poll ran", |h| {
         h.q::<i64>("SELECT count(*) FROM threads WHERE subject = 'Other'") == 1
@@ -269,7 +267,7 @@ async fn a_new_message_from_outside_clears_a_snooze() {
         h.q::<Option<i64>>(&format!("SELECT snooze_until FROM threads WHERE id = {t}"))
             .is_some()
     );
-    h.user.add_message(NewMessage {
+    h.user.add_message(&NewMessage {
         thread_id: Some(gmail_thread),
         ..NewMessage::inbox("Linus <linus@kernel.org>", "Re: Patch", "v2 attached")
     });
@@ -287,7 +285,7 @@ async fn new_inbox_mail_notifies_unless_muted() {
     let h = Harness::start(seed).await;
     h.synced(2).await;
     h.user
-        .add_message(NewMessage::inbox("Ken <ken@bell.com>", "Ping", "hello"));
+        .add_message(&NewMessage::inbox("Ken <ken@bell.com>", "Ping", "hello"));
     h.poll();
     h.until("notified", |h| h.engine.last_notification.lock().is_some())
         .await;
@@ -301,7 +299,7 @@ async fn new_inbox_mail_notifies_unless_muted() {
         value: "on".into(),
     });
     h.user
-        .add_message(NewMessage::inbox("Ken <ken@bell.com>", "Ping 2", "hello"));
+        .add_message(&NewMessage::inbox("Ken <ken@bell.com>", "Ping 2", "hello"));
     h.poll();
     h.until("second message stored", |h| {
         h.q::<i64>("SELECT count(*) FROM threads WHERE subject = 'Ping 2'") == 1

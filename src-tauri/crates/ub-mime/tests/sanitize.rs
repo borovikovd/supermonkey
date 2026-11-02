@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+#![expect(clippy::unwrap_used, reason = "Tests fail loudly on purpose.")]
 use std::collections::HashMap;
 
 use ub_mime::{html_to_text, sanitize_html};

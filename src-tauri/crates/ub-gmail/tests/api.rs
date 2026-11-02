@@ -1,7 +1,5 @@
 //! The client's calls against the fake's stateful mailbox.
 
-#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
-
 mod common;
 
 use common::*;
@@ -10,7 +8,7 @@ use ub_gmail::{Format, ThreadListQuery};
 
 #[tokio::test]
 async fn profile_send_as_and_labels() {
-    let (_fake, user, gmail) = setup().await;
+    let (_fake, user, gmail) = setup();
     user.set_display_name("Me Myself");
     user.add_send_as("alias@example.com", "Alias");
     user.add_label("Work/Projects");
@@ -36,21 +34,21 @@ async fn profile_send_as_and_labels() {
 
 #[tokio::test]
 async fn threads_list_filters_and_pages() {
-    let (_fake, user, gmail) = setup().await;
-    let first = user.add_message(NewMessage::inbox("ann@x.com", "Lunch plans", "Noon?"));
-    user.add_message(NewMessage {
+    let (_fake, user, gmail) = setup();
+    let first = user.add_message(&NewMessage::inbox("ann@x.com", "Lunch plans", "Noon?"));
+    user.add_message(&NewMessage {
         thread_id: Some(first.thread_id.clone()),
         in_reply_to: Some(first.rfc822_message_id.clone()),
         ..NewMessage::inbox("bob@x.com", "Re: Lunch plans", "Sure")
     });
     for i in 0..4 {
-        user.add_message(NewMessage::inbox(
+        user.add_message(&NewMessage::inbox(
             "news@x.com",
             &format!("Newsletter {i}"),
             "Read me",
         ));
     }
-    user.add_message(NewMessage {
+    user.add_message(&NewMessage {
         labels: vec!["TRASH".into()],
         ..NewMessage::inbox("old@x.com", "Lunch leftovers", "Gone")
     });
@@ -96,8 +94,8 @@ async fn threads_list_filters_and_pages() {
 
 #[tokio::test]
 async fn thread_formats_and_attachments() {
-    let (_fake, user, gmail) = setup().await;
-    let added = user.add_message(NewMessage {
+    let (_fake, user, gmail) = setup();
+    let added = user.add_message(&NewMessage {
         html: Some("<p>Hello <b>there</b></p>".into()),
         list_id: Some("<news.x.com>".into()),
         attachments: vec![NewAttachment {
@@ -139,10 +137,10 @@ async fn thread_formats_and_attachments() {
 
 #[tokio::test]
 async fn label_changes_show_up_in_history() {
-    let (_fake, user, gmail) = setup().await;
+    let (_fake, user, gmail) = setup();
     let start = gmail.get_profile().await.unwrap().history_id;
-    let a = user.add_message(NewMessage::inbox("ann@x.com", "A", "a"));
-    let b = user.add_message(NewMessage::inbox("bob@x.com", "B", "b"));
+    let a = user.add_message(&NewMessage::inbox("ann@x.com", "A", "a"));
+    let b = user.add_message(&NewMessage::inbox("bob@x.com", "B", "b"));
 
     gmail
         .batch_modify(&[a.id.clone(), b.id.clone()], &[], &["INBOX".into()])
@@ -184,7 +182,7 @@ async fn label_changes_show_up_in_history() {
 
 #[tokio::test]
 async fn draft_lifecycle() {
-    let (_fake, user, gmail) = setup().await;
+    let (_fake, user, gmail) = setup();
     let draft = gmail
         .create_draft(&draft_raw("First", "local-1"), None)
         .await
@@ -211,7 +209,7 @@ async fn draft_lifecycle() {
     assert_eq!(sent.thread_id, draft.message.thread_id);
     assert_eq!(
         gmail.list_drafts(None).await.unwrap().drafts,
-        [] as [ub_gmail::Draft; 0]
+        Vec::<ub_gmail::Draft>::new()
     );
 
     let other = gmail

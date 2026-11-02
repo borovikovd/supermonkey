@@ -18,6 +18,7 @@ pub mod sync;
 pub mod webbridge;
 pub mod work;
 
+use crate::LogErr as _;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -178,7 +179,8 @@ impl Engine {
 
     /// `invalid_grant`: the account shows Sign in again; its queue and outbox wait.
     pub fn needs_signin(&self, account: AccountId) {
-        if let Some(rt) = self.accounts.lock().remove(&account) {
+        let removed = self.accounts.lock().remove(&account);
+        if let Some(rt) = removed {
             rt.stopped.store(true, Ordering::Relaxed);
             rt.work.close();
         }
@@ -218,7 +220,8 @@ impl Engine {
             work: work::WorkQueue::default(),
             retrying_since: AtomicI64::new(0),
         });
-        if let Some(old) = self.accounts.lock().insert(id, rt.clone()) {
+        let replaced = self.accounts.lock().insert(id, rt.clone());
+        if let Some(old) = replaced {
             old.stopped.store(true, Ordering::Relaxed);
             old.work.close();
         }
@@ -347,13 +350,9 @@ async fn dispatch(engine: EngineRef, mut effects: UnboundedReceiver<Effect>) {
                     rt.outbox_kick.notify_one();
                 }
             }
-            Effect::FetchThread {
-                account,
-                thread,
-                open,
-            } => {
+            Effect::FetchThread { account, thread } => {
                 if let Some(rt) = e.account(account) {
-                    tauri::async_runtime::spawn(sync::fetch_opened(e, rt, thread, open));
+                    tauri::async_runtime::spawn(sync::fetch_opened(e, rt, thread));
                 }
             }
             Effect::GmailList {
@@ -387,7 +386,9 @@ async fn dispatch(engine: EngineRef, mut effects: UnboundedReceiver<Effect>) {
             Effect::RefreshLabels(a) => {
                 if let Some(rt) = e.account(a) {
                     tauri::async_runtime::spawn(async move {
-                        let _ = sync::refresh_labels(&e, &rt).await;
+                        sync::refresh_labels(&e, &rt)
+                            .await
+                            .log_err("refresh_labels");
                     });
                 }
             }
@@ -430,8 +431,12 @@ impl Engine {
             // Labels and sendAs addresses refresh on focus (SPEC Sync).
             let e = self.clone();
             tauri::async_runtime::spawn(async move {
-                let _ = sync::refresh_labels(&e, &rt).await;
-                let _ = sync::refresh_send_as(&e, &rt).await;
+                sync::refresh_labels(&e, &rt)
+                    .await
+                    .log_err("refresh_labels");
+                sync::refresh_send_as(&e, &rt)
+                    .await
+                    .log_err("refresh_send_as");
             });
         }
         let away = self.unfocused_since.swap(0, Ordering::Relaxed);
