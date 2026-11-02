@@ -6,12 +6,12 @@
 //! - **Offline**: reqwest reports a connect error (`is_connect`). That covers DNS failure,
 //!   connection refused, no route, TLS handshake failure and connect timeouts. Not one byte
 //!   of the request reached Gmail, so it is safe to queue and replay.
-//! - **NoResponse**: every other transport failure. The connection was up, so the request
+//! - **`NoResponse`**: every other transport failure. The connection was up, so the request
 //!   may have been written and acted on: read timeouts, a connection closed or reset before
 //!   the response, and a broken or undecodable response body.
 //!
 //! A stale pooled connection that fails while writing is reported by hyper the same way as
-//! one that dies after the write, so it counts as NoResponse. That is the conservative side.
+//! one that dies after the write, so it counts as `NoResponse`. That is the conservative side.
 
 use std::fmt;
 use std::time::Duration;

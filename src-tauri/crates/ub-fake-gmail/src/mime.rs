@@ -45,12 +45,11 @@ struct Ctx<'a> {
     html: Option<String>,
 }
 
-fn parse_part(bytes: &[u8], part_id: String, ctx: &mut Ctx) -> (Value, Vec<(String, String)>) {
+fn parse_part(bytes: &[u8], part_id: String, ctx: &mut Ctx<'_>) -> (Value, Vec<(String, String)>) {
     let (head, body) = split_head(bytes);
     let headers = parse_headers(&String::from_utf8_lossy(head));
     let (mime_type, params) = header(&headers, "Content-Type")
-        .map(parse_params)
-        .unwrap_or_else(|| ("text/plain".into(), Vec::new()));
+        .map_or_else(|| ("text/plain".into(), Vec::new()), parse_params);
     let filename = header(&headers, "Content-Disposition")
         .map(parse_params)
         .and_then(|(_, p)| param(&p, "filename"))
@@ -88,17 +87,17 @@ fn parse_part(bytes: &[u8], part_id: String, ctx: &mut Ctx) -> (Value, Vec<(Stri
     } else {
         let encoding = header(&headers, "Content-Transfer-Encoding").unwrap_or("7bit");
         let data = decode_transfer(body, encoding);
-        if !filename.is_empty() {
-            let id = (ctx.new_id)();
-            node["body"] = json!({ "attachmentId": id, "size": data.len() });
-            ctx.attachments.push((id, data));
-        } else {
+        if filename.is_empty() {
             if mime_type == "text/plain" && ctx.plain.is_none() {
                 ctx.plain = Some(String::from_utf8_lossy(&data).into_owned());
             } else if mime_type == "text/html" && ctx.html.is_none() {
                 ctx.html = Some(String::from_utf8_lossy(&data).into_owned());
             }
             node["body"] = json!({ "size": data.len(), "data": URL_SAFE.encode(&data) });
+        } else {
+            let id = (ctx.new_id)();
+            node["body"] = json!({ "attachmentId": id, "size": data.len() });
+            ctx.attachments.push((id, data));
         }
     }
     (node, headers)
@@ -273,21 +272,18 @@ fn decode_words(value: &str) -> String {
                 start + 2 + len + 2,
             ))
         });
-        match decoded {
-            Some((text, end)) => {
-                let between = &rest[..start];
-                if !(last_was_word && between.trim().is_empty()) {
-                    out.push_str(between);
-                }
-                out.push_str(&text);
-                rest = &rest[end..];
-                last_was_word = true;
+        if let Some((text, end)) = decoded {
+            let between = &rest[..start];
+            if !(last_was_word && between.trim().is_empty()) {
+                out.push_str(between);
             }
-            None => {
-                out.push_str(&rest[..start + 2]);
-                rest = &rest[start + 2..];
-                last_was_word = false;
-            }
+            out.push_str(&text);
+            rest = &rest[end..];
+            last_was_word = true;
+        } else {
+            out.push_str(&rest[..start + 2]);
+            rest = &rest[start + 2..];
+            last_was_word = false;
         }
     }
     out.push_str(rest);

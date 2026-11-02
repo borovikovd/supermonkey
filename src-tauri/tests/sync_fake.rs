@@ -1,6 +1,8 @@
 //! Sync, the op queue, and Gmail error handling against the fake Gmail server
 //! (SPEC Testing → Fake Gmail).
 
+#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+
 mod common;
 
 use std::time::Duration;

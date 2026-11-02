@@ -9,7 +9,9 @@ use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::db::{from_json, queries, to_json};
-use crate::model::*;
+use crate::model::{
+    AccountId, Addr, DraftAttachment, DraftKind, DraftSave, MessageId, SendAs, ThreadId,
+};
 use crate::writer::{Ctx, Effect};
 
 /// The fields a composer started with.
@@ -37,7 +39,7 @@ struct Target {
     html: String,
 }
 
-fn target(ctx: &Ctx, id: MessageId) -> anyhow::Result<Option<Target>> {
+fn target(ctx: &Ctx<'_>, id: MessageId) -> anyhow::Result<Option<Target>> {
     Ok(ctx
         .tx
         .query_row(
@@ -97,7 +99,7 @@ pub fn tz_offset_minutes() -> i32 {
     chrono::Local::now().offset().local_minus_utc() / 60
 }
 
-fn send_as(ctx: &Ctx, account: AccountId) -> anyhow::Result<(Vec<SendAs>, Addr)> {
+fn send_as(ctx: &Ctx<'_>, account: AccountId) -> anyhow::Result<(Vec<SendAs>, Addr)> {
     let (email, name, json): (String, String, String) = ctx.tx.query_row(
         "SELECT email, display_name, send_as FROM accounts WHERE id = ?1",
         [account],
@@ -108,14 +110,16 @@ fn send_as(ctx: &Ctx, account: AccountId) -> anyhow::Result<(Vec<SendAs>, Addr)>
         .iter()
         .find(|s| s.is_default)
         .or_else(|| list.iter().find(|s| s.is_primary))
-        .map(|s| Addr {
-            name: (!s.name.is_empty()).then(|| s.name.clone()),
-            email: s.email.clone(),
-        })
-        .unwrap_or(Addr {
-            name: (!name.is_empty() && name != email).then_some(name),
-            email,
-        });
+        .map_or(
+            Addr {
+                name: (!name.is_empty() && name != email).then_some(name),
+                email,
+            },
+            |s| Addr {
+                name: (!s.name.is_empty()).then(|| s.name.clone()),
+                email: s.email.clone(),
+            },
+        );
     Ok((list, default))
 }
 
@@ -133,7 +137,7 @@ fn dedup(list: Vec<Addr>, skip: &HashSet<String>) -> Vec<Addr> {
 /// Fills a fresh composer by the rules in SPEC Addressing.
 #[allow(clippy::too_many_arguments)]
 fn create(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     draft: &str,
     account: AccountId,
     kind: DraftKind,
@@ -159,7 +163,7 @@ fn create(
 
     if let Some(t) = &target {
         let sent_by_me = mine.contains(&t.from.email.to_lowercase());
-        in_reply_to = t.message_id.clone();
+        in_reply_to.clone_from(&t.message_id);
         references = format!(
             "{} {}",
             t.references,
@@ -177,7 +181,7 @@ fn create(
                 if sent_by_me {
                     // Replying to my own message: send from its From, to its To.
                     from = t.from.clone();
-                    to = t.to.clone();
+                    to.clone_from(&t.to);
                     if reply_all {
                         cc = dedup(t.cc.clone(), &mine);
                     }
@@ -272,7 +276,10 @@ fn create(
     Ok(())
 }
 
-pub fn account_of(ctx: &Ctx, draft: &str) -> anyhow::Result<Option<(AccountId, Option<ThreadId>)>> {
+pub fn account_of(
+    ctx: &Ctx<'_>,
+    draft: &str,
+) -> anyhow::Result<Option<(AccountId, Option<ThreadId>)>> {
     Ok(ctx
         .tx
         .query_row(
@@ -284,7 +291,7 @@ pub fn account_of(ctx: &Ctx, draft: &str) -> anyhow::Result<Option<(AccountId, O
 }
 
 /// Queues one upsert per draft; the runner reads the draft's latest state.
-pub fn queue_upsert(ctx: &mut Ctx, account: AccountId, draft: &str) -> anyhow::Result<()> {
+pub fn queue_upsert(ctx: &mut Ctx<'_>, account: AccountId, draft: &str) -> anyhow::Result<()> {
     let exists: bool = ctx.tx.query_row(
         "SELECT EXISTS (SELECT 1 FROM ops WHERE account_id = ?1 AND kind = 'draft_upsert'
                           AND json_extract(payload, '$.draft') = ?2)",
@@ -303,7 +310,7 @@ pub fn queue_upsert(ctx: &mut Ctx, account: AccountId, draft: &str) -> anyhow::R
     Ok(())
 }
 
-pub fn save(ctx: &mut Ctx, draft: &str, save: DraftSave) -> anyhow::Result<()> {
+pub fn save(ctx: &mut Ctx<'_>, draft: &str, save: DraftSave) -> anyhow::Result<()> {
     // A save that arrives after its draft was sent or discarded is dropped.
     let in_outbox: bool = ctx.tx.query_row(
         "SELECT EXISTS (SELECT 1 FROM outbox WHERE draft_id = ?1)",
@@ -369,7 +376,7 @@ pub fn save(ctx: &mut Ctx, draft: &str, save: DraftSave) -> anyhow::Result<()> {
 
 /// Untouched: subject, body, and attachments as the composer started them,
 /// and recipients and From the defaults.
-pub fn is_untouched(ctx: &Ctx, draft: &str) -> anyhow::Result<bool> {
+pub fn is_untouched(ctx: &Ctx<'_>, draft: &str) -> anyhow::Result<bool> {
     let row: Option<(String, String, String, String, String, String, String, Option<String>)> = ctx
         .tx
         .query_row(
@@ -411,7 +418,7 @@ pub fn is_untouched(ctx: &Ctx, draft: &str) -> anyhow::Result<bool> {
 
 /// Closing a composer (second Esc, switching, quitting). A draft started fresh
 /// and untouched is discarded, locally and on Gmail.
-pub fn close(ctx: &mut Ctx, draft: &str) -> anyhow::Result<()> {
+pub fn close(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
     let row: Option<(AccountId, bool, bool)> = ctx
         .tx
         .query_row(
@@ -449,7 +456,7 @@ pub fn close(ctx: &mut Ctx, draft: &str) -> anyhow::Result<()> {
 }
 
 /// Deletes the local draft and the Gmail draft.
-pub fn discard(ctx: &mut Ctx, draft: &str) -> anyhow::Result<()> {
+pub fn discard(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
     let row: Option<(AccountId, Option<ThreadId>, Option<String>)> = ctx
         .tx
         .query_row(
@@ -518,7 +525,7 @@ pub static DRAFT_FILES: std::sync::OnceLock<std::path::PathBuf> = std::sync::Onc
 
 /// On launch: apply the untouched rule to drafts whose started-fresh flag is
 /// still set (e.g. after a crash).
-pub fn on_launch(ctx: &mut Ctx) -> anyhow::Result<()> {
+pub fn on_launch(ctx: &mut Ctx<'_>) -> anyhow::Result<()> {
     let fresh: Vec<String> = {
         let mut stmt = ctx
             .tx
@@ -534,7 +541,7 @@ pub fn on_launch(ctx: &mut Ctx) -> anyhow::Result<()> {
 
 /// Gmail rejected a draft op.
 pub fn on_rejected(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     account: AccountId,
     kind: &str,
     payload: &str,

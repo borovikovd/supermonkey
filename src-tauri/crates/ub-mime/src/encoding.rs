@@ -6,7 +6,7 @@ use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 /// Decodes `bytes` in the named charset. Unknown or missing charsets fall back to UTF-8,
 /// then to windows-1252 when the bytes are not valid UTF-8.
 pub(crate) fn decode_charset(bytes: &[u8], charset: Option<&str>) -> String {
-    let label = charset.map(|c| c.trim().trim_matches('"')).unwrap_or("");
+    let label = charset.map_or("", |c| c.trim().trim_matches('"'));
     // RFC 2231 allows a language suffix: `utf-8*en`.
     let label = label.split('*').next().unwrap_or(label);
     if let Some(enc) = encoding_rs::Encoding::for_label(label.as_bytes()) {

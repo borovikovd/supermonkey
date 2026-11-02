@@ -5,7 +5,8 @@ import { markReadOnOpen } from "../commands";
 import { startReply } from "../compose/start";
 import { openAttachment } from "../ipc/bridge";
 import type { ConversationData, MessageSummary } from "../ipc/types";
-import { appHooks, conversationRef, onKeyDown } from "../keyboard/keys";
+import { onKeyDown } from "../keyboard/keys";
+import { appHooks, conversationRef } from "../keyboard/refs";
 import { useChrome } from "../store/chrome";
 import { useAppState, useConversation, useSubscription } from "../store/hooks";
 import { InlineComposer } from "./InlineComposer";
@@ -32,6 +33,15 @@ function recipients(m: MessageSummary) {
 /** Clicking a message selects it (SPEC Reading). Stable, so frames keep their listeners. */
 const select = (id: number) => useChrome.getState().set({ selectedMessage: id });
 
+/** Expands or collapses a message, and selects it. */
+const toggle = (id: number) => {
+  const c = useChrome.getState();
+  const ex = new Set(c.expanded);
+  if (ex.has(id)) ex.delete(id);
+  else ex.add(id);
+  c.set({ expanded: [...ex], selectedMessage: id });
+};
+
 type Block = { type: "message"; m: MessageSummary } | { type: "fold"; ids: number[] };
 
 /**
@@ -42,10 +52,12 @@ function blocks(messages: MessageSummary[], expanded: Set<number>, unfolded: Set
   const out: Block[] = [];
   let run: MessageSummary[] = [];
   const flush = () => {
-    if (run.length > 4 && !run.some((m) => unfolded.has(m.id))) {
-      out.push({ type: "message", m: run[0]! });
+    const head = run[0];
+    const tail = run.at(-1);
+    if (run.length > 4 && head && tail && !run.some((m) => unfolded.has(m.id))) {
+      out.push({ type: "message", m: head });
       out.push({ type: "fold", ids: run.slice(1, -1).map((m) => m.id) });
-      out.push({ type: "message", m: run[run.length - 1]! });
+      out.push({ type: "message", m: tail });
     } else {
       for (const m of run) out.push({ type: "message", m });
     }
@@ -83,11 +95,13 @@ function linkKey(e: KeyboardEvent): boolean {
         )
       : -1;
     at = (at + (e.shiftKey ? -1 : 1) + links.length) % links.length;
-    const [id, a] = links[at]!;
+    const picked = links[at];
+    if (!picked) return true;
+    const [id, a] = picked;
     const first = links.findIndex(([x]) => x === id);
     a.classList.add("ub-link-focus");
     a.scrollIntoView({ block: "nearest" });
-    (a.ownerDocument.defaultView?.frameElement as HTMLElement | null)?.scrollIntoView({
+    a.ownerDocument.defaultView?.frameElement?.scrollIntoView({
       block: "nearest",
     });
     c.set({ link: [id, at - first] });
@@ -195,13 +209,6 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
     shownExpanded,
     new Set([...unfolded, ...(selected !== null ? [selected] : [])]),
   );
-  const toggle = (id: number) => {
-    const c = useChrome.getState();
-    const ex = new Set(c.expanded);
-    if (ex.has(id)) ex.delete(id);
-    else ex.add(id);
-    c.set({ expanded: [...ex], selectedMessage: id });
-  };
 
   return (
     <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">

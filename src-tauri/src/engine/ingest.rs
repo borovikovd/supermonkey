@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::{OptionalExtension, params};
 
 use crate::db::{from_json, queries, to_json};
-use crate::model::*;
+use crate::model::{AccountId, Addr, MessageId, ThreadId};
 use crate::writer::{Ctx, Effect};
 
 /// One message, parsed and (when the body was fetched) sanitized.
@@ -133,7 +133,7 @@ pub fn parse(
 
 /// Maps Gmail label ids to local ids. Unknown ids are kept as they are.
 pub fn local_labels(
-    ctx: &Ctx,
+    ctx: &Ctx<'_>,
     account: AccountId,
     gmail: &[String],
 ) -> anyhow::Result<(Vec<String>, bool)> {
@@ -143,15 +143,14 @@ pub fn local_labels(
     let mut out = Vec::with_capacity(gmail.len());
     let mut unknown = false;
     for g in gmail {
-        match stmt
+        if let Some(id) = stmt
             .query_row(params![account, g], |r| r.get::<_, String>(0))
             .optional()?
         {
-            Some(id) => out.push(id),
-            None => {
-                unknown = true;
-                out.push(g.clone());
-            }
+            out.push(id);
+        } else {
+            unknown = true;
+            out.push(g.clone());
         }
     }
     Ok((out, unknown))
@@ -198,7 +197,7 @@ impl PendingOps {
 /// Stores a thread fetched from Gmail. `complete` means `msgs` is every
 /// message Gmail has on the thread, so local messages missing from it are gone.
 pub fn store_thread(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     account: AccountId,
     gmail_thread_id: &str,
     history_id: Option<u64>,
@@ -206,15 +205,14 @@ pub fn store_thread(
     complete: bool,
     pending: &PendingOps,
 ) -> anyhow::Result<ThreadId> {
-    let thread = match queries::thread_by_gmail(ctx.tx, account, gmail_thread_id)? {
-        Some(t) => t,
-        None => {
-            ctx.tx.execute(
-                "INSERT INTO threads (account_id, gmail_id) VALUES (?1, ?2)",
-                params![account, gmail_thread_id],
-            )?;
-            ctx.tx.last_insert_rowid()
-        }
+    let thread = if let Some(t) = queries::thread_by_gmail(ctx.tx, account, gmail_thread_id)? {
+        t
+    } else {
+        ctx.tx.execute(
+            "INSERT INTO threads (account_id, gmail_id) VALUES (?1, ?2)",
+            params![account, gmail_thread_id],
+        )?;
+        ctx.tx.last_insert_rowid()
     };
     if let Some(h) = history_id {
         ctx.tx.execute(
@@ -252,7 +250,7 @@ pub fn store_thread(
     Ok(thread)
 }
 
-pub fn delete_message(ctx: &mut Ctx, id: MessageId) -> anyhow::Result<()> {
+pub fn delete_message(ctx: &mut Ctx<'_>, id: MessageId) -> anyhow::Result<()> {
     ctx.tx
         .execute("DELETE FROM messages_fts WHERE rowid = ?1", [id])?;
     ctx.tx.execute("DELETE FROM messages WHERE id = ?1", [id])?;
@@ -260,7 +258,7 @@ pub fn delete_message(ctx: &mut Ctx, id: MessageId) -> anyhow::Result<()> {
 }
 
 fn store_message(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     account: AccountId,
     thread: ThreadId,
     m: &Incoming,
@@ -281,49 +279,46 @@ fn store_message(
         )
         .optional()?;
     let has_attachments = m.parts.iter().any(|p| !p.inline);
-    let id = match existing {
-        Some((id, _)) => {
-            ctx.tx.execute(
-                "UPDATE messages SET thread_id = ?2, label_ids = ?3, snippet = ?4, is_draft = ?5 WHERE id = ?1",
-                params![id, thread, to_json(&labels), m.snippet, is_draft],
-            )?;
-            id
-        }
-        None => {
-            ctx.tx.execute(
-                "INSERT INTO messages (account_id, thread_id, gmail_id, internal_date, from_name, from_email, to_json,
-                    cc_json, bcc_json, reply_to_json, subject, snippet, message_id_hdr, in_reply_to, references_hdr,
-                    is_list, is_draft, ub_draft_id, label_ids, has_attachments)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
-                params![
-                    account,
-                    thread,
-                    m.gmail_id,
-                    m.internal_date,
-                    from.name.clone().unwrap_or_default(),
-                    from.email,
-                    to_json(&m.to),
-                    to_json(&m.cc),
-                    to_json(&m.bcc),
-                    to_json(&m.reply_to),
-                    m.subject,
-                    m.snippet,
-                    m.message_id,
-                    m.in_reply_to,
-                    m.references.join(" "),
-                    m.is_list,
-                    is_draft,
-                    m.ub_draft_id,
-                    to_json(&labels),
-                    has_attachments,
-                ],
-            )?;
-            let id = ctx.tx.last_insert_rowid();
-            store_parts(ctx, id, &m.parts)?;
-            id
-        }
+    let id = if let Some((id, _)) = existing {
+        ctx.tx.execute(
+            "UPDATE messages SET thread_id = ?2, label_ids = ?3, snippet = ?4, is_draft = ?5 WHERE id = ?1",
+            params![id, thread, to_json(&labels), m.snippet, is_draft],
+        )?;
+        id
+    } else {
+        ctx.tx.execute(
+            "INSERT INTO messages (account_id, thread_id, gmail_id, internal_date, from_name, from_email, to_json,
+                cc_json, bcc_json, reply_to_json, subject, snippet, message_id_hdr, in_reply_to, references_hdr,
+                is_list, is_draft, ub_draft_id, label_ids, has_attachments)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+            params![
+                account,
+                thread,
+                m.gmail_id,
+                m.internal_date,
+                from.name.clone().unwrap_or_default(),
+                from.email,
+                to_json(&m.to),
+                to_json(&m.cc),
+                to_json(&m.bcc),
+                to_json(&m.reply_to),
+                m.subject,
+                m.snippet,
+                m.message_id,
+                m.in_reply_to,
+                m.references.join(" "),
+                m.is_list,
+                is_draft,
+                m.ub_draft_id,
+                to_json(&labels),
+                has_attachments,
+            ],
+        )?;
+        let id = ctx.tx.last_insert_rowid();
+        store_parts(ctx, id, &m.parts)?;
+        id
     };
-    let had_body = existing.map(|(_, b)| b).unwrap_or(false);
+    let had_body = existing.is_some_and(|(_, b)| b);
     if let Some(body) = &m.body
         && !had_body
     {
@@ -369,7 +364,7 @@ fn fmt_addr(a: &Addr) -> String {
 }
 
 fn store_parts(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     message: MessageId,
     parts: &[ub_mime::PartInfo],
 ) -> anyhow::Result<()> {
@@ -395,7 +390,7 @@ fn store_parts(
 /// Recipient autocomplete upkeep (SPEC Recipients and autocomplete). Each
 /// message id counts once.
 pub fn count_contacts(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     account: AccountId,
     m: &Incoming,
     from: &Addr,
@@ -456,7 +451,7 @@ pub fn count_contacts(
 
 /// Applies Gmail's labels for a known message, then re-applies pending ops.
 pub fn set_labels_from_gmail(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     account: AccountId,
     gmail_msg: &str,
     gmail_labels: &[String],

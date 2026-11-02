@@ -5,7 +5,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::model::*;
+use crate::model::{AccountId, Addr, PinKind, SplitId, SplitInfo, SplitKind, ThreadId};
 use crate::threads::Msg;
 use crate::writer::Ctx;
 
@@ -35,7 +35,7 @@ impl ub_rules::RuleSubject for Subject<'_> {
     fn subject(&self) -> &str {
         &self.msg.subject
     }
-    fn body(&self) -> &str {
+    fn body(&self) -> &'static str {
         ""
     }
     fn thread_user_labels(&self) -> Vec<&str> {
@@ -162,7 +162,7 @@ pub fn route(
 }
 
 /// Creates Important and Other for a new account.
-pub fn create_defaults(ctx: &mut Ctx, account: AccountId) -> anyhow::Result<()> {
+pub fn create_defaults(ctx: &mut Ctx<'_>, account: AccountId) -> anyhow::Result<()> {
     ctx.tx.execute(
         "INSERT INTO splits (account_id, name, position, kind, hide_when_empty) VALUES
            (?1, 'Important', 900000, 'important', 1), (?1, 'Other', 1000000, 'other', 0)",
@@ -172,7 +172,7 @@ pub fn create_defaults(ctx: &mut Ctx, account: AccountId) -> anyhow::Result<()> 
 }
 
 /// Re-routes every Inbox thread of the account, stamping the ones that move.
-pub fn reroute_inbox(ctx: &mut Ctx, account: AccountId) -> anyhow::Result<()> {
+pub fn reroute_inbox(ctx: &mut Ctx<'_>, account: AccountId) -> anyhow::Result<()> {
     let ids: Vec<(ThreadId, Option<SplitId>)> = {
         let mut stmt = ctx
             .tx
@@ -204,7 +204,7 @@ pub fn reroute_inbox(ctx: &mut Ctx, account: AccountId) -> anyhow::Result<()> {
 /// `Add to split`, `Move to Important/Other`: pins a sender, domain, or label.
 /// Returns the split it replaced.
 pub fn pin(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     n: i64,
     account: AccountId,
     kind: PinKind,
@@ -244,7 +244,7 @@ pub fn pin(
 }
 
 pub fn undo_pin(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     account: AccountId,
     payload: &serde_json::Value,
 ) -> anyhow::Result<()> {
@@ -269,7 +269,7 @@ pub fn undo_pin(
 
 /// The settings sheet's save: add, rename, reorder, turn off, delete custom splits.
 pub fn save(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     account: AccountId,
     splits: Vec<SplitInfo>,
     deleted: Vec<SplitId>,
@@ -283,7 +283,7 @@ pub fn save(
     }
     // Custom splits come first, then Important, then Other.
     let mut custom_index = 0i64;
-    for s in splits.iter() {
+    for s in &splits {
         let position = match s.kind {
             SplitKind::Other => 1_000_000,
             SplitKind::Important => 900_000,

@@ -850,9 +850,7 @@ pub fn strip_is_list(raw: &str) -> String {
             let prev = if i == 0 { None } else { Some(&kept[i - 1].0) };
             let next = kept.get(i + 1).map(|k| &k.0);
             match kept[i].0 {
-                Kind::Op if matches!(prev, None | Some(Kind::Open) | Some(Kind::Op)) => {
-                    Some((i, 1))
-                }
+                Kind::Op if matches!(prev, None | Some(Kind::Open | Kind::Op)) => Some((i, 1)),
                 Kind::Op if matches!(next, None | Some(Kind::Close)) => Some((i, 1)),
                 Kind::Open if next == Some(&Kind::Close) => Some((i, 2)),
                 _ => None,

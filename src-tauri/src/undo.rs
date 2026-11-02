@@ -3,13 +3,13 @@
 
 use rusqlite::{OptionalExtension, params};
 
-use crate::model::*;
+use crate::model::AccountId;
 use crate::writer::Ctx;
 
 const KEEP: i64 = 50;
 
 pub fn record(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     n: i64,
     account: AccountId,
     kind: &str,
@@ -31,7 +31,7 @@ pub fn record(
 
 /// Undoes one entry. Rejects the action when the entry is gone, so two quick
 /// undos never undo two entries by mistake.
-pub fn undo(ctx: &mut Ctx, n: i64, account: AccountId, entry: i64) -> anyhow::Result<()> {
+pub fn undo(ctx: &mut Ctx<'_>, n: i64, account: AccountId, entry: i64) -> anyhow::Result<()> {
     let Some((kind, payload)) = ctx
         .tx
         .query_row(
@@ -56,7 +56,7 @@ pub fn undo(ctx: &mut Ctx, n: i64, account: AccountId, entry: i64) -> anyhow::Re
 }
 
 /// Drops the send entry for an outbox row (its toast closed after it was sent).
-pub fn drop_send_entry(ctx: &mut Ctx, account: AccountId, outbox: i64) -> anyhow::Result<()> {
+pub fn drop_send_entry(ctx: &mut Ctx<'_>, account: AccountId, outbox: i64) -> anyhow::Result<()> {
     let n = ctx.tx.execute(
         "DELETE FROM undo_entries WHERE account_id = ?1 AND kind = 'send' AND json_extract(payload, '$.outbox') = ?2",
         params![account, outbox],

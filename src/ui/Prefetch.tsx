@@ -24,7 +24,7 @@ export function Prefetch() {
     const t = setTimeout(() => {
       const ids = visibleIds();
       const [kind, id, tm] = focus.split(":");
-      const at = ids.indexOf(id!);
+      const at = id === undefined ? -1 : ids.indexOf(id);
       const trashMode =
         tm === "true" ||
         (() => {

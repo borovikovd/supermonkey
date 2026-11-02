@@ -9,7 +9,7 @@ use tauri_plugin_opener::OpenerExt;
 use ub_gmail::{Priority, cost};
 
 use super::EngineRef;
-use crate::model::*;
+use crate::model::AccountId;
 
 /// Account, Gmail message id, filename, Gmail attachment id, cached path.
 type AttachmentRow = (AccountId, String, String, Option<String>, Option<String>);

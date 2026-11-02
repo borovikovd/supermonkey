@@ -7,7 +7,13 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::{from_json, now_ms};
-use crate::model::*;
+use crate::model::{
+    AccountId, AccountInfo, AccountSummary, Addr, AppState, AttachmentInfo, ConversationData,
+    DraftAttachment, DraftKind, DraftState, DraftSummary, GlobalSettings, LabelInfo, ListEntry,
+    ListRow, MessageBody, MessageId, MessageSummary, Notice, NoticeKind, OutboxRow, OutboxState,
+    PinInfo, PinKind, SendAs, SplitInfo, SplitKind, SyncStatus, ThreadId, UndoEntryInfo, UndoKind,
+    View,
+};
 
 pub const HUES: [&str; 6] = [
     "#714CB6", "#D6478A", "#DB7A2B", "#2E9C6A", "#2A8CC4", "#B08A2E",
@@ -69,7 +75,7 @@ pub fn list_ids(
         View::Drafts => unreachable!("handled above"),
     };
     let mut stmt = conn.prepare_cached(sql)?;
-    let map = |r: &rusqlite::Row| {
+    let map = |r: &rusqlite::Row<'_>| {
         Ok(ListEntry {
             key: r.get::<_, i64>(0)?.to_string(),
             split: r.get(1)?,
@@ -96,7 +102,7 @@ const THREAD_ROW_COLS: &str =
      t.unread, t.starred, t.has_attachments, t.message_count, t.snooze_until, t.split_id, t.rev,
      (SELECT group_concat(label_id, char(31)) FROM thread_labels WHERE thread_id = t.id)";
 
-fn thread_row(r: &rusqlite::Row) -> rusqlite::Result<ListRow> {
+fn thread_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ListRow> {
     let id: i64 = r.get(0)?;
     let labels: Option<String> = r.get(13)?;
     Ok(ListRow {

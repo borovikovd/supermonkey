@@ -3,11 +3,19 @@ import { useEffect, useMemo, useRef } from "react";
 
 import { goTo } from "../commands";
 import { closeComposerOnScreen } from "../compose/start";
-import { appHooks } from "../keyboard/keys";
+import { appHooks } from "../keyboard/refs";
 import { useChrome, viewTitle } from "../store/chrome";
 import { listKey, useAppState, useCurrent, useListView, useSummary } from "../store/hooks";
 
 export const countLabel = (n: number) => (n > 999 ? "999+" : String(n));
+
+/** Closes search and restores the view it replaced. */
+function closeSearch() {
+  const c = useChrome.getState();
+  const before = c.beforeSearch ?? { kind: "view" as const, view: { kind: "inbox" as const } };
+  c.set({ search: null, beforeSearch: null });
+  goTo(before);
+}
 
 /** Split names with counts for the Inbox header and section headers. */
 export function useSplitCounts(account: number | null) {
@@ -22,7 +30,12 @@ export function useSplitCounts(account: number | null) {
       if (e.split !== null) counts.set(e.split, (counts.get(e.split) ?? 0) + 1);
     const splits = (summary?.splits ?? [])
       .filter((s) => s.enabled || s.kind === "other")
-      .map((s) => ({ ...s, count: counts.get(s.id) ?? 0 }))
+      .map((s) => ({
+        id: s.id,
+        name: s.name,
+        hideWhenEmpty: s.hideWhenEmpty,
+        count: counts.get(s.id) ?? 0,
+      }))
       .filter((s) => s.count > 0 || !s.hideWhenEmpty || s.id === forced);
     return splits;
   }, [list.ids, summary, forced]);
@@ -48,12 +61,6 @@ function SearchField() {
   }, []);
 
   if (!search) return null;
-  const close = () => {
-    const c = useChrome.getState();
-    const before = c.beforeSearch ?? { kind: "view" as const, view: { kind: "inbox" as const } };
-    c.set({ search: null, beforeSearch: null });
-    goTo(before);
-  };
   return (
     <div className="flex items-center gap-2" data-tauri-drag-region="false">
       <Search size={14} strokeWidth={1.5} className="text-text-3" />
@@ -82,7 +89,7 @@ function SearchField() {
             e.preventDefault();
             e.stopPropagation();
             ref.current?.blur();
-            close();
+            closeSearch();
           } else if (e.key === "Enter" || e.key === "ArrowDown") {
             e.preventDefault();
             ref.current?.blur();
@@ -138,17 +145,17 @@ export function TopBar() {
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-12 items-center gap-2 px-4 [&>button]:pointer-events-auto">
         <IconButton
           title="Back (Esc)"
-          onClick={() => (screen === "compose" ? closeComposerOnScreen() : key("Escape"))}
+          onClick={() => (screen === "compose" ? closeComposerOnScreen() : press("Escape"))}
         >
           <ArrowLeft size={16} strokeWidth={1.5} />
         </IconButton>
         <div className="flex-1" />
         {screen === "conversation" && (
           <>
-            <IconButton title="Previous conversation (K)" onClick={() => key("k")}>
+            <IconButton title="Previous conversation (K)" onClick={() => press("k")}>
               <ChevronUp size={16} strokeWidth={1.5} />
             </IconButton>
-            <IconButton title="Next conversation (J)" onClick={() => key("j")}>
+            <IconButton title="Next conversation (J)" onClick={() => press("j")}>
               <ChevronDown size={16} strokeWidth={1.5} />
             </IconButton>
           </>
@@ -175,7 +182,7 @@ export function TopBar() {
 }
 
 /** Sends a key to the shortcut handler, so buttons and keys share one path. */
-function key(k: string) {
+function press(k: string) {
   window.dispatchEvent(new KeyboardEvent("keydown", { key: k }));
 }
 

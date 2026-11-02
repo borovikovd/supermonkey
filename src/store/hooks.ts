@@ -56,10 +56,7 @@ export function useListView(
   return useMemo(() => {
     if (!id || !sub || sub.type !== "list")
       return { ...EMPTY, loaded: false, searching: false, more: false };
-    const view = viewList(
-      { ...useMirror.getState(), subs: { [id]: sub }, rows, pending, removals },
-      id,
-    );
+    const view = viewList({ ack: 0, rev: 0, subs: { [id]: sub }, rows, pending, removals }, id);
     return { ...view, loaded: sub.loaded, searching: sub.searching, more: sub.more, sub: id };
   }, [id, sub, rows, pending, removals]);
 }

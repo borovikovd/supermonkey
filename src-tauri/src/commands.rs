@@ -1,11 +1,17 @@
 //! The Tauri command surface. Every argument and result type is generated
 //! into `src/bindings/` by ts-rs.
 
+// Tauri commands receive owned arguments by design.
+#![allow(clippy::needless_pass_by_value)]
+
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
 use crate::Core;
-use crate::model::*;
+use crate::model::{
+    AccountId, ChannelMessage, ContactSuggestion, DraftAttachment, DraftId, LaunchInfo, ListRow,
+    MessageBody, MessageId, NumberedAction, SnoozeChoice,
+};
 
 type CmdResult<T> = Result<T, String>;
 
@@ -103,7 +109,7 @@ pub fn add_attachment(
     mime_type: String,
     data: String,
 ) -> CmdResult<DraftAttachment> {
-    crate::commands::store_attachment(&draft, &filename, &mime_type, &data).map_err(err)
+    store_attachment(&draft, &filename, &mime_type, &data).map_err(err)
 }
 
 pub fn store_attachment(

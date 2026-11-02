@@ -14,7 +14,8 @@ export function parseAddr(text: string): Addr | null {
   const t = text.trim().replace(/[,;]+$/, "");
   if (!t) return null;
   const m = /^"?([^"<]*?)"?\s*<([^>]+)>$/.exec(t);
-  if (m) return { name: m[1]!.trim() || null, email: m[2]!.trim() };
+  if (m?.[1] !== undefined && m[2] !== undefined)
+    return { name: m[1].trim() || null, email: m[2].trim() };
   return { name: null, email: t };
 }
 
@@ -184,7 +185,8 @@ export const RecipientField = forwardRef<
             if (e.key === "Enter" || e.key === "Tab") {
               e.preventDefault();
               e.stopPropagation();
-              accept(suggestions[active]!);
+              const pick = suggestions[active];
+              if (pick) accept(pick);
               return;
             }
             if (e.key === "Escape") {

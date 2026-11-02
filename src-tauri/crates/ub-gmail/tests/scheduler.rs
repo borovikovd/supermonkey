@@ -1,5 +1,7 @@
 //! Priority order, the in-flight cap, and the quota bucket rules, on tokio's paused clock.
 
+#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -30,9 +32,9 @@ async fn queued_requests_run_in_priority_order() {
         tasks.push(tokio::spawn(async move {
             account
                 .run(Priority::new(level), 1, async {
-                    order.lock().unwrap().push(level)
+                    order.lock().unwrap().push(level);
                 })
-                .await
+                .await;
         }));
         settle().await;
     }
@@ -63,7 +65,7 @@ async fn at_most_eight_requests_run_at_once_per_account() {
                         sleep(Duration::from_millis(10)).await;
                         running.fetch_sub(1, Ordering::SeqCst);
                     })
-                    .await
+                    .await;
             }));
         }
     }
@@ -105,7 +107,7 @@ async fn background_priorities_starve_below_the_reserve_but_priority_one_runs() 
     let waited = ran_at - start;
     let expected = Duration::from_secs_f64(401.0 / 80.0);
     assert!(
-        waited >= expected - Duration::from_millis(5)
+        waited >= expected.checked_sub(Duration::from_millis(5)).unwrap()
             && waited < expected + Duration::from_millis(50),
         "{waited:?}"
     );

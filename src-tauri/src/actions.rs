@@ -2,10 +2,10 @@
 
 use rusqlite::params;
 
-use crate::model::*;
+use crate::model::{AccountId, Action, SubId, SubKey, View};
 use crate::writer::{Ctx, Effect, GmailListQuery};
 
-pub fn apply(ctx: &mut Ctx, n: i64, action: Action) -> anyhow::Result<()> {
+pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
     match action {
         Action::Reset => {
             // A reloaded page: close every subscription of the previous page.
@@ -128,7 +128,7 @@ pub fn apply(ctx: &mut Ctx, n: i64, action: Action) -> anyhow::Result<()> {
     }
 }
 
-fn composer_sub(ctx: &Ctx, draft: &str) -> Option<SubId> {
+fn composer_sub(ctx: &Ctx<'_>, draft: &str) -> Option<SubId> {
     ctx.subs
         .map
         .iter()
@@ -138,7 +138,7 @@ fn composer_sub(ctx: &Ctx, draft: &str) -> Option<SubId> {
 
 /// The Gmail listing a subscription needs while online: Search, and the
 /// Label, Trash, and Spam views (SPEC Views).
-fn gmail_query(ctx: &Ctx, key: &SubKey) -> Option<(AccountId, GmailListQuery)> {
+fn gmail_query(ctx: &Ctx<'_>, key: &SubKey) -> Option<(AccountId, GmailListQuery)> {
     match key {
         SubKey::Search { account, query } if !query.trim().is_empty() => Some((
             *account,
@@ -171,7 +171,7 @@ fn gmail_query(ctx: &Ctx, key: &SubKey) -> Option<(AccountId, GmailListQuery)> {
     }
 }
 
-fn subscribe(ctx: &mut Ctx, sub: SubId, key: SubKey) -> anyhow::Result<()> {
+fn subscribe(ctx: &mut Ctx<'_>, sub: SubId, key: SubKey) -> anyhow::Result<()> {
     match &key {
         SubKey::Conversation { thread, open, .. } => {
             if let Some(account) = crate::threads::account_of(ctx.tx, *thread)? {

@@ -169,7 +169,14 @@ describe("pending actions", () => {
       ...s,
       subs: {
         ...s.subs,
-        s2: { ...subForKey(starred), loaded: true, ids: [{ key: "1", split: null }] } as never,
+        s2: {
+          type: "list",
+          key: starred,
+          loaded: true,
+          ids: [{ key: "1", split: null }],
+          searching: false,
+          more: false,
+        },
       },
     };
     s = addPending(s, { n: 1, action: { type: "modify", ...modify("done", [1], [], ["INBOX"]) } });
@@ -204,13 +211,29 @@ describe("rev rule", () => {
   });
 });
 
-describe("undo target", () => {
-  const summary = (undo: number[]): AccountSummary =>
-    ({
-      account: { id: 1 },
-      undo: undo.map((id) => ({ id, kind: "mail", label: "", threads: [], outbox: null })),
-    }) as unknown as AccountSummary;
+const summary = (undo: number[]): AccountSummary => ({
+  account: {
+    id: 1,
+    email: "me@example.com",
+    name: "Me",
+    hue: "#714CB6",
+    position: 0,
+    inboxUnread: 0,
+    needsSignin: false,
+    muted: false,
+    syncStatus: "idle",
+    sendAs: [],
+  },
+  labels: [],
+  splits: [],
+  pins: [],
+  outbox: [],
+  undo: undo.map((id) => ({ id, kind: "mail", label: "", threads: [], outbox: null })),
+  notices: [],
+  queuedOps: 0,
+});
 
+describe("undo target", () => {
   it("takes the newest entry with pending actions applied", () => {
     let s = withList("s1", inbox, ["1", "2"]);
     s = {

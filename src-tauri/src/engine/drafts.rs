@@ -14,7 +14,7 @@ use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
 use super::ops::{Done, bad};
 use super::{AccountRt, EngineRef};
 use crate::db::{from_json, to_json};
-use crate::model::*;
+use crate::model::{AccountId, Addr, DraftAttachment, DraftId, DraftKind, MessageId};
 
 /// A draft as stored, for building its MIME.
 pub struct DraftRow {
@@ -455,7 +455,7 @@ async fn download_parts_now(
         return Ok(());
     };
     let mut atts = d.attachments.clone();
-    for a in atts.iter_mut() {
+    for a in &mut atts {
         if a.path.is_none()
             && let Some(src) = a.source
         {
@@ -694,76 +694,73 @@ pub async fn store_gmail_draft(e: &EngineRef, rt: &Arc<AccountRt>, g: ub_gmail::
                 None => vec![],
             };
             let from = m.from.clone();
-            match existing {
-                Some(local) => {
-                    ctx.tx.execute(
-                        "UPDATE drafts SET from_json = ?2, to_json = ?3, cc_json = ?4, bcc_json = ?5, subject = ?6,
-                            body_html = ?7, quote_html = ?8, attachments_json = ?9, gmail_draft_id = ?10,
-                            gmail_message_id = ?11, gmail_thread_id = ?12, thread_id = ?13, pending_gmail_read = 0,
-                            needs_parts = ?14, updated_at = ?15
-                         WHERE id = ?1",
-                        params![
-                            local,
-                            to_json(&from),
-                            to_json(&m.to),
-                            to_json(&m.cc),
-                            to_json(&m.bcc),
-                            m.subject,
-                            body,
-                            quote,
-                            to_json(&atts),
-                            gmail_draft,
-                            m.gmail_id,
-                            m.gmail_thread_id,
-                            thread,
-                            !atts.is_empty(),
-                            m.internal_date,
-                        ],
-                    )?;
-                    ctx.touch_draft(account, &local)?;
-                }
-                None => {
-                    let alone = others.is_empty();
-                    let kind = if alone && m.in_reply_to.is_none() {
-                        DraftKind::New
-                    } else if m.subject.trim_start().to_lowercase().starts_with("fwd:") {
-                        DraftKind::Forward
-                    } else {
-                        DraftKind::Reply
-                    };
-                    let local = m.ub_draft_id.clone().unwrap_or_else(|| format!("g-{gmail_draft}"));
-                    ctx.tx.execute(
-                        "INSERT INTO drafts (id, account_id, kind, thread_id, target_message_id, started_on_latest,
-                            from_json, to_json, cc_json, bcc_json, subject, body_html, quote_html, attachments_json,
-                            in_reply_to, references_hdr, gmail_draft_id, gmail_message_id, gmail_thread_id, needs_parts,
-                            updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
-                        params![
-                            local,
-                            account,
-                            kind.as_str(),
-                            if kind == DraftKind::New { None } else { Some(thread) },
-                            if kind == DraftKind::New { None } else { target },
-                            started_on_latest,
-                            to_json(&from),
-                            to_json(&m.to),
-                            to_json(&m.cc),
-                            to_json(&m.bcc),
-                            m.subject,
-                            body,
-                            quote,
-                            to_json(&atts),
-                            m.in_reply_to,
-                            m.references.join(" "),
-                            gmail_draft,
-                            m.gmail_id,
-                            m.gmail_thread_id,
-                            !atts.is_empty(),
-                            m.internal_date,
-                        ],
-                    )?;
-                    ctx.touch_draft(account, &local)?;
-                }
+            if let Some(local) = existing {
+                ctx.tx.execute(
+                    "UPDATE drafts SET from_json = ?2, to_json = ?3, cc_json = ?4, bcc_json = ?5, subject = ?6,
+                        body_html = ?7, quote_html = ?8, attachments_json = ?9, gmail_draft_id = ?10,
+                        gmail_message_id = ?11, gmail_thread_id = ?12, thread_id = ?13, pending_gmail_read = 0,
+                        needs_parts = ?14, updated_at = ?15
+                     WHERE id = ?1",
+                    params![
+                        local,
+                        to_json(&from),
+                        to_json(&m.to),
+                        to_json(&m.cc),
+                        to_json(&m.bcc),
+                        m.subject,
+                        body,
+                        quote,
+                        to_json(&atts),
+                        gmail_draft,
+                        m.gmail_id,
+                        m.gmail_thread_id,
+                        thread,
+                        !atts.is_empty(),
+                        m.internal_date,
+                    ],
+                )?;
+                ctx.touch_draft(account, &local)?;
+            } else {
+                let alone = others.is_empty();
+                let kind = if alone && m.in_reply_to.is_none() {
+                    DraftKind::New
+                } else if m.subject.trim_start().to_lowercase().starts_with("fwd:") {
+                    DraftKind::Forward
+                } else {
+                    DraftKind::Reply
+                };
+                let local = m.ub_draft_id.clone().unwrap_or_else(|| format!("g-{gmail_draft}"));
+                ctx.tx.execute(
+                    "INSERT INTO drafts (id, account_id, kind, thread_id, target_message_id, started_on_latest,
+                        from_json, to_json, cc_json, bcc_json, subject, body_html, quote_html, attachments_json,
+                        in_reply_to, references_hdr, gmail_draft_id, gmail_message_id, gmail_thread_id, needs_parts,
+                        updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                    params![
+                        local,
+                        account,
+                        kind.as_str(),
+                        if kind == DraftKind::New { None } else { Some(thread) },
+                        if kind == DraftKind::New { None } else { target },
+                        started_on_latest,
+                        to_json(&from),
+                        to_json(&m.to),
+                        to_json(&m.cc),
+                        to_json(&m.bcc),
+                        m.subject,
+                        body,
+                        quote,
+                        to_json(&atts),
+                        m.in_reply_to,
+                        m.references.join(" "),
+                        gmail_draft,
+                        m.gmail_id,
+                        m.gmail_thread_id,
+                        !atts.is_empty(),
+                        m.internal_date,
+                    ],
+                )?;
+                ctx.touch_draft(account, &local)?;
             }
             ctx.touch_thread(account, thread)?;
             Ok(())

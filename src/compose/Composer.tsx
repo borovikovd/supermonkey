@@ -1,11 +1,11 @@
 // The composer, inline under a conversation or replacing the screen (`c`).
 // TipTap edits the body; the quote is a read-only block Rust builds.
 
-import HardBreak from "@tiptap/extension-hard-break";
-import Strike from "@tiptap/extension-strike";
+import { HardBreak } from "@tiptap/extension-hard-break";
+import { Strike } from "@tiptap/extension-strike";
 import { Placeholder } from "@tiptap/extensions";
 import { EditorContent, useEditor } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
+import { StarterKit } from "@tiptap/starter-kit";
 import { ChevronDown, Paperclip, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -57,19 +57,23 @@ function QuoteBlock({ html }: { html: string }) {
   );
 }
 
-function readFile(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve((r.result as string).split(",")[1] ?? "");
-    r.onerror = () => reject(r.error);
-    r.readAsDataURL(file);
-  });
+/** A picked file as base64, for the `add_attachment` command. */
+async function readFile(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
 }
+
+const commitField = (h: RecipientHandle | null, v: Addr[]) => (h ? h.commit() : v);
 
 export function Composer({ draft, inline }: { draft: string; inline: boolean }) {
   const state = useDraft(draft);
   const app = useAppState();
   const blurred = useChrome((s) => s.composeBlurred);
+  const chromeAccount = useChrome((s) => s.account);
   const [fields, setFields] = useState<DraftFields>({
     from: null,
     to: [],
@@ -107,11 +111,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
 
   const update = useCallback(
     (patch: Partial<DraftFields>) => {
-      setFields((f) => {
-        const next = { ...f, ...patch };
-        latest.current = next;
-        return next;
-      });
+      latest.current = { ...latest.current, ...patch };
+      setFields((f) => ({ ...f, ...patch }));
       scheduleSave();
     },
     [scheduleSave],
@@ -161,30 +162,30 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     onFocus: () => useChrome.getState().set({ composeBlurred: false }),
   });
 
-  // The first load carries the filled fields. A resumed draft fills the editor.
-  useEffect(() => {
-    if (!state || loaded || state.gone) return;
+  // The first load carries the filled fields (adjusted during render, once).
+  if (state && !state.gone && !loaded) {
     setLoaded(true);
-    setFields((f) => {
-      const body = f.bodyHtml || state.bodyHtml;
-      const next: DraftFields = {
-        from: state.from,
-        to: state.to,
-        cc: state.cc,
-        bcc: state.bcc,
-        subject: state.subject,
-        bodyHtml: body,
-        attachments: state.attachments,
-      };
-      latest.current = next;
-      return next;
-    });
+    setFields((f) => ({
+      from: state.from,
+      to: state.to,
+      cc: state.cc,
+      bcc: state.bcc,
+      subject: state.subject,
+      bodyHtml: f.bodyHtml || state.bodyHtml,
+      attachments: state.attachments,
+    }));
     if (state.cc.length > 0) setShowCc(true);
     if (state.bcc.length > 0) setShowBcc(true);
     if (state.kind === "new") setShowSubject(true);
-    if (editor && editor.isEmpty && state.bodyHtml)
-      editor.commands.setContent(state.bodyHtml, { emitUpdate: false });
-  }, [state, loaded, editor]);
+  }
+  useEffect(() => {
+    latest.current = fields;
+  }, [fields]);
+  // A resumed draft fills the editor.
+  const firstBody = loaded ? (state?.bodyHtml ?? "") : "";
+  useEffect(() => {
+    if (editor?.isEmpty && firstBody) editor.commands.setContent(firstBody, { emitUpdate: false });
+  }, [editor, firstBody]);
 
   // Register with the session so send, discard, and close carry the pending save.
   useEffect(() => {
@@ -197,12 +198,11 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       }
       dirty.current = false;
       const f = latest.current;
-      const commitAll = (h: RecipientHandle | null, v: Addr[]) => (h ? h.commit() : v);
       return {
         ...f,
-        to: commitAll(toRef.current, f.to),
-        cc: commitAll(ccRef.current, f.cc),
-        bcc: commitAll(bccRef.current, f.bcc),
+        to: commitField(toRef.current, f.to),
+        cc: commitField(ccRef.current, f.cc),
+        bcc: commitField(bccRef.current, f.bcc),
       };
     };
     openComposer.invalid = () =>
@@ -284,7 +284,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
         }
         if (!blurredNow) {
           // The first Esc blurs the editor and leaves compose on screen.
-          (document.activeElement as HTMLElement | null)?.blur();
+          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
           useChrome.getState().set({ composeBlurred: true });
         } else {
           closeComposerOnScreen();
@@ -307,19 +307,21 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
 
   const onFiles = async (files: FileList | null) => {
     if (!files) return;
-    const added: DraftAttachment[] = [];
-    for (const f of Array.from(files)) {
-      try {
-        const data = await readFile(f);
-        added.push(await addAttachment(draft, f.name, f.type, data));
-      } catch (err) {
-        toast.error(`Couldn't attach ${f.name}: ${String(err)}`);
-      }
-    }
+    const results = await Promise.all(
+      Array.from(files).map(async (f): Promise<DraftAttachment | null> => {
+        try {
+          return await addAttachment(draft, f.name, f.type, await readFile(f));
+        } catch (err) {
+          toast.error(`Couldn't attach ${f.name}: ${String(err)}`);
+          return null;
+        }
+      }),
+    );
+    const added = results.filter((a): a is DraftAttachment => a !== null);
     update({ attachments: [...latest.current.attachments, ...added] });
   };
 
-  const account = state?.account ?? useChrome.getState().account ?? 0;
+  const account = state?.account ?? chromeAccount ?? 0;
   const sendAs = app?.accounts.find((a) => a.id === account)?.sendAs ?? [];
 
   const ccToggle =

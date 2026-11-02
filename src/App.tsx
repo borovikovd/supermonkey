@@ -4,7 +4,9 @@ import { Toaster } from "sonner";
 
 import { connect, inTauri, quitNow, subscribe } from "./ipc/bridge";
 import { goTo } from "./commands";
-import { appHooks, onKeyDown } from "./keyboard/keys";
+import { onKeyDown } from "./keyboard/keys";
+import { appHooks } from "./keyboard/refs";
+import { switchAccount } from "./accounts";
 import { closeComposerOnScreen } from "./compose/start";
 import { useChrome, type PaletteMode } from "./store/chrome";
 import { listKey, useAppState, useSubscription, useSummary } from "./store/hooks";
@@ -28,22 +30,6 @@ function AccountSubs({ account }: { account: number }) {
   const where = useChrome((s) => s.perAccount[account]?.where ?? null);
   useSubscription(where ? listKey(account, where) : null);
   return null;
-}
-
-/** Switching accounts closes the palette and search and an open composer (SPEC Accounts → Switching). */
-export function switchAccount(account: number) {
-  const c = useChrome.getState();
-  if (c.account === account) return;
-  closeComposerOnScreen();
-  if (c.account !== null) {
-    // An open conversation is not reopened; the list is.
-    c.patchCurrent({ screen: { kind: "list" } });
-  }
-  c.setAccount(account);
-  c.set({ inline: null, sheet: null, link: null });
-  const cur = useChrome.getState().perAccount[account];
-  if (cur && cur.screen.kind !== "list")
-    useChrome.getState().patchCurrent({ screen: { kind: "list" } });
 }
 
 export function App() {

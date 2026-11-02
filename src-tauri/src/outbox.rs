@@ -6,13 +6,13 @@
 use rusqlite::{OptionalExtension, params};
 
 use crate::db::from_json;
-use crate::model::*;
+use crate::model::{AccountId, Addr, MessageId, ThreadId};
 use crate::writer::{Ctx, Effect};
 
 /// The undo window. Fixed at ten seconds, as in Superhuman; tests shorten it.
 pub static DELAY_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(10_000);
 
-pub fn send(ctx: &mut Ctx, n: i64, draft: &str) -> anyhow::Result<()> {
+pub fn send(ctx: &mut Ctx<'_>, n: i64, draft: &str) -> anyhow::Result<()> {
     let row: Option<(AccountId, Option<ThreadId>, Option<String>, String, String, String)> = ctx
         .tx
         .query_row(
@@ -70,7 +70,7 @@ pub fn send(ctx: &mut Ctx, n: i64, draft: &str) -> anyhow::Result<()> {
 }
 
 fn row(
-    ctx: &Ctx,
+    ctx: &Ctx<'_>,
     outbox: i64,
 ) -> anyhow::Result<Option<(AccountId, String, Option<ThreadId>, String, Option<String>)>> {
     Ok(ctx
@@ -84,7 +84,7 @@ fn row(
 }
 
 /// Closing a send toast tells Rust; once sent, its entry leaves the history.
-pub fn close_toast(ctx: &mut Ctx, outbox: i64) -> anyhow::Result<()> {
+pub fn close_toast(ctx: &mut Ctx<'_>, outbox: i64) -> anyhow::Result<()> {
     let Some((account, _, _, state, _)) = row(ctx, outbox)? else {
         return Ok(());
     };
@@ -99,7 +99,7 @@ pub fn close_toast(ctx: &mut Ctx, outbox: i64) -> anyhow::Result<()> {
 
 /// Undo on a send: waiting cancels it and the composer reopens; sending is
 /// held until the send resolves; sent trashes only that sent message.
-pub fn undo_send(ctx: &mut Ctx, account: AccountId, outbox: i64) -> anyhow::Result<()> {
+pub fn undo_send(ctx: &mut Ctx<'_>, account: AccountId, outbox: i64) -> anyhow::Result<()> {
     let Some((acc, draft, thread, state, sent_id)) = row(ctx, outbox)? else {
         anyhow::bail!("outbox row {outbox} is gone");
     };
@@ -147,7 +147,7 @@ pub fn undo_send(ctx: &mut Ctx, account: AccountId, outbox: i64) -> anyhow::Resu
 }
 
 /// Trashes only the sent message, locally at once and on Gmail through the queue.
-pub fn trash_sent(ctx: &mut Ctx, account: AccountId, gmail_id: &str) -> anyhow::Result<()> {
+pub fn trash_sent(ctx: &mut Ctx<'_>, account: AccountId, gmail_id: &str) -> anyhow::Result<()> {
     let msg: Option<(MessageId, ThreadId, String)> = ctx
         .tx
         .query_row(
@@ -176,7 +176,7 @@ pub fn trash_sent(ctx: &mut Ctx, account: AccountId, gmail_id: &str) -> anyhow::
 }
 
 /// Removes sent rows whose toast is gone and whose message is on its thread.
-pub fn cleanup(ctx: &mut Ctx, account: AccountId) -> anyhow::Result<()> {
+pub fn cleanup(ctx: &mut Ctx<'_>, account: AccountId) -> anyhow::Result<()> {
     let done: Vec<(i64, String)> = {
         let mut stmt = ctx.tx.prepare(
             "SELECT o.id, o.draft_id FROM outbox o WHERE o.account_id = ?1 AND o.state = 'sent' AND o.toast_closed = 1
@@ -198,7 +198,7 @@ pub fn cleanup(ctx: &mut Ctx, account: AccountId) -> anyhow::Result<()> {
 
 /// On launch: drop send entries whose row is already sent, so a stray `z`
 /// never trashes delivered mail; mark waiting rows that missed their time.
-pub fn on_launch(ctx: &mut Ctx) -> anyhow::Result<()> {
+pub fn on_launch(ctx: &mut Ctx<'_>) -> anyhow::Result<()> {
     ctx.tx.execute(
         "DELETE FROM undo_entries WHERE kind = 'send' AND json_extract(payload, '$.outbox') IN
            (SELECT id FROM outbox WHERE state = 'sent')",

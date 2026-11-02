@@ -2,7 +2,7 @@
 
 use rusqlite::Connection;
 
-use crate::model::*;
+use crate::model::{AccountId, ListEntry, ThreadId};
 
 /// Most local matches a search list holds.
 const LIMIT: usize = 500;
@@ -17,6 +17,7 @@ pub fn ids(
     let mut matched: Vec<(i64, ThreadId)> = Vec::new();
     if q.has_local_terms() {
         let fts = q.to_fts5();
+        #[allow(clippy::single_match_else)] // Two plans read clearer as a match.
         match (&fts, q.needs_post_filter()) {
             // FTS expresses the whole query: one indexed lookup.
             (Some(fts), false) => {
@@ -36,22 +37,19 @@ pub fn ids(
             }
             // FTS narrows (or cannot help); the rule language decides.
             _ => {
-                let candidates: Vec<ThreadId> = match &fts {
-                    Some(fts) => {
-                        let mut stmt = conn.prepare_cached(
-                            "SELECT DISTINCT m.thread_id FROM messages_fts f JOIN messages m ON m.id = f.rowid
-                             WHERE messages_fts MATCH ?1 AND m.account_id = ?2 AND m.is_draft = 0 LIMIT 5000",
-                        )?;
-                        stmt.query_map(rusqlite::params![fts, account], |r| r.get(0))?
-                            .collect::<Result<_, _>>()?
-                    }
-                    None => {
-                        let mut stmt = conn.prepare_cached(
-                            "SELECT id FROM threads WHERE account_id = ?1 AND has_live = 1 ORDER BY sort_time DESC LIMIT 5000",
-                        )?;
-                        stmt.query_map([account], |r| r.get(0))?
-                            .collect::<Result<_, _>>()?
-                    }
+                let candidates: Vec<ThreadId> = if let Some(fts) = &fts {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT DISTINCT m.thread_id FROM messages_fts f JOIN messages m ON m.id = f.rowid
+                         WHERE messages_fts MATCH ?1 AND m.account_id = ?2 AND m.is_draft = 0 LIMIT 5000",
+                    )?;
+                    stmt.query_map(rusqlite::params![fts, account], |r| r.get(0))?
+                        .collect::<Result<_, _>>()?
+                } else {
+                    let mut stmt = conn.prepare_cached(
+                        "SELECT id FROM threads WHERE account_id = ?1 AND has_live = 1 ORDER BY sort_time DESC LIMIT 5000",
+                    )?;
+                    stmt.query_map([account], |r| r.get(0))?
+                        .collect::<Result<_, _>>()?
                 };
                 for t in candidates {
                     if let Some(time) = thread_matches(conn, account, t, &q)? {
@@ -142,7 +140,7 @@ pub fn thread_matches(
     q: &ub_rules::Query,
 ) -> anyhow::Result<Option<i64>> {
     let msgs = crate::threads::messages(conn, thread)?;
-    if !msgs.iter().any(|m| m.live()) {
+    if !msgs.iter().any(super::super::threads::Msg::live) {
         return Ok(None);
     }
     let labels = crate::threads::thread_labels(&msgs);
@@ -157,12 +155,7 @@ pub fn thread_matches(
             user_labels: user_labels.clone(),
         };
         if q.matches(&s, ub_rules::Mode::Search) {
-            let time = msgs
-                .iter()
-                .rev()
-                .find(|m| m.live())
-                .map(|m| m.date)
-                .unwrap_or(0);
+            let time = msgs.iter().rev().find(|m| m.live()).map_or(0, |m| m.date);
             return Ok(Some(time));
         }
     }

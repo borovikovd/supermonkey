@@ -134,13 +134,17 @@ export function ListView() {
   }, [list.ids, isInbox, splits, forced]);
 
   const parent = useRef<HTMLDivElement>(null);
+  // TanStack Virtual returns functions the React Compiler cannot memoize, so it
+  // skips this component; the list is virtualized and stays fast without it.
+  // oxlint-disable-next-line react/incompatible-library
   const v = useVirtualizer({
     count: items.length,
     getScrollElement: () => parent.current,
     estimateSize: (i) => (items[i]?.type === "header" ? HEADER : ROW),
     overscan: 20,
     getItemKey: (i) => {
-      const it = items[i]!;
+      const it = items[i];
+      if (!it) return i;
       return it.type === "row" ? it.key : `h${it.split}`;
     },
   });
@@ -154,8 +158,9 @@ export function ListView() {
 
   // First visit: the top row is highlighted.
   useEffect(() => {
-    if (highlight === null && list.ids.length > 0 && cur?.screen.kind === "list") {
-      useChrome.getState().patchCurrent({ highlight: list.ids[0]!.key });
+    const top = list.ids[0];
+    if (highlight === null && top && cur?.screen.kind === "list") {
+      useChrome.getState().patchCurrent({ highlight: top.key });
     }
   }, [highlight, list.ids, cur?.screen.kind]);
 
@@ -174,9 +179,11 @@ export function ListView() {
   const virtual = v.getVirtualItems();
   const rows = list.rows;
   useEffect(() => {
-    if (virtual.length === 0) return;
-    const first = Math.max(0, virtual[0]!.index - 40);
-    const last = Math.min(items.length - 1, virtual[virtual.length - 1]!.index + 60);
+    const head = virtual[0];
+    const tail = virtual.at(-1);
+    if (!head || !tail) return;
+    const first = Math.max(0, head.index - 40);
+    const last = Math.min(items.length - 1, tail.index + 60);
     const missing: string[] = [];
     for (let i = first; i <= last; i++) {
       const it = items[i];
@@ -192,8 +199,9 @@ export function ListView() {
   // Gmail pages: fetch the next one as the list nears its end.
   const asked = useRef(0);
   useEffect(() => {
-    if (!list.more || !list.sub || virtual.length === 0) return;
-    const last = virtual[virtual.length - 1]!.index;
+    const tail = virtual.at(-1);
+    if (!list.more || !list.sub || !tail) return;
+    const last = tail.index;
     if (last >= items.length - 15 && asked.current !== items.length) {
       asked.current = items.length;
       act({ type: "moreResults", sub: list.sub });
@@ -232,7 +240,8 @@ export function ListView() {
     <div ref={parent} className="min-h-0 flex-1 overflow-y-auto" style={{ contain: "strict" }}>
       <div style={{ height: v.getTotalSize(), position: "relative" }}>
         {virtual.map((vi) => {
-          const it = items[vi.index]!;
+          const it = items[vi.index];
+          if (!it) return null;
           return (
             <div
               key={vi.key}

@@ -1,7 +1,7 @@
 import { Command } from "cmdk";
 import { useEffect, useMemo, useState } from "react";
 
-import { switchAccount } from "../App";
+import { switchAccount } from "../accounts";
 import {
   applyLabel,
   goTo,
@@ -20,7 +20,7 @@ import {
 import { startCompose, startReply } from "../compose/start";
 import { act, addAccount, snoozeOptions } from "../ipc/bridge";
 import type { PinKind, View } from "../ipc/types";
-import { appHooks } from "../keyboard/keys";
+import { appHooks } from "../keyboard/refs";
 import { goSplit } from "../keyboard/nav";
 import { measure } from "../keyboard/meter";
 import { useChrome, type PaletteMode } from "../store/chrome";
@@ -296,11 +296,9 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
   const filtered = mode.kind === "snooze";
   // Snooze options arrive from Rust after each keystroke: keep the first one
   // selected so Enter always picks something.
-  const [selected, setSelected] = useState("");
+  const [picked, setSelected] = useState("");
   const firstValue = items[0] ? itemValue(items[0]) : "";
-  useEffect(() => {
-    if (filtered) setSelected(firstValue);
-  }, [filtered, firstValue]);
+  const selected = items.some((it) => itemValue(it) === picked) ? picked : firstValue;
   return (
     <div className="fixed inset-0 z-40" onMouseDown={close}>
       <div

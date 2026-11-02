@@ -3,13 +3,14 @@
 //! The perf fixture has two accounts, each with 20,000 cached threads, 2,000
 //! of them in Inbox, one 60-message thread, and 5,000 contacts.
 
+use std::fmt::Write as _;
 use std::path::Path;
 
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rusqlite::params;
 
-use crate::model::*;
+use crate::model::{Addr, SendAs};
 use crate::subs::Subs;
 use crate::writer::{Ctx, Touched};
 
@@ -138,10 +139,10 @@ fn body(rng: &mut StdRng) -> (String, String) {
     let lines: Vec<&str> = (0..n)
         .map(|_| LINES[rng.random_range(0..LINES.len())])
         .collect();
-    let html = lines
-        .iter()
-        .map(|l| format!("<p>{l}</p>"))
-        .collect::<String>();
+    let html = lines.iter().fold(String::new(), |mut out, l| {
+        let _ = write!(out, "<p>{l}</p>");
+        out
+    });
     (html, lines.join(" "))
 }
 

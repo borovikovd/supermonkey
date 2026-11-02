@@ -8,15 +8,19 @@ import type { MessageBody } from "../ipc/types";
 const bodies = new Map<number, MessageBody>();
 const waiting = new Map<number, Promise<void>>();
 
+async function fetchBody(id: number): Promise<void> {
+  try {
+    for (const b of await getBodies([id])) bodies.set(b.id, b);
+  } finally {
+    waiting.delete(id);
+  }
+}
+
 export function loadBody(id: number): Promise<void> {
   if (bodies.has(id)) return Promise.resolve();
   let p = waiting.get(id);
   if (!p) {
-    p = getBodies([id])
-      .then((r) => {
-        for (const b of r) bodies.set(b.id, b);
-      })
-      .finally(() => waiting.delete(id));
+    p = fetchBody(id);
     waiting.set(id, p);
   }
   return p;
@@ -85,6 +89,7 @@ export const MessageFrame = memo(function MessageFrame({
     const setup = () => {
       const doc = el.contentDocument;
       if (!doc) return;
+      ro?.disconnect();
       const fit = () => {
         el.style.height = `${doc.documentElement.scrollHeight}px`;
       };
@@ -95,7 +100,8 @@ export const MessageFrame = memo(function MessageFrame({
       doc.addEventListener("keydown", (e) => onKey(e));
       doc.addEventListener("mousedown", () => onSelect(id));
       doc.addEventListener("click", (e) => {
-        const t = e.target as HTMLElement;
+        const t = e.target;
+        if (!(t instanceof Element)) return;
         if (t.closest("[data-ub-toggle]")) {
           doc.querySelector(".ub-quote")?.classList.toggle("ub-open");
           requestAnimationFrame(fit);
@@ -120,7 +126,7 @@ export const MessageFrame = memo(function MessageFrame({
       el.removeEventListener("load", setup);
       ro?.disconnect();
     };
-  }, [body, onKey, onSelect, id, remoteImages, quoteOpen]);
+  }, [body, onKey, onSelect, id]);
 
   if (!body) {
     return (
@@ -134,6 +140,9 @@ export const MessageFrame = memo(function MessageFrame({
       ref={frame}
       data-frame={id}
       title={`message ${id}`}
+      // allow-scripts is only there so WebKit fires the parent's listeners (bug 218086);
+      // the document's CSP is script-src 'none', so nothing in a message can run.
+      // oxlint-disable-next-line react/iframe-missing-sandbox
       sandbox="allow-same-origin allow-scripts"
       srcDoc={srcdoc(body, remoteImages, quoteOpen)}
       className="block w-full border-0"

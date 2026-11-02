@@ -67,17 +67,22 @@ impl TokenStore for MemoryTokenStore {
     fn store_refresh_token(&self, email: &str, token: &str) -> Result<(), TokenStoreError> {
         self.tokens
             .lock()
-            .unwrap()
+            .expect("lock poisoned")
             .insert(email.into(), token.into());
         Ok(())
     }
 
     fn load_refresh_token(&self, email: &str) -> Result<Option<String>, TokenStoreError> {
-        Ok(self.tokens.lock().unwrap().get(email).cloned())
+        Ok(self
+            .tokens
+            .lock()
+            .expect("lock poisoned")
+            .get(email)
+            .cloned())
     }
 
     fn delete_refresh_token(&self, email: &str) -> Result<(), TokenStoreError> {
-        self.tokens.lock().unwrap().remove(email);
+        self.tokens.lock().expect("lock poisoned").remove(email);
         Ok(())
     }
 }

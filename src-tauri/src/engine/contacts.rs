@@ -6,7 +6,7 @@ use rusqlite::{Connection, params};
 use ub_gmail::{Format, GmailError, Priority, ThreadListQuery, cost};
 
 use super::{AccountRt, EngineRef};
-use crate::model::*;
+use crate::model::{AccountId, Addr, ContactSuggestion};
 
 /// Up to `limit` suggestions, ranked: sent-to first (by sent count weighted
 /// toward recent contact), then received-from, then co-recipients.
@@ -107,7 +107,7 @@ pub async fn backfill_page(
             .filter(|m| {
                 m.label_ids.iter().any(|l| l == "SENT") && !m.label_ids.iter().any(|l| l == "DRAFT")
             })
-            .map(|m| super::ingest::parse(m, false, &Default::default()))
+            .map(|m| super::ingest::parse(m, false, &std::collections::HashMap::default()))
             .collect();
         let account = rt.id;
         e.writer.sync(move |ctx| {

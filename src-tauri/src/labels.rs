@@ -3,11 +3,11 @@
 
 use rusqlite::params;
 
-use crate::model::*;
+use crate::model::AccountId;
 use crate::writer::Ctx;
 
 pub fn create(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     n: i64,
     account: AccountId,
     id: &str,

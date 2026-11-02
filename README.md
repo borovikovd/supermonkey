@@ -25,8 +25,20 @@ vp run tauri build     # src-tauri/target/release/bundle/macos/Ubermensch.app
 ## Checks
 
 ```sh
-./scripts/gate.sh       # vp check, vp test, cargo test, cargo clippy, bindings
+./scripts/gate.sh       # vp check, vp test, cargo fmt, cargo test, cargo clippy, bindings
+vp config --hooks       # once per clone: pre-commit runs `vp staged` (format and lint staged files)
 ```
+
+Lint setup:
+
+- TypeScript: Oxlint through Vite+ with type-aware rules and type checking
+  (`vite.config.ts`). Correctness, suspicious, and perf rules are errors, and
+  warnings fail the check. `tsconfig` is `strict` with
+  `noUncheckedIndexedAccess`. The React Compiler (the Rust port,
+  `oxc-transform-react`) compiles every component.
+- Rust: workspace lints in `src-tauri/Cargo.toml`. Clippy `all` is denied and
+  `pedantic` is on, `unsafe_code` is forbidden, and `unwrap` is flagged
+  outside tests. `rustfmt.toml` and `clippy.toml` sit next to it.
 
 Perf fixture (two accounts × 20,000 threads):
 

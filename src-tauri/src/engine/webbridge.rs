@@ -17,7 +17,7 @@ use tokio_stream::StreamExt;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::Core;
-use crate::model::*;
+use crate::model::{ChannelMessage, LaunchInfo};
 
 pub fn start(app: AppHandle) {
     if !cfg!(debug_assertions) || std::env::var("UBERMENSCH_WEB_BRIDGE").as_deref() != Ok("1") {

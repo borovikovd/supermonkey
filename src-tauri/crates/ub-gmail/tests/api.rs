@@ -1,5 +1,7 @@
 //! The client's calls against the fake's stateful mailbox.
 
+#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+
 mod common;
 
 use common::*;
@@ -207,7 +209,10 @@ async fn draft_lifecycle() {
     let sent = gmail.send_draft(&draft.id).await.unwrap();
     assert_eq!(sent.label_ids, vec!["SENT"]);
     assert_eq!(sent.thread_id, draft.message.thread_id);
-    assert!(gmail.list_drafts(None).await.unwrap().drafts.is_empty());
+    assert_eq!(
+        gmail.list_drafts(None).await.unwrap().drafts,
+        [] as [ub_gmail::Draft; 0]
+    );
 
     let other = gmail
         .create_draft(&draft_raw("Discard me", "local-2"), None)

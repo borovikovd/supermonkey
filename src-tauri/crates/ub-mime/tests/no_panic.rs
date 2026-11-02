@@ -1,5 +1,7 @@
 //! Random input built from the characters these parsers care about must never panic.
 
+#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+
 use std::collections::HashMap;
 
 use ub_mime::{

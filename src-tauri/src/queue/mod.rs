@@ -6,11 +6,11 @@ pub mod runner;
 use rusqlite::params;
 use serde::Serialize;
 
-use crate::model::*;
+use crate::model::AccountId;
 use crate::writer::{Ctx, Effect};
 
 pub fn push<T: Serialize>(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     account: AccountId,
     action: Option<i64>,
     kind: &str,

@@ -18,8 +18,9 @@ import {
 } from "../commands";
 import { startCompose, startReply } from "../compose/start";
 import { useChrome } from "../store/chrome";
-import type { ConversationData } from "../ipc/types";
 import { measure } from "./meter";
+import { appHooks, conversationRef } from "./refs";
+
 import {
   extendSelection,
   goSplit,
@@ -33,27 +34,8 @@ import {
 
 export { applyLabel };
 
-/** Set by the conversation view so keys can act on its data. */
-export const conversationRef: { data: ConversationData | null } = { data: null };
-
-/** Set by App: account switching and split lookup. */
-export const appHooks: {
-  switchAccount: (index: number) => void;
-  splitIdOf: (kind: string) => number | null;
-  openPalette: (mode: import("../store/chrome").PaletteMode) => void;
-  focusSearch: () => void;
-  linkKey: (e: KeyboardEvent) => boolean;
-} = {
-  switchAccount: () => {},
-  splitIdOf: () => null,
-  openPalette: () => {},
-  focusSearch: () => {},
-  linkKey: () => false,
-};
-
-const isTyping = (t: EventTarget | null) => {
-  const el = t as HTMLElement | null;
-  if (!el) return false;
+const isTyping = (el: EventTarget | null) => {
+  if (!(el instanceof HTMLElement)) return false;
   return (
     el.isContentEditable ||
     el.tagName === "INPUT" ||
@@ -62,31 +44,33 @@ const isTyping = (t: EventTarget | null) => {
   );
 };
 
+const goView = (kind: "done" | "snoozed" | "starred" | "sent" | "drafts" | "trash" | "spam") =>
+  goTo({ kind: "view", view: { kind } });
+
 function handleG(key: string): boolean {
   const c = useChrome.getState();
   c.set({ gPending: false });
-  const view = (kind: string) => goTo({ kind: "view", view: { kind } as never });
   switch (key) {
     case "e":
-      view("done");
+      goView("done");
       return true;
     case "h":
-      view("snoozed");
+      goView("snoozed");
       return true;
     case "s":
-      view("starred");
+      goView("starred");
       return true;
     case "t":
-      view("sent");
+      goView("sent");
       return true;
     case "d":
-      view("drafts");
+      goView("drafts");
       return true;
     case "#":
-      view("trash");
+      goView("trash");
       return true;
     case "!":
-      view("spam");
+      goView("spam");
       return true;
     case "l":
       appHooks.openPalette({ kind: "goLabel" });

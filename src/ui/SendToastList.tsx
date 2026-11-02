@@ -5,7 +5,8 @@
 import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 
-import { openComposer, reopenDraft, reopenWhenGone, undoSend } from "../compose/start";
+import { openComposer, reopenDraft } from "../compose/start";
+import { reopenWhenGone, undoSend } from "../compose/undo-send";
 import { act } from "../ipc/bridge";
 import type { Notice, OutboxRow } from "../ipc/types";
 import { useChrome } from "../store/chrome";

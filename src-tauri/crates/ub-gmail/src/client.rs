@@ -12,7 +12,10 @@ use serde_json::{Value, json};
 
 use crate::error::{self, GmailError, Outcome};
 use crate::oauth::TokenSource;
-use crate::types::*;
+use crate::types::{
+    Draft, Format, Label, ListDraftsResponse, ListHistoryResponse, ListThreadsResponse, Message,
+    MessagePartBody, Profile, SendAs, Thread,
+};
 
 /// Google's Gmail API base URL.
 pub const GMAIL_BASE_URL: &str = "https://gmail.googleapis.com";
@@ -24,7 +27,7 @@ const BASE64URL_LENIENT: GeneralPurpose = GeneralPurpose::new(
 );
 
 /// A reqwest client with the timeouts the error rule relies on: a connect timeout (Offline)
-/// and a read timeout (NoResponse).
+/// and a read timeout (`NoResponse`).
 pub fn default_http_client() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))

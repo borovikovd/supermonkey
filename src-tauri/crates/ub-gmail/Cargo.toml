@@ -19,3 +19,6 @@ url = "2"
 [dev-dependencies]
 ub-fake-gmail = { path = "../ub-fake-gmail" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "test-util"] }
+
+[lints]
+workspace = true

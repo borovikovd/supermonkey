@@ -30,6 +30,8 @@ async function invoke<T>(cmd: string, args: Record<string, unknown> = {}): Promi
     headers: { "content-type": "application/json" },
     body: JSON.stringify(args),
   });
+  // The debug bridge answers with JSON Rust serialized from the same ts-rs types.
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
   const body = (await r.json()) as T;
   if (!r.ok) throw new Error(String(body));
   return body;
@@ -38,7 +40,7 @@ async function invoke<T>(cmd: string, args: Record<string, unknown> = {}): Promi
 let nextN = 1;
 let buffer: NumberedAction[] = [];
 let inFlight = false;
-export let launch: LaunchInfo = { lastAction: 0, debug: false } as LaunchInfo;
+export let launch: LaunchInfo = { lastAction: 0, debug: false };
 
 async function flush(): Promise<void> {
   if (inFlight || buffer.length === 0) return;
@@ -112,14 +114,19 @@ export function subIdFor(key: SubKey): string | undefined {
 export async function connect(): Promise<LaunchInfo> {
   if (inTauri) {
     const channel = new Channel<ChannelMessage>();
+    // Tauri's Channel is not an EventTarget; `onmessage` is its only API.
+    // oxlint-disable-next-line unicorn/prefer-add-event-listener
     channel.onmessage = (msg) => useMirror.getState().receive(msg);
     launch = await invoke<LaunchInfo>("connect", { channel });
   } else {
     const events = new EventSource(`${BRIDGE}/events`);
-    events.onmessage = (e) =>
-      useMirror.getState().receive(JSON.parse(e.data as string) as ChannelMessage);
+    events.addEventListener("message", (e: MessageEvent<string>) => {
+      // Channel messages are serialized by Rust from the ts-rs types.
+      // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+      useMirror.getState().receive(JSON.parse(e.data) as ChannelMessage);
+    });
     await new Promise<void>((resolve) => {
-      events.onopen = () => resolve();
+      events.addEventListener("open", () => resolve(), { once: true });
     });
     launch = await invoke<LaunchInfo>("connect");
   }

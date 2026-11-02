@@ -2,7 +2,7 @@
 // targets, sends a resolved action (never a toggle), and moves the highlight
 // when rows leave the list (SPEC Keyboard).
 
-import { undoSend } from "./compose/start";
+import { undoSend } from "./compose/undo-send";
 import { act, subIdFor } from "./ipc/bridge";
 import type { ModifyAction, ModifyKind, SubKey, View } from "./ipc/types";
 import { useChrome, type Where } from "./store/chrome";
@@ -95,15 +95,17 @@ function moveAfterRemoval(before: string[], removed: Set<string>) {
   const at = before.indexOf(focus);
   let next: string | null = null;
   for (let i = at + 1; i < before.length; i++) {
-    if (after.includes(before[i]!)) {
-      next = before[i]!;
+    const k = before[i];
+    if (k !== undefined && after.includes(k)) {
+      next = k;
       break;
     }
   }
   if (next === null) {
     for (let i = at - 1; i >= 0; i--) {
-      if (after.includes(before[i]!)) {
-        next = before[i]!;
+      const k = before[i];
+      if (k !== undefined && after.includes(k)) {
+        next = k;
         break;
       }
     }
@@ -173,7 +175,7 @@ export const snooze = (at: number) =>
 
 const allHave = (field: "starred" | "unread") => {
   const t = targets();
-  return t.length > 0 && t.every((id) => rowOf(String(id))?.[field] === true);
+  return t.length > 0 && t.every((id) => rowOf(String(id))?.[field]);
 };
 
 export const toggleStar = () => {

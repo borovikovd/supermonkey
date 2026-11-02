@@ -11,7 +11,7 @@ use super::ingest::{self, Incoming, PendingOps};
 use super::work::{self, Work};
 use super::{AccountRt, EngineRef};
 use crate::db::to_json;
-use crate::model::*;
+use crate::model::{AccountId, SendAs, ThreadId};
 use crate::writer::Effect;
 
 const POLL: Duration = Duration::from_secs(45);
@@ -44,7 +44,9 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
             )?)
         })
         .unwrap_or(false);
-    if !connected {
+    if connected {
+        resume(&rt);
+    } else {
         while !rt.is_stopped() {
             match connect(&e, &rt).await {
                 Ok(()) => break,
@@ -57,14 +59,12 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
                 }
             }
         }
-    } else {
-        resume(&rt);
     }
     let mut last = Instant::now();
     let mut polls = 0u32;
     while !rt.is_stopped() {
         let r = poll(&e, &rt).await;
-        e.note(&rt, r.as_ref().map(|_| ()));
+        e.note(&rt, r.as_ref().map(drop));
         if let Err(err) = &r {
             if matches!(err.outcome, Outcome::InvalidGrant) {
                 return;
@@ -370,7 +370,7 @@ pub async fn fetch_thread(
 }
 
 pub fn drop_thread(
-    ctx: &mut crate::writer::Ctx,
+    ctx: &mut crate::writer::Ctx<'_>,
     account: AccountId,
     gmail_thread: &str,
 ) -> anyhow::Result<()> {
@@ -515,7 +515,7 @@ pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> 
         match get_thread(rt, t, Format::Metadata, Priority::P3).await {
             Ok((h, msgs)) => fetched.push((t.clone(), h, msgs)),
             Err(err) if matches!(err.outcome, Outcome::NotFound) => {
-                fetched.push((t.clone(), None, vec![]))
+                fetched.push((t.clone(), None, vec![]));
             }
             Err(err) => return Err(err),
         }
@@ -621,7 +621,7 @@ pub async fn full_resync(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), Gmail
         loop {
             let q = ThreadListQuery {
                 q: None,
-                label_ids: label.iter().map(|s| s.to_string()).collect(),
+                label_ids: label.iter().map(ToString::to_string).collect(),
                 page_token: page,
                 max_results: Some(500),
                 include_spam_trash: true,

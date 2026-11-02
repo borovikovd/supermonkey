@@ -1,5 +1,7 @@
 //! Sign-in, refresh, revoke and token storage against the fake's OAuth endpoints.
 
+#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+
 mod common;
 
 use std::sync::Arc;

@@ -3,6 +3,8 @@
 //! a list built from its first load plus patches equals a fresh first load at
 //! that `rev`.
 
+#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -63,7 +65,7 @@ fn op() -> impl Strategy<Value = Op> {
 }
 
 fn effect(kind: ModifyKind) -> (Vec<String>, Vec<String>, Option<SnoozeChange>) {
-    let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let s = |v: &[&str]| v.iter().map(ToString::to_string).collect::<Vec<_>>();
     match kind {
         ModifyKind::Done => (vec![], s(&["INBOX"]), None),
         ModifyKind::ReturnToInbox => (

@@ -17,3 +17,6 @@ encoding_rs = "0.8"
 
 [dev-dependencies]
 mail-parser = "1"
+
+[lints]
+workspace = true

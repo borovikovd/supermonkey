@@ -1,4 +1,6 @@
 //! Shared harness for tests against the fake Gmail server.
+
+#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
 #![allow(dead_code)]
 
 use std::sync::Arc;

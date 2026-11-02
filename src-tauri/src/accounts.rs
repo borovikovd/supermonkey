@@ -2,11 +2,11 @@
 
 use rusqlite::params;
 
-use crate::model::*;
+use crate::model::AccountId;
 use crate::writer::{Ctx, Effect};
 
 /// Adds an account row (or returns the existing one) with its default splits.
-pub fn create(ctx: &mut Ctx, email: &str) -> anyhow::Result<AccountId> {
+pub fn create(ctx: &mut Ctx<'_>, email: &str) -> anyhow::Result<AccountId> {
     if let Ok(id) = ctx.tx.query_row(
         "SELECT id FROM accounts WHERE lower(email) = lower(?1)",
         [email],
@@ -55,7 +55,7 @@ pub const SYSTEM_LABELS: [(&str, &str); 10] = [
 
 /// Deletes the account's rows, queue, and outbox. The async side stops its
 /// sync, deletes its Keychain item, revokes the token, and removes files.
-pub fn remove(ctx: &mut Ctx, account: AccountId) -> anyhow::Result<()> {
+pub fn remove(ctx: &mut Ctx<'_>, account: AccountId) -> anyhow::Result<()> {
     let email: String =
         ctx.tx
             .query_row("SELECT email FROM accounts WHERE id = ?1", [account], |r| {

@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use crate::model::*;
+use crate::model::{AccountId, MessageId, ModifyAction, ModifyKind, SnoozeChange, ThreadId};
 use crate::threads;
 use crate::writer::Ctx;
 
@@ -40,7 +40,7 @@ pub struct ModifyOp {
     pub threads: Vec<ThreadChange>,
 }
 
-pub fn modify(ctx: &mut Ctx, n: i64, m: ModifyAction) -> anyhow::Result<()> {
+pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: ModifyAction) -> anyhow::Result<()> {
     let add: BTreeSet<String> = m.add.iter().cloned().collect();
     let remove: BTreeSet<String> = m
         .remove
@@ -164,7 +164,7 @@ pub fn modify(ctx: &mut Ctx, n: i64, m: ModifyAction) -> anyhow::Result<()> {
 
 /// Reverts a mail entry: only the labels and snooze values it changed.
 pub fn undo(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     n: i64,
     account: AccountId,
     payload: &serde_json::Value,
@@ -175,7 +175,7 @@ pub fn undo(
 
 /// Shared by undo and by rollback after a Gmail rejection.
 pub fn revert(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     action: Option<i64>,
     account: AccountId,
     changes: &[ThreadChange],

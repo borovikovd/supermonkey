@@ -8,7 +8,7 @@ use ub_gmail::{Format, Priority, ThreadListQuery, cost};
 
 use super::EngineRef;
 use super::work::{self, Work};
-use crate::model::*;
+use crate::model::{AccountId, SubId};
 use crate::writer::GmailListQuery;
 
 const PAGE: u32 = 15;

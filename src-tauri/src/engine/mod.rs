@@ -30,7 +30,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use ub_gmail::{AccountScheduler, Gmail, GmailError, OAuthConfig, Outcome, Scheduler, TokenStore};
 
 use crate::db::ReadPool;
-use crate::model::*;
+use crate::model::{AccountId, SubId};
 use crate::writer::{Effect, Writer};
 
 /// Endpoints and credentials. Debug builds may point at the fake Gmail server.
@@ -294,13 +294,13 @@ impl Engine {
 
     /// Starts accounts and the effect loop.
     pub fn run(self: &Arc<Self>, effects: UnboundedReceiver<Effect>) {
-        tauri::async_runtime::spawn(launch(self.clone()));
+        launch(self.clone());
         tauri::async_runtime::spawn(dispatch(self.clone(), effects));
     }
 }
 
 /// On launch: start every signed-in account, wake due snoozes, settle the outbox.
-async fn launch(engine: EngineRef) {
+fn launch(engine: EngineRef) {
     let accounts: Vec<(AccountId, String, bool)> = engine
         .reads
         .with(|c| {
@@ -311,7 +311,7 @@ async fn launch(engine: EngineRef) {
         })
         .unwrap_or_default();
     snooze::wake_due(&engine);
-    crate::engine::outbox::on_launch(&engine);
+    outbox::on_launch(&engine);
     for (id, email, needs) in accounts {
         if needs {
             continue;

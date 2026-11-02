@@ -10,7 +10,7 @@ use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
 
 use super::{AccountRt, EngineRef};
 use crate::mail::ModifyOp;
-use crate::model::*;
+use crate::model::AccountId;
 
 #[derive(Debug, Clone)]
 pub struct Op {
@@ -98,8 +98,8 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
                     let d = ub_gmail::backoff(attempt, err.retry_after());
                     attempt = attempt.saturating_add(1);
                     tokio::select! {
-                        _ = tokio::time::sleep(d) => {}
-                        _ = rt.ops_kick.notified() => {}
+                        () = tokio::time::sleep(d) => {}
+                        () = rt.ops_kick.notified() => {}
                     }
                 }
             },
@@ -260,7 +260,7 @@ async fn execute(e: &EngineRef, rt: &Arc<AccountRt>, op: &Op) -> Result<Done, Gm
 /// Gives a locally created label its Gmail id. If a refresh already stored the
 /// Gmail label as its own row, that row folds into the local one.
 fn map_label(
-    ctx: &mut crate::writer::Ctx,
+    ctx: &mut crate::writer::Ctx<'_>,
     account: AccountId,
     local: &str,
     gmail_id: &str,

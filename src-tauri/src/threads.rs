@@ -7,7 +7,7 @@ use std::collections::{BTreeSet, HashSet};
 use rusqlite::{OptionalExtension, params};
 
 use crate::db::{from_json, queries};
-use crate::model::*;
+use crate::model::{AccountId, Addr, MessageId, ThreadId};
 use crate::writer::Ctx;
 
 #[derive(Debug, Clone)]
@@ -106,7 +106,7 @@ pub fn thread_labels(msgs: &[Msg]) -> BTreeSet<String> {
 }
 
 /// Recomputes a thread's row. Deletes it when it has no messages left.
-pub fn refresh(ctx: &mut Ctx, thread: ThreadId) -> anyhow::Result<()> {
+pub fn refresh(ctx: &mut Ctx<'_>, thread: ThreadId) -> anyhow::Result<()> {
     let Some(account) = ctx
         .tx
         .query_row(
@@ -131,8 +131,7 @@ pub fn refresh(ctx: &mut Ctx, thread: ThreadId) -> anyhow::Result<()> {
     let subject = msgs
         .iter()
         .find(|m| !m.is_draft && !m.subject.is_empty())
-        .map(|m| m.subject.clone())
-        .unwrap_or_else(|| latest.subject.clone());
+        .map_or_else(|| latest.subject.clone(), |m| m.subject.clone());
     let in_inbox = labels.contains("INBOX");
     let live_count = msgs.iter().filter(|m| m.live()).count();
     let non_draft = msgs.iter().filter(|m| !m.is_draft).count();
@@ -190,7 +189,7 @@ pub fn refresh(ctx: &mut Ctx, thread: ThreadId) -> anyhow::Result<()> {
 
 /// Sets a message's label list and stamps it.
 pub fn set_message_labels(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     message: MessageId,
     labels: &[String],
 ) -> anyhow::Result<()> {

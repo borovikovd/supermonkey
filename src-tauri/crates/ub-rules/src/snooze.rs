@@ -137,13 +137,13 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<
     let mut default_time = hour(MORNING_HOUR);
 
     // Setting a date or a time twice is an error.
+    #[allow(clippy::items_after_statements)] // Local helper, kept next to its only use.
     fn set<T>(slot: &mut Option<T>, value: T) -> Option<()> {
-        match slot {
-            Some(_) => None,
-            None => {
-                *slot = Some(value);
-                Some(())
-            }
+        if slot.is_some() {
+            None
+        } else {
+            *slot = Some(value);
+            Some(())
         }
     }
 
@@ -220,15 +220,12 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<
         if let Some((m, d)) = month_day {
             i += 1;
             let year = toks.get(i).and_then(|y| year_number(y));
-            let y = match year {
-                Some(y) => {
-                    i += 1;
-                    y
-                }
-                None => {
-                    roll = Roll::Year;
-                    today.year()
-                }
+            let y = if let Some(y) = year {
+                i += 1;
+                y
+            } else {
+                roll = Roll::Year;
+                today.year()
             };
             set(&mut date, NaiveDate::from_ymd_opt(y, m, d)?)?;
             continue;

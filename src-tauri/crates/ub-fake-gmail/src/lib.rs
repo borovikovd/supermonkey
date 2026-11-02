@@ -23,6 +23,9 @@
 //! A real "offline" (connection refused, nothing sent) cannot depend on a request the server
 //! has not read yet, so it is server-wide: [`FakeGmail::set_offline`].
 
+#![allow(clippy::unwrap_used)] // A test double: panics are test failures.
+#![allow(clippy::pedantic)] // Test support code, not shipped.
+
 mod mailbox;
 mod mime;
 mod routes;
@@ -386,7 +389,7 @@ impl FakeGmail {
 
     /// Expires every access token issued so far, so the next Gmail call gets a 401.
     pub fn expire_access_tokens(&self) {
-        let past = Instant::now() - Duration::from_secs(1);
+        let past = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
         for (_, expiry) in self.shared.world().access_tokens.values_mut() {
             *expiry = past;
         }
@@ -505,7 +508,7 @@ impl FakeUser {
                 email: email.to_owned(),
                 display_name: display_name.to_owned(),
                 primary: false,
-            })
+            });
         });
     }
 
@@ -630,8 +633,8 @@ async fn serve(
     let mut listener = Some(listener);
     let offline_for_connections = offline.clone();
     loop {
-        match &listener {
-            Some(l) => tokio::select! {
+        if let Some(l) = &listener {
+            tokio::select! {
                 accepted = l.accept() => {
                     if let Ok((stream, _)) = accepted {
                         tokio::spawn(connection(stream, shared.clone(), router.clone(), offline_for_connections.clone()));
@@ -641,14 +644,13 @@ async fn serve(
                     listener = None;
                     listening.send_replace(false);
                 }
-            },
-            None => {
-                if offline.wait_for(|&o| !o).await.is_err() {
-                    return;
-                }
-                listener = Some(bind(addr).expect("rebind the fake's port"));
-                listening.send_replace(true);
             }
+        } else {
+            if offline.wait_for(|&o| !o).await.is_err() {
+                return;
+            }
+            listener = Some(bind(addr).expect("rebind the fake's port"));
+            listening.send_replace(true);
         }
     }
 }
@@ -669,7 +671,7 @@ async fn connection(
         hyper::server::conn::http1::Builder::new().serve_connection(TokioIo::new(stream), service);
     tokio::select! {
         _ = conn => {}
-        _ = kill.notified() => {}
+        () = kill.notified() => {}
         _ = offline.wait_for(|&o| o) => {}
     }
 }

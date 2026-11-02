@@ -94,8 +94,7 @@ pub fn apply(list: &[ListEntry], removed: &[String], moved: &[ListMove]) -> Vec<
             Some(a) => out
                 .iter()
                 .position(|e| &e.key == a)
-                .map(|p| p + 1)
-                .unwrap_or(out.len()),
+                .map_or(out.len(), |p| p + 1),
         };
         out.insert(
             at,
@@ -127,7 +126,7 @@ mod tests {
         let old = entries(&[1, 2, 3, 4, 5], |_| None);
         let new = entries(&[1, 3, 4, 2, 5], |_| None);
         let (removed, moved) = diff(&old, &new);
-        assert!(removed.is_empty());
+        assert_eq!(removed, [] as [String; 0]);
         assert_eq!(moved.len(), 1);
         assert_eq!(moved[0].key, "2");
         assert_eq!(apply(&old, &removed, &moved), new);
@@ -158,8 +157,8 @@ mod tests {
             new in proptest::sample::subsequence((0u32..60).collect::<Vec<_>>(), 0..60).prop_shuffle(),
             salt in 0u32..3,
         ) {
-            let old = entries(&old, |k| Some(((k + salt) % 3) as i64));
-            let new = entries(&new, |k| Some((k % 3) as i64));
+            let old = entries(&old, |k| Some(i64::from((k + salt) % 3)));
+            let new = entries(&new, |k| Some(i64::from(k % 3)));
             let (removed, moved) = diff(&old, &new);
             prop_assert_eq!(apply(&old, &removed, &moved), new);
         }

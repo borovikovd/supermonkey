@@ -1,6 +1,6 @@
 import { Archive, Clock, File, Inbox, Send, Star } from "lucide-react";
 
-import { switchAccount } from "../App";
+import { switchAccount } from "../accounts";
 import { goTo } from "../commands";
 import type { AccountInfo, View } from "../ipc/types";
 import { useCurrent } from "../store/hooks";

@@ -4,12 +4,16 @@ use rusqlite::params;
 
 use super::EngineRef;
 use super::ingest::PendingOps;
-use crate::model::*;
+use crate::model::{AccountId, ModifyAction, ModifyKind, SnoozeChange, ThreadId};
 use crate::writer::Ctx;
 
 /// A snoozed thread that gains `INBOX` from outside this app loses its snooze.
 /// Judged on net labels, skipping messages with an op still pending.
-pub fn apply_rule(ctx: &mut Ctx, threads: &[ThreadId], pending: &PendingOps) -> anyhow::Result<()> {
+pub fn apply_rule(
+    ctx: &mut Ctx<'_>,
+    threads: &[ThreadId],
+    pending: &PendingOps,
+) -> anyhow::Result<()> {
     for &t in threads {
         let snoozed: bool = ctx
             .tx
@@ -81,7 +85,7 @@ pub async fn run(e: EngineRef) {
             .ok()
             .flatten();
         let now = crate::db::now_ms();
-        let wait_ms = next.map(|n| (n - now).clamp(0, 60_000)).unwrap_or(60_000) as u64;
+        let wait_ms = next.map_or(60_000, |n| (n - now).clamp(0, 60_000)) as u64;
         // A new snooze re-plans the timer.
         let _ = tokio::time::timeout(
             std::time::Duration::from_millis(wait_ms.max(250)),
@@ -94,7 +98,7 @@ pub async fn run(e: EngineRef) {
     }
 }
 
-pub fn snooze_count(ctx: &Ctx, account: AccountId) -> i64 {
+pub fn snooze_count(ctx: &Ctx<'_>, account: AccountId) -> i64 {
     ctx.tx
         .query_row(
             "SELECT count(*) FROM threads WHERE account_id = ?1 AND snooze_until IS NOT NULL",

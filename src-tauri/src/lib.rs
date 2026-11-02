@@ -36,9 +36,7 @@ pub struct Core {
 }
 
 fn db_path(data_dir: &std::path::Path) -> PathBuf {
-    std::env::var("UBERMENSCH_DB")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| data_dir.join("ubermensch.db"))
+    std::env::var("UBERMENSCH_DB").map_or_else(|_| data_dir.join("ubermensch.db"), PathBuf::from)
 }
 
 fn show_main(app: &tauri::AppHandle) {
@@ -53,7 +51,7 @@ fn show_main(app: &tauri::AppHandle) {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show_main(app)
+            show_main(app);
         }))
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
@@ -140,10 +138,10 @@ pub fn run() {
 fn env_logger_init() -> Result<(), log::SetLoggerError> {
     struct Stderr;
     impl log::Log for Stderr {
-        fn enabled(&self, m: &log::Metadata) -> bool {
+        fn enabled(&self, m: &log::Metadata<'_>) -> bool {
             m.level() <= log::Level::Info || m.target().starts_with("ubermensch")
         }
-        fn log(&self, r: &log::Record) {
+        fn log(&self, r: &log::Record<'_>) {
             if self.enabled(r.metadata()) {
                 eprintln!("[{}] {}: {}", r.level(), r.target(), r.args());
             }

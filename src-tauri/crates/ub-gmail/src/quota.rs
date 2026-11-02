@@ -136,9 +136,9 @@ impl QuotaBucket {
     /// A full bucket.
     pub fn new(capacity: u32, refill_per_minute: u32) -> Self {
         QuotaBucket {
-            capacity: capacity as f64,
-            refill_per_sec: refill_per_minute as f64 / 60.0,
-            level: capacity as f64,
+            capacity: f64::from(capacity),
+            refill_per_sec: f64::from(refill_per_minute) / 60.0,
+            level: f64::from(capacity),
             updated: Instant::now(),
         }
     }
@@ -160,13 +160,13 @@ impl QuotaBucket {
     /// Spends `units`. The level may go negative; the debt refills like any deficit.
     pub fn take(&mut self, units: u32) {
         self.level();
-        self.level -= units as f64;
+        self.level -= f64::from(units);
     }
 
     /// Returns `units` that were taken but not used.
     pub fn give_back(&mut self, units: u32) {
         self.level();
-        self.level = (self.level + units as f64).min(self.capacity);
+        self.level = (self.level + f64::from(units)).min(self.capacity);
     }
 
     /// When the bucket will hold `units`.
@@ -235,7 +235,7 @@ impl AccountState {
         }
         let now = Instant::now();
         // A call costing more than the bucket holds runs once the bucket is full.
-        let mut needed = cost.min(cfg.capacity) as f64;
+        let mut needed = f64::from(cost.min(cfg.capacity));
         if priority.is_background() {
             while let Some(&(at, _)) = self.background_spent.front() {
                 if now.duration_since(at) < WINDOW {
@@ -250,7 +250,7 @@ impl AccountState {
                 return Admit::At(oldest + WINDOW);
             }
             // "More than the reserve", in whole units.
-            needed = needed.max(cfg.background_reserve as f64 + 1.0);
+            needed = needed.max(f64::from(cfg.background_reserve) + 1.0);
         }
         if self.bucket.has(needed) {
             Admit::Now
@@ -336,7 +336,7 @@ impl Scheduler {
 
     /// Marks the account on screen. Its requests go first among equal priorities.
     pub fn set_on_screen(&self, email: Option<&str>) {
-        let mut state = self.inner.state.lock().unwrap();
+        let mut state = self.inner.state.lock().expect("lock poisoned");
         state.on_screen = email.map(str::to_owned);
         state.pump(&self.inner.cfg);
     }
@@ -363,7 +363,7 @@ impl AccountScheduler {
     pub async fn acquire(&self, priority: Priority, cost: u32) -> Permit {
         let notify = Arc::new(Notify::new());
         let id = {
-            let mut state = self.inner.state.lock().unwrap();
+            let mut state = self.inner.state.lock().expect("lock poisoned");
             let id = state.next_id;
             state.next_id += 1;
             state.waiters.insert(
@@ -386,7 +386,7 @@ impl AccountScheduler {
         };
         loop {
             let next_wake = {
-                let mut state = self.inner.state.lock().unwrap();
+                let mut state = self.inner.state.lock().expect("lock poisoned");
                 if state.waiters[&id].granted {
                     state.waiters.remove(&id);
                     queued.done = true;
@@ -400,9 +400,9 @@ impl AccountScheduler {
             match next_wake {
                 Some(at) => {
                     tokio::select! {
-                        _ = notify.notified() => {}
-                        _ = tokio::time::sleep_until(at) => {
-                            self.inner.state.lock().unwrap().pump(&self.inner.cfg);
+                        () = notify.notified() => {}
+                        () = tokio::time::sleep_until(at) => {
+                            self.inner.state.lock().expect("lock poisoned").pump(&self.inner.cfg);
                         }
                     }
                 }
@@ -413,7 +413,7 @@ impl AccountScheduler {
 
     /// Units in this account's bucket now.
     pub fn bucket_level(&self) -> f64 {
-        let mut state = self.inner.state.lock().unwrap();
+        let mut state = self.inner.state.lock().expect("lock poisoned");
         let cfg = &self.inner.cfg;
         state
             .accounts
@@ -425,13 +425,13 @@ impl AccountScheduler {
 
     /// Requests of this account running now.
     pub fn in_flight(&self) -> usize {
-        let state = self.inner.state.lock().unwrap();
+        let state = self.inner.state.lock().expect("lock poisoned");
         state.accounts.get(&self.account).map_or(0, |a| a.in_flight)
     }
 
     /// Requests of this account waiting for a slot or budget.
     pub fn queued(&self) -> usize {
-        let state = self.inner.state.lock().unwrap();
+        let state = self.inner.state.lock().expect("lock poisoned");
         state
             .waiters
             .values()
@@ -453,7 +453,7 @@ impl Drop for Queued<'_> {
         if self.done {
             return;
         }
-        let mut state = self.inner.state.lock().unwrap();
+        let mut state = self.inner.state.lock().expect("lock poisoned");
         if let Some(waiter) = state.waiters.remove(&self.id)
             && waiter.granted
             && let Some(account) = state.accounts.get_mut(&waiter.account)
@@ -473,7 +473,7 @@ pub struct Permit {
 
 impl Drop for Permit {
     fn drop(&mut self) {
-        let mut state = self.inner.state.lock().unwrap();
+        let mut state = self.inner.state.lock().expect("lock poisoned");
         if let Some(account) = state.accounts.get_mut(&self.account) {
             account.in_flight -= 1;
         }

@@ -6,15 +6,8 @@ import { toast } from "sonner";
 
 import { markReadOnOpenWhenLoaded, openThread } from "../commands";
 import { act, forgetSub, subscribe } from "../ipc/bridge";
-import type {
-  Addr,
-  ConversationData,
-  DraftFields,
-  DraftKind,
-  OutboxRow,
-  SubKey,
-} from "../ipc/types";
-import { conversationRef } from "../keyboard/keys";
+import type { Addr, ConversationData, DraftFields, DraftKind, SubKey } from "../ipc/types";
+import { conversationRef } from "../keyboard/refs";
 import { useChrome, type Screen } from "../store/chrome";
 import { useMirror } from "../store/mirror";
 
@@ -178,7 +171,7 @@ export function startReply(mode: ReplyMode, draftId?: string) {
     const kind: DraftKind = mode === "forward" ? "forward" : "reply";
     const ofKind = data.drafts
       .filter((d) => d.kind === kind)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+      .toSorted((a, b) => b.updatedAt - a.updatedAt);
     const resume =
       ofKind.find((d) => d.target === selected) ??
       (selected === latest ? ofKind.find((d) => d.startedOnLatest) : undefined);
@@ -291,18 +284,4 @@ export function reopenDraft(account: number, draft: string, thread: number | nul
     // Even if the thread has left the current view.
     resumeDraft(draft, thread, null);
   }
-}
-
-/** Undo on a waiting send: the composer opens once the row is gone from the outbox. */
-export const reopenWhenGone = new Map<
-  number,
-  { account: number; draft: string; thread: number | null }
->();
-
-export function undoSend(row: OutboxRow) {
-  if (row.undoEntry === null) return;
-  if (row.state === "waiting") {
-    reopenWhenGone.set(row.id, { account: row.account, draft: row.draft, thread: row.thread });
-  }
-  act({ type: "undo", account: row.account, entry: row.undoEntry });
 }

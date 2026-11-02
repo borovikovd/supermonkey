@@ -26,7 +26,7 @@ export function moveHighlight(delta: number) {
   let at = focus === null ? -1 : ids.indexOf(focus);
   if (at < 0) at = delta > 0 ? -1 : ids.length;
   const next = Math.min(ids.length - 1, Math.max(0, at + delta));
-  const key = ids[next]!;
+  const key = ids[next];
   if (cur.screen.kind === "conversation") {
     if (key !== focus) {
       openThread(Number(key));
@@ -89,12 +89,13 @@ export function jumpSplit(delta: number) {
   const hSplit = entries.find((e) => e.key === cur.highlight)?.split ?? null;
   const at = splits.findIndex((s) => s.split === hSplit);
   const next = at + delta;
-  if (at < 0 && delta > 0 && ids.length > 0) {
-    c.patchCurrent({ highlight: splits[0]!.first });
+  const first = splits[0];
+  if (at < 0 && delta > 0 && ids.length > 0 && first) {
+    c.patchCurrent({ highlight: first.first });
     return;
   }
-  if (next < 0 || next >= splits.length) return;
-  c.patchCurrent({ highlight: splits[next]!.first });
+  const target = splits[next];
+  if (target) c.patchCurrent({ highlight: target.first });
 }
 
 /** `g i` / `g o`: Inbox on the Important or Other split. */
@@ -122,10 +123,10 @@ export function selectable(data: ConversationData): number[] {
 export function selectMessage(data: ConversationData, delta: number) {
   const c = useChrome.getState();
   const ids = selectable(data);
-  if (ids.length === 0) return;
-  const cur = c.selectedMessage ?? ids[ids.length - 1]!;
-  const at = ids.indexOf(cur);
-  const next = ids[Math.min(ids.length - 1, Math.max(0, (at < 0 ? ids.length - 1 : at) + delta))]!;
+  const last = ids.length - 1;
+  const at = c.selectedMessage === null ? -1 : ids.indexOf(c.selectedMessage);
+  const next = ids[Math.min(last, Math.max(0, (at < 0 ? last : at) + delta))];
+  if (next === undefined) return;
   c.set({ selectedMessage: next, unfolded: [...c.unfolded, next] });
   requestAnimationFrame(() =>
     document.querySelector(`[data-message="${next}"]`)?.scrollIntoView({ block: "nearest" }),

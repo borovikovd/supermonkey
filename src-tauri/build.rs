@@ -5,9 +5,10 @@ use std::path::PathBuf;
 /// binary. Google treats a desktop client secret as not confidential.
 fn oauth_client() {
     println!("cargo:rerun-if-env-changed=UBERMENSCH_OAUTH_CLIENT");
-    let path = std::env::var("UBERMENSCH_OAUTH_CLIENT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("../google-oauth-client.json"));
+    let path = std::env::var("UBERMENSCH_OAUTH_CLIENT").map_or_else(
+        |_| PathBuf::from("../google-oauth-client.json"),
+        PathBuf::from,
+    );
     println!("cargo:rerun-if-changed={}", path.display());
 
     let (id, secret) = match std::fs::read_to_string(&path) {
@@ -54,5 +55,5 @@ fn oauth_client() {
 
 fn main() {
     oauth_client();
-    tauri_build::build()
+    tauri_build::build();
 }

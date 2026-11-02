@@ -1,5 +1,7 @@
 //! Split routing (SPEC Split Inbox → Where a conversation lands).
 
+#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+
 use rusqlite::params;
 use ubermensch_lib::model::*;
 use ubermensch_lib::writer::Writer;
@@ -38,7 +40,7 @@ impl T {
     /// Adds an inbox thread with one message.
     fn thread(&self, from: &str, subject: &str, labels: &[&str], list: bool) -> ThreadId {
         let (from, subject) = (from.to_string(), subject.to_string());
-        let labels: Vec<String> = labels.iter().map(|s| s.to_string()).collect();
+        let labels: Vec<String> = labels.iter().map(ToString::to_string).collect();
         self.writer
             .call_blocking(move |ctx| {
                 let gid = format!("t{}", ctx.now + rand_id());
@@ -163,7 +165,7 @@ fn custom_splits_come_first_and_pins_beat_rules() {
     assert_eq!(t.split_kind(ada), "custom:Newsletters");
     // A pin to a split that is turned off is skipped.
     let mut splits = t.splits();
-    for s in splits.iter_mut() {
+    for s in &mut splits {
         if s.id == newsletters {
             s.enabled = false;
         }

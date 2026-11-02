@@ -2,6 +2,7 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::sync::LazyLock;
 
 use regex::{Captures, Regex};
@@ -79,7 +80,7 @@ static SANITIZER: LazyLock<ammonia::Builder<'static>> = LazyLock::new(|| {
 });
 
 static CID_REF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)\bcid:([^"'\s)>]+)"#).unwrap());
+    LazyLock::new(|| Regex::new(r#"(?i)\bcid:([^"'\s)>]+)"#).expect("valid regex"));
 
 /// Sanitizes received HTML for storage and display.
 ///
@@ -92,7 +93,7 @@ pub fn sanitize_html(html: &str, cid_data: &HashMap<String, String>) -> String {
     let rewritten = if cid_data.is_empty() {
         Cow::Borrowed(html)
     } else {
-        CID_REF.replace_all(html, |c: &Captures| {
+        CID_REF.replace_all(html, |c: &Captures<'_>| {
             let raw = &c[1];
             let decoded = String::from_utf8_lossy(&percent_decode(raw)).into_owned();
             let key = decoded.trim_start_matches('<').trim_end_matches('>');
@@ -107,18 +108,20 @@ pub fn sanitize_html(html: &str, cid_data: &HashMap<String, String>) -> String {
 
 /// Comments, `<!DOCTYPE>`/`<![CDATA[` declarations, and `<?xml ?>` processing instructions.
 static COMMENT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)<!--.*?-->|<![^>]*>|<\?[^>]*>").unwrap());
+    LazyLock::new(|| Regex::new(r"(?s)<!--.*?-->|<![^>]*>|<\?[^>]*>").expect("valid regex"));
 static HIDDEN_BLOCKS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     ["head", "style", "script", "title", "noscript", "template"]
         .iter()
-        .map(|t| Regex::new(&format!(r"(?is)<{t}\b[^>]*>.*?</{t}\s*>")).unwrap())
+        .map(|t| Regex::new(&format!(r"(?is)<{t}\b[^>]*>.*?</{t}\s*>")).expect("valid regex"))
         .collect()
 });
 static TAG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"<(/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>"#).unwrap()
+    Regex::new(r#"<(/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>"#)
+        .expect("valid regex")
 });
-static HREF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).unwrap());
+static HREF: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).expect("valid regex")
+});
 
 /// Plain text of an HTML body for full-text search and snippets: no `<head>`, `<style>`,
 /// `<script>` or comments, entities decoded, all whitespace collapsed to single spaces.
@@ -168,7 +171,7 @@ fn render_text(html: &str, plain: bool) -> String {
     let mut link: Option<(String, usize)> = None;
     let mut last = 0;
     for m in TAG.captures_iter(&html) {
-        let whole = m.get(0).unwrap();
+        let whole = m.get(0).expect("group 0 is the whole match");
         w.text(&html[last..whole.start()], pre_depth > 0);
         last = whole.end();
 
@@ -193,7 +196,7 @@ fn render_text(html: &str, plain: bool) -> String {
                 w.quote_depth = w.quote_depth.saturating_sub(1);
             }
             ("p" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "ul" | "ol" | "table", _) => {
-                w.paragraph()
+                w.paragraph();
             }
             ("li", false) => {
                 w.block();
@@ -209,7 +212,12 @@ fn render_text(html: &str, plain: bool) -> String {
             ("td" | "th", true) => w.text(" ", true),
             ("a", false) if plain => {
                 link = HREF.captures(&m[3]).map(|h| {
-                    let href = h.get(1).or(h.get(2)).or(h.get(3)).unwrap().as_str();
+                    let href = h
+                        .get(1)
+                        .or(h.get(2))
+                        .or(h.get(3))
+                        .expect("one href form matched")
+                        .as_str();
                     (
                         html_escape::decode_html_entities(href).into_owned(),
                         w.out.len(),
@@ -324,7 +332,8 @@ impl TextWriter {
     }
 }
 
-static URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"https?://[^\s<>"]+"#).unwrap());
+static URL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"https?://[^\s<>"]+"#).expect("valid regex"));
 
 /// Converts a plain-text body to HTML: escaped, newlines as `<br>`, spaces preserved with
 /// `white-space:pre-wrap`, http(s) URLs linked. A trailing block of `>`-quoted lines (with the
@@ -401,25 +410,27 @@ fn linkify(line: &str) -> String {
         }
         out.push_str(&html_escape::encode_text(&line[last..m.start()]));
         let attr = html_escape::encode_double_quoted_attribute(url);
-        out.push_str(&format!(
+        let _ = write!(
+            out,
             r#"<a href="{attr}">{}</a>"#,
             html_escape::encode_text(url)
-        ));
+        );
         last = m.start() + url.len();
     }
     out.push_str(&html_escape::encode_text(&line[last..]));
     out
 }
 
-static DATA_URI: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)data:[a-z]+/[a-z0-9.+-]+;base64,([a-z0-9+/=]+)").unwrap());
+static DATA_URI: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)data:[a-z]+/[a-z0-9.+-]+;base64,([a-z0-9+/=]+)").expect("valid regex")
+});
 
 /// Rewrites `data:` URIs in `html` whose decoded bytes equal a known inline part's data into
 /// `cid:<content_id>`. Returns the rewritten HTML and the parts it referenced, in order of first
 /// use and without duplicates. Unmatched `data:` URIs are left as they are.
 pub fn data_images_to_cid(html: &str, known: &[InlinePart]) -> (String, Vec<InlinePart>) {
     let mut used: Vec<InlinePart> = Vec::new();
-    let rewritten = DATA_URI.replace_all(html, |c: &Captures| {
+    let rewritten = DATA_URI.replace_all(html, |c: &Captures<'_>| {
         let found = decode_base64(&c[1]).and_then(|bytes| known.iter().find(|p| p.data == bytes));
         match found {
             Some(part) => {

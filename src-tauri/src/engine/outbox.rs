@@ -12,7 +12,7 @@ use rusqlite::{OptionalExtension, params};
 use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
 
 use super::{AccountRt, EngineRef};
-use crate::model::*;
+use crate::model::AccountId;
 
 #[derive(Debug, Clone)]
 struct Row {
@@ -68,7 +68,7 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
                     Ok(())
                 }
             };
-            e.note(&rt, r.as_ref().map(|_| ()));
+            e.note(&rt, r.as_ref().map(drop));
             if let Err(err) = r {
                 failed = Some(err);
                 break;
@@ -117,7 +117,7 @@ async fn set_state(
 }
 
 fn touch_row_thread(
-    ctx: &mut crate::writer::Ctx,
+    ctx: &mut crate::writer::Ctx<'_>,
     account: AccountId,
     outbox: i64,
 ) -> anyhow::Result<()> {
@@ -154,15 +154,12 @@ async fn send(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row) -> Result<(), Gmail
     let draft = match super::drafts::write(e, rt, &d).await {
         Ok(g) => g,
         Err(err) => {
-            return match err.outcome {
-                Outcome::Rejected { ref message, .. } => {
-                    fail(e, rt.id, row, message.clone()).await;
-                    Ok(())
-                }
-                _ => {
-                    set_state(e, rt.id, row.id, "waiting", true).await;
-                    Err(err)
-                }
+            return if let Outcome::Rejected { ref message, .. } = err.outcome {
+                fail(e, rt.id, row, message.clone()).await;
+                Ok(())
+            } else {
+                set_state(e, rt.id, row.id, "waiting", true).await;
+                Err(err)
             };
         }
     };

@@ -1,8 +1,9 @@
 //! Quote blocks: building Gmail-style reply/forward quotes and finding quoted history.
 
+use std::fmt::Write as _;
 use std::sync::LazyLock;
 
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Offset};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +27,7 @@ const GMAIL_QUOTE_START: &str =
     r#"<[a-zA-Z][^>]*\bclass\s*=\s*["']?[^"'>]*\bgmail_quote(?:[\s"'>/])"#;
 
 static GMAIL_QUOTE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(&format!("(?i){GMAIL_QUOTE_START}")).unwrap());
+    LazyLock::new(|| Regex::new(&format!("(?i){GMAIL_QUOTE_START}")).expect("valid regex"));
 
 static HISTORY_START: LazyLock<Regex> = LazyLock::new(|| {
     let markers = [
@@ -40,11 +41,11 @@ static HISTORY_START: LazyLock<Regex> = LazyLock::new(|| {
         // Outlook desktop: the reply header's top border
         r#"<div\b[^>]*\bstyle\s*=\s*["'][^"']*border-top:\s*solid\s+#(?:E1E1E1|B5C4DF)"#,
     ];
-    Regex::new(&format!("(?i){}", markers.join("|"))).unwrap()
+    Regex::new(&format!("(?i){}", markers.join("|"))).expect("valid regex")
 });
 
 static TRAILING_BREAKS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(?:\s|<br\s*/?>|&nbsp;)+$").unwrap());
+    LazyLock::new(|| Regex::new(r"(?i)(?:\s|<br\s*/?>|&nbsp;)+$").expect("valid regex"));
 
 /// Splits a draft read from Gmail into the part that goes into the editor and the quote block:
 /// everything from the first element whose class includes `gmail_quote` onward. Trailing
@@ -127,7 +128,7 @@ pub fn forward_quote_html(src: &QuoteSource, tz_offset_minutes: i32) -> String {
         addr_list_html(&src.to),
     );
     if !src.cc.is_empty() {
-        out.push_str(&format!("Cc: {}<br>", addr_list_html(&src.cc)));
+        let _ = write!(out, "Cc: {}<br>", addr_list_html(&src.cc));
     }
     out.push_str("</div><br><br>");
     out.push_str(&src.html);
@@ -137,8 +138,7 @@ pub fn forward_quote_html(src: &QuoteSource, tz_offset_minutes: i32) -> String {
 
 /// `Mon, Jan 6, 2025 at 10:00 AM`, Gmail's quote date format.
 fn format_date(date_ms: i64, tz_offset_minutes: i32) -> String {
-    let offset =
-        FixedOffset::east_opt(tz_offset_minutes * 60).unwrap_or(FixedOffset::east_opt(0).unwrap());
+    let offset = FixedOffset::east_opt(tz_offset_minutes * 60).unwrap_or(chrono::Utc.fix());
     DateTime::from_timestamp_millis(date_ms)
         .unwrap_or_default()
         .with_timezone(&offset)

@@ -14,10 +14,12 @@ use std::path::PathBuf;
 use crossbeam_channel::{Receiver, Sender, select_biased, unbounded};
 use rusqlite::{Connection, Transaction, params};
 
-use crate::model::*;
+use crate::model::{
+    AccountId, ChannelMessage, DraftId, MessageId, NumberedAction, SubId, ThreadId,
+};
 use crate::subs::Subs;
 
-pub type SyncFn = Box<dyn FnOnce(&mut Ctx) -> anyhow::Result<()> + Send>;
+pub type SyncFn = Box<dyn FnOnce(&mut Ctx<'_>) -> anyhow::Result<()> + Send>;
 
 enum Job {
     Actions(Vec<NumberedAction>),
@@ -210,14 +212,14 @@ impl Writer {
     }
 
     /// Queues a sync job (runs after pending UI work).
-    pub fn sync(&self, f: impl FnOnce(&mut Ctx) -> anyhow::Result<()> + Send + 'static) {
+    pub fn sync(&self, f: impl FnOnce(&mut Ctx<'_>) -> anyhow::Result<()> + Send + 'static) {
         let _ = self.sync.send(Job::Sync(Box::new(f)));
     }
 
     /// Runs a job and waits for its result.
     pub async fn call<T: Send + 'static>(
         &self,
-        f: impl FnOnce(&mut Ctx) -> anyhow::Result<T> + Send + 'static,
+        f: impl FnOnce(&mut Ctx<'_>) -> anyhow::Result<T> + Send + 'static,
     ) -> anyhow::Result<T> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.sync(move |ctx| {
@@ -237,7 +239,7 @@ impl Writer {
     /// Blocking variant of `call` for non-async code (tests, setup).
     pub fn call_blocking<T: Send + 'static>(
         &self,
-        f: impl FnOnce(&mut Ctx) -> anyhow::Result<T> + Send + 'static,
+        f: impl FnOnce(&mut Ctx<'_>) -> anyhow::Result<T> + Send + 'static,
     ) -> anyhow::Result<T> {
         let (tx, rx) = crossbeam_channel::bounded(1);
         self.sync(move |ctx| {
@@ -349,7 +351,7 @@ impl WriterState {
     fn transact(
         &mut self,
         action: Option<i64>,
-        f: impl FnOnce(&mut Ctx) -> anyhow::Result<()>,
+        f: impl FnOnce(&mut Ctx<'_>) -> anyhow::Result<()>,
     ) -> anyhow::Result<()> {
         let tx = self.conn.transaction()?;
         let rev = self.rev + 1;

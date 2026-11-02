@@ -7,7 +7,7 @@ use tauri_plugin_opener::OpenerExt;
 use ub_gmail::{Gmail, OAuthTokens, Priority, cost};
 
 use super::EngineRef;
-use crate::model::*;
+use crate::model::AccountId;
 
 async fn sign_in(app: &AppHandle) -> anyhow::Result<(String, Arc<OAuthTokens>, String)> {
     let e = app.state::<EngineRef>().inner().clone();

@@ -1,5 +1,7 @@
 //! Every Gmail call ends in one Outcome (SPEC: Gmail errors), checked against the fake.
 
+#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+
 mod common;
 
 use std::time::Duration;

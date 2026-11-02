@@ -7,7 +7,7 @@ use tauri_plugin_notification::NotificationExt;
 
 use super::EngineRef;
 use crate::db::queries;
-use crate::model::*;
+use crate::model::AccountId;
 use crate::notify::Notification;
 use crate::writer::{Ctx, Effect};
 
@@ -15,7 +15,7 @@ use crate::writer::{Ctx, Effect};
 /// from a connected account, and not in a conversation already on screen.
 /// More than three for one account become one summary.
 pub fn from_poll(
-    ctx: &mut Ctx,
+    ctx: &mut Ctx<'_>,
     account: AccountId,
     new_ids: &HashSet<String>,
 ) -> anyhow::Result<()> {

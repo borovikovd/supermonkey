@@ -410,10 +410,10 @@ fn history_json(r: &HistoryRecord) -> Value {
         Change::Added => out["messagesAdded"] = json!([{ "message": message }]),
         Change::Deleted => out["messagesDeleted"] = json!([{ "message": message }]),
         Change::LabelsAdded(ids) => {
-            out["labelsAdded"] = json!([{ "message": message, "labelIds": ids }])
+            out["labelsAdded"] = json!([{ "message": message, "labelIds": ids }]);
         }
         Change::LabelsRemoved(ids) => {
-            out["labelsRemoved"] = json!([{ "message": message, "labelIds": ids }])
+            out["labelsRemoved"] = json!([{ "message": message, "labelIds": ids }]);
         }
     }
     out

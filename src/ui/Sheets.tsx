@@ -66,6 +66,8 @@ const SHORTCUTS: [string, [string, string][]][] = [
   ],
 ];
 
+const closeSheet = () => useChrome.getState().set({ sheet: null });
+
 function Sheet({
   title,
   children,
@@ -75,9 +77,8 @@ function Sheet({
   children: React.ReactNode;
   wide?: boolean;
 }) {
-  const close = () => useChrome.getState().set({ sheet: null });
   return (
-    <div className="fixed inset-0 z-30 bg-black/10" onMouseDown={close}>
+    <div className="fixed inset-0 z-30 bg-black/10" onMouseDown={closeSheet}>
       <div
         className={`fade-in absolute left-1/2 top-16 max-h-[80vh] -translate-x-1/2 overflow-y-auto rounded-sheet bg-bg px-8 py-5 shadow-float ${wide ? "w-[760px]" : "w-[550px]"}`}
         onMouseDown={(e) => e.stopPropagation()}
@@ -112,9 +113,20 @@ function Shortcuts() {
   );
 }
 
-function Toggle({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }) {
+function Toggle({
+  on,
+  onChange,
+  label,
+}: {
+  on: boolean;
+  onChange: (on: boolean) => void;
+  label: string;
+}) {
   return (
     <button
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
       onClick={() => onChange(!on)}
       className={`relative h-5 w-9 rounded-full transition-colors ${on ? "bg-accent" : "bg-border"}`}
     >
@@ -136,6 +148,7 @@ function AccountBlock({ a }: { a: AccountInfo }) {
       <div className="flex items-center justify-between py-1 text-row">
         <span>Mute notifications</span>
         <Toggle
+          label="Mute notifications"
           on={a.muted}
           onChange={(on) =>
             act({ type: "setSetting", account: a.id, key: "muted", value: on ? "on" : "off" })
@@ -198,6 +211,7 @@ function Settings() {
       <div className="flex items-center justify-between py-2 text-row">
         <span>Load remote images</span>
         <Toggle
+          label="Load remote images"
           on={app.settings.remoteImages}
           onChange={(on) =>
             act({
@@ -238,11 +252,13 @@ function Splits() {
     setRows(rows.map((r, j) => (i === j ? { ...r, ...patch } : r)));
   const move = (i: number, d: number) => {
     const j = i + d;
+    const a = rows[i];
+    const b = rows[j];
     // Only custom splits reorder, among themselves.
-    if (j < 0 || j >= rows.length || rows[j]!.kind !== "custom" || rows[i]!.kind !== "custom")
-      return;
+    if (!a || !b || a.kind !== "custom" || b.kind !== "custom") return;
     const next = [...rows];
-    [next[i], next[j]] = [next[j]!, next[i]!];
+    next[i] = b;
+    next[j] = a;
     setRows(next);
   };
   let tmp = -1;
@@ -299,7 +315,11 @@ function Splits() {
             hide empty
           </label>
           {s.kind !== "other" && (
-            <Toggle on={s.enabled} onChange={(on) => update(i, { enabled: on })} />
+            <Toggle
+              label={`Turn ${s.name} on or off`}
+              on={s.enabled}
+              onChange={(on) => update(i, { enabled: on })}
+            />
           )}
           {s.kind === "custom" && (
             <button

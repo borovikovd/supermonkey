@@ -12,7 +12,10 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::Connection;
 
 use crate::db::queries;
-use crate::model::*;
+use crate::model::{
+    AccountId, AccountInfo, AccountSummary, DraftId, ListEntry, SubId, SubKey, SubUpdate,
+    SyncStatus, ThreadId, View,
+};
 use crate::writer::Touched;
 
 /// Rows sent with a first load, from the top of the list.
@@ -286,7 +289,7 @@ fn list_first(
         .map(|e| e.key.clone())
         .collect();
     let rows = queries::rows_for_keys(conn, drafts, &window)?;
-    sub.ids = ids.clone();
+    sub.ids.clone_from(&ids);
     Ok(SubUpdate::List {
         sub: id.to_string(),
         first: true,

@@ -85,7 +85,7 @@ pub fn is_noreply(email: &str) -> bool {
 /// addresses, `noreply` addresses, and addresses never sent to that appeared
 /// only on list mail.
 pub fn is_suggestible(sent_count: u32, list_only: bool, is_noreply: bool, is_own: bool) -> bool {
-    !is_own && !is_noreply && !(sent_count == 0 && list_only)
+    !is_own && !is_noreply && (sent_count != 0 || !list_only)
 }
 
 /// `0.5 ^ (age / 90 days)`: 1.0 for contact now, 0.5 at 90 days, 0.25 at

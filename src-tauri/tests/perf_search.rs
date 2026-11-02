@@ -1,8 +1,10 @@
 //! Local search timing on the perf fixture. Run with
 //! `UBERMENSCH_PERF_DB=<path> cargo test --release --test perf_search -- --ignored --nocapture`.
 
+#![allow(clippy::unwrap_used)] // Tests fail loudly on purpose.
+
 #[test]
-#[ignore]
+#[ignore = "needs UBERMENSCH_PERF_DB pointing at a perf fixture"]
 fn local_search_per_keystroke() {
     let Ok(path) = std::env::var("UBERMENSCH_PERF_DB") else {
         return;
@@ -32,7 +34,7 @@ fn local_search_per_keystroke() {
 }
 
 #[test]
-#[ignore]
+#[ignore = "needs UBERMENSCH_PERF_DB pointing at a perf fixture"]
 fn autocomplete_per_keystroke() {
     let Ok(path) = std::env::var("UBERMENSCH_PERF_DB") else {
         return;

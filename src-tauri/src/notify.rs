@@ -1,6 +1,6 @@
 //! macOS notifications and the Dock badge (SPEC Notifications).
 
-use crate::model::*;
+use crate::model::{AccountId, ThreadId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Notification {
