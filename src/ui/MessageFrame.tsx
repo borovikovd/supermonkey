@@ -56,12 +56,15 @@ export const MessageFrame = memo(function MessageFrame({
   remoteImages,
   quoteOpen,
   onKey,
+  onSelect,
 }: {
   id: number;
   hasBody: boolean;
   remoteImages: boolean;
   quoteOpen: boolean;
   onKey: (e: KeyboardEvent) => void;
+  /** Clicks inside the message body select the message. */
+  onSelect: (id: number) => void;
 }) {
   const [body, setBody] = useState(() => bodies.get(id));
   const frame = useRef<HTMLIFrameElement>(null);
@@ -90,6 +93,7 @@ export const MessageFrame = memo(function MessageFrame({
       ro.observe(doc.documentElement);
       for (const img of Array.from(doc.images)) img.addEventListener("load", fit);
       doc.addEventListener("keydown", (e) => onKey(e));
+      doc.addEventListener("mousedown", () => onSelect(id));
       doc.addEventListener("click", (e) => {
         const t = e.target as HTMLElement;
         if (t.closest("[data-ub-toggle]")) {
@@ -116,7 +120,7 @@ export const MessageFrame = memo(function MessageFrame({
       el.removeEventListener("load", setup);
       ro?.disconnect();
     };
-  }, [body, onKey, remoteImages, quoteOpen]);
+  }, [body, onKey, onSelect, id, remoteImages, quoteOpen]);
 
   if (!body) {
     return (

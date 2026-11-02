@@ -29,6 +29,9 @@ function recipients(m: MessageSummary) {
   return all.length > 0 ? `to ${all.join(", ")}` : "";
 }
 
+/** Clicking a message selects it (SPEC Reading). Stable, so frames keep their listeners. */
+const select = (id: number) => useChrome.getState().set({ selectedMessage: id });
+
 type Block = { type: "message"; m: MessageSummary } | { type: "fold"; ids: number[] };
 
 /**
@@ -228,6 +231,7 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
               remoteImages={remoteImages}
               quoteOpen={expandAll}
               onToggle={toggle}
+              onSelect={select}
               onKey={forward}
             />
           ),
@@ -274,6 +278,7 @@ function Message({
   remoteImages,
   quoteOpen,
   onToggle,
+  onSelect,
   onKey,
 }: {
   m: MessageSummary;
@@ -282,6 +287,7 @@ function Message({
   remoteImages: boolean;
   quoteOpen: boolean;
   onToggle: (id: number) => void;
+  onSelect: (id: number) => void;
   onKey: (e: KeyboardEvent) => void;
 }) {
   const bar = selected ? (
@@ -306,7 +312,11 @@ function Message({
     );
   }
   return (
-    <div data-message={m.id} className="relative border-b border-border-2 py-4">
+    <div
+      data-message={m.id}
+      className="relative border-b border-border-2 py-4"
+      onMouseDown={() => onSelect(m.id)}
+    >
       {bar}
       <div className="mb-5 flex items-baseline gap-2 text-row" onClick={() => onToggle(m.id)}>
         <span className="font-semibold">{name(m)}</span>
@@ -317,6 +327,7 @@ function Message({
         <MessageFrame
           id={m.id}
           hasBody={m.hasBody}
+          onSelect={onSelect}
           remoteImages={remoteImages}
           quoteOpen={quoteOpen}
           onKey={onKey}
