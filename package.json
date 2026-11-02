@@ -8,7 +8,8 @@
     "build": "vp build",
     "check": "vp check",
     "test": "vp test",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "demo": "UBERMENSCH_FAKE=1 UBERMENSCH_WEB_BRIDGE=1 UBERMENSCH_DB=${TMPDIR:-/tmp}/ubermensch-demo.db tauri dev --features fake"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
@@ -17,6 +18,9 @@
     "@tauri-apps/plugin-notification": "^2.8.0",
     "@tauri-apps/plugin-opener": "^2.7.2",
     "@tauri-apps/plugin-window-state": "^2.5.0",
+    "@tiptap/extension-hard-break": "^3.32.2",
+    "@tiptap/extension-link": "^3.32.2",
+    "@tiptap/extension-strike": "^3.32.2",
     "@tiptap/extensions": "^3.32.2",
     "@tiptap/pm": "^3.32.2",
     "@tiptap/react": "^3.32.2",

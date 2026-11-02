@@ -484,6 +484,11 @@ pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> 
             deleted.insert(m.message.id.clone());
         }
     }
+    // Draft versions are new messages with DRAFT; deletes may be old versions.
+    let draft_change = !deleted.is_empty()
+        || added
+            .iter()
+            .any(|m| m.label_ids.iter().any(|l| l == "DRAFT"));
     let known: HashSet<String> = {
         let ids: Vec<String> = label_sets.keys().cloned().collect();
         e.reads
@@ -574,6 +579,10 @@ pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> 
         for t in threads {
             rt.work.push(work::POLL_BODIES, Work::Body { thread: t });
         }
+    }
+    // Draft messages changed: reconcile drafts (SPEC Drafts).
+    if draft_change {
+        super::drafts::sync_list(e, rt).await?;
     }
     Ok(())
 }

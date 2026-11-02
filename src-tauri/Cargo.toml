@@ -56,6 +56,11 @@ futures-util = "0.3"
 ub-mime = { path = "crates/ub-mime" }
 ub-gmail = { path = "crates/ub-gmail" }
 ub-rules = { path = "crates/ub-rules" }
+ub-fake-gmail = { path = "crates/ub-fake-gmail", optional = true }
+
+[features]
+# Debug only: run against an in-process fake Gmail with demo mail (UBERMENSCH_FAKE=1).
+fake = ["dep:ub-fake-gmail"]
 
 [dev-dependencies]
 proptest = "1"

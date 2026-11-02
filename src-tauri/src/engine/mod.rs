@@ -5,6 +5,8 @@
 pub mod attachments;
 pub mod auth;
 pub mod contacts;
+#[cfg(feature = "fake")]
+pub mod demo;
 pub mod drafts;
 pub mod ingest;
 pub mod notify;
@@ -251,6 +253,8 @@ pub fn start(
         } else {
             Arc::new(ub_gmail::Keychain)
         };
+    #[cfg(feature = "fake")]
+    let (config, store) = demo::setup(&writer).unwrap_or((config, store));
     let engine = Engine::new(Some(app.clone()), writer, reads, data_dir, config, store);
     app.manage(engine.clone());
     webbridge::start(app.clone());

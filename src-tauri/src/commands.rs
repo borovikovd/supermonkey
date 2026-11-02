@@ -95,6 +95,48 @@ pub async fn open_attachment(app: AppHandle, attachment: i64) -> CmdResult<()> {
         .map_err(err)
 }
 
+/// Copies a file the user picked into the draft's folder (SPEC Compose: attachments).
+#[tauri::command]
+pub fn add_attachment(
+    draft: DraftId,
+    filename: String,
+    mime_type: String,
+    data: String,
+) -> CmdResult<DraftAttachment> {
+    crate::commands::store_attachment(&draft, &filename, &mime_type, &data).map_err(err)
+}
+
+pub fn store_attachment(
+    draft: &str,
+    filename: &str,
+    mime_type: &str,
+    data_b64: &str,
+) -> anyhow::Result<DraftAttachment> {
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(data_b64)?;
+    let dir = crate::drafts::draft_dir(draft);
+    std::fs::create_dir_all(&dir)?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let safe: String = filename
+        .chars()
+        .map(|c| if c == '/' || c == ':' { '_' } else { c })
+        .collect();
+    let path = dir.join(format!("{}-{safe}", &id[..8]));
+    std::fs::write(&path, &bytes)?;
+    Ok(DraftAttachment {
+        id,
+        filename: filename.to_string(),
+        mime_type: if mime_type.is_empty() {
+            "application/octet-stream".into()
+        } else {
+            mime_type.to_string()
+        },
+        size: bytes.len() as i64,
+        path: Some(path.to_string_lossy().to_string()),
+        source: None,
+    })
+}
+
 /// Quits after the UI has closed an open composer (SPEC Undo send: Cmd+Q).
 #[tauri::command]
 pub fn quit_now(app: AppHandle) {

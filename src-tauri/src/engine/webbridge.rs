@@ -148,6 +148,28 @@ async fn invoke(
                 Value::Null
             }
             "quit_now" => Value::Null,
+            #[cfg(feature = "fake")]
+            "demo_deliver" => {
+                crate::engine::demo::deliver(&arg::<String>(&args, "subject")?);
+                for rt in app
+                    .state::<crate::engine::EngineRef>()
+                    .accounts
+                    .lock()
+                    .values()
+                {
+                    rt.poll_kick.notify_one();
+                }
+                Value::Null
+            }
+            "add_attachment" => json!(
+                crate::commands::store_attachment(
+                    &arg::<String>(&args, "draft")?,
+                    &arg::<String>(&args, "filename")?,
+                    &arg::<String>(&args, "mimeType")?,
+                    &arg::<String>(&args, "data")?,
+                )
+                .map_err(|e| e.to_string())?
+            ),
             other => return Err(format!("unknown command {other}")),
         })
     }

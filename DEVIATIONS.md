@@ -47,3 +47,14 @@ written. Each keeps the spec's intent.
   historyId) and fetches any bodies the connect sync had not reached.
 - Notification clicks: the macOS notification plugin does not report clicks,
   so a click only brings the app forward. See Notifications (step 6).
+
+## Compose (step 3)
+
+- Attachments are picked with the webview's file input and copied into the
+  draft's folder by an `add_attachment` command, so no dialog plugin is added.
+- One `draft_upsert` op per draft at a time; it writes the draft's latest
+  state when it runs, so fast typing does not queue a write per save.
+- Undo of a waiting send clears the draft's defaults, so the reopened draft is
+  never discarded as untouched.
+- Demo mode: debug builds with `--features fake` and `UBERMENSCH_FAKE=1`
+  (`pnpm demo`) run an in-process fake Gmail with demo mail and two accounts.

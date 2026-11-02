@@ -38,16 +38,15 @@ fn safe_name(name: &str) -> String {
 
 /// Downloads an attachment row if it is not cached yet. Returns its path.
 pub async fn ensure(e: &EngineRef, attachment: i64) -> anyhow::Result<PathBuf> {
-    let row: Option<AttachmentRow> =
-        e.reads.with(|c| {
-            Ok(c.query_row(
-                "SELECT m.account_id, m.gmail_id, a.filename, a.gmail_att_id, a.local_path
+    let row: Option<AttachmentRow> = e.reads.with(|c| {
+        Ok(c.query_row(
+            "SELECT m.account_id, m.gmail_id, a.filename, a.gmail_att_id, a.local_path
              FROM attachments a JOIN messages m ON m.id = a.message_id WHERE a.id = ?1",
-                [attachment],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
-            )
-            .optional()?)
-        })?;
+            [attachment],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+        )
+        .optional()?)
+    })?;
     let Some((account, gmail_msg, filename, att_id, local)) = row else {
         anyhow::bail!("attachment {attachment} is gone");
     };

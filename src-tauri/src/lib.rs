@@ -1,5 +1,8 @@
 //! Ubermensch: a keyboard-first Gmail client for macOS.
 
+// SQL rows are read into plain tuples throughout.
+#![allow(clippy::type_complexity)]
+
 pub mod accounts;
 pub mod actions;
 pub mod commands;
@@ -61,6 +64,7 @@ pub fn run() {
             }
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
+            let _ = drafts::DRAFT_FILES.set(data_dir.join("drafts"));
             let path = db_path(&data_dir);
             let (effects_tx, effects_rx) = tokio::sync::mpsc::unbounded_channel();
             let writer = Writer::start(path.clone(), effects_tx)?;
@@ -94,6 +98,7 @@ pub fn run() {
             commands::quit_now,
             commands::perf_report,
             commands::snooze_options,
+            commands::add_attachment,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Ubermensch");

@@ -10,6 +10,7 @@ import type {
   Action,
   ChannelMessage,
   ContactSuggestion,
+  DraftAttachment,
   LaunchInfo,
   ListRow,
   MessageBody,
@@ -143,3 +144,5 @@ export const quitNow = () => invoke<void>("quit_now");
 export const perfReport = (action: string, ms: number, budget: number) =>
   invoke<void>("perf_report", { action, ms, budget });
 export const snoozeOptions = (text: string) => invoke<SnoozeChoice[]>("snooze_options", { text });
+export const addAttachment = (draft: string, filename: string, mimeType: string, data: string) =>
+  invoke<DraftAttachment>("add_attachment", { draft, filename, mimeType, data });

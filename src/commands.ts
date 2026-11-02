@@ -2,6 +2,7 @@
 // targets, sends a resolved action (never a toggle), and moves the highlight
 // when rows leave the list (SPEC Keyboard).
 
+import { undoSend } from "./compose/start";
 import { act, subIdFor } from "./ipc/bridge";
 import type { ModifyAction, ModifyKind, SubKey, View } from "./ipc/types";
 import { useChrome, type Where } from "./store/chrome";
@@ -217,6 +218,16 @@ export function undo() {
   if (c.account === null) return;
   const entry = undoTarget(useMirror.getState(), c.account);
   if (entry === null) return;
+  // `z` on a send: the composer reopens as with the toast's Undo.
+  for (const sub of Object.values(useMirror.getState().subs)) {
+    if (sub.type !== "account" || sub.summary?.account.id !== c.account) continue;
+    const e = sub.summary.undo.find((u) => u.id === entry);
+    const row = e?.outbox != null ? sub.summary.outbox.find((o) => o.id === e.outbox) : undefined;
+    if (row) {
+      undoSend(row);
+      return;
+    }
+  }
   act({ type: "undo", account: c.account, entry });
 }
 

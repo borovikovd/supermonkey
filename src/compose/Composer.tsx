@@ -1,0 +1,481 @@
+// The composer, inline under a conversation or replacing the screen (`c`).
+// TipTap edits the body; the quote is a read-only block Rust builds.
+
+import HardBreak from "@tiptap/extension-hard-break";
+import Strike from "@tiptap/extension-strike";
+import { Placeholder } from "@tiptap/extensions";
+import { EditorContent, useEditor } from "@tiptap/react";
+import StarterKit from "@tiptap/starter-kit";
+import { Paperclip, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+
+import { act, addAttachment } from "../ipc/bridge";
+import type { Addr, DraftAttachment, DraftFields } from "../ipc/types";
+import { useChrome } from "../store/chrome";
+import { useAppState, useDraft } from "../store/hooks";
+import { RecipientField, isValidEmail, type RecipientHandle } from "./RecipientField";
+import { closeComposerOnScreen, discardOnScreen, openComposer, sendOnScreen } from "./start";
+
+const SAVE_DELAY = 500;
+
+const fmt = (a: Addr | null) => (a ? (a.name ? `${a.name} <${a.email}>` : a.email) : "");
+
+function QuoteBlock({ html }: { html: string }) {
+  const [open, setOpen] = useState(false);
+  const frame = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    const el = frame.current;
+    if (!el || !open) return;
+    const fit = () => {
+      const doc = el.contentDocument;
+      if (doc) el.style.height = `${doc.documentElement.scrollHeight}px`;
+    };
+    el.addEventListener("load", fit);
+    return () => el.removeEventListener("load", fit);
+  }, [open]);
+  return (
+    <div className="mt-2">
+      <button
+        tabIndex={-1}
+        onClick={() => setOpen(!open)}
+        className="rounded-control bg-fill px-2 text-time text-text-2"
+        title="Show quoted text"
+      >
+        •••
+      </button>
+      {open && (
+        <iframe
+          ref={frame}
+          title="quoted"
+          sandbox="allow-same-origin"
+          className="mt-2 w-full border-0"
+          srcDoc={`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="script-src 'none'"><style>body{margin:0;font:13px/20px -apple-system,sans-serif;color:#73716D}</style></head><body>${html}</body></html>`}
+        />
+      )}
+    </div>
+  );
+}
+
+function readFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve((r.result as string).split(",")[1] ?? "");
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
+export function Composer({ draft, inline }: { draft: string; inline: boolean }) {
+  const state = useDraft(draft);
+  const app = useAppState();
+  const blurred = useChrome((s) => s.composeBlurred);
+  const [fields, setFields] = useState<DraftFields>({
+    from: null,
+    to: [],
+    cc: [],
+    bcc: [],
+    subject: "",
+    bodyHtml: "",
+    attachments: [],
+  });
+  const [loaded, setLoaded] = useState(false);
+  const [showCc, setShowCc] = useState(false);
+  const [showBcc, setShowBcc] = useState(false);
+  const [showSubject, setShowSubject] = useState(!inline);
+  const [link, setLink] = useState<string | null>(null);
+  const dirty = useRef(false);
+  const latest = useRef(fields);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const toRef = useRef<RecipientHandle>(null);
+  const ccRef = useRef<RecipientHandle>(null);
+  const bccRef = useRef<RecipientHandle>(null);
+  const subjectRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const linkRef = useRef<HTMLInputElement>(null);
+
+  const scheduleSave = useCallback(() => {
+    dirty.current = true;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      const pending = openComposer.pending();
+      if (pending) act({ type: "saveDraft", draft, save: { type: "update", fields: pending } });
+    }, SAVE_DELAY);
+  }, [draft]);
+
+  const update = useCallback(
+    (patch: Partial<DraftFields>) => {
+      setFields((f) => {
+        const next = { ...f, ...patch };
+        latest.current = next;
+        return next;
+      });
+      scheduleSave();
+    },
+    [scheduleSave],
+  );
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        // Removed: they clash with the compose table (Cmd+Shift+B, Cmd+Shift+S, Cmd+Enter).
+        blockquote: false,
+        strike: false,
+        hardBreak: false,
+        heading: false,
+        codeBlock: false,
+        code: false,
+        horizontalRule: false,
+        link: { openOnClick: false, autolink: true },
+      }),
+      Strike.extend({
+        addKeyboardShortcuts() {
+          return { "Mod-Shift-x": () => this.editor.commands.toggleStrike() };
+        },
+      }),
+      HardBreak.extend({
+        addKeyboardShortcuts() {
+          return { "Shift-Enter": () => this.editor.commands.setHardBreak() };
+        },
+      }),
+      Placeholder.configure({ placeholder: inline ? "Write a reply…" : "Write a message…" }),
+    ],
+    content: "",
+    autofocus: inline ? "end" : false,
+    editorProps: {
+      handleKeyDown: (_view, e) => {
+        if (e.metaKey && e.key === "Enter") {
+          e.preventDefault();
+          sendOnScreen();
+          return true;
+        }
+        return false;
+      },
+    },
+    onUpdate: ({ editor: ed }) => {
+      const html = ed.getHTML();
+      update({ bodyHtml: html === "<p></p>" ? "" : html });
+    },
+    onFocus: () => useChrome.getState().set({ composeBlurred: false }),
+  });
+
+  // The first load carries the filled fields. A resumed draft fills the editor.
+  useEffect(() => {
+    if (!state || loaded || state.gone) return;
+    setLoaded(true);
+    setFields((f) => {
+      const body = f.bodyHtml || state.bodyHtml;
+      const next: DraftFields = {
+        from: state.from,
+        to: state.to,
+        cc: state.cc,
+        bcc: state.bcc,
+        subject: state.subject,
+        bodyHtml: body,
+        attachments: state.attachments,
+      };
+      latest.current = next;
+      return next;
+    });
+    if (state.cc.length > 0) setShowCc(true);
+    if (state.bcc.length > 0) setShowBcc(true);
+    if (state.kind === "new") setShowSubject(true);
+    if (editor && editor.isEmpty && state.bodyHtml)
+      editor.commands.setContent(state.bodyHtml, { emitUpdate: false });
+  }, [state, loaded, editor]);
+
+  // Register with the session so send, discard, and close carry the pending save.
+  useEffect(() => {
+    openComposer.draft = draft;
+    openComposer.pending = () => {
+      if (!dirty.current) return null;
+      if (timer.current) {
+        clearTimeout(timer.current);
+        timer.current = null;
+      }
+      dirty.current = false;
+      const f = latest.current;
+      const commitAll = (h: RecipientHandle | null, v: Addr[]) => (h ? h.commit() : v);
+      return {
+        ...f,
+        to: commitAll(toRef.current, f.to),
+        cc: commitAll(ccRef.current, f.cc),
+        bcc: commitAll(bccRef.current, f.bcc),
+      };
+    };
+    openComposer.invalid = () =>
+      [...latest.current.to, ...latest.current.cc, ...latest.current.bcc]
+        .filter((a) => !isValidEmail(a.email))
+        .map((a) => a.email);
+    openComposer.focus = () => editor?.commands.focus("end");
+    openComposer.setFrom = (from) => update({ from });
+    openComposer.attach = () => fileRef.current?.click();
+    return () => {
+      if (openComposer.draft === draft) openComposer.draft = null;
+    };
+  }, [draft, editor, update]);
+
+  // A reply scrolls fully into view with the editor focused; a new message starts in To.
+  useEffect(() => {
+    if (inline) root.current?.scrollIntoView({ block: "nearest" });
+    else requestAnimationFrame(() => toRef.current?.focus());
+  }, [inline]);
+
+  const attach = useCallback(() => fileRef.current?.click(), []);
+
+  // Compose shortcuts work focused or blurred (SPEC Compose).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (useChrome.getState().palette) return;
+      const blurredNow = useChrome.getState().composeBlurred;
+      if (e.metaKey && e.shiftKey) {
+        const k = e.key.toLowerCase();
+        const run: Record<string, () => void> = {
+          o: () => toRef.current?.focus(),
+          c: () => {
+            setShowCc(true);
+            requestAnimationFrame(() => ccRef.current?.focus());
+          },
+          b: () => {
+            setShowBcc(true);
+            requestAnimationFrame(() => bccRef.current?.focus());
+          },
+          f: () => useChrome.getState().set({ palette: { kind: "from", draft } }),
+          s: () => {
+            setShowSubject(true);
+            requestAnimationFrame(() => subjectRef.current?.focus());
+          },
+          m: () => editor?.commands.focus("end"),
+          a: attach,
+          ",": discardOnScreen,
+          "<": discardOnScreen,
+        };
+        const f = run[k];
+        if (f) {
+          e.preventDefault();
+          e.stopPropagation();
+          f();
+          return;
+        }
+      }
+      if (e.metaKey && e.key === "Enter") {
+        e.preventDefault();
+        sendOnScreen();
+        return;
+      }
+      if (e.metaKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        if (!blurredNow && editor?.isFocused) {
+          setLink(editor.getAttributes("link").href ?? "");
+          requestAnimationFrame(() => linkRef.current?.focus());
+        } else {
+          useChrome.getState().set({ palette: { kind: "commands", draftActions: true } });
+        }
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (link !== null) {
+          setLink(null);
+          editor?.commands.focus();
+          return;
+        }
+        if (!blurredNow) {
+          // The first Esc blurs the editor and leaves compose on screen.
+          (document.activeElement as HTMLElement | null)?.blur();
+          useChrome.getState().set({ composeBlurred: true });
+        } else {
+          closeComposerOnScreen();
+        }
+        return;
+      }
+      if (blurredNow) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          editor?.commands.focus("end");
+        } else if (!e.metaKey) {
+          // Other keys do nothing while compose is blurred.
+          e.preventDefault();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [draft, editor, attach, link]);
+
+  const onFiles = async (files: FileList | null) => {
+    if (!files) return;
+    const added: DraftAttachment[] = [];
+    for (const f of Array.from(files)) {
+      try {
+        const data = await readFile(f);
+        added.push(await addAttachment(draft, f.name, f.type, data));
+      } catch (err) {
+        toast.error(`Couldn't attach ${f.name}: ${String(err)}`);
+      }
+    }
+    update({ attachments: [...latest.current.attachments, ...added] });
+  };
+
+  const account = state?.account ?? useChrome.getState().account ?? 0;
+  const sendAs = app?.accounts.find((a) => a.id === account)?.sendAs ?? [];
+
+  return (
+    <div
+      ref={root}
+      className={`selectable rounded-sheet ${inline ? "mt-4 border border-border px-5 py-3" : "px-1"} ${
+        blurred ? "opacity-90" : ""
+      }`}
+      onMouseDown={() => useChrome.getState().set({ composeBlurred: false })}
+    >
+      {sendAs.length > 1 && (
+        <button
+          tabIndex={-1}
+          className="mb-1 text-row text-text-2 hover:text-text"
+          onClick={() => useChrome.getState().set({ palette: { kind: "from", draft } })}
+        >
+          From {fmt(fields.from)}
+        </button>
+      )}
+      <RecipientField
+        ref={toRef}
+        label="To"
+        account={account}
+        value={fields.to}
+        onChange={(to) => update({ to })}
+        onTab={(shift) =>
+          shift
+            ? null
+            : showCc
+              ? ccRef.current?.focus()
+              : showSubject
+                ? subjectRef.current?.focus()
+                : editor?.commands.focus()
+        }
+      />
+      {showCc && (
+        <RecipientField
+          ref={ccRef}
+          label="Cc"
+          account={account}
+          value={fields.cc}
+          onChange={(cc) => update({ cc })}
+        />
+      )}
+      {showBcc && (
+        <RecipientField
+          ref={bccRef}
+          label="Bcc"
+          account={account}
+          value={fields.bcc}
+          onChange={(bcc) => update({ bcc })}
+        />
+      )}
+      {!showCc && !showBcc && (
+        <div className="flex gap-3 py-1 text-hint text-text-3">
+          <button tabIndex={-1} onClick={() => setShowCc(true)}>
+            Cc
+          </button>
+          <button tabIndex={-1} onClick={() => setShowBcc(true)}>
+            Bcc
+          </button>
+        </div>
+      )}
+      {showSubject && (
+        <input
+          ref={subjectRef}
+          className="h-9 w-full border-b border-border-2 bg-transparent text-row font-medium outline-none placeholder:text-text-3"
+          placeholder="Subject"
+          value={fields.subject}
+          onChange={(e) => update({ subject: e.target.value })}
+          onKeyDown={(e) => {
+            if (e.key === "Tab" && !e.shiftKey) {
+              e.preventDefault();
+              editor?.commands.focus();
+            }
+          }}
+        />
+      )}
+      <div className="relative pt-3">
+        <EditorContent editor={editor} />
+        {link !== null && (
+          <div className="absolute top-0 left-0 z-10 flex items-center gap-2 rounded-control bg-bg p-1 shadow-float">
+            <input
+              ref={linkRef}
+              className="w-72 rounded-control border border-border px-2 py-1 text-row outline-none"
+              placeholder="https://"
+              value={link}
+              onChange={(e) => setLink(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  const href = link.trim();
+                  const chain = editor?.chain().focus().extendMarkRange("link");
+                  if (href)
+                    chain
+                      ?.setLink({ href: /^[a-z]+:/i.test(href) ? href : `https://${href}` })
+                      .run();
+                  else chain?.unsetLink().run();
+                  setLink(null);
+                }
+              }}
+            />
+          </div>
+        )}
+      </div>
+      {state?.quoteHtml && <QuoteBlock html={state.quoteHtml} />}
+      {fields.attachments.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {fields.attachments.map((a) => (
+            <span
+              key={a.id}
+              className="flex items-center gap-1.5 rounded-control border border-border px-2 py-1 text-row"
+            >
+              <Paperclip size={12} strokeWidth={1.5} className="text-text-3" />
+              <span className="max-w-[220px] truncate">{a.filename}</span>
+              <button
+                tabIndex={-1}
+                className="text-text-3 hover:text-text"
+                onClick={() =>
+                  update({ attachments: latest.current.attachments.filter((x) => x.id !== a.id) })
+                }
+              >
+                <X size={12} />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <input
+        ref={fileRef}
+        type="file"
+        multiple
+        hidden
+        onChange={(e) => void onFiles(e.target.files)}
+      />
+      <div className="mt-3 flex items-center gap-3">
+        <button
+          tabIndex={-1}
+          onClick={sendOnScreen}
+          className="rounded-control bg-accent px-3 py-1 text-row font-medium text-white"
+        >
+          Send <span className="opacity-70">⌘↵</span>
+        </button>
+        <button
+          tabIndex={-1}
+          onClick={attach}
+          className="text-text-3 hover:text-text-2"
+          title="Attach (⌘⇧A)"
+        >
+          <Paperclip size={14} strokeWidth={1.5} />
+        </button>
+        <div className="flex-1" />
+        <span className="text-hint text-text-3">
+          {blurred ? "Enter to edit · Esc to close" : "Esc to blur"}
+        </span>
+      </div>
+    </div>
+  );
+}

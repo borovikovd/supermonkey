@@ -1,0 +1,252 @@
+// To, Cc, and Bcc as chips with autocomplete (SPEC Recipients and autocomplete).
+
+import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+
+import { autocomplete } from "../ipc/bridge";
+import type { Addr, ContactSuggestion } from "../ipc/types";
+import { measure } from "../keyboard/meter";
+
+const EMAIL = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
+export const isValidEmail = (s: string) => EMAIL.test(s.trim());
+
+/** Parses `Name <a@b.c>` or a bare address. */
+export function parseAddr(text: string): Addr | null {
+  const t = text.trim().replace(/[,;]+$/, "");
+  if (!t) return null;
+  const m = /^"?([^"<]*?)"?\s*<([^>]+)>$/.exec(t);
+  if (m) return { name: m[1]!.trim() || null, email: m[2]!.trim() };
+  return { name: null, email: t };
+}
+
+/** Splits pasted text into addresses (commas, semicolons, newlines). */
+export function splitAddrs(text: string): Addr[] {
+  const parts = text.split(/[\n;]+|,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
+  return parts.map(parseAddr).filter((a): a is Addr => a !== null);
+}
+
+export type RecipientHandle = { focus: () => void; commit: () => Addr[] };
+
+function Highlight({ text, start, end }: { text: string; start: number; end: number }) {
+  // Offsets are byte offsets from Rust; map through UTF-8.
+  const bytes = new TextEncoder().encode(text);
+  const dec = new TextDecoder();
+  const a = dec.decode(bytes.slice(0, start));
+  const b = dec.decode(bytes.slice(start, end));
+  const c = dec.decode(bytes.slice(end));
+  return (
+    <>
+      {a}
+      <b className="font-semibold">{b}</b>
+      {c}
+    </>
+  );
+}
+
+export const RecipientField = forwardRef<
+  RecipientHandle,
+  {
+    label: string;
+    account: number;
+    value: Addr[];
+    onChange: (v: Addr[]) => void;
+    onTab?: (shift: boolean) => void;
+  }
+>(function RecipientField({ label, account, value, onChange, onTab }, ref) {
+  const [text, setText] = useState("");
+  const [suggestions, setSuggestions] = useState<ContactSuggestion[]>([]);
+  const [active, setActive] = useState(0);
+  const [selectedChip, setSelectedChip] = useState<number | null>(null);
+  const input = useRef<HTMLInputElement>(null);
+  const seq = useRef(0);
+
+  const addAll = (addrs: Addr[]) => {
+    const have = new Set(value.map((a) => a.email.toLowerCase()));
+    const next = [...value];
+    for (const a of addrs) {
+      if (!have.has(a.email.toLowerCase())) {
+        next.push(a);
+        have.add(a.email.toLowerCase());
+      }
+    }
+    onChange(next);
+  };
+
+  /** Turns typed text into a chip; returns the full list. */
+  const commit = (): Addr[] => {
+    const a = parseAddr(text);
+    setText("");
+    setSuggestions([]);
+    if (!a) return value;
+    const next = value.some((x) => x.email.toLowerCase() === a.email.toLowerCase())
+      ? value
+      : [...value, a];
+    onChange(next);
+    return next;
+  };
+
+  useImperativeHandle(ref, () => ({ focus: () => input.current?.focus(), commit }));
+
+  const query = (q: string) => {
+    const start = performance.now();
+    const n = ++seq.current;
+    if (!q.trim()) {
+      setSuggestions([]);
+      return;
+    }
+    void autocomplete(account, q).then((s) => {
+      if (n !== seq.current) return;
+      setSuggestions(s);
+      setActive(0);
+      measure("autocomplete", start);
+    });
+  };
+
+  const accept = (s: ContactSuggestion) => {
+    addAll([{ name: s.name || null, email: s.email }]);
+    setText("");
+    setSuggestions([]);
+  };
+
+  const open = suggestions.length > 0;
+  return (
+    <div className="relative flex min-h-9 flex-wrap items-center gap-1 border-b border-border-2 py-1 text-row">
+      <span className="w-12 shrink-0 text-text-2">{label}</span>
+      {value.map((a, i) => {
+        const bad = !isValidEmail(a.email);
+        return (
+          <span
+            key={`${a.email}-${i}`}
+            title={a.email}
+            className={`flex items-center gap-1 rounded-control px-1.5 py-0.5 ${
+              bad
+                ? "bg-[#fde8ee] text-danger"
+                : selectedChip === i
+                  ? "bg-accent text-white"
+                  : "bg-fill"
+            }`}
+          >
+            {a.name || a.email}
+            <button
+              tabIndex={-1}
+              className="text-text-3 hover:text-text"
+              onClick={() => onChange(value.filter((_, j) => j !== i))}
+            >
+              ×
+            </button>
+          </span>
+        );
+      })}
+      <input
+        ref={input}
+        className="min-w-[120px] flex-1 bg-transparent outline-none"
+        value={text}
+        onChange={(e) => {
+          const v = e.target.value;
+          setSelectedChip(null);
+          // A comma, or a space after a complete address, makes a chip.
+          if (/[,;]$/.test(v) || (/\s$/.test(v) && isValidEmail(v.trim()))) {
+            const a = parseAddr(v);
+            if (a) addAll([a]);
+            setText("");
+            setSuggestions([]);
+            return;
+          }
+          setText(v);
+          query(v);
+        }}
+        onPaste={(e) => {
+          const t = e.clipboardData.getData("text");
+          if (/[,;\n]/.test(t) || t.includes("@")) {
+            e.preventDefault();
+            addAll(splitAddrs(text + t));
+            setText("");
+            setSuggestions([]);
+          }
+        }}
+        onBlur={() => {
+          // Leaving the field turns typed text into a chip.
+          setTimeout(() => {
+            if (text.trim()) commit();
+            setSuggestions([]);
+          }, 120);
+        }}
+        onKeyDown={(e) => {
+          if (open) {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setActive((a) => Math.min(a + 1, suggestions.length - 1));
+              return;
+            }
+            if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActive((a) => Math.max(a - 1, 0));
+              return;
+            }
+            if (e.key === "Enter" || e.key === "Tab") {
+              e.preventDefault();
+              e.stopPropagation();
+              accept(suggestions[active]!);
+              return;
+            }
+            if (e.key === "Escape") {
+              // Closes the list without leaving the field.
+              e.preventDefault();
+              e.stopPropagation();
+              setSuggestions([]);
+              return;
+            }
+          }
+          if (e.key === "Backspace" && text === "" && value.length > 0) {
+            e.preventDefault();
+            if (selectedChip === null) setSelectedChip(value.length - 1);
+            else {
+              onChange(value.filter((_, j) => j !== selectedChip));
+              setSelectedChip(null);
+            }
+            return;
+          }
+          if ((e.key === "Tab" || e.key === "Enter") && !e.metaKey) {
+            if (text.trim()) {
+              e.preventDefault();
+              commit();
+              return;
+            }
+            if (e.key === "Tab" && onTab) {
+              e.preventDefault();
+              onTab(e.shiftKey);
+            }
+          }
+        }}
+      />
+      {open && (
+        <div className="fade-in absolute top-full left-12 z-20 mt-1 w-[420px] overflow-hidden rounded-sheet bg-bg py-1 shadow-float">
+          {suggestions.map((s, i) => (
+            <div
+              key={s.email}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                accept(s);
+              }}
+              className={`flex h-row items-center gap-2 px-3 ${i === active ? "bg-accent-soft" : ""}`}
+            >
+              <span className="truncate font-medium">
+                {s.matchField === "name" ? (
+                  <Highlight text={s.name} start={s.matchStart} end={s.matchEnd} />
+                ) : (
+                  s.name
+                )}
+              </span>
+              <span className="truncate text-text-2">
+                {s.matchField === "email" ? (
+                  <Highlight text={s.email} start={s.matchStart} end={s.matchEnd} />
+                ) : (
+                  s.email
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+});

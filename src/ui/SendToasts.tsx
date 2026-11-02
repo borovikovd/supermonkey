@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 
 import { act } from "../ipc/bridge";
@@ -8,13 +8,14 @@ import { SendToastList } from "./SendToastList";
 
 /** All notices across accounts. A notice persists until shown and acked. */
 function useNotices(): Notice[] {
-  return useMirror((s) => {
+  const subs = useMirror((s) => s.subs);
+  return useMemo(() => {
     const out: Notice[] = [];
-    for (const sub of Object.values(s.subs)) {
+    for (const sub of Object.values(subs)) {
       if (sub.type === "account" && sub.summary) out.push(...sub.summary.notices);
     }
     return out;
-  });
+  }, [subs]);
 }
 
 export function SendToasts() {
