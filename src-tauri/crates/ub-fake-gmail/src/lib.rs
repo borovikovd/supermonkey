@@ -22,6 +22,10 @@
 //! connection without answering. To the client both closes look like "sent, no response".
 //! A real "offline" (connection refused, nothing sent) cannot depend on a request the server
 //! has not read yet, so it is server-wide: [`FakeGmail::set_offline`].
+//!
+//! [`Fault::Hold`] parks matching requests until [`FakeGmail::release`], so a test can look at
+//! the client while a request is in flight. Every request is logged ([`FakeGmail::requests`])
+//! with its Gmail method name, account, body, and answer.
 
 #![expect(
     clippy::unwrap_used,
@@ -31,24 +35,32 @@
 mod mailbox;
 mod mime;
 mod routes;
+mod traffic;
 
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::Body;
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
 use tokio::net::{TcpListener, TcpSocket};
-use tokio::sync::{Notify, watch};
+use tokio::sync::{Notify, oneshot, watch};
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
 
 use crate::mailbox::{Mailbox, Msg, SendAsEntry};
+use crate::traffic::Held;
+pub use crate::traffic::{Answer, LoggedRequest, Release, RequestInfo, api_name};
+
+/// App time for the fake: what Gmail's own clock reads (dates of new messages,
+/// `newer_than:`) and when requests arrive.
+type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
 
 /// The fake Gmail server. Dropping it stops accepting connections.
 pub struct FakeGmail {
@@ -62,7 +74,11 @@ pub struct FakeGmail {
 pub(crate) struct Shared {
     pub world: Mutex<World>,
     faults: Mutex<Vec<FaultEntry>>,
+    next_fault: AtomicU64,
     log: Mutex<Vec<LoggedRequest>>,
+    held: Mutex<Vec<Held>>,
+    in_flight: AtomicUsize,
+    clock: Mutex<Option<Clock>>,
 }
 
 pub(crate) struct World {
@@ -77,7 +93,18 @@ pub(crate) struct World {
     pub invalid_grant: HashSet<String>,
     pub token_lifetime: Duration,
     pub last_auth_request: Option<Vec<(String, String)>>,
+    /// The next consent page answers `access_denied`.
+    pub deny_next_auth: bool,
+    pub revocations: Vec<Revocation>,
     counter: u64,
+}
+
+/// A token revoked at the revoke endpoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Revocation {
+    /// The token the client sent.
+    pub token: String,
+    pub email: String,
 }
 
 pub(crate) struct AuthCode {
@@ -97,6 +124,8 @@ impl Default for World {
             invalid_grant: HashSet::new(),
             token_lifetime: Duration::from_secs(3600),
             last_auth_request: None,
+            deny_next_auth: false,
+            revocations: Vec::new(),
             counter: 0,
         }
     }
@@ -121,6 +150,14 @@ impl World {
         self.refresh_tokens.insert(token.clone(), email.to_owned());
         token
     }
+
+    /// Whose refresh or access token this is.
+    pub fn token_owner(&self, token: &str) -> Option<String> {
+        self.refresh_tokens
+            .get(token)
+            .or_else(|| self.access_tokens.get(token).map(|(email, _)| email))
+            .cloned()
+    }
 }
 
 impl Shared {
@@ -128,38 +165,104 @@ impl Shared {
         self.world.lock().unwrap()
     }
 
-    /// The first fault that applies to this request. Every matching entry counts the request,
-    /// applied or not, so `nth` and `times` count from injection.
-    fn fault_for(&self, method: &str, path: &str) -> Option<Fault> {
+    /// App time, if a clock was set; otherwise mailboxes keep their own dates.
+    pub fn clock_ms(&self) -> Option<u64> {
+        let clock = self.clock.lock().unwrap().clone();
+        clock.map(|now| now())
+    }
+
+    pub(crate) fn now_ms(&self) -> u64 {
+        self.clock_ms().unwrap_or_else(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        })
+    }
+
+    /// The first fault that applies to this request, with its id. Every matching entry counts
+    /// the request, applied or not, so `nth` and `times` count from injection.
+    fn fault_for(&self, request: &RequestInfo) -> Option<(u64, Fault)> {
         let mut faults = self.faults.lock().unwrap();
         let mut chosen = None;
-        for entry in faults
-            .iter_mut()
-            .filter(|e| e.matcher.matches(method, path))
-        {
+        for entry in faults.iter_mut().filter(|e| e.matcher.matches(request)) {
             entry.seen += 1;
             if chosen.is_none() && entry.applies() {
-                chosen = Some(entry.fault.clone());
+                chosen = Some((entry.id, entry.fault.clone()));
             }
         }
         chosen
     }
+
+    fn set_held(&self, seq: usize, held: bool) {
+        if let Some(entry) = self.log.lock().unwrap().get_mut(seq) {
+            entry.held = held;
+        }
+    }
+
+    fn answered(&self, seq: usize, answer: Answer) {
+        if let Some(entry) = self.log.lock().unwrap().get_mut(seq) {
+            entry.answer = Some(answer);
+        }
+    }
+
+    /// Parks a request until it is released, then returns what it suffers next.
+    async fn hold(&self, seq: usize, hold: u64, info: RequestInfo) -> Option<Fault> {
+        let (release, released) = oneshot::channel();
+        self.held.lock().unwrap().push(Held {
+            seq,
+            hold,
+            info,
+            release,
+        });
+        self.set_held(seq, true);
+        // If the client goes away first, the request leaves the held list.
+        let _unhold = Unhold { shared: self, seq };
+        released.await.ok().flatten()
+    }
 }
 
-/// A request the fake received, faulted or not.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LoggedRequest {
-    pub method: String,
-    pub path: String,
-    /// The raw query string, without `?`.
-    pub query: String,
+/// Takes a request off the held list when its handler ends.
+struct Unhold<'a> {
+    shared: &'a Shared,
+    seq: usize,
 }
 
-/// Picks requests by method and path.
+impl Drop for Unhold<'_> {
+    fn drop(&mut self) {
+        self.shared
+            .held
+            .lock()
+            .unwrap()
+            .retain(|h| h.seq != self.seq);
+        self.shared.set_held(self.seq, false);
+    }
+}
+
+/// Counts a request in flight while its handler runs.
+struct InFlight<'a>(&'a AtomicUsize);
+
+impl<'a> InFlight<'a> {
+    fn new(count: &'a AtomicUsize) -> Self {
+        count.fetch_add(1, Ordering::AcqRel);
+        InFlight(count)
+    }
+}
+
+impl Drop for InFlight<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// Picks requests by method and path, and optionally by Gmail method name, account, and
+/// query parameters.
 #[derive(Debug, Clone)]
 pub struct Matcher {
     method: Option<String>,
     path: String,
+    api: Option<String>,
+    account: Option<String>,
+    query: Vec<(String, String)>,
     nth: Option<usize>,
     times: Option<usize>,
 }
@@ -171,9 +274,38 @@ impl Matcher {
         Matcher {
             method: (method != "*").then(|| method.to_ascii_uppercase()),
             path: path_glob.to_owned(),
+            api: None,
+            account: None,
+            query: Vec::new(),
             nth: None,
             times: None,
         }
+    }
+
+    /// Requests to a Gmail method by name (see [`api_name`]), e.g. `messages.batchModify`.
+    pub fn api(name: &str) -> Self {
+        Matcher::new("*", "*").for_api(name)
+    }
+
+    /// Only requests to this Gmail method (see [`api_name`]).
+    #[must_use]
+    pub fn for_api(mut self, name: &str) -> Self {
+        self.api = Some(name.to_owned());
+        self
+    }
+
+    /// Only requests acting for this account.
+    #[must_use]
+    pub fn account(mut self, email: &str) -> Self {
+        self.account = Some(email.to_lowercase());
+        self
+    }
+
+    /// Only requests whose query has `name=value` (one of them, for repeated keys).
+    #[must_use]
+    pub fn query(mut self, name: &str, value: &str) -> Self {
+        self.query.push((name.to_owned(), value.to_owned()));
+        self
     }
 
     /// Only the `n`th matching request (1-based, counted from injection).
@@ -196,8 +328,21 @@ impl Matcher {
         self.times(1)
     }
 
-    fn matches(&self, method: &str, path: &str) -> bool {
-        self.method.as_deref().is_none_or(|m| m == method) && glob(&self.path, path)
+    /// Whether this picks `request` (ignoring `nth` and `times`).
+    pub fn matches(&self, request: &RequestInfo) -> bool {
+        self.method.as_deref().is_none_or(|m| m == request.method)
+            && glob(&self.path, &request.path)
+            && self.api.as_deref().is_none_or(|a| a == request.api)
+            && self.account.as_deref().is_none_or(|a| {
+                request
+                    .account
+                    .as_deref()
+                    .is_some_and(|r| r.eq_ignore_ascii_case(a))
+            })
+            && (self.query.is_empty() || {
+                let pairs = request.query_pairs();
+                self.query.iter().all(|q| pairs.contains(q))
+            })
     }
 }
 
@@ -231,6 +376,12 @@ pub enum Fault {
     },
     /// Wait, then handle the request normally.
     Delay(Duration),
+    /// Park the request until [`FakeGmail::release`] lets it go.
+    Hold,
+    /// Do the request's work, then answer with this error: done, but the client hears otherwise.
+    StatusAfterApply { status: u16, reason: String },
+    /// Handle the request, then leave these thread ids out of a `threads.list` page.
+    OmitThreads(Vec<String>),
 }
 
 impl Fault {
@@ -245,6 +396,7 @@ impl Fault {
 }
 
 struct FaultEntry {
+    id: u64,
     matcher: Matcher,
     fault: Fault,
     /// Matching requests so far, this one included.
@@ -366,7 +518,11 @@ impl FakeGmail {
         let shared = Arc::new(Shared {
             world: Mutex::new(World::default()),
             faults: Mutex::default(),
+            next_fault: AtomicU64::new(1),
             log: Mutex::default(),
+            held: Mutex::default(),
+            in_flight: AtomicUsize::new(0),
+            clock: Mutex::new(None),
         });
         let (offline, offline_rx) = watch::channel(false);
         let (listening_tx, listening) = watch::channel(true);
@@ -442,18 +598,67 @@ impl FakeGmail {
         self.shared.world().last_auth_request.clone()
     }
 
-    /// Adds a fault for matching requests. The first applicable fault wins.
-    pub fn inject(&self, matcher: Matcher, fault: Fault) {
+    /// Adds a fault for matching requests. The first applicable fault wins. Returns its id,
+    /// which [`Release::Hold`] names.
+    pub fn inject(&self, matcher: Matcher, fault: Fault) -> u64 {
+        let id = self.shared.next_fault.fetch_add(1, Ordering::Relaxed);
         self.shared.faults.lock().unwrap().push(FaultEntry {
+            id,
             matcher,
             fault,
             seen: 0,
         });
+        id
     }
 
-    /// Removes every fault.
+    /// Removes every fault, holds included. Requests already held stay held.
     pub fn clear_faults(&self) {
         self.shared.faults.lock().unwrap().clear();
+    }
+
+    /// Ends holds and lets the requests they parked go on: handled normally, or suffering
+    /// `then`. Returns how many requests it released.
+    pub fn release(&self, which: &Release, then: Option<&Fault>) -> usize {
+        let is_hold = |id: u64, api: Option<&str>| which.covers(id, api);
+        self.shared.faults.lock().unwrap().retain(|e| {
+            !(matches!(e.fault, Fault::Hold) && is_hold(e.id, e.matcher.api.as_deref()))
+        });
+        let released: Vec<Held> = {
+            let mut held = self.shared.held.lock().unwrap();
+            let (go, stay) = held
+                .drain(..)
+                .partition(|h| is_hold(h.hold, Some(h.info.api)));
+            *held = stay;
+            go
+        };
+        let n = released.len();
+        for h in released {
+            self.shared.set_held(h.seq, false);
+            // The handler may be gone already (its connection closed).
+            let _ = h.release.send(then.cloned());
+        }
+        n
+    }
+
+    /// Requests parked by a hold now.
+    pub fn held(&self) -> usize {
+        self.shared.held.lock().unwrap().len()
+    }
+
+    /// Requests parked now by the holds `which` names.
+    pub fn held_by(&self, which: &Release) -> usize {
+        self.shared
+            .held
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|h| which.covers(h.hold, Some(h.info.api)))
+            .count()
+    }
+
+    /// Requests being handled now, held ones included.
+    pub fn in_flight(&self) -> usize {
+        self.shared.in_flight.load(Ordering::Acquire)
     }
 
     /// Every request received so far.
@@ -469,8 +674,25 @@ impl FakeGmail {
             .lock()
             .unwrap()
             .iter()
-            .filter(|r| matcher.matches(&r.method, &r.path))
+            .filter(|r| matcher.matches(&r.info()))
             .count()
+    }
+
+    /// Sets the fake's clock (Unix ms): the date of messages Gmail creates (sends, drafts),
+    /// what `newer_than:` counts from, and when requests are logged. Default: the system
+    /// clock, with new messages a minute apart.
+    pub fn set_clock(&self, now_ms: impl Fn() -> u64 + Send + Sync + 'static) {
+        *self.shared.clock.lock().unwrap() = Some(Arc::new(now_ms));
+    }
+
+    /// The next consent page answers Google's `access_denied` instead of a code.
+    pub fn deny_next_sign_in(&self) {
+        self.shared.world().deny_next_auth = true;
+    }
+
+    /// Tokens revoked at Google so far, oldest first.
+    pub fn revocations(&self) -> Vec<Revocation> {
+        self.shared.world().revocations.clone()
     }
 
     /// Clears the request log.
@@ -528,6 +750,16 @@ impl FakeUser {
         self.shared.world().issue_access_token(&self.email)
     }
 
+    /// Expires every access token of this user, so its next Gmail call gets a 401.
+    pub fn expire_access_tokens(&self) {
+        let past = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        for (email, expiry) in self.shared.world().access_tokens.values_mut() {
+            if *email == self.email {
+                *expiry = past;
+            }
+        }
+    }
+
     /// While set, refreshing any of this user's tokens answers `invalid_grant`.
     pub fn set_invalid_grant(&self, invalid: bool) {
         let mut world = self.shared.world();
@@ -541,6 +773,16 @@ impl FakeUser {
     /// Sets the primary send-as display name.
     pub fn set_display_name(&self, name: &str) {
         self.with(|mb| name.clone_into(&mut mb.send_as[0].display_name));
+    }
+
+    /// Every send-as address: email, display name, and whether it is the primary one.
+    pub fn send_as(&self) -> Vec<(String, String, bool)> {
+        self.with(|mb| {
+            mb.send_as
+                .iter()
+                .map(|s| (s.email.clone(), s.display_name.clone(), s.primary))
+                .collect()
+        })
     }
 
     /// Adds a send-as alias.
@@ -571,13 +813,10 @@ impl FakeUser {
 
     /// Stores a message as if it arrived, recording `messagesAdded`.
     pub fn add_message(&self, msg: &NewMessage) -> AddedMessage {
+        let now = self.shared.clock_ms();
         self.with(|mb| {
-            let date = msg.internal_date.unwrap_or_else(|| mb.next_date());
-            let rfc822_message_id = msg
-                .message_id
-                .clone()
-                .unwrap_or_else(|| format!("<{}@fake.example>", mb.new_id()));
-            let raw = mime::build(msg, date, &rfc822_message_id);
+            let date = msg.internal_date.or(now).unwrap_or_else(|| mb.next_date());
+            let (raw, rfc822_message_id) = built(mb, msg, date);
             let id = mb.insert_raw(raw, msg.thread_id.clone(), msg.labels.clone(), Some(date));
             AddedMessage {
                 thread_id: mb.messages[&id].thread_id.clone(),
@@ -585,6 +824,78 @@ impl FakeUser {
                 rfc822_message_id,
             }
         })
+    }
+
+    /// A draft made by another client (Gmail on the web, a phone). Labels are ignored.
+    pub fn add_draft(&self, msg: &NewMessage) -> AddedDraft {
+        let now = self.shared.clock_ms();
+        self.with(|mb| {
+            let date = msg.internal_date.or(now).unwrap_or_else(|| mb.next_date());
+            let (raw, rfc822_message_id) = built(mb, msg, date);
+            let id = mb.create_draft(raw, msg.thread_id.clone(), Some(date));
+            let message = mb.drafts[&id].clone();
+            AddedDraft {
+                thread_id: mb.messages[&message].thread_id.clone(),
+                id,
+                message_id: message,
+                rfc822_message_id,
+            }
+        })
+    }
+
+    /// Replaces a draft's message, as another client editing it. `None` if it is gone.
+    pub fn update_draft(&self, draft_id: &str, msg: &NewMessage) -> Option<AddedDraft> {
+        let now = self.shared.clock_ms();
+        self.with(|mb| {
+            let date = msg.internal_date.or(now).unwrap_or_else(|| mb.next_date());
+            let (raw, rfc822_message_id) = built(mb, msg, date);
+            let message = mb
+                .update_draft(draft_id, raw, msg.thread_id.clone(), Some(date))
+                .ok()?;
+            Some(AddedDraft {
+                thread_id: mb.messages[&message].thread_id.clone(),
+                id: draft_id.to_owned(),
+                message_id: message,
+                rfc822_message_id,
+            })
+        })
+    }
+
+    /// Deletes a draft, as another client. Returns false if it was gone.
+    pub fn delete_draft(&self, draft_id: &str) -> bool {
+        self.with(|mb| mb.delete_draft(draft_id).is_ok())
+    }
+
+    /// Sends a draft from another client (a phone). Returns the sent message, or `None` if
+    /// the draft was gone.
+    pub fn send_draft(&self, draft_id: &str) -> Option<AddedMessage> {
+        let now = self.shared.clock_ms();
+        self.with(|mb| {
+            let id = mb.send_draft(draft_id, None, now).ok()?;
+            let msg = &mb.messages[&id];
+            Some(AddedMessage {
+                id: id.clone(),
+                thread_id: msg.thread_id.clone(),
+                rfc822_message_id: mime::header(&msg.headers, "Message-ID")
+                    .unwrap_or_default()
+                    .to_owned(),
+            })
+        })
+    }
+
+    /// Deletes every message of a thread (and drafts in it), recording `messagesDeleted`.
+    pub fn delete_thread(&self, thread_id: &str) {
+        self.with(|mb| {
+            let ids: Vec<String> = mb
+                .thread_messages(thread_id)
+                .iter()
+                .map(|m| m.id.clone())
+                .collect();
+            mb.drafts.retain(|_, m| !ids.contains(m));
+            for id in ids {
+                mb.delete(&id).expect("listed message exists");
+            }
+        });
     }
 
     /// Stores raw RFC 822 bytes as a message.
@@ -651,6 +962,37 @@ impl FakeUser {
     pub fn set_history_floor(&self, floor: u64) {
         self.with(|mb| mb.history_floor = floor);
     }
+
+    /// Expires all history so far, as Gmail does after about a week: any `history.list`
+    /// from an older cursor answers 404, and `getProfile` gives a cursor that works.
+    pub fn expire_history(&self) {
+        self.with(|mb| {
+            mb.history_id += 1;
+            mb.history_floor = mb.history_id;
+        });
+    }
+}
+
+/// Ids of a draft the fake stored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddedDraft {
+    pub id: String,
+    pub message_id: String,
+    pub thread_id: String,
+    /// The `Message-ID` header.
+    pub rfc822_message_id: String,
+}
+
+/// RFC 822 bytes for `msg` and its `Message-ID`.
+fn built(mb: &mut Mailbox, msg: &NewMessage, date: u64) -> (Vec<u8>, String) {
+    let rfc822_message_id = msg
+        .message_id
+        .clone()
+        .unwrap_or_else(|| format!("<{}@fake.example>", mb.new_id()));
+    (
+        mime::build(msg, date, &rfc822_message_id),
+        rfc822_message_id,
+    )
 }
 
 fn owned(ids: &[&str]) -> Vec<String> {
@@ -725,38 +1067,87 @@ async fn handle(
     kill: Arc<Notify>,
     req: hyper::Request<Incoming>,
 ) -> Result<Response, Infallible> {
-    shared.log.lock().unwrap().push(LoggedRequest {
-        method: req.method().to_string(),
-        path: req.uri().path().to_owned(),
-        query: req.uri().query().unwrap_or_default().to_owned(),
-    });
-    let fault = shared.fault_for(req.method().as_str(), req.uri().path());
-    let req = req.map(Body::new);
-    match fault {
-        None => {}
-        Some(Fault::Delay(wait)) => tokio::time::sleep(wait).await,
+    let (parts, body) = req.into_parts();
+    let body = axum::body::to_bytes(Body::new(body), usize::MAX)
+        .await
+        .unwrap_or_default();
+    let query = parts.uri.query().unwrap_or_default();
+    let info = RequestInfo::new(
+        &shared.world(),
+        parts.method.as_str(),
+        parts.uri.path(),
+        query,
+        &parts.headers,
+        &body,
+    );
+    let seq = {
+        let mut log = shared.log.lock().unwrap();
+        let seq = log.len();
+        log.push(LoggedRequest::new(
+            seq,
+            &info,
+            &parts.headers,
+            &body,
+            shared.now_ms(),
+        ));
+        seq
+    };
+    let _in_flight = InFlight::new(&shared.in_flight);
+    let mut fault = shared.fault_for(&info);
+    if let Some((hold, Fault::Hold)) = fault {
+        fault = shared.hold(seq, hold, info).await.map(|f| (hold, f));
+    }
+    let req = hyper::Request::from_parts(parts, Body::from(body));
+    let response = match fault.map(|(_, f)| f) {
+        None | Some(Fault::Hold) => router.oneshot(req).await.unwrap_or_else(|e| match e {}),
+        Some(Fault::Delay(wait)) => {
+            tokio::time::sleep(wait).await;
+            router.oneshot(req).await.unwrap_or_else(|e| match e {})
+        }
         Some(Fault::Status {
             status,
             reason,
             retry_after_secs,
-        }) => {
-            return Ok(routes::google_error(
-                status,
-                &reason,
-                "Injected fault",
-                retry_after_secs,
-            ));
+        }) => routes::google_error(status, &reason, "Injected fault", retry_after_secs),
+        Some(Fault::StatusAfterApply { status, reason }) => {
+            let _ = router.oneshot(req).await;
+            routes::google_error(status, &reason, "Injected fault", None)
+        }
+        Some(Fault::OmitThreads(ids)) => {
+            let response = router.oneshot(req).await.unwrap_or_else(|e| match e {});
+            omit_threads(response, &ids).await
         }
         // Never answer; the connection task drops the connection on `kill`.
         Some(Fault::Drop) => {
+            shared.answered(seq, Answer::Dropped);
             kill.notify_one();
             return std::future::pending().await;
         }
         Some(Fault::NoResponse) => {
             let _ = router.oneshot(req).await;
+            shared.answered(seq, Answer::NoResponse);
             kill.notify_one();
             return std::future::pending().await;
         }
+    };
+    shared.answered(seq, Answer::Status(response.status().as_u16()));
+    Ok(response)
+}
+
+/// A `threads.list` answer without the threads `ids`.
+async fn omit_threads(response: Response, ids: &[String]) -> Response {
+    let (parts, body) = response.into_parts();
+    let bytes = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .unwrap_or_default();
+    let Ok(mut json) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return Response::from_parts(parts, Body::from(bytes));
+    };
+    if let Some(threads) = json
+        .get_mut("threads")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        threads.retain(|t| !ids.iter().any(|id| t["id"] == id.as_str()));
     }
-    Ok(router.oneshot(req).await.unwrap_or_else(|e| match e {}))
+    (parts.status, axum::Json(json)).into_response()
 }

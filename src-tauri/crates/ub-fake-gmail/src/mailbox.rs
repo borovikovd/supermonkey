@@ -265,6 +265,59 @@ impl Mailbox {
         Ok(())
     }
 
+    /// Stores `raw` as a new draft's message (`DRAFT`), in `thread_id` or a new thread.
+    /// Returns the draft id.
+    pub fn create_draft(
+        &mut self,
+        raw: Vec<u8>,
+        thread_id: Option<String>,
+        date: Option<u64>,
+    ) -> String {
+        let message_id = self.insert_raw(raw, thread_id, vec!["DRAFT".into()], date);
+        let draft_id = format!("r-{}", self.new_id());
+        self.drafts.insert(draft_id.clone(), message_id);
+        draft_id
+    }
+
+    /// Replaces a draft's message, keeping its thread unless `thread_id` names another.
+    /// Returns the new message id.
+    pub fn update_draft(
+        &mut self,
+        draft_id: &str,
+        raw: Vec<u8>,
+        thread_id: Option<String>,
+        date: Option<u64>,
+    ) -> Result<String, Missing> {
+        let old = self.drafts.get(draft_id).cloned().ok_or(Missing)?;
+        let thread_id = thread_id.unwrap_or_else(|| self.messages[&old].thread_id.clone());
+        self.delete(&old)?;
+        let message_id = self.insert_raw(raw, Some(thread_id), vec!["DRAFT".into()], date);
+        self.drafts.insert(draft_id.to_owned(), message_id.clone());
+        Ok(message_id)
+    }
+
+    /// Sends a draft: the draft and its message go, and a `SENT` message with `raw` (or the
+    /// draft's own bytes) joins the thread. Returns the sent message id.
+    pub fn send_draft(
+        &mut self,
+        draft_id: &str,
+        raw: Option<Vec<u8>>,
+        date: Option<u64>,
+    ) -> Result<String, Missing> {
+        let old = self.drafts.get(draft_id).cloned().ok_or(Missing)?;
+        let raw = raw.unwrap_or_else(|| self.messages[&old].raw.clone());
+        let thread_id = self.messages[&old].thread_id.clone();
+        self.drafts.remove(draft_id);
+        self.delete(&old)?;
+        Ok(self.insert_raw(raw, Some(thread_id), vec!["SENT".into()], date))
+    }
+
+    /// Deletes a draft and its message.
+    pub fn delete_draft(&mut self, draft_id: &str) -> Result<(), Missing> {
+        let message = self.drafts.remove(draft_id).ok_or(Missing)?;
+        self.delete(&message)
+    }
+
     /// Adds and removes labels, recording only real changes.
     pub fn modify(&mut self, id: &str, add: &[String], remove: &[String]) -> Result<(), Missing> {
         let msg = self.messages.get_mut(id).ok_or(Missing)?;
@@ -351,14 +404,16 @@ impl Mailbox {
         Some(out)
     }
 
-    /// Thread ids matching `q` and `label_ids`, newest first.
+    /// Thread ids matching `q` and `label_ids`, newest first. `now_ms` is what
+    /// `newer_than:` and `older_than:` count back from.
     pub fn search_threads(
         &self,
         q: &str,
         label_ids: &[String],
         include_spam_trash: bool,
+        now_ms: u64,
     ) -> Vec<String> {
-        let query = Query::parse(q, self);
+        let query = Query::parse(q, self, now_ms);
         let wants_spam_trash = include_spam_trash
             || query.wants_spam_trash
             || label_ids.iter().any(|l| l == "SPAM" || l == "TRASH");
@@ -431,8 +486,8 @@ fn history_json(r: &HistoryRecord) -> Value {
 }
 
 /// A tiny subset of Gmail search: `in:`/`label:`/`is:` label filters, `from:`, `to:`,
-/// `subject:`, `-` negation, and bare words matched against subject, from and snippet.
-/// Other operators are ignored.
+/// `subject:`, `newer_than:`/`older_than:` (`d`, `m`, `y`), `-` negation, and bare words
+/// matched against subject, from and snippet. Other operators are ignored.
 struct Query {
     terms: Vec<(bool, Term)>,
     wants_spam_trash: bool,
@@ -442,10 +497,27 @@ enum Term {
     Label(String),
     Header(&'static str, String),
     Word(String),
+    /// `internalDate` at or after this.
+    Since(u64),
+    /// `internalDate` before this.
+    Before(u64),
+}
+
+/// `7d`, `2m`, `1y` in milliseconds (a month is 30 days, a year 365).
+fn age_ms(text: &str) -> Option<u64> {
+    let unit = text.chars().last()?;
+    let n: u64 = text[..text.len() - unit.len_utf8()].parse().ok()?;
+    let days = match unit {
+        'd' => n,
+        'm' => n * 30,
+        'y' => n * 365,
+        _ => return None,
+    };
+    Some(days * 86_400_000)
 }
 
 impl Query {
-    fn parse(q: &str, mailbox: &Mailbox) -> Query {
+    fn parse(q: &str, mailbox: &Mailbox, now_ms: u64) -> Query {
         let mut query = Query {
             terms: Vec::new(),
             wants_spam_trash: false,
@@ -476,6 +548,14 @@ impl Query {
                 Some(("from", v)) => Term::Header("From", v.to_owned()),
                 Some(("to", v)) => Term::Header("To", v.to_owned()),
                 Some(("subject", v)) => Term::Header("Subject", v.to_owned()),
+                Some(("newer_than", v)) => match age_ms(v) {
+                    Some(age) => Term::Since(now_ms.saturating_sub(age)),
+                    None => continue,
+                },
+                Some(("older_than", v)) => match age_ms(v) {
+                    Some(age) => Term::Before(now_ms.saturating_sub(age)),
+                    None => continue,
+                },
                 Some(_) => continue,
                 None if token.is_empty() => continue,
                 None => Term::Word(token),
@@ -496,6 +576,8 @@ impl Query {
                     .filter_map(|h| mime::header(&msg.headers, h))
                     .chain([msg.snippet.as_str()])
                     .any(|text| text.to_lowercase().contains(word)),
+                Term::Since(t) => msg.internal_date >= *t,
+                Term::Before(t) => msg.internal_date < *t,
             };
             hit != *negated
         })

@@ -65,6 +65,21 @@ pub struct MemoryTokenStore {
     tokens: Mutex<HashMap<String, String>>,
 }
 
+impl MemoryTokenStore {
+    /// Every stored account with its token, by account.
+    pub fn entries(&self) -> Vec<(String, String)> {
+        let mut entries: Vec<(String, String)> = self
+            .tokens
+            .lock()
+            .expect("lock poisoned")
+            .iter()
+            .map(|(email, token)| (email.clone(), token.clone()))
+            .collect();
+        entries.sort();
+        entries
+    }
+}
+
 impl TokenStore for MemoryTokenStore {
     fn store_refresh_token(&self, email: &str, token: &str) -> Result<(), TokenStoreError> {
         self.tokens

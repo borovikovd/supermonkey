@@ -313,11 +313,13 @@ async fn list_history(caller: Caller, params: Params) -> ApiResult {
 }
 
 async fn list_threads(caller: Caller, params: Params) -> ApiResult {
+    let now = caller.state.now_ms();
     caller.mailbox(|mb| {
         let ids = mb.search_threads(
             params.get("q").unwrap_or_default(),
             &params.all("labelIds"),
             params.get("includeSpamTrash") == Some("true"),
+            now,
         );
         let out = json!({ "resultSizeEstimate": ids.len() });
         Ok(Json(with_page(out, "threads", &ids, &params, |id| {
@@ -446,11 +448,10 @@ async fn get_draft(
 
 async fn create_draft(caller: Caller, body: Bytes) -> ApiResult {
     let body = json_body(&body)?;
+    let now = caller.state.clock_ms();
     caller.mailbox(|mb| {
         let (raw, thread_id) = draft_input(&body, mb)?;
-        let message_id = mb.insert_raw(raw, thread_id, vec!["DRAFT".into()], None);
-        let draft_id = format!("r-{}", mb.new_id());
-        mb.drafts.insert(draft_id.clone(), message_id);
+        let draft_id = mb.create_draft(raw, thread_id, now);
         Ok(Json(draft_json(mb, &draft_id, "minimal")))
     })
 }
@@ -461,13 +462,13 @@ async fn update_draft(
     body: Bytes,
 ) -> ApiResult {
     let body = json_body(&body)?;
+    let now = caller.state.clock_ms();
     caller.mailbox(|mb| {
-        let old = mb.drafts.get(&id).cloned().ok_or(ApiError::NotFound)?;
+        if !mb.drafts.contains_key(&id) {
+            return Err(ApiError::NotFound);
+        }
         let (raw, thread_id) = draft_input(&body, mb)?;
-        let thread_id = thread_id.unwrap_or_else(|| mb.messages[&old].thread_id.clone());
-        mb.delete(&old)?;
-        let message_id = mb.insert_raw(raw, Some(thread_id), vec!["DRAFT".into()], None);
-        mb.drafts.insert(id.clone(), message_id);
+        mb.update_draft(&id, raw, thread_id, now)?;
         Ok(Json(draft_json(mb, &id, "minimal")))
     })
 }
@@ -475,20 +476,20 @@ async fn update_draft(
 /// Sends a draft: the draft and its message go away and a `SENT` message joins the thread.
 async fn send_draft(caller: Caller, body: Bytes) -> ApiResult {
     let body = json_body(&body)?;
+    let now = caller.state.clock_ms();
     caller.mailbox(|mb| {
         let id = body["id"]
             .as_str()
             .ok_or_else(|| ApiError::BadRequest("Missing draft id".into()))?;
-        let old = mb.drafts.get(id).cloned().ok_or(ApiError::NotFound)?;
+        if !mb.drafts.contains_key(id) {
+            return Err(ApiError::NotFound);
+        }
         let raw = if body["message"]["raw"].is_string() {
-            draft_input(&body, mb)?.0
+            Some(draft_input(&body, mb)?.0)
         } else {
-            mb.messages[&old].raw.clone()
+            None
         };
-        let thread_id = mb.messages[&old].thread_id.clone();
-        mb.drafts.remove(id);
-        mb.delete(&old)?;
-        let sent = mb.insert_raw(raw, Some(thread_id), vec!["SENT".into()], None);
+        let sent = mb.send_draft(id, raw, now)?;
         Ok(Json(mb.messages[&sent].json("minimal", &[])))
     })
 }
@@ -498,8 +499,7 @@ async fn delete_draft(
     Path((_, id)): Path<(String, String)>,
 ) -> ApiResult<StatusCode> {
     caller.mailbox(|mb| {
-        let message = mb.drafts.remove(&id).ok_or(ApiError::NotFound)?;
-        mb.delete(&message)?;
+        mb.delete_draft(&id)?;
         Ok(StatusCode::NO_CONTENT)
     })
 }
@@ -542,6 +542,14 @@ async fn auth(
             .cloned()
             .ok_or(bad_request("no users"))?,
     };
+    let mut location = url::Url::parse(redirect_uri).expect("valid redirect_uri");
+    if std::mem::take(&mut world.deny_next_auth) {
+        location
+            .query_pairs_mut()
+            .append_pair("error", "access_denied")
+            .append_pair("state", params.get("state").unwrap_or_default());
+        return Ok((StatusCode::FOUND, [(LOCATION, location.to_string())]).into_response());
+    }
     let code = format!("4/fake-code-{}", world.next());
     world.auth_codes.insert(
         code.clone(),
@@ -551,7 +559,6 @@ async fn auth(
             code_challenge: challenge.to_owned(),
         },
     );
-    let mut location = url::Url::parse(redirect_uri).expect("valid redirect_uri");
     location
         .query_pairs_mut()
         .append_pair("code", &code)
@@ -614,14 +621,13 @@ async fn revoke(State(s): State<AppState>, mut params: Params, body: Bytes) -> R
         .extend(url::form_urlencoded::parse(&body).into_owned());
     let mut world = s.world();
     let token = params.get("token").unwrap_or_default();
-    let email = world
-        .refresh_tokens
-        .get(token)
-        .or_else(|| world.access_tokens.get(token).map(|(email, _)| email))
-        .cloned();
-    let Some(email) = email else {
+    let Some(email) = world.token_owner(token) else {
         return oauth_error("invalid_token", "Token expired or revoked");
     };
+    world.revocations.push(crate::Revocation {
+        token: token.to_owned(),
+        email: email.clone(),
+    });
     world.refresh_tokens.retain(|_, e| *e != email);
     world.access_tokens.retain(|_, (e, _)| *e != email);
     StatusCode::OK.into_response()
