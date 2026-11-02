@@ -4,7 +4,7 @@ import { switchAccount } from "../accounts";
 import { goTo } from "../commands";
 import type { AccountInfo, View } from "../ipc/types";
 import { useCurrent } from "../store/hooks";
-import { countLabel } from "./TopBar";
+import { countLabel } from "./format";
 
 const VIEWS: { view: View; icon: typeof Inbox; title: string }[] = [
   { view: { kind: "inbox" }, icon: Inbox, title: "Inbox" },
@@ -15,12 +15,12 @@ const VIEWS: { view: View; icon: typeof Inbox; title: string }[] = [
   { view: { kind: "drafts" }, icon: File, title: "Drafts (g d)" },
 ];
 
-export function Avatar({ account, size = 24 }: { account: AccountInfo; size?: number }) {
+function Avatar({ account }: { account: AccountInfo }) {
   const initial = (account.name || account.email).trim().charAt(0).toUpperCase();
   return (
     <span
       className="flex items-center justify-center rounded-full text-hint font-semibold"
-      style={{ width: size, height: size, background: `${account.hue}26`, color: account.hue }}
+      style={{ width: 24, height: 24, background: `${account.hue}26`, color: account.hue }}
     >
       {initial}
     </span>

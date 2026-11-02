@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import { visibleIds } from "../commands";
 import { subscribe, unsubscribe } from "../ipc/bridge";
@@ -11,28 +12,27 @@ import { useChrome } from "../store/chrome";
  * has been open 100 ms), so opening one paints from the mirror.
  */
 export function Prefetch() {
-  const focus = useChrome((s) => {
-    const cur = s.account === null ? null : s.perAccount[s.account];
-    if (!cur) return null;
-    if (cur.screen.kind === "conversation") return `c:${cur.screen.thread}:${cur.screen.trashMode}`;
-    return cur.highlight ? `l:${cur.highlight}` : null;
-  });
+  const { thread, openTrashMode, row } = useChrome(
+    useShallow((s) => {
+      const cur = s.account === null ? undefined : s.perAccount[s.account];
+      return cur?.screen.kind === "conversation"
+        ? { thread: cur.screen.thread, openTrashMode: cur.screen.trashMode, row: null }
+        : { thread: null, openTrashMode: false, row: cur?.highlight || null };
+    }),
+  );
   const [keys, setKeys] = useState<SubKey[]>([]);
 
   useEffect(() => {
-    if (!focus) return;
+    const center = thread === null ? row : String(thread);
+    if (center === null) return;
     const t = setTimeout(() => {
       const ids = visibleIds();
-      const [kind, id, tm] = focus.split(":");
-      const at = id === undefined ? -1 : ids.indexOf(id);
-      const trashMode =
-        tm === "true" ||
-        (() => {
-          const c = useChrome.getState().current();
-          const v = c?.where.kind === "view" ? c.where.view.kind : null;
-          return v === "trash" || v === "spam";
-        })();
-      const around = [ids[at - 1], kind === "l" ? id : undefined, ids[at + 1]].filter(
+      const at = ids.indexOf(center);
+      const where = useChrome.getState().current()?.where;
+      const view = where?.kind === "view" ? where.view.kind : null;
+      const trashMode = openTrashMode || view === "trash" || view === "spam";
+      // An open conversation is subscribed already; a highlighted row is not.
+      const around = [ids[at - 1], thread === null ? center : undefined, ids[at + 1]].filter(
         (x): x is string => x !== undefined && !Number.isNaN(Number(x)),
       );
       setKeys(
@@ -40,7 +40,7 @@ export function Prefetch() {
       );
     }, 100);
     return () => clearTimeout(t);
-  }, [focus]);
+  }, [thread, openTrashMode, row]);
 
   useEffect(() => {
     for (const k of keys) subscribe(k);
