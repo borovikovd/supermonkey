@@ -57,7 +57,7 @@ impl Harness {
             .await
             .unwrap();
         let engine = Engine::new(
-            None,
+            Arc::new(ubermensch_lib::engine::NoPlatform),
             writer.clone(),
             reads.clone(),
             dir.path().to_path_buf(),

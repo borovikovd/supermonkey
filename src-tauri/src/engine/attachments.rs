@@ -5,8 +5,6 @@ use std::fmt;
 use std::path::PathBuf;
 
 use rusqlite::{OptionalExtension, params};
-use tauri::{AppHandle, Manager};
-use tauri_plugin_opener::OpenerExt;
 use ub_gmail::{Outcome, Priority, cost};
 
 use super::EngineRef;
@@ -102,10 +100,7 @@ pub async fn ensure(e: &EngineRef, attachment: i64) -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
-pub async fn open(app: &AppHandle, attachment: i64) -> anyhow::Result<()> {
-    let e = app.state::<EngineRef>();
-    let path = ensure(&e, attachment).await?;
-    app.opener()
-        .open_path(path.to_string_lossy(), None::<&str>)?;
-    Ok(())
+pub async fn open(e: &EngineRef, attachment: i64) -> anyhow::Result<()> {
+    let path = ensure(e, attachment).await?;
+    e.platform.open_path(&path)
 }

@@ -21,7 +21,9 @@ import type {
 
 /** Inside the Tauri webview; otherwise the debug web bridge on 127.0.0.1:1430. */
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-const BRIDGE = "http://127.0.0.1:1430";
+// Outside Tauri: the dev server talks to the debug app's bridge; a built UI is
+// served by the E2E server, which mounts the bridge on its own origin.
+const BRIDGE = import.meta.env.DEV ? "http://127.0.0.1:1430" : "";
 
 async function invoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
   if (inTauri) return tauriInvoke<T>(cmd, args);

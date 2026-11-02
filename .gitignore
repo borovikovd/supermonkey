@@ -7,3 +7,5 @@ src-tauri/target
 src-tauri/gen
 *.log
 .claude/worktrees/
+test-results/
+playwright-report/

@@ -15,6 +15,11 @@ name = "ubermensch"
 path = "src/main.rs"
 
 [[bin]]
+name = "e2e-server"
+path = "src/bin/e2e_server.rs"
+required-features = ["fake"]
+
+[[bin]]
 name = "perf-fixture"
 path = "src/bin/perf_fixture.rs"
 
@@ -50,10 +55,11 @@ ub-mime = { path = "crates/ub-mime" }
 ub-gmail = { path = "crates/ub-gmail" }
 ub-rules = { path = "crates/ub-rules" }
 ub-fake-gmail = { path = "crates/ub-fake-gmail", optional = true }
+tempfile = { version = "3", optional = true }
 
 [features]
 # Debug only: run against an in-process fake Gmail with demo mail (UBERMENSCH_FAKE=1).
-fake = ["dep:ub-fake-gmail"]
+fake = ["dep:ub-fake-gmail", "dep:tempfile"]
 
 [dev-dependencies]
 proptest = "1"

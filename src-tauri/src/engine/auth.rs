@@ -3,8 +3,6 @@
 use crate::LogErr as _;
 use std::sync::Arc;
 
-use tauri::{AppHandle, Manager};
-use tauri_plugin_opener::OpenerExt;
 use ub_gmail::{Gmail, OAuthTokens, Priority, cost};
 
 use super::EngineRef;
@@ -26,18 +24,15 @@ impl SignIn {
     }
 }
 
-async fn sign_in(app: &AppHandle, e: &EngineRef) -> anyhow::Result<SignIn> {
+async fn sign_in(e: &EngineRef) -> anyhow::Result<SignIn> {
     if e.config.oauth.client_id.is_empty() {
         anyhow::bail!(
             "This build has no Google OAuth client. Put google-oauth-client.json in the project and rebuild."
         );
     }
-    let opener = app.clone();
+    let platform = e.platform.clone();
     let auth = ub_gmail::authorize(&e.config.oauth, &e.http, move |url| {
-        opener
-            .opener()
-            .open_url(url, None::<&str>)
-            .log_err("open the sign-in page");
+        platform.open_url(url);
     })
     .await
     .map_err(|err| anyhow::anyhow!("Sign-in failed: {:?}", err.outcome))?;
@@ -67,24 +62,20 @@ async fn sign_in(app: &AppHandle, e: &EngineRef) -> anyhow::Result<SignIn> {
     })
 }
 
-pub async fn add_account(app: &AppHandle) -> anyhow::Result<AccountId> {
-    let e = app.state::<EngineRef>().inner().clone();
-    let signed_in = sign_in(app, &e).await?;
-    signed_in.store_token(&e)?;
+pub async fn add_account(e: &EngineRef) -> anyhow::Result<AccountId> {
+    let signed_in = sign_in(e).await?;
+    signed_in.store_token(e)?;
     let email = signed_in.email.clone();
     let id = e
         .writer
         .call(move |ctx| crate::accounts::create(ctx, &email))
         .await?;
     e.start_account(id, signed_in.email, signed_in.tokens);
-    if let Some(w) = app.get_webview_window("main") {
-        w.set_focus().log_err("focus the main window");
-    }
+    e.platform.focus_window();
     Ok(id)
 }
 
-pub async fn sign_in_again(app: &AppHandle, account: AccountId) -> anyhow::Result<()> {
-    let e = app.state::<EngineRef>().inner().clone();
+pub async fn sign_in_again(e: &EngineRef, account: AccountId) -> anyhow::Result<()> {
     let expected: String = e.reads.with(|c| {
         Ok(
             c.query_row("SELECT email FROM accounts WHERE id = ?1", [account], |r| {
@@ -92,12 +83,12 @@ pub async fn sign_in_again(app: &AppHandle, account: AccountId) -> anyhow::Resul
             })?,
         )
     })?;
-    let signed_in = sign_in(app, &e).await?;
+    let signed_in = sign_in(e).await?;
     let email = &signed_in.email;
     if !email.eq_ignore_ascii_case(&expected) {
         anyhow::bail!("You signed in as {email}. Sign in as {expected} to reconnect this account.");
     }
-    signed_in.store_token(&e)?;
+    signed_in.store_token(e)?;
     e.writer
         .call(move |ctx| {
             ctx.tx.execute(

@@ -76,10 +76,26 @@ impl ReadPool {
     }
 }
 
+/// Added to the wall clock. Only the E2E server moves it, to make app time pass.
+static CLOCK_OFFSET_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// App time in Unix milliseconds. Every time check in the core reads this.
 pub fn now_ms() -> i64 {
-    std::time::SystemTime::now()
+    let wall = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    wall.saturating_add(CLOCK_OFFSET_MS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// App time in the local time zone.
+pub fn now_local() -> chrono::DateTime<chrono::Local> {
+    chrono::DateTime::from_timestamp_millis(now_ms())
+        .map_or_else(chrono::Local::now, |d| d.with_timezone(&chrono::Local))
+}
+
+/// Moves app time forward (E2E tests).
+pub fn advance_clock(ms: i64) {
+    CLOCK_OFFSET_MS.fetch_add(ms, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// JSON column helpers.

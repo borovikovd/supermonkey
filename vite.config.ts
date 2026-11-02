@@ -103,6 +103,14 @@ export default defineConfig({
       "jsx-a11y/no-static-element-interactions": "error",
       "jsx-a11y/no-autofocus": "error",
     },
+    overrides: [
+      {
+        // Playwright fixtures: `({}, use)` is the required signature, and their
+        // `use` callback is not React's `use` hook.
+        files: ["e2e/**"],
+        rules: { "no-empty-pattern": "off", "react/rules-of-hooks": "off" },
+      },
+    ],
     options: {
       typeAware: true,
       typeCheck: true,

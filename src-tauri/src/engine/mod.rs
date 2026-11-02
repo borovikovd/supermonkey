@@ -12,9 +12,12 @@ pub mod ingest;
 pub mod notify;
 pub mod ops;
 pub mod outbox;
+pub mod platform;
 pub mod search;
 pub mod snooze;
 pub mod sync;
+#[cfg(feature = "fake")]
+pub mod testserver;
 pub mod webbridge;
 pub mod work;
 
@@ -27,6 +30,8 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use tauri::{AppHandle, Manager};
+
+pub use platform::{NoPlatform, Platform, TauriPlatform};
 use tokio::sync::Notify;
 use tokio::sync::mpsc::UnboundedReceiver;
 use ub_gmail::{AccountScheduler, Gmail, GmailError, OAuthConfig, Outcome, Scheduler, TokenStore};
@@ -102,8 +107,8 @@ impl AccountRt {
 }
 
 pub struct Engine {
-    /// None in tests that run the engine without a window.
-    pub app: Option<AppHandle>,
+    /// The OS side: Tauri in the app, a recorder in tests.
+    pub platform: Arc<dyn Platform>,
     pub writer: Writer,
     pub reads: ReadPool,
     pub data_dir: PathBuf,
@@ -142,15 +147,22 @@ pub fn start(
         };
     #[cfg(feature = "fake")]
     let (config, store) = demo::setup(&writer).unwrap_or((config, store));
-    let engine = Engine::new(Some(app.clone()), writer, reads, data_dir, config, store);
+    let engine = Engine::new(
+        Arc::new(TauriPlatform(app.clone())),
+        writer,
+        reads,
+        data_dir,
+        config,
+        store,
+    );
     app.manage(engine.clone());
-    webbridge::start(app.clone());
+    webbridge::start(app);
     engine.run(effects);
 }
 
 impl Engine {
     pub fn new(
-        app: Option<AppHandle>,
+        platform: Arc<dyn Platform>,
         writer: Writer,
         reads: ReadPool,
         data_dir: PathBuf,
@@ -158,7 +170,7 @@ impl Engine {
         store: Arc<dyn TokenStore>,
     ) -> EngineRef {
         Arc::new(Engine {
-            app,
+            platform,
             writer,
             reads,
             data_dir,
@@ -179,6 +191,21 @@ impl Engine {
     pub fn run(self: &Arc<Self>, effects: UnboundedReceiver<Effect>) {
         launch(self);
         tauri::async_runtime::spawn(dispatch(self.clone(), effects));
+    }
+
+    /// Replays every account's op queue and outbox now (back online, or app time moved).
+    pub fn kick_queues(&self) {
+        for rt in self.accounts.lock().values() {
+            rt.ops_kick.notify_one();
+            rt.outbox_kick.notify_one();
+        }
+    }
+
+    /// Polls every account's history now (new mail delivered in tests and demo mode).
+    pub fn kick_polls(&self) {
+        for rt in self.accounts.lock().values() {
+            rt.poll_kick.notify_one();
+        }
     }
 
     pub fn account(&self, id: AccountId) -> Option<Arc<AccountRt>> {
@@ -437,7 +464,6 @@ async fn dispatch(engine: EngineRef, mut effects: UnboundedReceiver<Effect>) {
 
 /// The Dock badge: unread Inbox threads across accounts that are not muted.
 fn update_badge(e: &Engine) {
-    let Some(app) = &e.app else { return };
     let count: i64 = e
         .reads
         .with(|c| {
@@ -450,10 +476,7 @@ fn update_badge(e: &Engine) {
             )?)
         })
         .unwrap_or(0);
-    if let Some(w) = app.get_webview_window("main") {
-        w.set_badge_count((count > 0).then_some(count))
-            .log_err("set badge count");
-    }
+    e.platform.set_badge((count > 0).then_some(count));
 }
 
 /// Waits for a kick or a timeout.

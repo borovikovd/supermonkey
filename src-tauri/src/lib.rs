@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod actions;
+pub mod api;
 pub mod commands;
 pub mod db;
 pub mod drafts;
@@ -39,13 +40,6 @@ use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
 use crate::writer::Writer;
 
-/// Shared state for commands.
-pub struct Core {
-    pub writer: Writer,
-    pub reads: db::ReadPool,
-    pub data_dir: PathBuf,
-}
-
 fn db_path(data_dir: &std::path::Path) -> PathBuf {
     std::env::var("UBERMENSCH_DB").map_or_else(|_| data_dir.join("ubermensch.db"), PathBuf::from)
 }
@@ -77,11 +71,6 @@ pub fn run() {
             let (effects_tx, effects_rx) = tokio::sync::mpsc::unbounded_channel();
             let writer = Writer::start(&path, effects_tx)?;
             let reads = db::ReadPool::new(&path, 4);
-            app.manage(Core {
-                writer: writer.clone(),
-                reads: reads.clone(),
-                data_dir: data_dir.clone(),
-            });
             engine::start(app.handle(), writer, reads, data_dir, effects_rx);
             Ok(())
         })
@@ -145,7 +134,8 @@ pub fn run() {
     });
 }
 
-fn stderr_logger_init() -> Result<(), log::SetLoggerError> {
+/// Logs to stderr: warnings and errors, plus our debug lines in debug builds.
+pub fn stderr_logger_init() -> Result<(), log::SetLoggerError> {
     struct Stderr;
     impl log::Log for Stderr {
         fn enabled(&self, m: &log::Metadata<'_>) -> bool {
