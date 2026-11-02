@@ -17,10 +17,9 @@ import {
   undo,
 } from "../commands";
 import { startCompose, startReply } from "../compose/start";
+import type { View } from "../ipc/types";
 import { useChrome } from "../store/chrome";
 import { measure } from "./meter";
-import { appHooks, conversationRef } from "./refs";
-
 import {
   extendSelection,
   goSplit,
@@ -31,6 +30,7 @@ import {
   toggleExpandAll,
   toggleSelect,
 } from "./nav";
+import { appHooks, conversationRef } from "./refs";
 
 export { applyLabel };
 
@@ -44,34 +44,25 @@ const isTyping = (el: EventTarget | null) => {
   );
 };
 
-const goView = (kind: "done" | "snoozed" | "starred" | "sent" | "drafts" | "trash" | "spam") =>
-  goTo({ kind: "view", view: { kind } });
+/** `g` then one of these keys opens that view. */
+const G_VIEWS: Partial<Record<string, Exclude<View, { kind: "label" }>["kind"]>> = {
+  e: "done",
+  h: "snoozed",
+  s: "starred",
+  t: "sent",
+  d: "drafts",
+  "#": "trash",
+  "!": "spam",
+};
 
 function handleG(key: string): boolean {
-  const c = useChrome.getState();
-  c.set({ gPending: false });
+  useChrome.getState().set({ gPending: false });
+  const view = G_VIEWS[key];
+  if (view) {
+    goTo({ kind: "view", view: { kind: view } });
+    return true;
+  }
   switch (key) {
-    case "e":
-      goView("done");
-      return true;
-    case "h":
-      goView("snoozed");
-      return true;
-    case "s":
-      goView("starred");
-      return true;
-    case "t":
-      goView("sent");
-      return true;
-    case "d":
-      goView("drafts");
-      return true;
-    case "#":
-      goView("trash");
-      return true;
-    case "!":
-      goView("spam");
-      return true;
     case "l":
       appHooks.openPalette({ kind: "goLabel" });
       return true;
@@ -85,19 +76,18 @@ function handleG(key: string): boolean {
   return false;
 }
 
-/** Esc order: link, open picker/palette/search/compose handled by them; conversation; selection. */
+/**
+ * Esc closes the innermost thing: a focused link, then the conversation, then
+ * the selection. onKeyDown closes an open sheet first; the palette, search, and
+ * compose handle their own Esc.
+ */
 function escape() {
   const c = useChrome.getState();
-  const cur = c.current();
   if (c.link) {
     c.set({ link: null });
     return;
   }
-  if (c.sheet) {
-    c.set({ sheet: null });
-    return;
-  }
-  if (cur?.screen.kind === "conversation") {
+  if (c.current()?.screen.kind === "conversation") {
     closeThread();
     return;
   }
@@ -110,8 +100,8 @@ export function onKeyDown(e: KeyboardEvent) {
   if (c.account === null) return;
   const cur = c.current();
 
-  // Account switching works everywhere except while typing in a field? It
-  // works everywhere; switching closes the composer as a second Esc would.
+  // Account switching works everywhere, even while typing; it closes the
+  // composer as a second Esc would.
   if (e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code)) {
     e.preventDefault();
     appHooks.switchAccount(Number(e.code.slice(5)) - 1);

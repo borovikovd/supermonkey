@@ -7,41 +7,45 @@ import { act, subIdFor } from "./ipc/bridge";
 import type { ModifyAction, ModifyKind, SubKey, View } from "./ipc/types";
 import { useChrome, type Where } from "./store/chrome";
 import { listKey } from "./store/hooks";
-import { undoTarget, viewList } from "./store/mirror-core";
+import {
+  accountSummary,
+  undoTarget,
+  viewLabel,
+  viewList,
+  type ListView,
+} from "./store/mirror-core";
 import { useMirror } from "./store/mirror";
 
 export function currentListKey(): SubKey | null {
   const c = useChrome.getState();
-  if (c.account === null) return null;
-  const cur = c.perAccount[c.account];
-  if (!cur) return null;
-  return listKey(c.account, cur.where);
+  const cur = c.current();
+  return c.account === null || !cur ? null : listKey(c.account, cur.where);
 }
 
 export function currentView(): View | null {
-  const c = useChrome.getState();
-  const cur = c.account === null ? null : c.perAccount[c.account];
-  return cur?.where.kind === "view" ? cur.where.view : null;
+  const where = useChrome.getState().current()?.where;
+  return where?.kind === "view" ? where.view : null;
+}
+
+/** The list on screen with pending actions applied, once it is subscribed. */
+export function currentListView(): ListView | null {
+  const key = currentListKey();
+  const id = key ? subIdFor(key) : undefined;
+  return id ? viewList(useMirror.getState(), id) : null;
 }
 
 export function visibleIds(): string[] {
-  const key = currentListKey();
-  const id = key ? subIdFor(key) : undefined;
-  if (!id) return [];
-  return viewList(useMirror.getState(), id).ids.map((e) => e.key);
+  return currentListView()?.ids.map((e) => e.key) ?? [];
 }
 
 export function rowOf(key: string) {
-  const key2 = currentListKey();
-  const id = key2 ? subIdFor(key2) : undefined;
-  if (!id) return useMirror.getState().rows[key];
-  return viewList(useMirror.getState(), id).rows[key];
+  return (currentListView()?.rows ?? useMirror.getState().rows)[key];
 }
 
 /** Threads an action applies to: the selection, else the open conversation, else the highlight. */
 export function targets(): number[] {
   const c = useChrome.getState();
-  const cur = c.account === null ? null : c.perAccount[c.account];
+  const cur = c.current();
   if (!cur) return [];
   if (c.selection.length > 0 && cur.screen.kind === "list") {
     return c.selection.map(Number).filter((n) => !Number.isNaN(n));
@@ -89,27 +93,15 @@ function moveAfterRemoval(before: string[], removed: Set<string>) {
   const c = useChrome.getState();
   const cur = c.current();
   if (!cur) return;
-  const after = visibleIds();
+  const shown = new Set(visibleIds());
   const focus = cur.screen.kind === "conversation" ? String(cur.screen.thread) : cur.highlight;
-  if (focus === null || after.includes(focus) || !removed.has(focus)) return;
+  if (focus === null || shown.has(focus) || !removed.has(focus)) return;
   const at = before.indexOf(focus);
-  let next: string | null = null;
-  for (let i = at + 1; i < before.length; i++) {
-    const k = before[i];
-    if (k !== undefined && after.includes(k)) {
-      next = k;
-      break;
-    }
-  }
-  if (next === null) {
-    for (let i = at - 1; i >= 0; i--) {
-      const k = before[i];
-      if (k !== undefined && after.includes(k)) {
-        next = k;
-        break;
-      }
-    }
-  }
+  const isShown = (k: string) => shown.has(k);
+  const next =
+    before.slice(at + 1).find(isShown) ??
+    before.slice(0, Math.max(at, 0)).findLast(isShown) ??
+    null;
   if (cur.screen.kind === "conversation") {
     if (next === null) closeThread();
     else openThread(Number(next));
@@ -146,17 +138,15 @@ export function modify(
 const isSnoozed = (threads: number[]) => threads.some((t) => rowOf(String(t))?.snoozeUntil != null);
 
 export const markDone = () => {
-  const t = targets();
   if (currentView()?.kind === "done") return;
-  modify("done", [], ["INBOX"], { snooze: isSnoozed(t) ? { kind: "clear" } : null });
+  modify("done", [], ["INBOX"], { snooze: isSnoozed(targets()) ? { kind: "clear" } : null });
 };
 
 export const returnToInbox = () => {
   const view = currentView();
-  const t = targets();
   const remove = view?.kind === "trash" ? ["TRASH"] : view?.kind === "spam" ? ["SPAM"] : [];
   modify("returnToInbox", ["INBOX"], remove, {
-    snooze: isSnoozed(t) ? { kind: "clear" } : null,
+    snooze: isSnoozed(targets()) ? { kind: "clear" } : null,
   });
 };
 
@@ -199,18 +189,8 @@ export function applyLabel(labelId: string) {
 /** `y`: remove the current view's label when it can be removed. */
 export function removeViewLabel() {
   const view = currentView();
-  const label =
-    view?.kind === "inbox"
-      ? "INBOX"
-      : view?.kind === "starred"
-        ? "STARRED"
-        : view?.kind === "trash"
-          ? "TRASH"
-          : view?.kind === "spam"
-            ? "SPAM"
-            : view?.kind === "label"
-              ? view.label
-              : null;
+  // Gmail does not let SENT be removed.
+  const label = view && view.kind !== "sent" ? viewLabel(view) : null;
   if (!label) return;
   modify("removeLabel", [], [label]);
 }
@@ -221,14 +201,12 @@ export function undo() {
   const entry = undoTarget(useMirror.getState(), c.account);
   if (entry === null) return;
   // `z` on a send: the composer reopens as with the toast's Undo.
-  for (const sub of Object.values(useMirror.getState().subs)) {
-    if (sub.type !== "account" || sub.summary?.account.id !== c.account) continue;
-    const e = sub.summary.undo.find((u) => u.id === entry);
-    const row = e?.outbox != null ? sub.summary.outbox.find((o) => o.id === e.outbox) : undefined;
-    if (row) {
-      undoSend(row);
-      return;
-    }
+  const summary = accountSummary(useMirror.getState(), c.account);
+  const outbox = summary?.undo.find((u) => u.id === entry)?.outbox;
+  const row = outbox == null ? undefined : summary?.outbox.find((o) => o.id === outbox);
+  if (row) {
+    undoSend(row);
+    return;
   }
   act({ type: "undo", account: c.account, entry });
 }
@@ -254,11 +232,7 @@ export function goTo(where: Where) {
 export function markReadOnOpenWhenLoaded(thread: number) {
   const loaded = () =>
     Object.values(useMirror.getState().subs).some(
-      (s) =>
-        s.type === "conversation" &&
-        s.key.type === "conversation" &&
-        s.key.thread === thread &&
-        s.data,
+      (s) => s.type === "conversation" && s.key.thread === thread && s.data,
     );
   if (loaded()) {
     markReadOnOpen(thread);

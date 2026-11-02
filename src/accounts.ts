@@ -12,7 +12,6 @@ export function switchAccount(account: number) {
   }
   c.setAccount(account);
   c.set({ inline: null, sheet: null, link: null });
-  const cur = useChrome.getState().perAccount[account];
-  if (cur && cur.screen.kind !== "list")
-    useChrome.getState().patchCurrent({ screen: { kind: "list" } });
+  const cur = c.current();
+  if (cur && cur.screen.kind !== "list") c.patchCurrent({ screen: { kind: "list" } });
 }

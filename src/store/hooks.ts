@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { keyString, subIdFor, subscribe, unsubscribe } from "../ipc/bridge";
 import type { AccountSummary, AppState, ConversationData, DraftState, SubKey } from "../ipc/types";
 import { useChrome, type Where } from "./chrome";
-import { viewList, type ListView } from "./mirror-core";
+import { accountSummary, appState, viewList, type ListView } from "./mirror-core";
 import { useMirror } from "./mirror";
 
 /** Keeps a subscription open while the component is mounted. */
@@ -21,21 +21,11 @@ export function useSubscription(key: SubKey | null): string | undefined {
 }
 
 export function useAppState(): AppState | null {
-  return useMirror((s) => {
-    for (const sub of Object.values(s.subs)) if (sub.type === "app") return sub.state;
-    return null;
-  });
+  return useMirror(appState);
 }
 
 export function useSummary(account: number | null): AccountSummary | null {
-  return useMirror((s) => {
-    if (account === null) return null;
-    for (const sub of Object.values(s.subs)) {
-      if (sub.type === "account" && sub.key.type === "account" && sub.key.account === account)
-        return sub.summary;
-    }
-    return null;
-  });
+  return useMirror((s) => (account === null ? null : accountSummary(s, account)));
 }
 
 export function listKey(account: number, where: Where): SubKey {
@@ -43,8 +33,6 @@ export function listKey(account: number, where: Where): SubKey {
     ? { type: "search", account, query: where.query }
     : { type: "list", account, view: where.view };
 }
-
-const EMPTY: ListView = { ids: [], rows: {} };
 
 /** The list as shown, with pending actions applied. */
 export function useListView(
@@ -55,9 +43,12 @@ export function useListView(
   const rows = useMirror((s) => s.rows);
   const pending = useMirror((s) => s.pending);
   const removals = useMirror((s) => s.removals);
+  // Manual memo: the compiler does not memoize viewList, which builds new arrays
+  // whenever pending actions apply, and callers depend on a stable `ids`.
   return useMemo(() => {
-    if (!id || !sub || sub.type !== "list")
-      return { ...EMPTY, loaded: false, searching: false, more: false };
+    if (!id || sub?.type !== "list") {
+      return { ids: [], rows: {}, loaded: false, searching: false, more: false };
+    }
     const view = viewList({ ack: 0, rev: 0, subs: { [id]: sub }, rows, pending, removals }, id);
     return { ...view, loaded: sub.loaded, searching: sub.searching, more: sub.more, sub: id };
   }, [id, sub, rows, pending, removals]);
@@ -73,7 +64,6 @@ export function useConversation(
     for (const sub of Object.values(s.subs)) {
       if (
         sub.type === "conversation" &&
-        sub.key.type === "conversation" &&
         sub.key.thread === thread &&
         sub.key.trashMode === trashMode &&
         sub.data
@@ -90,8 +80,7 @@ export function useDraft(draft: string | null): DraftState | null {
   return useMirror((s) => {
     if (!draft) return null;
     for (const sub of Object.values(s.subs)) {
-      if (sub.type === "composer" && sub.key.type === "composer" && sub.key.draft === draft)
-        return sub.draft;
+      if (sub.type === "composer" && sub.key.draft === draft) return sub.draft;
     }
     return null;
   });

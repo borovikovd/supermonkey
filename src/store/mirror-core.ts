@@ -17,23 +17,28 @@ import type {
   ListRow,
   ModifyAction,
   SubKey,
-  UndoEntryInfo,
   View,
 } from "../ipc/types";
 
+type KeyOf<T extends SubKey["type"]> = Extract<SubKey, { type: T }>;
+
 export type ListSub = {
   type: "list";
-  key: SubKey;
+  key: KeyOf<"list" | "search">;
   loaded: boolean;
   ids: ListEntry[];
   searching: boolean;
   /** Gmail has another page (Search, Label, Trash, Spam). */
   more: boolean;
 };
-export type ConversationSub = { type: "conversation"; key: SubKey; data: ConversationData | null };
-export type ComposerSub = { type: "composer"; key: SubKey; draft: DraftState | null };
-export type AccountSub = { type: "account"; key: SubKey; summary: AccountSummary | null };
-export type AppSub = { type: "app"; key: SubKey; state: AppState | null };
+export type ConversationSub = {
+  type: "conversation";
+  key: KeyOf<"conversation">;
+  data: ConversationData | null;
+};
+export type ComposerSub = { type: "composer"; key: KeyOf<"composer">; draft: DraftState | null };
+export type AccountSub = { type: "account"; key: KeyOf<"account">; summary: AccountSummary | null };
+export type AppSub = { type: "app"; key: KeyOf<"app">; state: AppState | null };
 export type Sub = ListSub | ConversationSub | ComposerSub | AccountSub | AppSub;
 
 export type Pending = { n: number; action: Action };
@@ -92,14 +97,12 @@ export function applyListPatch(
   const drop = new Set<string>(removed);
   for (const m of moved) drop.add(m.key);
   const out = ids.filter((e) => !drop.has(e.key));
-  const index = new Map<string, number>();
-  out.forEach((e, i) => index.set(e.key, i));
   for (const m of moved) {
     let at = 0;
     if (m.after !== null) {
-      // Moves arrive in new-list order, so `after` is usually just placed.
-      const prev = out.at(-1)?.key === m.after ? out.length - 1 : -1;
-      const pos = prev >= 0 ? prev : out.findIndex((e) => e.key === m.after);
+      // Moves arrive in new-list order, so `after` is usually the last entry.
+      const pos =
+        out.at(-1)?.key === m.after ? out.length - 1 : out.findIndex((e) => e.key === m.after);
       at = pos >= 0 ? pos + 1 : out.length;
     }
     out.splice(at, 0, { key: m.key, split: m.split });
@@ -141,13 +144,11 @@ export function applyChannel(s: MirrorState, msg: ChannelMessage): MirrorState {
         break;
     }
   }
-  const pending = s.pending.filter((p) => p.n > msg.ack);
-  // Drop session removals for undo entries that are gone from every account summary.
   return {
     ...s,
     subs,
     rows,
-    pending,
+    pending: s.pending.filter((p) => p.n > msg.ack),
     ack: Math.max(s.ack, msg.ack),
     rev: Math.max(s.rev, msg.rev),
   };
@@ -155,7 +156,8 @@ export function applyChannel(s: MirrorState, msg: ChannelMessage): MirrorState {
 
 // ------------------------------------------------------------ pending effects
 
-const viewLabel = (view: View): string | null => {
+/** The Gmail label a view lists, if one label backs it. */
+export const viewLabel = (view: View): string | null => {
   switch (view.kind) {
     case "inbox":
       return "INBOX";
@@ -210,6 +212,20 @@ export function removesFrom(m: ModifyAction, key: SubKey): boolean {
   }
 }
 
+/** The mail change an action makes, if any. */
+function modifyOf(a: Action): ModifyAction | null {
+  if (a.type === "modify") return a;
+  if (a.type === "createLabel") return a.apply;
+  return null;
+}
+
+/** A row flag after an action that may add or remove its label. */
+function flag(m: ModifyAction, label: string, current: boolean): boolean {
+  if (m.add.includes(label)) return true;
+  if (m.remove.includes(label)) return false;
+  return current;
+}
+
 function patchRow(row: ListRow, m: ModifyAction): ListRow {
   const labels = new Set(row.labels);
   for (const l of m.remove) labels.delete(l);
@@ -227,44 +243,38 @@ function patchRow(row: ListRow, m: ModifyAction): ListRow {
   return {
     ...row,
     labels: [...labels],
-    unread: m.add.includes("UNREAD") ? true : m.remove.includes("UNREAD") ? false : row.unread,
-    starred: m.add.includes("STARRED") ? true : m.remove.includes("STARRED") ? false : row.starred,
+    unread: flag(m, "UNREAD", row.unread),
+    starred: flag(m, "STARRED", row.starred),
     snoozeUntil,
   };
 }
 
-/** The undo entry a pending action adds, so `z` can target it before Rust confirms. */
-function pendingEntry(p: Pending): UndoEntryInfo | null {
-  const a = p.action;
-  if (a.type === "modify" && a.undoable) {
-    return { id: p.n, kind: "mail", label: "", threads: a.threads, outbox: null };
+/** The app-wide state, once its subscription has loaded. */
+export function appState(s: MirrorState): AppState | null {
+  for (const sub of Object.values(s.subs)) if (sub.type === "app") return sub.state;
+  return null;
+}
+
+/** An account's summary, once its subscription has loaded. */
+export function accountSummary(s: MirrorState, account: number): AccountSummary | null {
+  for (const sub of Object.values(s.subs)) {
+    if (sub.type === "account" && sub.key.account === account) return sub.summary;
   }
-  if (a.type === "pin") return { id: p.n, kind: "pin", label: "", threads: [], outbox: null };
   return null;
 }
 
 /** The newest undo entry for an account with pending actions applied. */
 export function undoTarget(s: MirrorState, account: number): number | null {
-  const summary = Object.values(s.subs).find(
-    (x): x is AccountSub => x.type === "account" && x.summary?.account.id === account,
-  )?.summary;
-  const entries = (summary?.undo ?? []).map((e) => e.id);
-  for (const p of s.pending) {
-    const a = p.action;
+  const entries = (accountSummary(s, account)?.undo ?? []).map((e) => e.id);
+  for (const { n, action: a } of s.pending) {
     if (a.type === "undo" && a.account === account) {
       const i = entries.indexOf(a.entry);
       if (i >= 0) entries.splice(i, 1);
       continue;
     }
-    const accountOf =
-      a.type === "modify"
-        ? a.account
-        : a.type === "pin"
-          ? a.account
-          : a.type === "sendDraft"
-            ? null
-            : null;
-    if (accountOf === account && pendingEntry(p)) entries.push(p.n);
+    // An undoable action adds an entry whose id is its action number.
+    const addsEntry = (a.type === "modify" && a.undoable) || a.type === "pin";
+    if (addsEntry && a.account === account) entries.push(n);
   }
   return entries.length > 0 ? Math.max(...entries) : null;
 }
@@ -288,9 +298,8 @@ export function viewList(s: MirrorState, subId: string): ListView {
       copied = true;
     }
   };
-  for (const p of s.pending) {
-    const a = p.action;
-    const m = a.type === "modify" ? a : a.type === "createLabel" ? a.apply : null;
+  for (const { action: a } of s.pending) {
+    const m = modifyOf(a);
     if (m) {
       for (const t of m.threads) {
         const k = String(t);
@@ -325,14 +334,13 @@ export function viewList(s: MirrorState, subId: string): ListView {
 
 /** Records, for undo, the rows an action removes from each open list. */
 export function recordRemovals(s: MirrorState, p: Pending): Removal[] {
-  const a = p.action;
-  const m = a.type === "modify" ? a : a.type === "createLabel" ? a.apply : null;
-  if (!m || !m.undoable) return [];
+  const m = modifyOf(p.action);
+  if (!m?.undoable) return [];
+  const drop = new Set(m.threads.map(String));
   const out: Removal[] = [];
   for (const [subId, sub] of Object.entries(s.subs)) {
     if (sub.type !== "list" || !removesFrom(m, sub.key)) continue;
     const { ids } = viewList(s, subId);
-    const drop = new Set(m.threads.map(String));
     let after: string | null = null;
     for (const e of ids) {
       if (drop.has(e.key)) out.push({ sub: subId, key: e.key, after });
