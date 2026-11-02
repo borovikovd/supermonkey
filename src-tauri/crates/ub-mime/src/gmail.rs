@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::address::{Addr, parse_address_list};
+use crate::collapse_whitespace;
 use crate::encoding::{decode_base64url, decode_charset, decode_encoded_words, header_param};
 
 /// An attachment or inline part of a received message.
@@ -85,88 +86,114 @@ pub fn parse_gmail_payload(payload: &Value) -> ParsedMessage {
         ..Default::default()
     };
 
-    let mut html = Vec::new();
-    let mut text = Vec::new();
-    walk(payload, &mut html, &mut text, &mut msg.parts);
-    msg.html = (!html.is_empty()).then(|| html.join("\n"));
-    msg.text = (!text.is_empty()).then(|| text.join("\n"));
+    let mut found = Collected::default();
+    found.visit(payload);
+    msg.html = join_bodies(&found.html);
+    msg.text = join_bodies(&found.text);
+    msg.parts = found.parts;
     msg
 }
 
-fn walk(part: &Value, html: &mut Vec<String>, text: &mut Vec<String>, parts: &mut Vec<PartInfo>) {
-    let mime_type = part["mimeType"]
-        .as_str()
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
-    if mime_type.starts_with("multipart/") {
-        for child in part["parts"].as_array().into_iter().flatten() {
-            walk(child, html, text, parts);
-        }
-        return;
-    }
+fn join_bodies(bodies: &[String]) -> Option<String> {
+    (!bodies.is_empty()).then(|| bodies.join("\n"))
+}
 
-    let content_type = find_header(part, "Content-Type").unwrap_or("");
-    let disposition = find_header(part, "Content-Disposition").unwrap_or("");
-    let disposition_kind = disposition
-        .split(';')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_ascii_lowercase();
-    let mut filename = part["filename"].as_str().unwrap_or("").to_string();
-    if filename.is_empty() {
-        filename = header_param(disposition, "filename")
+/// What a walk of the part tree collects, in document order.
+#[derive(Default)]
+struct Collected {
+    html: Vec<String>,
+    text: Vec<String>,
+    parts: Vec<PartInfo>,
+}
+
+impl Collected {
+    fn visit(&mut self, part: &Value) {
+        let mime_type = part["mimeType"]
+            .as_str()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if mime_type.starts_with("multipart/") {
+            for child in part["parts"].as_array().into_iter().flatten() {
+                self.visit(child);
+            }
+            return;
+        }
+
+        let content_type = find_header(part, "Content-Type").unwrap_or("");
+        let disposition = find_header(part, "Content-Disposition").unwrap_or("");
+        let disposition_kind = disposition
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        let mut filename = part["filename"]
+            .as_str()
+            .filter(|f| !f.is_empty())
+            .map(str::to_string)
+            .or_else(|| header_param(disposition, "filename"))
             .or_else(|| header_param(content_type, "name"))
             .unwrap_or_default();
-    }
-    let body = &part["body"];
-    let data = body["data"].as_str().and_then(decode_base64url);
-    let attachment_id = body["attachmentId"].as_str().map(str::to_string);
+        let body = &part["body"];
+        let data = body["data"].as_str().and_then(decode_base64url);
 
-    let is_body = (mime_type == "text/html" || mime_type == "text/plain")
-        && filename.is_empty()
-        && disposition_kind != "attachment";
-    if is_body {
-        if let Some(bytes) = data {
-            let decoded = decode_charset(&bytes, header_param(content_type, "charset").as_deref());
-            if mime_type == "text/html" { html } else { text }.push(decoded);
+        let is_body = (mime_type == "text/html" || mime_type == "text/plain")
+            && filename.is_empty()
+            && disposition_kind != "attachment";
+        if is_body {
+            if let Some(bytes) = data {
+                let charset = header_param(content_type, "charset");
+                let bodies = if mime_type == "text/html" {
+                    &mut self.html
+                } else {
+                    &mut self.text
+                };
+                bodies.push(decode_charset(&bytes, charset.as_deref()));
+            }
+            return;
         }
-        return;
-    }
-    if data.is_none() && attachment_id.is_none() {
-        return;
-    }
 
-    let content_id = find_header(part, "Content-ID")
-        .map(|v| {
-            v.trim()
-                .trim_start_matches('<')
-                .trim_end_matches('>')
-                .to_string()
-        })
-        .filter(|v| !v.is_empty());
-    if filename.is_empty() {
-        filename = match mime_type.as_str() {
-            "text/calendar" => "invite.ics".to_string(),
-            "message/rfc822" => "message.eml".to_string(),
-            _ => String::new(),
-        };
+        let attachment_id = body["attachmentId"].as_str().map(str::to_string);
+        if data.is_none() && attachment_id.is_none() {
+            return;
+        }
+        let content_id = find_header(part, "Content-ID")
+            .map(bare_id)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string);
+        if filename.is_empty() {
+            filename = default_filename(&mime_type).to_string();
+        }
+        self.parts.push(PartInfo {
+            part_id: part["partId"].as_str().unwrap_or("").to_string(),
+            filename,
+            inline: match disposition_kind.as_str() {
+                "inline" => true,
+                "" => content_id.is_some(),
+                _ => false,
+            },
+            content_id,
+            mime_type,
+            size: body["size"].as_u64().unwrap_or(0),
+            attachment_id,
+            data,
+        });
     }
-    parts.push(PartInfo {
-        part_id: part["partId"].as_str().unwrap_or("").to_string(),
-        filename,
-        inline: match disposition_kind.as_str() {
-            "inline" => true,
-            "" => content_id.is_some(),
-            _ => false,
-        },
-        content_id,
-        mime_type,
-        size: body["size"].as_u64().unwrap_or(0),
-        attachment_id,
-        data,
-    });
+}
+
+/// The name a nameless part is saved under; empty when its type has no usual name.
+fn default_filename(mime_type: &str) -> &'static str {
+    match mime_type {
+        "text/calendar" => "invite.ics",
+        "message/rfc822" => "message.eml",
+        _ => "",
+    }
+}
+
+/// A message id or Content-ID without surrounding whitespace and angle brackets.
+pub(crate) fn bare_id(id: &str) -> &str {
+    id.trim().trim_start_matches('<').trim_end_matches('>')
 }
 
 /// First header with this name (case-insensitive) on a payload or part.
@@ -197,15 +224,8 @@ pub(crate) fn message_ids(value: &str) -> Vec<String> {
 /// Parses an RFC 2822 `Date` header into Unix milliseconds. Tolerates trailing comments
 /// such as `(UTC)` and extra whitespace.
 pub(crate) fn parse_date(value: &str) -> Option<i64> {
-    let without_comment = match value.find('(') {
-        Some(i) => &value[..i],
-        None => value,
-    };
-    let cleaned = without_comment
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    chrono::DateTime::parse_from_rfc2822(&cleaned)
+    let without_comment = value.split_once('(').map_or(value, |(date, _)| date);
+    chrono::DateTime::parse_from_rfc2822(&collapse_whitespace(without_comment))
         .ok()
         .map(|d| d.timestamp_millis())
 }

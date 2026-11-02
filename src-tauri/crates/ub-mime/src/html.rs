@@ -7,8 +7,8 @@ use std::sync::LazyLock;
 
 use regex::{Captures, Regex};
 
-use crate::InlinePart;
 use crate::encoding::{decode_base64, encode_base64, percent_decode};
+use crate::{InlinePart, collapse_whitespace};
 
 static SANITIZER: LazyLock<ammonia::Builder<'static>> = LazyLock::new(|| {
     let mut b = ammonia::Builder::default();
@@ -126,10 +126,7 @@ static HREF: LazyLock<Regex> = LazyLock::new(|| {
 /// Plain text of an HTML body for full-text search and snippets: no `<head>`, `<style>`,
 /// `<script>` or comments, entities decoded, all whitespace collapsed to single spaces.
 pub fn html_to_text(html: &str) -> String {
-    render_text(html, false)
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
+    collapse_whitespace(&render_text(html, false))
 }
 
 /// The `text/plain` alternative of an outgoing HTML body: line breaks from blocks and `<br>`,
@@ -171,7 +168,7 @@ fn render_text(html: &str, plain: bool) -> String {
     let mut link: Option<(String, usize)> = None;
     let mut last = 0;
     for m in TAG.captures_iter(&html) {
-        let whole = m.get(0).expect("group 0 is the whole match");
+        let whole = m.get_match();
         w.text(&html[last..whole.start()], pre_depth > 0);
         last = whole.end();
 
@@ -283,30 +280,22 @@ impl TextWriter {
             }
             return;
         }
-        let mut collapsed = decoded.split_whitespace().collect::<Vec<_>>().join(" ");
+        let collapsed = collapse_whitespace(&decoded);
+        let at_line_start = self.at_line_start();
+        // A whitespace run becomes one space, never at a line start and never doubled.
+        if decoded.starts_with(char::is_whitespace) && !at_line_start && !self.out.ends_with(' ') {
+            self.out.push(' ');
+        }
         if collapsed.is_empty() {
-            if decoded.chars().any(char::is_whitespace)
-                && !self.at_line_start()
-                && !self.out.ends_with(' ')
-            {
-                self.out.push(' ');
-            }
             return;
         }
-        if decoded.starts_with(char::is_whitespace)
-            && !self.at_line_start()
-            && !self.out.ends_with(' ')
-        {
-            collapsed.insert(0, ' ');
-        }
-        if decoded.ends_with(char::is_whitespace) {
-            collapsed.push(' ');
-        }
-        if self.at_line_start() {
+        if at_line_start {
             self.prefix();
-            collapsed = collapsed.trim_start().to_string();
         }
         self.out.push_str(&collapsed);
+        if decoded.ends_with(char::is_whitespace) {
+            self.out.push(' ');
+        }
     }
 
     fn newline(&mut self) {

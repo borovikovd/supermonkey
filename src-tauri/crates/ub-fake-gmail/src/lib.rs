@@ -48,7 +48,7 @@ use tokio::sync::{Notify, watch};
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
 
-use crate::mailbox::{Mailbox, SendAsEntry};
+use crate::mailbox::{Mailbox, Msg, SendAsEntry};
 
 /// The fake Gmail server. Dropping it stops accepting connections.
 pub struct FakeGmail {
@@ -86,6 +86,22 @@ pub(crate) struct AuthCode {
     pub code_challenge: String,
 }
 
+impl Default for World {
+    fn default() -> Self {
+        World {
+            users: Vec::new(),
+            mailboxes: HashMap::new(),
+            refresh_tokens: HashMap::new(),
+            access_tokens: HashMap::new(),
+            auth_codes: HashMap::new(),
+            invalid_grant: HashSet::new(),
+            token_lifetime: Duration::from_secs(3600),
+            last_auth_request: None,
+            counter: 0,
+        }
+    }
+}
+
 impl World {
     pub fn next(&mut self) -> u64 {
         self.counter += 1;
@@ -110,6 +126,23 @@ impl World {
 impl Shared {
     pub fn world(&self) -> MutexGuard<'_, World> {
         self.world.lock().unwrap()
+    }
+
+    /// The first fault that applies to this request. Every matching entry counts the request,
+    /// applied or not, so `nth` and `times` count from injection.
+    fn fault_for(&self, method: &str, path: &str) -> Option<Fault> {
+        let mut faults = self.faults.lock().unwrap();
+        let mut chosen = None;
+        for entry in faults
+            .iter_mut()
+            .filter(|e| e.matcher.matches(method, path))
+        {
+            entry.seen += 1;
+            if chosen.is_none() && entry.applies() {
+                chosen = Some(entry.fault.clone());
+            }
+        }
+        chosen
     }
 }
 
@@ -214,7 +247,18 @@ impl Fault {
 struct FaultEntry {
     matcher: Matcher,
     fault: Fault,
+    /// Matching requests so far, this one included.
     seen: usize,
+}
+
+impl FaultEntry {
+    fn applies(&self) -> bool {
+        match (self.matcher.nth, self.matcher.times) {
+            (Some(n), _) => self.seen == n,
+            (None, Some(t)) => self.seen <= t,
+            (None, None) => true,
+        }
+    }
 }
 
 /// Simple fields for a message added with [`FakeUser::add_message`].
@@ -299,15 +343,17 @@ pub struct FakeDraft {
     pub message: FakeMessage,
 }
 
-fn snapshot(msg: &mailbox::Msg) -> FakeMessage {
-    FakeMessage {
-        id: msg.id.clone(),
-        thread_id: msg.thread_id.clone(),
-        label_ids: msg.label_ids.clone(),
-        internal_date: msg.internal_date,
-        snippet: msg.snippet.clone(),
-        headers: msg.headers.clone(),
-        raw: msg.raw.clone(),
+impl From<&Msg> for FakeMessage {
+    fn from(msg: &Msg) -> Self {
+        FakeMessage {
+            id: msg.id.clone(),
+            thread_id: msg.thread_id.clone(),
+            label_ids: msg.label_ids.clone(),
+            internal_date: msg.internal_date,
+            snippet: msg.snippet.clone(),
+            headers: msg.headers.clone(),
+            raw: msg.raw.clone(),
+        }
     }
 }
 
@@ -318,19 +364,9 @@ impl FakeGmail {
         let listener = bind("127.0.0.1:0".parse().unwrap()).expect("bind the fake");
         let addr = listener.local_addr().unwrap();
         let shared = Arc::new(Shared {
-            world: Mutex::new(World {
-                users: Vec::new(),
-                mailboxes: HashMap::new(),
-                refresh_tokens: HashMap::new(),
-                access_tokens: HashMap::new(),
-                auth_codes: HashMap::new(),
-                invalid_grant: HashSet::new(),
-                token_lifetime: Duration::from_secs(3600),
-                last_auth_request: None,
-                counter: 0,
-            }),
-            faults: Mutex::new(Vec::new()),
-            log: Mutex::new(Vec::new()),
+            world: Mutex::new(World::default()),
+            faults: Mutex::default(),
+            log: Mutex::default(),
         });
         let (offline, offline_rx) = watch::channel(false);
         let (listening_tx, listening) = watch::channel(true);
@@ -554,16 +590,14 @@ impl FakeUser {
     /// Stores raw RFC 822 bytes as a message.
     pub fn add_raw_message(&self, raw: &[u8], thread_id: Option<&str>, labels: &[&str]) -> String {
         self.with(|mb| {
-            let labels = labels.iter().map(|l| (*l).to_owned()).collect();
-            mb.insert_raw(raw.to_vec(), thread_id.map(str::to_owned), labels, None)
+            let thread_id = thread_id.map(str::to_owned);
+            mb.insert_raw(raw.to_vec(), thread_id, owned(labels), None)
         })
     }
 
     /// Changes a message's labels as another client would, recording history.
     pub fn modify_labels(&self, message_id: &str, add: &[&str], remove: &[&str]) {
-        let own = |ids: &[&str]| ids.iter().map(|l| (*l).to_owned()).collect::<Vec<_>>();
-        self.with(|mb| mb.modify(message_id, &own(add), &own(remove)))
-            .ok()
+        self.with(|mb| mb.modify(message_id, &owned(add), &owned(remove)))
             .expect("message exists");
     }
 
@@ -571,29 +605,28 @@ impl FakeUser {
     pub fn delete_message(&self, message_id: &str) {
         self.with(|mb| {
             mb.drafts.retain(|_, m| m != message_id);
-            mb.delete(message_id).ok().expect("message exists");
+            mb.delete(message_id).expect("message exists");
         });
     }
 
     /// A stored message.
     pub fn message(&self, id: &str) -> Option<FakeMessage> {
-        self.with(|mb| mb.messages.get(id).map(snapshot))
+        self.with(|mb| mb.messages.get(id).map(FakeMessage::from))
     }
 
     /// Every stored message, in id order.
     pub fn messages(&self) -> Vec<FakeMessage> {
-        self.with(|mb| mb.messages.values().map(snapshot).collect())
+        self.with(|mb| mb.messages.values().map(FakeMessage::from).collect())
     }
 
     /// A thread's messages, oldest first.
     pub fn thread(&self, thread_id: &str) -> Vec<FakeMessage> {
-        let mut messages: Vec<FakeMessage> = self
-            .messages()
-            .into_iter()
-            .filter(|m| m.thread_id == thread_id)
-            .collect();
-        messages.sort_by_key(|m| m.internal_date);
-        messages
+        self.with(|mb| {
+            mb.thread_messages(thread_id)
+                .into_iter()
+                .map(FakeMessage::from)
+                .collect()
+        })
     }
 
     /// Every draft.
@@ -603,7 +636,7 @@ impl FakeUser {
                 .iter()
                 .map(|(id, msg)| FakeDraft {
                     id: id.clone(),
-                    message: snapshot(&mb.messages[msg]),
+                    message: FakeMessage::from(&mb.messages[msg]),
                 })
                 .collect()
         })
@@ -618,6 +651,10 @@ impl FakeUser {
     pub fn set_history_floor(&self, floor: u64) {
         self.with(|mb| mb.history_floor = floor);
     }
+}
+
+fn owned(ids: &[&str]) -> Vec<String> {
+    ids.iter().map(|&id| id.to_owned()).collect()
 }
 
 fn bind(addr: SocketAddr) -> std::io::Result<TcpListener> {
@@ -688,32 +725,12 @@ async fn handle(
     kill: Arc<Notify>,
     req: hyper::Request<Incoming>,
 ) -> Result<Response, Infallible> {
-    let method = req.method().to_string();
-    let path = req.uri().path().to_owned();
     shared.log.lock().unwrap().push(LoggedRequest {
-        method: method.clone(),
-        path: path.clone(),
+        method: req.method().to_string(),
+        path: req.uri().path().to_owned(),
         query: req.uri().query().unwrap_or_default().to_owned(),
     });
-    let fault = {
-        let mut faults = shared.faults.lock().unwrap();
-        let mut chosen = None;
-        for entry in faults.iter_mut() {
-            if !entry.matcher.matches(&method, &path) {
-                continue;
-            }
-            entry.seen += 1;
-            let applies = match (entry.matcher.nth, entry.matcher.times) {
-                (Some(n), _) => entry.seen == n,
-                (None, Some(t)) => entry.seen <= t,
-                (None, None) => true,
-            };
-            if applies && chosen.is_none() {
-                chosen = Some(entry.fault.clone());
-            }
-        }
-        chosen
-    };
+    let fault = shared.fault_for(req.method().as_str(), req.uri().path());
     let req = req.map(Body::new);
     match fault {
         None => {}
