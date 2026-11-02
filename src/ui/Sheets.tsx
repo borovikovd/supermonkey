@@ -238,7 +238,9 @@ function Splits() {
     setRows(rows.map((r, j) => (i === j ? { ...r, ...patch } : r)));
   const move = (i: number, d: number) => {
     const j = i + d;
-    if (j < 0 || j >= rows.length || rows[j]!.kind === "other" || rows[i]!.kind === "other") return;
+    // Only custom splits reorder, among themselves.
+    if (j < 0 || j >= rows.length || rows[j]!.kind !== "custom" || rows[i]!.kind !== "custom")
+      return;
     const next = [...rows];
     [next[i], next[j]] = [next[j]!, next[i]!];
     setRows(next);
@@ -246,7 +248,8 @@ function Splits() {
   let tmp = -1;
   const add = (name: string, query: string) =>
     setRows((r) => {
-      const other = r.findIndex((x) => x.kind === "other");
+      // Custom splits come first, then Important, then Other.
+      const fixed = r.findIndex((x) => x.kind !== "custom");
       const s: SplitInfo = {
         id: tmp--,
         name,
@@ -256,7 +259,7 @@ function Splits() {
         hideWhenEmpty: true,
         position: 0,
       };
-      return other < 0 ? [...r, s] : [...r.slice(0, other), s, ...r.slice(other)];
+      return fixed < 0 ? [...r, s] : [...r.slice(0, fixed), s, ...r.slice(fixed)];
     });
   return (
     <Sheet title={`Split Inbox · ${summary.account.email}`}>

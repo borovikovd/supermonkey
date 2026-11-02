@@ -165,7 +165,7 @@ pub fn route(
 pub fn create_defaults(ctx: &mut Ctx, account: AccountId) -> anyhow::Result<()> {
     ctx.tx.execute(
         "INSERT INTO splits (account_id, name, position, kind, hide_when_empty) VALUES
-           (?1, 'Important', 1000, 'important', 1), (?1, 'Other', 1000000, 'other', 0)",
+           (?1, 'Important', 900000, 'important', 1), (?1, 'Other', 1000000, 'other', 0)",
         [account],
     )?;
     Ok(())
@@ -281,10 +281,16 @@ pub fn save(
             params![id, account],
         )?;
     }
-    for (i, s) in splits.iter().enumerate() {
+    // Custom splits come first, then Important, then Other.
+    let mut custom_index = 0i64;
+    for s in splits.iter() {
         let position = match s.kind {
             SplitKind::Other => 1_000_000,
-            _ => (i as i64 + 1) * 10,
+            SplitKind::Important => 900_000,
+            SplitKind::Custom => {
+                custom_index += 1;
+                custom_index * 10
+            }
         };
         if s.kind == SplitKind::Custom && !s.query.trim().is_empty() {
             ub_rules::Query::parse_strict(&s.query)
