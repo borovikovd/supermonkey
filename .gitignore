@@ -1,0 +1,8 @@
+google-oauth-client.json
+node_modules
+dist
+*.local
+.DS_Store
+src-tauri/target
+src-tauri/gen
+*.log
