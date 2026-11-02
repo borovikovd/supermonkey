@@ -335,6 +335,8 @@ test("RCP-07 Cc and Bcc stay hidden until used", async ({ app, gmail }) => {
   await app.press("Meta+Shift+c");
   await expect(field(app, "Cc")).toBeVisible();
   await expect(field(app, "Bcc")).toHaveCount(0);
+  // Focus moves to Cc a frame later; an Esc before that would be undone by it.
+  await expect(field(app, "Cc")).toBeFocused();
   await app.press("Escape", "Escape");
   await expect(app.editor).toHaveCount(0);
 

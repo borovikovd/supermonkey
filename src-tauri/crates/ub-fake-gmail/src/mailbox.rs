@@ -164,12 +164,12 @@ impl Mailbox {
             messages: BTreeMap::new(),
             drafts: BTreeMap::new(),
             history: Vec::new(),
-            next_id: 0x18c0_0000_0000_0000,
+            next_id: id_base(email),
             clock_ms: 1_700_000_000_000,
         }
     }
 
-    /// A fresh Gmail-looking hex id.
+    /// A fresh Gmail-looking hex id, never one another mailbox hands out.
     pub fn new_id(&mut self) -> String {
         self.next_id += 1;
         format!("{:x}", self.next_id)
@@ -601,4 +601,13 @@ fn resolve_label(name: &str, mailbox: &Mailbox) -> String {
         .iter()
         .find(|l| dashed(&l.name) == dashed(name) || l.id.eq_ignore_ascii_case(name))
         .map_or_else(|| format!("unknown:{name}"), |l| l.id.clone())
+}
+
+/// Where a mailbox's ids start. Real Gmail ids are unique across mailboxes,
+/// so each fake mailbox counts in its own range, fixed by its address (FNV-1a).
+fn id_base(email: &str) -> u64 {
+    let hash = email.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    });
+    0x18c0_0000_0000_0000 | ((hash & 0xffff) << 32)
 }
