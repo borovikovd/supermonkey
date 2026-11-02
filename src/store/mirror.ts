@@ -5,6 +5,7 @@ import {
   addPending,
   applyChannel,
   emptyMirror,
+  mergeRow,
   type MirrorState,
   type Pending,
   type Sub,
@@ -26,17 +27,13 @@ export const useMirror = create<MirrorStore>((set) => ({
   addSub: (id, sub) => set((s) => ({ subs: { ...s.subs, [id]: sub } })),
   dropSub: (id) =>
     set((s) => {
-      const subs = { ...s.subs };
-      delete subs[id];
+      const { [id]: _dropped, ...subs } = s.subs;
       return { subs };
     }),
   putRows: (rows) =>
     set((s) => {
       const next = { ...s.rows };
-      for (const r of rows) {
-        const have = next[r.key];
-        if (!have || have.rev <= r.rev) next[r.key] = r;
-      }
+      for (const r of rows) mergeRow(next, r);
       return { rows: next };
     }),
 }));
