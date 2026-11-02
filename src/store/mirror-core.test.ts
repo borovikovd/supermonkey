@@ -51,6 +51,7 @@ function withList(sub: string, key: SubKey, keys: string[], rev = 1): MirrorStat
         moved: [],
         rows: keys.map((k) => row(k)),
         searching: false,
+        more: false,
       },
     ],
   };
@@ -90,6 +91,7 @@ describe("channel messages", () => {
           moved: [{ key: "4", split: null, after: "1" }],
           rows: [row("4", { rev: 2 })],
           searching: false,
+          more: false,
         },
       ],
     });
@@ -111,6 +113,7 @@ describe("channel messages", () => {
           moved: [{ key: "9", split: null, after: null }],
           rows: [],
           searching: false,
+          more: false,
         },
       ],
     });
@@ -141,6 +144,7 @@ describe("pending actions", () => {
           moved: [],
           rows: [],
           searching: false,
+          more: false,
         },
       ],
     });
@@ -241,6 +245,7 @@ describe("undo target", () => {
           moved: [],
           rows: [],
           searching: false,
+          more: false,
         },
       ],
     });

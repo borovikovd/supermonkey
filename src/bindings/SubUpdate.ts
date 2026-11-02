@@ -11,4 +11,8 @@ export type SubUpdate = { "type": "list", sub: string, first: boolean, ids: Arra
 /**
  * Search only: a Gmail query is still running.
  */
-searching: boolean, } | { "type": "conversation", sub: string, first: boolean, data: ConversationData, } | { "type": "composer", sub: string, first: boolean, draft: DraftState, } | { "type": "account", sub: string, first: boolean, summary: AccountSummary, } | { "type": "app", sub: string, first: boolean, state: AppState, };
+searching: boolean, 
+/**
+ * Gmail has another page for this list.
+ */
+more: boolean, } | { "type": "conversation", sub: string, first: boolean, data: ConversationData, } | { "type": "composer", sub: string, first: boolean, draft: DraftState, } | { "type": "account", sub: string, first: boolean, summary: AccountSummary, } | { "type": "app", sub: string, first: boolean, state: AppState, };

@@ -4,7 +4,7 @@ import { memo, useEffect, useMemo, useRef } from "react";
 
 import { markReadOnOpenWhenLoaded, openThread } from "../commands";
 import { startReply } from "../compose/start";
-import { fetchRows } from "../ipc/bridge";
+import { act, fetchRows } from "../ipc/bridge";
 import type { ListRow } from "../ipc/types";
 import { useChrome } from "../store/chrome";
 import { listKey, useCurrent, useListView, useSummary } from "../store/hooks";
@@ -181,6 +181,17 @@ export function ListView() {
     }, 0);
     return () => clearTimeout(t);
   }, [virtual, items, rows, isDrafts]);
+
+  // Gmail pages: fetch the next one as the list nears its end.
+  const asked = useRef(0);
+  useEffect(() => {
+    if (!list.more || !list.sub || virtual.length === 0) return;
+    const last = virtual[virtual.length - 1]!.index;
+    if (last >= items.length - 15 && asked.current !== items.length) {
+      asked.current = items.length;
+      act({ type: "moreResults", sub: list.sub });
+    }
+  }, [virtual, items.length, list.more, list.sub]);
 
   const onClick = useMemo(
     () => (k: string) => {

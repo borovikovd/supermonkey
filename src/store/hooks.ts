@@ -47,19 +47,20 @@ const EMPTY: ListView = { ids: [], rows: {} };
 /** The list as shown, with pending actions applied. */
 export function useListView(
   key: SubKey | null,
-): ListView & { loaded: boolean; searching: boolean } {
+): ListView & { loaded: boolean; searching: boolean; more: boolean; sub?: string } {
   const id = key ? subIdFor(key) : undefined;
   const sub = useMirror((s) => (id ? s.subs[id] : undefined));
   const rows = useMirror((s) => s.rows);
   const pending = useMirror((s) => s.pending);
   const removals = useMirror((s) => s.removals);
   return useMemo(() => {
-    if (!id || !sub || sub.type !== "list") return { ...EMPTY, loaded: false, searching: false };
+    if (!id || !sub || sub.type !== "list")
+      return { ...EMPTY, loaded: false, searching: false, more: false };
     const view = viewList(
       { ...useMirror.getState(), subs: { [id]: sub }, rows, pending, removals },
       id,
     );
-    return { ...view, loaded: sub.loaded, searching: sub.searching };
+    return { ...view, loaded: sub.loaded, searching: sub.searching, more: sub.more, sub: id };
   }, [id, sub, rows, pending, removals]);
 }
 

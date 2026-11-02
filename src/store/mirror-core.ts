@@ -27,6 +27,8 @@ export type ListSub = {
   loaded: boolean;
   ids: ListEntry[];
   searching: boolean;
+  /** Gmail has another page (Search, Label, Trash, Spam). */
+  more: boolean;
 };
 export type ConversationSub = { type: "conversation"; key: SubKey; data: ConversationData | null };
 export type ComposerSub = { type: "composer"; key: SubKey; draft: DraftState | null };
@@ -63,7 +65,7 @@ export function subForKey(key: SubKey): Sub {
   switch (key.type) {
     case "list":
     case "search":
-      return { type: "list", key, loaded: false, ids: [], searching: false };
+      return { type: "list", key, loaded: false, ids: [], searching: false, more: false };
     case "conversation":
       return { type: "conversation", key, data: null };
     case "composer":
@@ -119,7 +121,7 @@ export function applyChannel(s: MirrorState, msg: ChannelMessage): MirrorState {
         if (!u.first && !sub.loaded) break;
         for (const r of u.rows) mergeRow(rows, r);
         const ids = u.first ? (u.ids ?? []) : applyListPatch(sub.ids, u.removed, u.moved);
-        subs[u.sub] = { ...sub, loaded: true, ids, searching: u.searching };
+        subs[u.sub] = { ...sub, loaded: true, ids, searching: u.searching, more: u.more };
         break;
       }
       case "conversation":

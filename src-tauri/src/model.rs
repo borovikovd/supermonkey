@@ -530,6 +530,8 @@ pub enum SubUpdate {
         rows: Vec<ListRow>,
         /// Search only: a Gmail query is still running.
         searching: bool,
+        /// Gmail has another page for this list.
+        more: bool,
     },
     Conversation {
         sub: SubId,

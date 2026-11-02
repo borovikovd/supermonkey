@@ -141,6 +141,8 @@ impl Subs {
                         let ids = queries::list_ids(conn, account, &view)?;
                         if let Some(u) = list_patch(conn, id, sub, ids, t, drafts)? {
                             out.push(u);
+                        } else if forced {
+                            out.push(empty_list_patch(id, sub));
                         }
                     }
                 }
@@ -189,6 +191,7 @@ fn empty_list_patch(id: &str, sub: &Sub) -> SubUpdate {
         moved: vec![],
         rows: vec![],
         searching: sub.searching,
+        more: sub.next_page.is_some(),
     }
 }
 
@@ -225,6 +228,7 @@ fn list_patch(
         moved,
         rows,
         searching: sub.searching,
+        more: sub.next_page.is_some(),
     }))
 }
 
@@ -291,6 +295,7 @@ fn list_first(
         moved: vec![],
         rows,
         searching: sub.searching,
+        more: sub.next_page.is_some(),
     })
 }
 
