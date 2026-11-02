@@ -6,7 +6,7 @@ import Strike from "@tiptap/extension-strike";
 import { Placeholder } from "@tiptap/extensions";
 import { EditorContent, useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import { Paperclip, X } from "lucide-react";
+import { ChevronDown, Paperclip, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -35,11 +35,11 @@ function QuoteBlock({ html }: { html: string }) {
     return () => el.removeEventListener("load", fit);
   }, [open]);
   return (
-    <div className="mt-2">
+    <div className="mt-1">
       <button
         tabIndex={-1}
         onClick={() => setOpen(!open)}
-        className="rounded-control bg-fill px-2 text-time text-text-2"
+        className="text-body leading-none tracking-widest text-text-3 hover:text-text-2"
         title="Show quoted text"
       >
         •••
@@ -322,22 +322,42 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   const account = state?.account ?? useChrome.getState().account ?? 0;
   const sendAs = app?.accounts.find((a) => a.id === account)?.sendAs ?? [];
 
+  const ccToggle =
+    !showCc || !showBcc ? (
+      <button
+        tabIndex={-1}
+        title="Cc and Bcc (⌘⇧C, ⌘⇧B)"
+        className="flex h-6 w-6 items-center justify-center rounded-control text-text-3 hover:bg-fill-half hover:text-text-2"
+        onClick={() => {
+          setShowCc(true);
+          setShowBcc(true);
+          requestAnimationFrame(() => ccRef.current?.focus());
+        }}
+      >
+        <ChevronDown size={15} strokeWidth={1.5} />
+      </button>
+    ) : null;
+
   return (
     <div
       ref={root}
-      className={`selectable rounded-sheet ${inline ? "mt-4 border border-border px-5 py-3" : "px-1"} ${
-        blurred ? "opacity-90" : ""
-      }`}
+      // A floating card, as Superhuman draws its composer.
+      className={`selectable flex flex-col rounded-[10px] bg-bg px-10 pt-4 pb-3 shadow-[0_6px_28px_rgb(20_20_19/0.09),0_0_0_1px_rgb(20_20_19/0.05)] ${
+        inline ? "mt-6 min-h-[220px]" : "min-h-[440px]"
+      } ${blurred ? "opacity-95" : ""}`}
       onMouseDown={() => useChrome.getState().set({ composeBlurred: false })}
     >
       {sendAs.length > 1 && (
-        <button
-          tabIndex={-1}
-          className="mb-1 text-row text-text-2 hover:text-text"
-          onClick={() => useChrome.getState().set({ palette: { kind: "from", draft } })}
-        >
-          From {fmt(fields.from)}
-        </button>
+        <div className="flex min-h-10 items-center text-body">
+          <span className="w-20 shrink-0 text-text">From</span>
+          <button
+            tabIndex={-1}
+            className="px-1 text-text-2 hover:text-text"
+            onClick={() => useChrome.getState().set({ palette: { kind: "from", draft } })}
+          >
+            {fmt(fields.from)}
+          </button>
+        </div>
       )}
       <RecipientField
         ref={toRef}
@@ -345,6 +365,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
         account={account}
         value={fields.to}
         onChange={(to) => update({ to })}
+        right={ccToggle}
         onTab={(shift) =>
           shift
             ? null
@@ -373,20 +394,10 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
           onChange={(bcc) => update({ bcc })}
         />
       )}
-      {!showCc && !showBcc && (
-        <div className="flex gap-3 py-1 text-hint text-text-3">
-          <button tabIndex={-1} onClick={() => setShowCc(true)}>
-            Cc
-          </button>
-          <button tabIndex={-1} onClick={() => setShowBcc(true)}>
-            Bcc
-          </button>
-        </div>
-      )}
       {showSubject && (
         <input
           ref={subjectRef}
-          className="h-9 w-full border-b border-border-2 bg-transparent text-row font-medium outline-none placeholder:text-text-3"
+          className="mt-2 h-10 w-full bg-transparent text-body outline-none placeholder:text-text-3"
           placeholder="Subject"
           value={fields.subject}
           onChange={(e) => update({ subject: e.target.value })}
@@ -431,7 +442,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
           {fields.attachments.map((a) => (
             <span
               key={a.id}
-              className="flex items-center gap-1.5 rounded-control border border-border px-2 py-1 text-row"
+              className="flex items-center gap-1.5 rounded-control border border-border-2 px-2 py-1 text-row"
             >
               <Paperclip size={12} strokeWidth={1.5} className="text-text-3" />
               <span className="max-w-[220px] truncate">{a.filename}</span>
@@ -448,6 +459,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
           ))}
         </div>
       )}
+      {/* Empty room in the card goes below the quote, as in Superhuman. */}
+      <div className="flex-1" />
       <input
         ref={fileRef}
         type="file"
@@ -455,26 +468,36 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
         hidden
         onChange={(e) => void onFiles(e.target.files)}
       />
-      <div className="mt-3 flex items-center gap-3">
+      {/* Footer: Send on the left, quiet icons on the right, under a hairline. */}
+      <div className="mt-6 flex items-center gap-5 border-t border-border-2 pt-3 text-row">
         <button
           tabIndex={-1}
           onClick={sendOnScreen}
-          className="rounded-control bg-accent px-3 py-1 text-row font-medium text-white"
+          className="font-medium text-text hover:text-accent"
+          title="Send (⌘↵)"
         >
-          Send <span className="opacity-70">⌘↵</span>
+          Send
         </button>
+        <span className="text-text-3">
+          {blurred ? "Enter to edit · Esc to close" : "⌘↵ to send"}
+        </span>
+        <div className="flex-1" />
         <button
           tabIndex={-1}
           onClick={attach}
           className="text-text-3 hover:text-text-2"
           title="Attach (⌘⇧A)"
         >
-          <Paperclip size={14} strokeWidth={1.5} />
+          <Paperclip size={16} strokeWidth={1.5} />
         </button>
-        <div className="flex-1" />
-        <span className="text-hint text-text-3">
-          {blurred ? "Enter to edit · Esc to close" : "Esc to blur"}
-        </span>
+        <button
+          tabIndex={-1}
+          onClick={discardOnScreen}
+          className="text-text-3 hover:text-text-2"
+          title="Discard (⌘⇧,)"
+        >
+          <Trash2 size={16} strokeWidth={1.5} />
+        </button>
       </div>
     </div>
   );

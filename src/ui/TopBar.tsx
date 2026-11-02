@@ -1,7 +1,8 @@
-import { Search } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, Search } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
 import { goTo } from "../commands";
+import { closeComposerOnScreen } from "../compose/start";
 import { appHooks } from "../keyboard/keys";
 import { useChrome, viewTitle } from "../store/chrome";
 import { listKey, useAppState, useCurrent, useListView, useSummary } from "../store/hooks";
@@ -129,24 +130,72 @@ export function TopBar() {
     title = <span className="text-row font-semibold">{viewTitle(where.view, name)}</span>;
   }
 
+  const screen = cur?.screen.kind ?? "list";
+  if (screen !== "list" && !searchOpen) {
+    // Conversation and compose: back to the list, and previous / next conversation.
+    return (
+      // Overlaid on the panel so the subject sits on the same row, as in Superhuman.
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-12 items-center gap-2 px-4 [&>button]:pointer-events-auto">
+        <IconButton
+          title="Back (Esc)"
+          onClick={() => (screen === "compose" ? closeComposerOnScreen() : key("Escape"))}
+        >
+          <ArrowLeft size={16} strokeWidth={1.5} />
+        </IconButton>
+        <div className="flex-1" />
+        {screen === "conversation" && (
+          <>
+            <IconButton title="Previous conversation (K)" onClick={() => key("k")}>
+              <ChevronUp size={16} strokeWidth={1.5} />
+            </IconButton>
+            <IconButton title="Next conversation (J)" onClick={() => key("j")}>
+              <ChevronDown size={16} strokeWidth={1.5} />
+            </IconButton>
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       data-tauri-drag-region
-      className="flex h-11 shrink-0 items-center gap-6 border-b border-border pr-4 pl-[84px]"
+      className="flex h-12 shrink-0 items-center gap-6 border-b border-border-2 px-5"
     >
       {!searchOpen && title}
       <div className="flex-1" data-tauri-drag-region />
       <SearchField />
       {!searchOpen && (
-        <button
-          className="text-text-3 hover:text-text-2"
-          onClick={() => appHooks.focusSearch()}
-          title="Search (/)"
-        >
+        <IconButton title="Search (/)" onClick={() => appHooks.focusSearch()}>
           <Search size={16} strokeWidth={1.5} />
-        </button>
+        </IconButton>
       )}
     </div>
+  );
+}
+
+/** Sends a key to the shortcut handler, so buttons and keys share one path. */
+function key(k: string) {
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: k }));
+}
+
+function IconButton({
+  title,
+  onClick,
+  children,
+}: {
+  title: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      title={title}
+      onClick={onClick}
+      className="flex h-7 w-7 items-center justify-center rounded-control text-text-2 hover:bg-fill hover:text-text"
+    >
+      {children}
+    </button>
   );
 }
 

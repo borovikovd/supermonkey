@@ -50,8 +50,10 @@ export const RecipientField = forwardRef<
     value: Addr[];
     onChange: (v: Addr[]) => void;
     onTab?: (shift: boolean) => void;
+    /** Controls at the right end of the row (e.g. the Cc/Bcc toggle). */
+    right?: React.ReactNode;
   }
->(function RecipientField({ label, account, value, onChange, onTab }, ref) {
+>(function RecipientField({ label, account, value, onChange, onTab, right }, ref) {
   const [text, setText] = useState("");
   const [suggestions, setSuggestions] = useState<ContactSuggestion[]>([]);
   const [active, setActive] = useState(0);
@@ -109,26 +111,23 @@ export const RecipientField = forwardRef<
 
   const open = suggestions.length > 0;
   return (
-    <div className="relative flex min-h-9 flex-wrap items-center gap-1 border-b border-border-2 py-1 text-row">
-      <span className="w-12 shrink-0 text-text-2">{label}</span>
+    <div className="relative flex min-h-10 flex-wrap items-center gap-x-1 py-1 text-body">
+      <span className="w-20 shrink-0 text-text">{label}</span>
       {value.map((a, i) => {
         const bad = !isValidEmail(a.email);
         return (
           <span
             key={`${a.email}-${i}`}
             title={a.email}
-            className={`flex items-center gap-1 rounded-control px-1.5 py-0.5 ${
-              bad
-                ? "bg-[#fde8ee] text-danger"
-                : selectedChip === i
-                  ? "bg-accent text-white"
-                  : "bg-fill"
-            }`}
+            className={`group flex items-center gap-0.5 rounded-control px-1 ${
+              bad ? "text-danger" : "text-link"
+            } ${selectedChip === i ? "bg-accent-soft" : ""}`}
           >
             {a.name || a.email}
+            {i < value.length - 1 && <span className="text-text-3">,</span>}
             <button
               tabIndex={-1}
-              className="text-text-3 hover:text-text"
+              className="invisible text-text-3 group-hover:visible hover:text-text"
               onClick={() => onChange(value.filter((_, j) => j !== i))}
             >
               ×
@@ -138,7 +137,7 @@ export const RecipientField = forwardRef<
       })}
       <input
         ref={input}
-        className="min-w-[120px] flex-1 bg-transparent outline-none"
+        className="min-w-[120px] flex-1 bg-transparent px-1 outline-none"
         value={text}
         onChange={(e) => {
           const v = e.target.value;
@@ -218,8 +217,9 @@ export const RecipientField = forwardRef<
           }
         }}
       />
+      {right && <div className="ml-auto flex items-center gap-1 self-start pt-1">{right}</div>}
       {open && (
-        <div className="fade-in absolute top-full left-12 z-20 mt-1 w-[420px] overflow-hidden rounded-sheet bg-bg py-1 shadow-float">
+        <div className="fade-in absolute top-full left-20 z-20 mt-1 w-[420px] overflow-hidden rounded-sheet bg-bg py-1 shadow-float">
           {suggestions.map((s, i) => (
             <div
               key={s.email}

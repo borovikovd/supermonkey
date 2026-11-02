@@ -102,28 +102,33 @@ export function App() {
   if (app.accounts.length === 0) return <FirstRun />;
 
   return (
-    <div className="flex h-full flex-col bg-bg text-text">
+    <div className="flex h-full flex-col bg-surface text-text">
       {app.accounts.map((a) => (
         <AccountSubs key={a.id} account={a.id} />
       ))}
-      <TopBar />
+      {/* The traffic lights sit in this strip; content starts below it. */}
+      <div data-tauri-drag-region className="h-[34px] shrink-0" />
       <div className="flex min-h-0 flex-1">
         <Rail accounts={app.accounts} />
-        <main className="relative flex min-w-0 flex-1 flex-col">
-          {screen?.kind === "conversation" ? (
-            <ConversationView
-              key={`${screen.thread}:${screen.trashMode}`}
-              thread={screen.thread}
-              trashMode={screen.trashMode}
-            />
-          ) : screen?.kind === "compose" ? (
-            <ComposeScreen draft={screen.draft} />
-          ) : (
-            <ListView />
-          )}
-        </main>
+        {/* The white panel on the off-white canvas, as in Superhuman. */}
+        <div className="relative mr-2 mb-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-border-2 bg-bg shadow-[0_1px_2px_rgb(20_20_19/0.04)]">
+          <TopBar />
+          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+            {screen?.kind === "conversation" ? (
+              <ConversationView
+                key={`${screen.thread}:${screen.trashMode}`}
+                thread={screen.thread}
+                trashMode={screen.trashMode}
+              />
+            ) : screen?.kind === "compose" ? (
+              <ComposeScreen draft={screen.draft} />
+            ) : (
+              <ListView />
+            )}
+          </main>
+          <HintBar />
+        </div>
       </div>
-      <HintBar />
       <Prefetch />
       <Palette />
       <Sheets />

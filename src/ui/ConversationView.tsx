@@ -202,8 +202,8 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
 
   return (
     <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-[768px] min-w-[520px] px-16 pt-8 pb-24">
-        <h1 className="selectable mb-4 text-subject font-semibold">
+      <div className="mx-auto w-full max-w-[768px] min-w-[520px] px-16 pt-[11px] pb-24">
+        <h1 className="selectable mb-6 text-subject font-semibold">
           {data.subject || "(no subject)"}
         </h1>
         {list.map((b) =>
@@ -281,7 +281,7 @@ function Message({
   onKey: (e: KeyboardEvent) => void;
 }) {
   const bar = selected ? (
-    <span className="absolute top-0 bottom-0 -left-4 w-[3px] bg-accent" />
+    <span className="absolute top-2 bottom-2 -left-5 w-[2px] rounded-full bg-accent" />
   ) : null;
   if (!expanded) {
     return (
@@ -304,7 +304,7 @@ function Message({
   return (
     <div data-message={m.id} className="relative border-b border-border-2 py-4">
       {bar}
-      <div className="mb-3 flex items-baseline gap-2 text-row" onClick={() => onToggle(m.id)}>
+      <div className="mb-5 flex items-baseline gap-2 text-row" onClick={() => onToggle(m.id)}>
         <span className="font-semibold">{name(m)}</span>
         <span className="truncate text-text-3">{recipients(m)}</span>
         <span className="tabular ml-auto shrink-0 text-time text-text-3">{fullDate(m.date)}</span>

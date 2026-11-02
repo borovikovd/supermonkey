@@ -67,3 +67,15 @@ written. Each keeps the spec's intent.
   that account, opens Inbox, and highlights the thread.
 - The Dock badge refreshes after every commit that can change unread counts.
 - Wake from sleep is detected as a gap of more than three poll intervals.
+
+## Look, matched to Superhuman screenshots
+
+- The window is an off-white canvas (`surface`) with the content in a white
+  rounded panel; the rail sits on the canvas. The rail is 56px rather than
+  40px so its icon pill and account badges have room.
+- In a conversation or composer the header is a back arrow and previous/next
+  arrows overlaid on the panel, with the subject on the same row.
+- The composer is a floating card with a soft shadow (the spec reserves
+  shadows for the palette, sheets, and toasts). Recipients show as blue
+  names, Cc/Bcc sit behind a chevron on the To row, and the footer has Send
+  on the left and attach and discard icons on the right.
