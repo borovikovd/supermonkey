@@ -1,5 +1,7 @@
 //! Building outgoing RFC 5322 messages.
 
+use std::iter;
+
 use mail_builder::MessageBuilder;
 use mail_builder::headers::address::Address;
 use mail_builder::headers::content_type::ContentType;
@@ -10,6 +12,7 @@ use mail_builder::mime::MimePart;
 use serde::{Deserialize, Serialize};
 
 use crate::address::Addr;
+use crate::gmail::bare_id;
 use crate::html::html_to_plain;
 
 /// A file attached to an outgoing message.
@@ -63,44 +66,6 @@ pub struct Outgoing {
 /// (RFC 2047 / RFC 2231). Empty address lists are omitted; `Bcc` is written when present, as
 /// Gmail needs it to deliver and then strips it.
 pub fn build_mime(o: &Outgoing) -> Vec<u8> {
-    let alternative = MimePart::new(
-        "multipart/alternative",
-        vec![
-            MimePart::new("text/plain", html_to_plain(&o.html)),
-            MimePart::new("text/html", o.html.as_str()),
-        ],
-    );
-
-    let mut body = alternative;
-    if !o.inline.is_empty() {
-        let mut related = vec![body];
-        for part in &o.inline {
-            let mut content_type = ContentType::new(part.mime_type.as_str());
-            let mut disposition = ContentType::new("inline");
-            if let Some(name) = &part.filename {
-                content_type = content_type.attribute("name", name.as_str());
-                disposition = disposition.attribute("filename", name.as_str());
-            }
-            related.push(
-                MimePart::new(content_type, part.data.as_slice())
-                    .header("Content-Disposition", disposition)
-                    .cid(bare_id(&part.content_id)),
-            );
-        }
-        body = MimePart::new("multipart/related", related);
-    }
-    if !o.attachments.is_empty() {
-        let mut mixed = vec![body];
-        for a in &o.attachments {
-            let content_type =
-                ContentType::new(a.mime_type.as_str()).attribute("name", a.filename.as_str());
-            mixed.push(
-                MimePart::new(content_type, a.data.as_slice()).attachment(a.filename.as_str()),
-            );
-        }
-        body = MimePart::new("multipart/mixed", mixed);
-    }
-
     let mut message = MessageBuilder::new().from(address(&o.from));
     if !o.to.is_empty() {
         message = message.to(address_list(&o.to));
@@ -131,13 +96,47 @@ pub fn build_mime(o: &Outgoing) -> Vec<u8> {
     }
     message
         .header("X-Ubermensch-Draft", Raw::new(o.ub_draft_id.as_str()))
-        .body(body)
+        .body(body(o))
         .write_to_vec()
         .expect("writing to a Vec cannot fail")
 }
 
-fn bare_id(id: &str) -> &str {
-    id.trim().trim_start_matches('<').trim_end_matches('>')
+/// The body tree described on [`build_mime`].
+fn body(o: &Outgoing) -> MimePart<'_> {
+    let mut body = MimePart::new(
+        "multipart/alternative",
+        vec![
+            MimePart::new("text/plain", html_to_plain(&o.html)),
+            MimePart::new("text/html", o.html.as_str()),
+        ],
+    );
+    if !o.inline.is_empty() {
+        let related = iter::once(body).chain(o.inline.iter().map(inline_part));
+        body = MimePart::new("multipart/related", related.collect::<Vec<_>>());
+    }
+    if !o.attachments.is_empty() {
+        let mixed = iter::once(body).chain(o.attachments.iter().map(attachment_part));
+        body = MimePart::new("multipart/mixed", mixed.collect::<Vec<_>>());
+    }
+    body
+}
+
+fn inline_part(part: &InlinePart) -> MimePart<'_> {
+    let mut content_type = ContentType::new(part.mime_type.as_str());
+    let mut disposition = ContentType::new("inline");
+    if let Some(name) = &part.filename {
+        content_type = content_type.attribute("name", name.as_str());
+        disposition = disposition.attribute("filename", name.as_str());
+    }
+    MimePart::new(content_type, part.data.as_slice())
+        .header("Content-Disposition", disposition)
+        .cid(bare_id(&part.content_id))
+}
+
+fn attachment_part(a: &OutAttachment) -> MimePart<'_> {
+    let content_type =
+        ContentType::new(a.mime_type.as_str()).attribute("name", a.filename.as_str());
+    MimePart::new(content_type, a.data.as_slice()).attachment(a.filename.as_str())
 }
 
 fn address(a: &Addr) -> Address<'_> {

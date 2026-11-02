@@ -53,3 +53,15 @@ pub use quote::{
     QuoteSource, forward_quote_html, forward_subject, reply_quote_html, reply_subject,
     split_gmail_quote, split_quoted_history,
 };
+
+/// `s` with every run of whitespace turned into one space and the ends trimmed.
+pub(crate) fn collapse_whitespace(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for word in s.split_whitespace() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(word);
+    }
+    out
+}

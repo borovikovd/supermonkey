@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::collapse_whitespace;
 use crate::encoding::decode_encoded_words;
 
 /// One mailbox: an optional display name and an address.
@@ -170,8 +171,7 @@ fn clean_email(s: &str) -> String {
 }
 
 fn clean_name(s: &str) -> Option<String> {
-    let decoded = decode_encoded_words(s.trim());
-    let collapsed = decoded.split_whitespace().collect::<Vec<_>>().join(" ");
+    let collapsed = collapse_whitespace(&decode_encoded_words(s.trim()));
     let trimmed = collapsed.trim_matches(|c| c == '"' || c == '\'').trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
