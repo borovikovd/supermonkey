@@ -1,6 +1,6 @@
 //! One user's mailbox: labels, messages grouped into threads, drafts and history.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE;
@@ -82,7 +82,65 @@ pub(crate) struct Mailbox {
 }
 
 /// Returned when something is not there.
+#[derive(Debug)]
 pub(crate) struct Missing;
+
+impl Label {
+    pub fn json(&self) -> Value {
+        if self.system {
+            json!({ "id": self.id, "name": self.name, "type": "system" })
+        } else {
+            json!({
+                "id": self.id,
+                "name": self.name,
+                "type": "user",
+                "labelListVisibility": "labelShow",
+                "messageListVisibility": "show",
+            })
+        }
+    }
+}
+
+impl Msg {
+    /// The message in the shape `format` asks for.
+    pub fn json(&self, format: &str, metadata_headers: &[String]) -> Value {
+        let mut out = json!({
+            "id": self.id,
+            "threadId": self.thread_id,
+            "labelIds": self.label_ids,
+            "snippet": self.snippet,
+            "historyId": self.history_id.to_string(),
+            "internalDate": self.internal_date.to_string(),
+            "sizeEstimate": self.raw.len(),
+        });
+        match format {
+            "minimal" => {}
+            "metadata" => {
+                let headers: Vec<Value> = self
+                    .headers
+                    .iter()
+                    .filter(|(name, _)| {
+                        metadata_headers.is_empty()
+                            || metadata_headers
+                                .iter()
+                                .any(|h| h.eq_ignore_ascii_case(name))
+                    })
+                    .map(|(name, value)| json!({ "name": name, "value": value }))
+                    .collect();
+                out["payload"] = json!({
+                    "partId": "",
+                    "mimeType": self.payload["mimeType"],
+                    "filename": "",
+                    "headers": headers,
+                    "body": { "size": 0 },
+                });
+            }
+            "raw" => out["raw"] = json!(URL_SAFE.encode(&self.raw)),
+            _ => out["payload"] = self.payload.clone(),
+        }
+        out
+    }
+}
 
 impl Mailbox {
     pub fn new(email: &str) -> Self {
@@ -198,12 +256,13 @@ impl Mailbox {
     }
 
     /// Removes a message and records `messagesDeleted`.
-    pub fn delete(&mut self, id: &str) -> Result<Msg, Missing> {
+    pub fn delete(&mut self, id: &str) -> Result<(), Missing> {
         if !self.messages.contains_key(id) {
             return Err(Missing);
         }
         self.record(id, Change::Deleted);
-        Ok(self.messages.remove(id).expect("checked above"))
+        self.messages.remove(id);
+        Ok(())
     }
 
     /// Adds and removes labels, recording only real changes.
@@ -231,7 +290,7 @@ impl Mailbox {
     }
 
     pub fn profile_json(&self) -> Value {
-        let threads: std::collections::HashSet<&str> = self
+        let threads: HashSet<&str> = self
             .messages
             .values()
             .map(|m| m.thread_id.as_str())
@@ -245,7 +304,7 @@ impl Mailbox {
     }
 
     pub fn labels_json(&self) -> Value {
-        json!({ "labels": self.labels.iter().map(label_json).collect::<Vec<_>>() })
+        json!({ "labels": self.labels.iter().map(Label::json).collect::<Vec<_>>() })
     }
 
     pub fn send_as_json(&self) -> Value {
@@ -271,46 +330,8 @@ impl Mailbox {
         json!({ "sendAs": entries })
     }
 
-    /// A message in the shape `format` asks for.
-    pub fn message_json(msg: &Msg, format: &str, metadata_headers: &[String]) -> Value {
-        let mut out = json!({
-            "id": msg.id,
-            "threadId": msg.thread_id,
-            "labelIds": msg.label_ids,
-            "snippet": msg.snippet,
-            "historyId": msg.history_id.to_string(),
-            "internalDate": msg.internal_date.to_string(),
-            "sizeEstimate": msg.raw.len(),
-        });
-        match format {
-            "minimal" => {}
-            "metadata" => {
-                let headers: Vec<Value> = msg
-                    .headers
-                    .iter()
-                    .filter(|(name, _)| {
-                        metadata_headers.is_empty()
-                            || metadata_headers
-                                .iter()
-                                .any(|h| h.eq_ignore_ascii_case(name))
-                    })
-                    .map(|(name, value)| json!({ "name": name, "value": value }))
-                    .collect();
-                out["payload"] = json!({
-                    "partId": "",
-                    "mimeType": msg.payload["mimeType"],
-                    "filename": "",
-                    "headers": headers,
-                    "body": { "size": 0 },
-                });
-            }
-            "raw" => out["raw"] = json!(URL_SAFE.encode(&msg.raw)),
-            _ => out["payload"] = msg.payload.clone(),
-        }
-        out
-    }
-
-    fn thread_messages(&self, thread_id: &str) -> Vec<&Msg> {
+    /// A thread's messages, oldest first.
+    pub fn thread_messages(&self, thread_id: &str) -> Vec<&Msg> {
         let mut messages: Vec<&Msg> = self
             .messages
             .values()
@@ -322,13 +343,12 @@ impl Mailbox {
 
     pub fn thread_json(&self, thread_id: &str, format: &str, headers: &[String]) -> Option<Value> {
         let messages = self.thread_messages(thread_id);
-        let last = messages.last()?;
-        Some(json!({
-            "id": thread_id,
-            "snippet": last.snippet,
-            "historyId": messages.iter().map(|m| m.history_id).max().unwrap_or_default().to_string(),
-            "messages": messages.iter().map(|m| Mailbox::message_json(m, format, headers)).collect::<Vec<_>>(),
-        }))
+        if messages.is_empty() {
+            return None;
+        }
+        let mut out = thread_summary_json(thread_id, &messages);
+        out["messages"] = messages.iter().map(|m| m.json(format, headers)).collect();
+        Some(out)
     }
 
     /// Thread ids matching `q` and `label_ids`, newest first.
@@ -347,29 +367,25 @@ impl Mailbox {
             let date = latest.entry(&msg.thread_id).or_default();
             *date = (*date).max(msg.internal_date);
         }
-        let mut hits: Vec<&str> = Vec::new();
-        for msg in self.messages.values() {
-            let hidden = msg.label_ids.iter().any(|l| l == "SPAM" || l == "TRASH");
-            if (hidden && !wants_spam_trash)
-                || !label_ids.iter().all(|l| msg.label_ids.contains(l))
-                || !query.matches(msg)
-                || hits.contains(&msg.thread_id.as_str())
-            {
-                continue;
-            }
-            hits.push(&msg.thread_id);
-        }
+        let mut hits: Vec<&str> = self
+            .messages
+            .values()
+            .filter(|msg| {
+                let hidden = msg.label_ids.iter().any(|l| l == "SPAM" || l == "TRASH");
+                (!hidden || wants_spam_trash)
+                    && label_ids.iter().all(|l| msg.label_ids.contains(l))
+                    && query.matches(msg)
+            })
+            .map(|msg| msg.thread_id.as_str())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
         hits.sort_by(|a, b| latest[b].cmp(&latest[a]).then(b.cmp(a)));
         hits.into_iter().map(str::to_owned).collect()
     }
 
     pub fn thread_summary_json(&self, thread_id: &str) -> Value {
-        let messages = self.thread_messages(thread_id);
-        json!({
-            "id": thread_id,
-            "snippet": messages.last().map(|m| m.snippet.clone()).unwrap_or_default(),
-            "historyId": messages.iter().map(|m| m.history_id).max().unwrap_or_default().to_string(),
-        })
+        thread_summary_json(thread_id, &self.thread_messages(thread_id))
     }
 
     /// History records after `start`, or `Missing` if `start` is older than the floor.
@@ -386,18 +402,13 @@ impl Mailbox {
     }
 }
 
-pub(crate) fn label_json(label: &Label) -> Value {
-    if label.system {
-        json!({ "id": label.id, "name": label.name, "type": "system" })
-    } else {
-        json!({
-            "id": label.id,
-            "name": label.name,
-            "type": "user",
-            "labelListVisibility": "labelShow",
-            "messageListVisibility": "show",
-        })
-    }
+/// `id`, `snippet` and `historyId` of a thread whose messages are `messages`, oldest first.
+fn thread_summary_json(thread_id: &str, messages: &[&Msg]) -> Value {
+    json!({
+        "id": thread_id,
+        "snippet": messages.last().map(|m| m.snippet.as_str()).unwrap_or_default(),
+        "historyId": messages.iter().map(|m| m.history_id).max().unwrap_or_default().to_string(),
+    })
 }
 
 fn history_json(r: &HistoryRecord) -> Value {
