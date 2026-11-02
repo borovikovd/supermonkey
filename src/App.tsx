@@ -1,15 +1,8 @@
-import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { Toaster } from "sonner";
 
-import { connect, inTauri, quitNow, subscribe } from "./ipc/bridge";
-import { goTo } from "./commands";
-import { onKeyDown } from "./keyboard/keys";
-import { appHooks } from "./keyboard/refs";
-import { switchAccount } from "./accounts";
-import { closeComposerOnScreen } from "./compose/start";
-import { useChrome, type PaletteMode } from "./store/chrome";
-import { listKey, useAppState, useSubscription, useSummary } from "./store/hooks";
+import { useChrome } from "./store/chrome";
+import { listKey, useAppState, useSubscription } from "./store/hooks";
 import { ConversationView } from "./ui/ConversationView";
 import { ComposeScreen } from "./ui/ComposeScreen";
 import { FirstRun } from "./ui/FirstRun";
@@ -22,8 +15,6 @@ import { Sheets } from "./ui/Sheets";
 import { SendToasts } from "./ui/SendToasts";
 import { TopBar } from "./ui/TopBar";
 
-let started = false;
-
 /** Keeps each account's summary and last list subscribed, so switching back paints at once. */
 function AccountSubs({ account }: { account: number }) {
   useSubscription({ type: "account", account });
@@ -33,37 +24,11 @@ function AccountSubs({ account }: { account: number }) {
 }
 
 export function App() {
-  const [ready, setReady] = useState(false);
   const app = useAppState();
   const account = useChrome((s) => s.account);
   const screen = useChrome((s) =>
     s.account === null ? null : (s.perAccount[s.account]?.screen ?? null),
   );
-  const summary = useSummary(account);
-
-  useEffect(() => {
-    if (started) return;
-    started = true;
-    void connect().then(() => {
-      subscribe({ type: "app" });
-      setReady(true);
-    });
-    window.addEventListener("keydown", onKeyDown);
-    // Cmd+Q: close an open composer as a second Esc would, then quit once it commits.
-    if (inTauri) {
-      // A notification click: that account, Inbox, the thread selected.
-      void listen<{ account: number; thread: number | null }>("notification-open", (e) => {
-        switchAccount(e.payload.account);
-        goTo({ kind: "view", view: { kind: "inbox" } });
-        if (e.payload.thread !== null)
-          useChrome.getState().patchCurrent({ highlight: String(e.payload.thread) });
-      });
-      void listen("quit-requested", () => {
-        closeComposerOnScreen();
-        setTimeout(() => void quitNow(), 150);
-      });
-    }
-  }, []);
 
   // Pick an account on screen; follow removals.
   useEffect(() => {
@@ -74,17 +39,7 @@ export function App() {
     }
   }, [app, account]);
 
-  useEffect(() => {
-    appHooks.switchAccount = (index) => {
-      const a = app?.accounts[index];
-      if (a) switchAccount(a.id);
-    };
-    appHooks.splitIdOf = (kind) =>
-      summary?.splits.find((s) => s.kind === kind && s.enabled)?.id ?? null;
-    appHooks.openPalette = (mode: PaletteMode) => useChrome.getState().set({ palette: mode });
-  }, [summary, app]);
-
-  if (!ready || !app) return <div className="h-full bg-bg" />;
+  if (!app) return <div className="h-full bg-bg" />;
   if (app.accounts.length === 0) return <FirstRun />;
 
   return (
