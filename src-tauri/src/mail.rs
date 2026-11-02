@@ -125,9 +125,9 @@ pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: &ModifyAction) -> anyhow::Result<()>
         let latest_live = msgs.iter().rev().find(|x| x.live()).map(|x| x.id);
         let mut tc = ThreadChange {
             thread,
+            changes: Vec::new(),
             snooze_before,
-            snooze_after: snooze_before,
-            ..Default::default()
+            snooze_after: snooze_after(m, snooze_before),
         };
         for msg in msgs.iter().filter(|x| !x.is_draft) {
             // Every message is part of the op: a queued action applies to the messages it recorded.
@@ -137,7 +137,6 @@ pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: &ModifyAction) -> anyhow::Result<()>
                 tc.changes.push(change);
             }
         }
-        tc.snooze_after = snooze_after(m, snooze_before);
         if tc.snooze_after != snooze_before {
             ctx.tx.execute(
                 "UPDATE threads SET snooze_until = ?2 WHERE id = ?1",
@@ -184,7 +183,7 @@ pub fn undo(
     account: AccountId,
     payload: &serde_json::Value,
 ) -> anyhow::Result<()> {
-    let threads: Vec<ThreadChange> = serde_json::from_value(payload["threads"].clone())?;
+    let threads = Vec::<ThreadChange>::deserialize(&payload["threads"])?;
     revert(ctx, Some(n), account, &threads, true)
 }
 

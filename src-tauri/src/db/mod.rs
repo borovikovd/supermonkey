@@ -68,10 +68,11 @@ impl ReadPool {
             .iter()
             .find_map(|slot| slot.try_lock())
             .unwrap_or_else(|| self.conns[0].lock());
-        if guard.is_none() {
-            *guard = Some(open_reader(&self.path)?);
-        }
-        f(guard.as_ref().expect("connection opened above"))
+        let conn = match &mut *guard {
+            Some(conn) => conn,
+            slot => slot.insert(open_reader(&self.path)?),
+        };
+        f(conn)
     }
 }
 

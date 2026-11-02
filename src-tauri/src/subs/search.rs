@@ -1,8 +1,9 @@
 //! Local search (SPEC Search): FTS5 matches plus the Gmail hits for the query.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::model::{AccountId, ListEntry, ThreadId};
+use crate::threads::RuleMsg;
 
 /// Most local matches a search list holds.
 const LIMIT: i64 = 500;
@@ -63,7 +64,7 @@ pub fn ids(
                     rusqlite::params![t, account],
                     |r| r.get::<_, i64>(0),
                 )
-                .ok()
+                .optional()?
         {
             matched.push((time, t));
         }
@@ -79,54 +80,6 @@ pub fn ids(
         .collect())
 }
 
-struct SearchSubject<'a> {
-    msg: &'a crate::threads::Msg,
-    body: String,
-    user_labels: Vec<String>,
-}
-
-impl ub_rules::RuleSubject for SearchSubject<'_> {
-    fn sender(&self) -> (&str, &str) {
-        (&self.msg.from_name, &self.msg.from_email)
-    }
-    fn to(&self) -> Vec<(&str, &str)> {
-        self.msg
-            .to
-            .iter()
-            .map(|a| (a.name.as_deref().unwrap_or(""), a.email.as_str()))
-            .collect()
-    }
-    fn cc(&self) -> Vec<(&str, &str)> {
-        self.msg
-            .cc
-            .iter()
-            .map(|a| (a.name.as_deref().unwrap_or(""), a.email.as_str()))
-            .collect()
-    }
-    fn bcc(&self) -> Vec<(&str, &str)> {
-        self.msg
-            .bcc
-            .iter()
-            .map(|a| (a.name.as_deref().unwrap_or(""), a.email.as_str()))
-            .collect()
-    }
-    fn subject(&self) -> &str {
-        &self.msg.subject
-    }
-    fn body(&self) -> &str {
-        &self.body
-    }
-    fn thread_user_labels(&self) -> Vec<&str> {
-        self.user_labels.iter().map(String::as_str).collect()
-    }
-    fn message_label_ids(&self) -> Vec<&str> {
-        self.msg.labels.iter().map(String::as_str).collect()
-    }
-    fn is_list(&self) -> bool {
-        self.msg.is_list
-    }
-}
-
 /// The thread's sort time when any live message matches, like Gmail search
 /// skips threads with no message outside trash and spam.
 pub fn thread_matches(
@@ -136,7 +89,7 @@ pub fn thread_matches(
     q: &ub_rules::Query,
 ) -> anyhow::Result<Option<i64>> {
     let msgs = crate::threads::messages(conn, thread)?;
-    if !msgs.iter().any(super::super::threads::Msg::live) {
+    if !msgs.iter().any(crate::threads::Msg::live) {
         return Ok(None);
     }
     let labels = crate::threads::thread_labels(&msgs);
@@ -145,10 +98,10 @@ pub fn thread_matches(
         conn.prepare_cached("SELECT coalesce(body_text, '') FROM messages WHERE id = ?1")?;
     for m in msgs.iter().filter(|m| m.live()) {
         let body: String = body_stmt.query_row([m.id], |r| r.get(0))?;
-        let s = SearchSubject {
+        let s = RuleMsg {
             msg: m,
-            body,
-            user_labels: user_labels.clone(),
+            body: &body,
+            user_labels: &user_labels,
         };
         if q.matches(&s, ub_rules::Mode::Search) {
             let time = msgs.iter().rev().find(|m| m.live()).map_or(0, |m| m.date);

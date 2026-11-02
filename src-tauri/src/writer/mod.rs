@@ -98,6 +98,14 @@ impl Touched {
             && self.subs.is_empty()
             && !self.app
     }
+
+    /// A thread's row, its account's lists and summary, and unread counts.
+    fn thread(&mut self, account: AccountId, thread: ThreadId) {
+        self.threads.insert(thread);
+        self.lists.insert(account);
+        self.summaries.insert(account);
+        self.app = true;
+    }
 }
 
 /// A job's view of the writer: the open transaction plus bookkeeping.
@@ -118,19 +126,13 @@ impl Ctx<'_> {
             "UPDATE threads SET rev = ?1 WHERE id = ?2",
             params![self.rev, thread],
         )?;
-        self.touched.threads.insert(thread);
-        self.touched.lists.insert(account);
-        self.touched.summaries.insert(account);
-        self.touched.app = true;
+        self.touched.thread(account, thread);
         Ok(())
     }
 
     /// A thread was deleted; lists must drop it.
     pub fn thread_gone(&mut self, account: AccountId, thread: ThreadId) {
-        self.touched.threads.insert(thread);
-        self.touched.lists.insert(account);
-        self.touched.summaries.insert(account);
-        self.touched.app = true;
+        self.touched.thread(account, thread);
     }
 
     pub fn touch_message(&mut self, message: MessageId) -> rusqlite::Result<()> {
@@ -220,17 +222,7 @@ impl Writer {
         f: impl FnOnce(&mut Ctx<'_>) -> anyhow::Result<T> + Send + 'static,
     ) -> anyhow::Result<T> {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.sync(move |ctx| {
-            let r = f(ctx);
-            let failed = r.is_err();
-            let out = r.map_err(|e| anyhow::anyhow!("{e:#}"));
-            let _ = tx.send(out);
-            if failed {
-                Err(anyhow::anyhow!("job failed"))
-            } else {
-                Ok(())
-            }
-        });
+        self.sync(move |ctx| run_and_reply(ctx, f, |r| _ = tx.send(r)));
         rx.await
             .map_err(|e| anyhow::anyhow!("writer stopped: {e}"))?
     }
@@ -241,16 +233,7 @@ impl Writer {
         f: impl FnOnce(&mut Ctx<'_>) -> anyhow::Result<T> + Send + 'static,
     ) -> anyhow::Result<T> {
         let (tx, rx) = crossbeam_channel::bounded(1);
-        self.sync(move |ctx| {
-            let r = f(ctx);
-            let failed = r.is_err();
-            let _ = tx.send(r.map_err(|e| anyhow::anyhow!("{e:#}")));
-            if failed {
-                Err(anyhow::anyhow!("job failed"))
-            } else {
-                Ok(())
-            }
-        });
+        self.sync(move |ctx| run_and_reply(ctx, f, |r| _ = tx.send(r)));
         rx.recv()
             .map_err(|e| anyhow::anyhow!("writer stopped: {e}"))?
     }
@@ -263,6 +246,22 @@ impl Writer {
     pub fn set_online(&self, online: bool) {
         let _ = self.ui.send(Job::SetOnline(online));
     }
+}
+
+/// Runs `f` and hands its result to the waiting caller. A failed `f` also
+/// fails the job, so its transaction rolls back.
+fn run_and_reply<T>(
+    ctx: &mut Ctx<'_>,
+    f: impl FnOnce(&mut Ctx<'_>) -> anyhow::Result<T>,
+    reply: impl FnOnce(anyhow::Result<T>),
+) -> anyhow::Result<()> {
+    let result = f(ctx);
+    let failed = result.is_err();
+    reply(result.map_err(|e| anyhow::anyhow!("{e:#}")));
+    if failed {
+        anyhow::bail!("job failed");
+    }
+    Ok(())
 }
 
 struct WriterState {

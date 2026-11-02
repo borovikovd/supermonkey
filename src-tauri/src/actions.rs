@@ -1,6 +1,6 @@
 //! Applies one numbered UI action inside a writer transaction.
 
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use crate::model::{AccountId, Action, SubId, SubKey, View};
 use crate::writer::{Ctx, Effect, GmailListQuery};
@@ -44,35 +44,29 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
         Action::SaveDraft { draft, save } => crate::drafts::save(ctx, &draft, save),
         Action::CloseComposer { draft } => {
             crate::drafts::close(ctx, &draft)?;
-            if let Some(id) = composer_sub(ctx, &draft) {
-                ctx.subs.unsubscribe(&id);
-            }
+            close_composer_sub(ctx, &draft);
             Ok(())
         }
         Action::SendDraft { draft } => {
             crate::outbox::send(ctx, n, &draft)?;
-            if let Some(id) = composer_sub(ctx, &draft) {
-                ctx.subs.unsubscribe(&id);
-            }
+            close_composer_sub(ctx, &draft);
             Ok(())
         }
         Action::DiscardDraft { draft } => {
             crate::drafts::discard(ctx, &draft)?;
-            if let Some(id) = composer_sub(ctx, &draft) {
-                ctx.subs.unsubscribe(&id);
-            }
+            close_composer_sub(ctx, &draft);
             Ok(())
         }
         Action::CloseToast { outbox } => crate::outbox::close_toast(ctx, outbox),
         Action::AckNotice { notice } => {
-            let account: Option<i64> = ctx
+            let account: Option<AccountId> = ctx
                 .tx
                 .query_row(
                     "SELECT account_id FROM notices WHERE id = ?1",
                     [notice],
                     |r| r.get(0),
                 )
-                .ok();
+                .optional()?;
             ctx.tx
                 .execute("DELETE FROM notices WHERE id = ?1", [notice])?;
             if let Some(a) = account {
@@ -129,12 +123,16 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
     }
 }
 
-fn composer_sub(ctx: &Ctx<'_>, draft: &str) -> Option<SubId> {
-    ctx.subs
+fn close_composer_sub(ctx: &mut Ctx<'_>, draft: &str) {
+    let id = ctx
+        .subs
         .map
         .iter()
         .find(|(_, s)| matches!(&s.key, SubKey::Composer { draft: d } if d == draft))
-        .map(|(id, _)| id.clone())
+        .map(|(id, _)| id.clone());
+    if let Some(id) = id {
+        ctx.subs.unsubscribe(&id);
+    }
 }
 
 /// The Gmail listing a subscription needs while online: Search, and the
@@ -186,14 +184,14 @@ fn subscribe(ctx: &mut Ctx<'_>, sub: SubId, key: SubKey) -> anyhow::Result<()> {
             }
         }
         SubKey::Composer { draft } => {
-            let needs: Option<(i64, bool)> = ctx
+            let needs: Option<(AccountId, bool)> = ctx
                 .tx
                 .query_row(
                     "SELECT account_id, needs_parts FROM drafts WHERE id = ?1",
                     [draft],
                     |r| Ok((r.get(0)?, r.get(1)?)),
                 )
-                .ok();
+                .optional()?;
             if let Some((account, true)) = needs {
                 ctx.effect(Effect::DraftParts {
                     account,

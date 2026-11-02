@@ -142,21 +142,13 @@ impl Subs {
                     };
                     if hit || forced {
                         let ids = queries::list_ids(conn, account, &view)?;
-                        if let Some(u) = list_patch(conn, id, sub, ids, t, drafts)? {
-                            out.push(u);
-                        } else if forced {
-                            out.push(empty_list_patch(id, sub));
-                        }
+                        out.extend(list_patch(conn, id, sub, ids, t, drafts, forced)?);
                     }
                 }
                 SubKey::Search { account, query } => {
                     if t.lists.contains(&account) || forced {
                         let ids = search::ids(conn, account, &query, &sub.gmail_hits)?;
-                        if let Some(u) = list_patch(conn, id, sub, ids, t, false)? {
-                            out.push(u);
-                        } else if forced {
-                            out.push(empty_list_patch(id, sub));
-                        }
+                        out.extend(list_patch(conn, id, sub, ids, t, false, forced)?);
                     }
                 }
                 SubKey::Conversation {
@@ -185,19 +177,8 @@ impl Subs {
     }
 }
 
-fn empty_list_patch(id: &str, sub: &Sub) -> SubUpdate {
-    SubUpdate::List {
-        sub: id.to_string(),
-        first: false,
-        ids: None,
-        removed: vec![],
-        moved: vec![],
-        rows: vec![],
-        searching: sub.searching,
-        more: sub.next_page.is_some(),
-    }
-}
-
+/// The patch from the last ids sent to `ids`, or None when nothing changed.
+/// A forced patch is sent even when empty, so `searching` and `more` reach the mirror.
 fn list_patch(
     conn: &Connection,
     id: &str,
@@ -205,6 +186,7 @@ fn list_patch(
     ids: Vec<ListEntry>,
     t: &Touched,
     drafts: bool,
+    forced: bool,
 ) -> anyhow::Result<Option<SubUpdate>> {
     let (removed, moved) = diff::diff(&sub.ids, &ids);
     let changed: Vec<String> = ids
@@ -219,7 +201,7 @@ fn list_patch(
         .map(|e| e.key.clone())
         .collect();
     sub.ids = ids;
-    if removed.is_empty() && moved.is_empty() && changed.is_empty() {
+    if !forced && removed.is_empty() && moved.is_empty() && changed.is_empty() {
         return Ok(None);
     }
     let rows = queries::rows_for_keys(conn, drafts, &changed)?;

@@ -115,12 +115,16 @@ fn send_as(ctx: &Ctx<'_>, account: AccountId) -> anyhow::Result<(Vec<SendAs>, Ad
                 name: (!name.is_empty() && name != email).then_some(name),
                 email,
             },
-            |s| Addr {
-                name: (!s.name.is_empty()).then(|| s.name.clone()),
-                email: s.email.clone(),
-            },
+            send_as_addr,
         );
     Ok((list, default))
+}
+
+fn send_as_addr(s: &SendAs) -> Addr {
+    Addr {
+        name: (!s.name.is_empty()).then(|| s.name.clone()),
+        email: s.email.clone(),
+    }
 }
 
 fn same(a: &str, b: &str) -> bool {
@@ -134,7 +138,6 @@ fn dedup(list: Vec<Addr>, skip: &HashSet<String>) -> Vec<Addr> {
         .collect()
 }
 
-/// Fills a fresh composer by the rules in SPEC Addressing.
 /// A fresh composer's first save (SPEC UI state → Actions).
 struct NewDraft<'a> {
     draft: &'a str,
@@ -167,10 +170,7 @@ fn reply_addressing(
     let from = send_as
         .iter()
         .find(|s| t.to.iter().chain(&t.cc).any(|a| same(&a.email, &s.email)))
-        .map_or(default_from, |s| Addr {
-            name: (!s.name.is_empty()).then(|| s.name.clone()),
-            email: s.email.clone(),
-        });
+        .map_or(default_from, send_as_addr);
     let to = if t.reply_to.is_empty() {
         vec![t.from.clone()]
     } else {
@@ -231,7 +231,7 @@ fn create(ctx: &mut Ctx<'_>, d: &NewDraft<'_>) -> anyhow::Result<()> {
         references = format!(
             "{} {}",
             t.references,
-            t.message_id.clone().unwrap_or_default()
+            t.message_id.as_deref().unwrap_or_default()
         )
         .trim()
         .to_string();
@@ -331,14 +331,17 @@ pub fn queue_upsert(ctx: &mut Ctx<'_>, account: AccountId, draft: &str) -> anyho
     Ok(())
 }
 
-pub fn save(ctx: &mut Ctx<'_>, draft: &str, save: DraftSave) -> anyhow::Result<()> {
-    // A save that arrives after its draft was sent or discarded is dropped.
-    let in_outbox: bool = ctx.tx.query_row(
+fn in_outbox(ctx: &Ctx<'_>, draft: &str) -> rusqlite::Result<bool> {
+    ctx.tx.query_row(
         "SELECT EXISTS (SELECT 1 FROM outbox WHERE draft_id = ?1)",
         [draft],
         |r| r.get(0),
-    )?;
-    if in_outbox {
+    )
+}
+
+pub fn save(ctx: &mut Ctx<'_>, draft: &str, save: DraftSave) -> anyhow::Result<()> {
+    // A save that arrives after its draft was sent or discarded is dropped.
+    if in_outbox(ctx, draft)? {
         return Ok(());
     }
     match save {
@@ -432,33 +435,27 @@ pub fn is_untouched(ctx: &Ctx<'_>, draft: &str) -> anyhow::Result<bool> {
             },
         )
         .optional()?;
-    let Some(StoredFields {
-        from,
-        to,
-        cc,
-        bcc,
-        subject,
-        body,
-        attachments: atts,
-        defaults,
-    }) = row
+    let Some(stored) = row else {
+        return Ok(false);
+    };
+    let Some(d) = stored
+        .defaults
+        .as_deref()
+        .and_then(|d| serde_json::from_str::<Defaults>(d).ok())
     else {
         return Ok(false);
     };
-    let Some(d) = defaults.and_then(|d| serde_json::from_str::<Defaults>(&d).ok()) else {
-        return Ok(false);
-    };
-    let atts: Vec<DraftAttachment> = from_json(&atts);
-    let empty_body = ub_mime::html_to_text(&body).trim().is_empty() && !body.contains("<img");
-    Ok(
-        serde_json::from_str::<Option<Addr>>(&from).ok().flatten() == d.from
-            && from_json::<Vec<Addr>>(&to) == d.to
-            && from_json::<Vec<Addr>>(&cc) == d.cc
-            && from_json::<Vec<Addr>>(&bcc) == d.bcc
-            && subject == d.subject
-            && (empty_body || body == d.body_html)
-            && atts.iter().map(|a| a.id.clone()).collect::<Vec<_>>() == d.attachments,
-    )
+    let from: Option<Addr> = serde_json::from_str(&stored.from).ok().flatten();
+    let body = &stored.body;
+    let atts: Vec<DraftAttachment> = from_json(&stored.attachments);
+    let empty_body = ub_mime::html_to_text(body).trim().is_empty() && !body.contains("<img");
+    Ok(from == d.from
+        && from_json::<Vec<Addr>>(&stored.to) == d.to
+        && from_json::<Vec<Addr>>(&stored.cc) == d.cc
+        && from_json::<Vec<Addr>>(&stored.bcc) == d.bcc
+        && stored.subject == d.subject
+        && (empty_body || *body == d.body_html)
+        && atts.iter().map(|a| &a.id).eq(&d.attachments))
 }
 
 /// Closing a composer (second Esc, switching, quitting). A draft started fresh
@@ -475,12 +472,7 @@ pub fn close(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
     let Some((account, fresh, pending_read)) = row else {
         return Ok(());
     };
-    let in_outbox: bool = ctx.tx.query_row(
-        "SELECT EXISTS (SELECT 1 FROM outbox WHERE draft_id = ?1)",
-        [draft],
-        |r| r.get(0),
-    )?;
-    if in_outbox {
+    if in_outbox(ctx, draft)? {
         return Ok(());
     }
     let untouched = is_untouched(ctx, draft)?;
@@ -522,13 +514,8 @@ pub fn discard(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
     ctx.touched.drafts.insert(draft.to_string());
     ctx.touched.draft_lists.insert(account);
     ctx.touch_summary(account);
-    if let Some(t) = thread
-        && ctx
-            .tx
-            .query_row("SELECT 1 FROM threads WHERE id = ?1", [t], |_| Ok(()))
-            .is_ok()
-    {
-        ctx.touch_thread(account, t)?;
+    if let Some(t) = thread {
+        crate::threads::touch_if_exists(ctx, account, t)?;
     }
     if let Some(g) = gmail {
         crate::queue::push(

@@ -5,54 +5,13 @@ use std::collections::{BTreeSet, HashMap};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::model::{AccountId, Addr, PinKind, SplitId, SplitInfo, SplitKind, ThreadId};
-use crate::threads::Msg;
+use crate::model::{AccountId, PinKind, SplitId, SplitInfo, SplitKind, ThreadId};
+use crate::threads::{Msg, RuleMsg};
 use crate::writer::Ctx;
 
 thread_local! {
     /// Parsed custom split queries, by query text.
     static PARSED: RefCell<HashMap<String, ub_rules::Query>> = RefCell::new(HashMap::new());
-}
-
-struct Subject<'a> {
-    msg: &'a Msg,
-    user_labels: Vec<String>,
-}
-
-impl ub_rules::RuleSubject for Subject<'_> {
-    fn sender(&self) -> (&str, &str) {
-        (&self.msg.from_name, &self.msg.from_email)
-    }
-    fn to(&self) -> Vec<(&str, &str)> {
-        pairs(&self.msg.to)
-    }
-    fn cc(&self) -> Vec<(&str, &str)> {
-        pairs(&self.msg.cc)
-    }
-    fn bcc(&self) -> Vec<(&str, &str)> {
-        pairs(&self.msg.bcc)
-    }
-    fn subject(&self) -> &str {
-        &self.msg.subject
-    }
-    fn body(&self) -> &'static str {
-        ""
-    }
-    fn thread_user_labels(&self) -> Vec<&str> {
-        self.user_labels.iter().map(String::as_str).collect()
-    }
-    fn message_label_ids(&self) -> Vec<&str> {
-        self.msg.labels.iter().map(String::as_str).collect()
-    }
-    fn is_list(&self) -> bool {
-        self.msg.is_list
-    }
-}
-
-fn pairs(v: &[Addr]) -> Vec<(&str, &str)> {
-    v.iter()
-        .map(|a| (a.name.as_deref().unwrap_or(""), a.email.as_str()))
-        .collect()
 }
 
 /// Names of the user labels among a thread's labels.
@@ -78,7 +37,7 @@ pub fn user_label_names(
 
 struct SplitRow {
     id: SplitId,
-    kind: String,
+    kind: SplitKind,
     query: String,
     enabled: bool,
 }
@@ -99,7 +58,7 @@ pub fn route(
         stmt.query_map([account], |r| {
             Ok(SplitRow {
                 id: r.get(0)?,
-                kind: r.get(1)?,
+                kind: SplitKind::parse(&r.get::<_, String>(1)?),
                 query: r.get(2)?,
                 enabled: r.get(3)?,
             })
@@ -110,25 +69,25 @@ pub fn route(
     let order = |id: SplitId| splits.iter().position(|s| s.id == id).unwrap_or(usize::MAX);
     let user_labels = user_label_names(conn, account, labels)?;
 
-    let pin = |kind: &str, value: &str| -> anyhow::Result<Option<SplitId>> {
+    let pin = |kind: PinKind, value: &str| -> anyhow::Result<Option<SplitId>> {
         Ok(conn
             .prepare_cached("SELECT split_id FROM split_overrides WHERE account_id = ?1 AND kind = ?2 AND value = ?3")?
-            .query_row(params![account, kind, value], |r| r.get::<_, i64>(0))
+            .query_row(params![account, kind.as_str(), value], |r| r.get::<_, i64>(0))
             .optional()?
             .filter(|&id| enabled(id)))
     };
     let email = msg.from_email.to_lowercase();
-    if let Some(id) = pin("sender", &email)? {
+    if let Some(id) = pin(PinKind::Sender, &email)? {
         return Ok(Some(id));
     }
     if let Some(domain) = email.split('@').nth(1)
-        && let Some(id) = pin("domain", domain)?
+        && let Some(id) = pin(PinKind::Domain, domain)?
     {
         return Ok(Some(id));
     }
     let mut label_hits: Vec<SplitId> = Vec::new();
     for name in &user_labels {
-        if let Some(id) = pin("label", &name.to_lowercase())? {
+        if let Some(id) = pin(PinKind::Label, &name.to_lowercase())? {
             label_hits.push(id);
         }
     }
@@ -136,29 +95,40 @@ pub fn route(
         return Ok(Some(id));
     }
 
-    let subject = Subject { msg, user_labels };
+    let subject = RuleMsg {
+        msg,
+        body: "",
+        user_labels: &user_labels,
+    };
     for s in splits
         .iter()
-        .filter(|s| s.kind == "custom" && s.enabled && !s.query.trim().is_empty())
+        .filter(|s| s.kind == SplitKind::Custom && s.enabled && !s.query.trim().is_empty())
     {
-        let hit = PARSED.with(|cache| {
-            let mut cache = cache.borrow_mut();
-            let q = cache
-                .entry(s.query.clone())
-                .or_insert_with(|| ub_rules::Query::parse(&s.query));
-            q.matches(&subject, ub_rules::Mode::Rule)
+        // Look up before inserting so a cache hit does not copy the query.
+        let hit = PARSED.with_borrow_mut(|cache| {
+            if !cache.contains_key(&s.query) {
+                cache.insert(s.query.clone(), ub_rules::Query::parse(&s.query));
+            }
+            cache
+                .get(&s.query)
+                .is_some_and(|q| q.matches(&subject, ub_rules::Mode::Rule))
         });
         if hit {
             return Ok(Some(s.id));
         }
     }
     let labels: Vec<&str> = msg.labels.iter().map(String::as_str).collect();
-    if let Some(imp) = splits.iter().find(|s| s.kind == "important" && s.enabled)
+    if let Some(imp) = splits
+        .iter()
+        .find(|s| s.kind == SplitKind::Important && s.enabled)
         && ub_rules::is_person_to_person(&labels, msg.is_list)
     {
         return Ok(Some(imp.id));
     }
-    Ok(splits.iter().find(|s| s.kind == "other").map(|s| s.id))
+    Ok(splits
+        .iter()
+        .find(|s| s.kind == SplitKind::Other)
+        .map(|s| s.id))
 }
 
 /// Creates Important and Other for a new account.
@@ -202,7 +172,7 @@ pub fn reroute_inbox(ctx: &mut Ctx<'_>, account: AccountId) -> anyhow::Result<()
 }
 
 /// `Add to split`, `Move to Important/Other`: pins a sender, domain, or label.
-/// Returns the split it replaced.
+/// The undo entry remembers the split it replaced.
 pub fn pin(
     ctx: &mut Ctx<'_>,
     n: i64,

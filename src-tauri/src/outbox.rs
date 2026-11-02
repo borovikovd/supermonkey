@@ -6,7 +6,7 @@
 use rusqlite::{OptionalExtension, params};
 
 use crate::db::from_json;
-use crate::model::{AccountId, Addr, MessageId, ThreadId};
+use crate::model::{AccountId, Addr, MessageId, OutboxState, ThreadId};
 use crate::writer::{Ctx, Effect};
 
 /// The undo window. Fixed at ten seconds, as in Superhuman; tests shorten it.
@@ -96,7 +96,7 @@ struct OutboxRef {
     account: AccountId,
     draft: String,
     thread: Option<ThreadId>,
-    state: String,
+    state: OutboxState,
     sent_message: Option<String>,
 }
 
@@ -111,7 +111,7 @@ fn row(ctx: &Ctx<'_>, outbox: i64) -> anyhow::Result<Option<OutboxRef>> {
                     account: r.get(0)?,
                     draft: r.get(1)?,
                     thread: r.get(2)?,
-                    state: r.get(3)?,
+                    state: OutboxState::parse(&r.get::<_, String>(3)?),
                     sent_message: r.get(4)?,
                 })
             },
@@ -126,7 +126,7 @@ pub fn close_toast(ctx: &mut Ctx<'_>, outbox: i64) -> anyhow::Result<()> {
     };
     ctx.tx
         .execute("UPDATE outbox SET toast_closed = 1 WHERE id = ?1", [outbox])?;
-    if state == "sent" {
+    if state == OutboxState::Sent {
         crate::undo::drop_send_entry(ctx, account, outbox)?;
     }
     ctx.touch_outbox(account, outbox)?;
@@ -147,8 +147,8 @@ pub fn undo_send(ctx: &mut Ctx<'_>, account: AccountId, outbox: i64) -> anyhow::
         anyhow::bail!("outbox row {outbox} is gone");
     };
     anyhow::ensure!(acc == account, "outbox row belongs to another account");
-    match state.as_str() {
-        "waiting" => {
+    match state {
+        OutboxState::Waiting => {
             ctx.tx
                 .execute("DELETE FROM outbox WHERE id = ?1", [outbox])?;
             // A draft reopened by undo is never discarded as untouched.
@@ -158,14 +158,14 @@ pub fn undo_send(ctx: &mut Ctx<'_>, account: AccountId, outbox: i64) -> anyhow::
             )?;
             ctx.touch_draft(account, &draft)?;
         }
-        "sending" => {
+        OutboxState::Sending => {
             ctx.tx.execute(
                 "UPDATE outbox SET undo_requested = 1 WHERE id = ?1",
                 [outbox],
             )?;
             ctx.touch_outbox(account, outbox)?;
         }
-        _ => {
+        OutboxState::Sent => {
             if let Some(gid) = sent_id {
                 trash_sent(ctx, account, &gid)?;
             }
@@ -178,13 +178,8 @@ pub fn undo_send(ctx: &mut Ctx<'_>, account: AccountId, outbox: i64) -> anyhow::
         }
     }
     ctx.touch_summary(account);
-    if let Some(t) = thread
-        && ctx
-            .tx
-            .query_row("SELECT 1 FROM threads WHERE id = ?1", [t], |_| Ok(()))
-            .is_ok()
-    {
-        ctx.touch_thread(account, t)?;
+    if let Some(t) = thread {
+        crate::threads::touch_if_exists(ctx, account, t)?;
     }
     Ok(())
 }

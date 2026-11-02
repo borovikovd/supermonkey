@@ -41,6 +41,52 @@ impl Msg {
     }
 }
 
+/// A message as split rules and local search read it.
+pub struct RuleMsg<'a> {
+    pub msg: &'a Msg,
+    /// Plain body text; split rules never read it.
+    pub body: &'a str,
+    /// Names of the thread's user labels.
+    pub user_labels: &'a [String],
+}
+
+impl ub_rules::RuleSubject for RuleMsg<'_> {
+    fn sender(&self) -> (&str, &str) {
+        (&self.msg.from_name, &self.msg.from_email)
+    }
+    fn to(&self) -> Vec<(&str, &str)> {
+        pairs(&self.msg.to)
+    }
+    fn cc(&self) -> Vec<(&str, &str)> {
+        pairs(&self.msg.cc)
+    }
+    fn bcc(&self) -> Vec<(&str, &str)> {
+        pairs(&self.msg.bcc)
+    }
+    fn subject(&self) -> &str {
+        &self.msg.subject
+    }
+    fn body(&self) -> &str {
+        self.body
+    }
+    fn thread_user_labels(&self) -> Vec<&str> {
+        self.user_labels.iter().map(String::as_str).collect()
+    }
+    fn message_label_ids(&self) -> Vec<&str> {
+        self.msg.labels.iter().map(String::as_str).collect()
+    }
+    fn is_list(&self) -> bool {
+        self.msg.is_list
+    }
+}
+
+fn pairs(addrs: &[Addr]) -> Vec<(&str, &str)> {
+    addrs
+        .iter()
+        .map(|a| (a.name.as_deref().unwrap_or(""), a.email.as_str()))
+        .collect()
+}
+
 pub fn messages(conn: &rusqlite::Connection, thread: ThreadId) -> anyhow::Result<Vec<Msg>> {
     let mut stmt = conn.prepare_cached(
         "SELECT id, gmail_id, internal_date, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet,
@@ -107,26 +153,18 @@ pub fn thread_labels(msgs: &[Msg]) -> BTreeSet<String> {
 
 /// Recomputes a thread's row. Deletes it when it has no messages left.
 pub fn refresh(ctx: &mut Ctx<'_>, thread: ThreadId) -> anyhow::Result<()> {
-    let Some(account) = ctx
-        .tx
-        .query_row(
-            "SELECT account_id FROM threads WHERE id = ?1",
-            [thread],
-            |r| r.get::<_, i64>(0),
-        )
-        .optional()?
-    else {
+    let Some(account) = account_of(ctx.tx, thread)? else {
         return Ok(());
     };
     let msgs = messages(ctx.tx, thread)?;
-    if msgs.is_empty() {
-        // Drafts keep their row; their thread link is cleared by the foreign key.
+    let Some(latest) = latest(&msgs) else {
+        // No messages left. Drafts keep their row; their thread link is
+        // cleared by the foreign key.
         ctx.tx
             .execute("DELETE FROM threads WHERE id = ?1", [thread])?;
         ctx.thread_gone(account, thread);
         return Ok(());
-    }
-    let latest = latest(&msgs).expect("non-empty");
+    };
     let labels = thread_labels(&msgs);
     let subject = msgs
         .iter()
@@ -143,7 +181,7 @@ pub fn refresh(ctx: &mut Ctx<'_>, thread: ThreadId) -> anyhow::Result<()> {
 
     let mine = queries::my_addresses(ctx.tx, account)?;
     let split = if in_inbox {
-        let subject_msg = latest_from_someone_else(&msgs, &mine).expect("non-empty");
+        let subject_msg = latest_from_someone_else(&msgs, &mine).unwrap_or(latest);
         crate::splits::route(ctx.tx, account, &labels, subject_msg)?
     } else {
         None
@@ -212,4 +250,16 @@ pub fn account_of(
             |r| r.get(0),
         )
         .optional()?)
+}
+
+/// Stamps a thread if it still exists.
+pub fn touch_if_exists(
+    ctx: &mut Ctx<'_>,
+    account: AccountId,
+    thread: ThreadId,
+) -> anyhow::Result<()> {
+    if account_of(ctx.tx, thread)?.is_some() {
+        ctx.touch_thread(account, thread)?;
+    }
+    Ok(())
 }

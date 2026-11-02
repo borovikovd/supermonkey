@@ -1,17 +1,21 @@
 //! Accounts (SPEC Accounts, Settings → Remove account).
 
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 
 use crate::model::AccountId;
 use crate::writer::{Ctx, Effect};
 
 /// Adds an account row (or returns the existing one) with its default splits.
 pub fn create(ctx: &mut Ctx<'_>, email: &str) -> anyhow::Result<AccountId> {
-    if let Ok(id) = ctx.tx.query_row(
-        "SELECT id FROM accounts WHERE lower(email) = lower(?1)",
-        [email],
-        |r| r.get(0),
-    ) {
+    let existing: Option<AccountId> = ctx
+        .tx
+        .query_row(
+            "SELECT id FROM accounts WHERE lower(email) = lower(?1)",
+            [email],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(id) = existing {
         ctx.tx
             .execute("UPDATE accounts SET needs_signin = 0 WHERE id = ?1", [id])?;
         ctx.touch_app();

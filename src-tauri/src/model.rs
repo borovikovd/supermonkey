@@ -260,6 +260,16 @@ pub enum OutboxState {
     Sent,
 }
 
+impl OutboxState {
+    pub fn parse(s: &str) -> OutboxState {
+        match s {
+            "sending" => OutboxState::Sending,
+            "sent" => OutboxState::Sent,
+            _ => OutboxState::Waiting,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -353,6 +363,16 @@ pub enum SplitKind {
     Custom,
     Important,
     Other,
+}
+
+impl SplitKind {
+    pub fn parse(s: &str) -> SplitKind {
+        match s {
+            "important" => SplitKind::Important,
+            "other" => SplitKind::Other,
+            _ => SplitKind::Custom,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -457,6 +477,16 @@ pub enum UndoKind {
     Pin,
 }
 
+impl UndoKind {
+    pub fn parse(s: &str) -> UndoKind {
+        match s {
+            "send" => UndoKind::Send,
+            "pin" => UndoKind::Pin,
+            _ => UndoKind::Mail,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -470,6 +500,18 @@ pub enum NoticeKind {
     /// The draft open in a composer was sent or deleted elsewhere.
     DraftGone,
     Info,
+}
+
+impl NoticeKind {
+    pub fn parse(s: &str) -> NoticeKind {
+        match s {
+            "rejected" => NoticeKind::Rejected,
+            "send_failed" => NoticeKind::SendFailed,
+            "send_undone" => NoticeKind::SendUndone,
+            "draft_gone" => NoticeKind::DraftGone,
+            _ => NoticeKind::Info,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

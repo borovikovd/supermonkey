@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use super::{from_json, now_ms};
+use super::from_json;
 use crate::model::{
     AccountId, AccountInfo, AccountSummary, Addr, AppState, AttachmentInfo, ConversationData,
     DraftAttachment, DraftKind, DraftState, DraftSummary, GlobalSettings, LabelInfo, ListEntry,
@@ -25,21 +25,8 @@ pub fn list_ids(
     account: AccountId,
     view: &View,
 ) -> anyhow::Result<Vec<ListEntry>> {
-    if *view == View::Drafts {
-        let mut stmt = conn.prepare_cached(
-            "SELECT d.id FROM drafts d
-             WHERE d.account_id = ?1 AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.draft_id = d.id)
-             ORDER BY d.updated_at DESC, d.id",
-        )?;
-        let rows = stmt.query_map([account], |r| {
-            Ok(ListEntry {
-                key: r.get(0)?,
-                split: None,
-            })
-        })?;
-        return Ok(rows.collect::<Result<_, _>>()?);
-    }
     let (sql, label): (&str, Option<&str>) = match view {
+        View::Drafts => return draft_list_ids(conn, account),
         View::Inbox => (
             "SELECT t.id, t.split_id FROM threads t LEFT JOIN splits s ON s.id = t.split_id
              WHERE t.account_id = ?1 AND t.in_inbox = 1 AND t.snooze_until IS NULL
@@ -72,7 +59,6 @@ pub fn list_ids(
         View::Starred => (LABEL_SQL, Some("STARRED")),
         View::Sent => (LABEL_SQL, Some("SENT")),
         View::Label { label } => (LABEL_SQL, Some(label.as_str())),
-        View::Drafts => unreachable!("handled above"),
     };
     let mut stmt = conn.prepare_cached(sql)?;
     let map = |r: &rusqlite::Row<'_>| {
@@ -82,14 +68,26 @@ pub fn list_ids(
         })
     };
     let rows = match label {
-        Some(l) => stmt
-            .query_map(params![account, l], map)?
-            .collect::<Result<Vec<_>, _>>()?,
-        None => stmt
-            .query_map([account], map)?
-            .collect::<Result<Vec<_>, _>>()?,
+        Some(l) => stmt.query_map(params![account, l], map)?,
+        None => stmt.query_map([account], map)?,
     };
-    Ok(rows)
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The Drafts list: drafts not yet handed to the outbox, newest first.
+fn draft_list_ids(conn: &Connection, account: AccountId) -> anyhow::Result<Vec<ListEntry>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT d.id FROM drafts d
+         WHERE d.account_id = ?1 AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.draft_id = d.id)
+         ORDER BY d.updated_at DESC, d.id",
+    )?;
+    let rows = stmt.query_map([account], |r| {
+        Ok(ListEntry {
+            key: r.get(0)?,
+            split: None,
+        })
+    })?;
+    Ok(rows.collect::<Result<_, _>>()?)
 }
 
 const LABEL_SQL: &str =
@@ -161,9 +159,9 @@ pub fn draft_rows(conn: &Connection, ids: &[String]) -> anyhow::Result<Vec<ListR
                     to.iter()
                         .map(|a| {
                             a.name
-                                .clone()
+                                .as_deref()
                                 .filter(|n| !n.is_empty())
-                                .unwrap_or_else(|| a.email.clone())
+                                .unwrap_or(&a.email)
                         })
                         .collect::<Vec<_>>()
                         .join(", ")
@@ -233,10 +231,6 @@ pub fn my_addresses(conn: &Connection, account: AccountId) -> anyhow::Result<Has
     Ok(set)
 }
 
-pub fn label_ids_of(json: &str) -> Vec<String> {
-    from_json(json)
-}
-
 fn attachments_of(conn: &Connection, message: MessageId) -> anyhow::Result<Vec<AttachmentInfo>> {
     let mut stmt = conn.prepare_cached(
         "SELECT id, filename, mime_type, size, inline, local_path IS NOT NULL FROM attachments
@@ -271,7 +265,7 @@ fn conversation_messages(
     let rows = stmt.query_map([thread], |r| {
         let from_name: String = r.get(1)?;
         let from_email: String = r.get(2)?;
-        let labels = label_ids_of(&r.get::<_, String>(9)?);
+        let labels: Vec<String> = from_json(&r.get::<_, String>(9)?);
         let has = |l: &str| labels.iter().any(|x| x == l);
         Ok(MessageSummary {
             id: r.get(0)?,
@@ -411,18 +405,13 @@ pub fn outbox_rows(conn: &Connection, filter: OutboxFilter) -> anyhow::Result<Ve
     );
     let mut stmt = conn.prepare_cached(&sql)?;
     let rows = stmt.query_map([key], |r| {
-        let state: String = r.get(5)?;
         Ok(OutboxRow {
             id: r.get(0)?,
             account: r.get(1)?,
             draft: r.get(2)?,
             thread: r.get(3)?,
             send_after: r.get(4)?,
-            state: match state.as_str() {
-                "sending" => OutboxState::Sending,
-                "sent" => OutboxState::Sent,
-                _ => OutboxState::Waiting,
-            },
+            state: OutboxState::parse(&r.get::<_, String>(5)?),
             sent_message_gmail_id: r.get(6)?,
             undo_requested: r.get(7)?,
             toast_closed: r.get(8)?,
@@ -556,15 +545,10 @@ pub fn splits(conn: &Connection, account: AccountId) -> anyhow::Result<Vec<Split
          WHERE account_id = ?1 ORDER BY position, id",
     )?;
     let rows = stmt.query_map([account], |r| {
-        let kind: String = r.get(2)?;
         Ok(SplitInfo {
             id: r.get(0)?,
             name: r.get(1)?,
-            kind: match kind.as_str() {
-                "important" => SplitKind::Important,
-                "other" => SplitKind::Other,
-                _ => SplitKind::Custom,
-            },
+            kind: SplitKind::parse(&r.get::<_, String>(2)?),
             query: r.get(3)?,
             enabled: r.get(4)?,
             hide_when_empty: r.get(5)?,
@@ -612,16 +596,11 @@ pub fn account_summary(
             "SELECT id, kind, label, payload FROM undo_entries WHERE account_id = ?1 ORDER BY id",
         )?;
         let rows = stmt.query_map([account], |r| {
-            let kind: String = r.get(1)?;
             let payload: String = r.get(3)?;
             let v: serde_json::Value = serde_json::from_str(&payload).unwrap_or_default();
             Ok(UndoEntryInfo {
                 id: r.get(0)?,
-                kind: match kind.as_str() {
-                    "send" => UndoKind::Send,
-                    "pin" => UndoKind::Pin,
-                    _ => UndoKind::Mail,
-                },
+                kind: UndoKind::parse(&r.get::<_, String>(1)?),
                 label: r.get(2)?,
                 threads: v["threads"]
                     .as_array()
@@ -636,16 +615,9 @@ pub fn account_summary(
         let mut stmt =
             conn.prepare_cached("SELECT id, kind, message, draft_id, thread_id FROM notices WHERE account_id = ?1 ORDER BY id")?;
         let rows = stmt.query_map([account], |r| {
-            let kind: String = r.get(1)?;
             Ok(Notice {
                 id: r.get(0)?,
-                kind: match kind.as_str() {
-                    "rejected" => NoticeKind::Rejected,
-                    "send_failed" => NoticeKind::SendFailed,
-                    "send_undone" => NoticeKind::SendUndone,
-                    "draft_gone" => NoticeKind::DraftGone,
-                    _ => NoticeKind::Info,
-                },
+                kind: NoticeKind::parse(&r.get::<_, String>(1)?),
                 message: r.get(2)?,
                 draft: r.get(3)?,
                 thread: r.get(4)?,
@@ -731,8 +703,4 @@ pub fn last_action(conn: &Connection) -> anyhow::Result<i64> {
         [],
         |r| r.get(0),
     )?)
-}
-
-pub fn now() -> i64 {
-    now_ms()
 }
