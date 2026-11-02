@@ -7,9 +7,9 @@ Tauri 2 + React 19 + Rust/SQLite. Choices the spec left open are in
 ## Run
 
 ```sh
-pnpm install
-pnpm tauri dev          # real Gmail; needs google-oauth-client.json (git-ignored)
-pnpm demo               # no Google: in-process fake Gmail with demo mail and two accounts
+vp install
+vp run tauri dev       # real Gmail; needs google-oauth-client.json (git-ignored)
+vp run demo            # no Google: in-process fake Gmail with demo mail and two accounts
 ```
 
 Sign in from the first-run screen or `⌘K → Add account`. Google shows an
@@ -19,7 +19,7 @@ Testing, Google asks you to sign in again every 7 days.
 ## Build
 
 ```sh
-pnpm tauri build        # src-tauri/target/release/bundle/macos/Ubermensch.app
+vp run tauri build     # src-tauri/target/release/bundle/macos/Ubermensch.app
 ```
 
 ## Checks
@@ -31,10 +31,9 @@ pnpm tauri build        # src-tauri/target/release/bundle/macos/Ubermensch.app
 Perf fixture (two accounts × 20,000 threads):
 
 ```sh
-cd src-tauri
-cargo run --release --bin perf-fixture -- /tmp/perf.db perf
-UBERMENSCH_DB=/tmp/perf.db pnpm tauri dev
-UBERMENSCH_PERF_DB=/tmp/perf.db cargo test --release --test perf_search -- --ignored --nocapture
+cargo run --manifest-path src-tauri/Cargo.toml --release --bin perf-fixture -- /tmp/perf.db perf
+UBERMENSCH_DB=/tmp/perf.db vp run tauri dev
+UBERMENSCH_PERF_DB=/tmp/perf.db cargo test --manifest-path src-tauri/Cargo.toml --release --test perf_search -- --ignored --nocapture
 ```
 
 Debug builds log keydown-to-paint for each shortcut and warn when one is over
