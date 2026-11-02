@@ -95,14 +95,6 @@ pub async fn open_attachment(app: AppHandle, attachment: i64) -> CmdResult<()> {
         .map_err(err)
 }
 
-/// Shows the open panel and copies the chosen files into the draft's folder.
-#[tauri::command]
-pub async fn pick_attachments(app: AppHandle, draft: DraftId) -> CmdResult<Vec<DraftAttachment>> {
-    crate::engine::attachments::pick(&app, &draft)
-        .await
-        .map_err(err)
-}
-
 /// Quits after the UI has closed an open composer (SPEC Undo send: Cmd+Q).
 #[tauri::command]
 pub fn quit_now(app: AppHandle) {

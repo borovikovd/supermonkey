@@ -61,6 +61,7 @@ ub-rules = { path = "crates/ub-rules" }
 proptest = "1"
 tempfile = "3"
 ub-fake-gmail = { path = "crates/ub-fake-gmail" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "test-util"] }
 
 [workspace]
 members = [".", "crates/ub-mime", "crates/ub-gmail", "crates/ub-fake-gmail", "crates/ub-rules"]

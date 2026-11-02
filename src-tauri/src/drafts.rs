@@ -14,3 +14,13 @@ pub fn close(_ctx: &mut Ctx, _draft: &str) -> anyhow::Result<()> {
 pub fn discard(_ctx: &mut Ctx, _draft: &str) -> anyhow::Result<()> {
     anyhow::bail!("drafts are not built yet")
 }
+
+/// Gmail rejected a draft op.
+pub fn on_rejected(
+    _ctx: &mut Ctx,
+    _account: AccountId,
+    _kind: &str,
+    _payload: &str,
+) -> anyhow::Result<()> {
+    Ok(())
+}

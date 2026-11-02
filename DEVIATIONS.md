@@ -34,3 +34,16 @@ written. Each keeps the spec's intent.
 ## UI
 
 - Search treats `AND`/`OR` case-insensitively for local matching.
+
+## Sync (step 2)
+
+- History polls apply each message's latest `labelIds` from the history
+  records directly, and fetch thread metadata only for messages the app does
+  not know yet. Pending ops are re-applied on top, so a queued action wins.
+- The snooze rule runs whenever a thread is stored from Gmail (poll, resync,
+  open), skipping messages with an op still pending. That is equivalent to
+  judging net labels after the batch.
+- After a restart the app re-lists Inbox (unchanged threads are skipped by
+  historyId) and fetches any bodies the connect sync had not reached.
+- Notification clicks: the macOS notification plugin does not report clicks,
+  so a click only brings the app forward. See Notifications (step 6).

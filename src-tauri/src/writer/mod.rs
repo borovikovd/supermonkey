@@ -60,6 +60,8 @@ pub enum Effect {
     Badge,
     /// A notification should be raised (computed by sync).
     Notify(crate::notify::Notification),
+    /// History or a fetch named a label id this account does not know.
+    RefreshLabels(AccountId),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

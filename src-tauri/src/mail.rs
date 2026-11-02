@@ -169,7 +169,7 @@ pub fn undo(
     payload: &serde_json::Value,
 ) -> anyhow::Result<()> {
     let threads: Vec<ThreadChange> = serde_json::from_value(payload["threads"].clone())?;
-    revert(ctx, Some(n), account, &threads)
+    revert(ctx, Some(n), account, &threads, true)
 }
 
 /// Shared by undo and by rollback after a Gmail rejection.
@@ -178,6 +178,7 @@ pub fn revert(
     action: Option<i64>,
     account: AccountId,
     changes: &[ThreadChange],
+    queue: bool,
 ) -> anyhow::Result<()> {
     // Group Gmail calls by identical label sets.
     let mut ops: Vec<ModifyOp> = Vec::new();
@@ -244,8 +245,11 @@ pub fn revert(
         }
         threads::refresh(ctx, tc.thread)?;
     }
-    for op in ops {
-        crate::queue::push(ctx, account, action, "modify", &op)?;
+    // A rollback after a Gmail rejection only restores local state.
+    if queue {
+        for op in ops {
+            crate::queue::push(ctx, account, action, "modify", &op)?;
+        }
     }
     Ok(())
 }

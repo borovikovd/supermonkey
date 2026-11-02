@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS messages (
   body_html       TEXT,                         -- sanitized
   quote_html      TEXT,                         -- quoted history, sanitized
   body_text       TEXT,
+  is_plain        INTEGER NOT NULL DEFAULT 0,
   has_attachments INTEGER NOT NULL DEFAULT 0,
   rev             INTEGER NOT NULL DEFAULT 0,
   UNIQUE (account_id, gmail_id)

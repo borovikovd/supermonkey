@@ -293,7 +293,7 @@ pub fn conversation(
     {
         let mut stmt = conn.prepare_cached(
             "SELECT id, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, internal_date,
-                    label_ids, has_body, rev, body_html IS NULL AND body_text IS NOT NULL
+                    label_ids, has_body, rev, is_plain
              FROM messages WHERE thread_id = ?1 AND is_draft = 0 ORDER BY internal_date, id",
         )?;
         let rows = stmt.query_map([thread], |r| {
