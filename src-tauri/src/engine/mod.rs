@@ -164,6 +164,8 @@ pub struct Engine {
     pub store: Arc<dyn TokenStore>,
     pub accounts: Mutex<HashMap<AccountId, Arc<AccountRt>>>,
     pub online: AtomicBool,
+    /// Orders changes of `online` with the writer's copy of it.
+    online_order: Mutex<()>,
     pub searches: Mutex<HashMap<SubId, AbortHandle>>,
     /// The last notification shown, for click-through.
     pub last_notification: Mutex<Option<(crate::notify::Notification, Millis)>>,
@@ -234,6 +236,7 @@ impl Engine {
             store,
             accounts: Mutex::new(HashMap::new()),
             online: AtomicBool::new(true),
+            online_order: Mutex::new(()),
             searches: Mutex::new(HashMap::new()),
             last_notification: Mutex::new(None),
             unfocused_since: AtomicI64::new(0),
@@ -353,15 +356,22 @@ impl Engine {
     }
 
     pub fn set_online(&self, online: bool) {
-        if self.online.swap(online, Ordering::Relaxed) != online {
-            self.writer.set_online(online);
-            if online {
-                for rt in self.accounts.lock().values() {
-                    rt.ops_kick.kick();
-                    rt.outbox_kick.kick();
-                    rt.poll_kick.kick();
-                    rt.online_kick.kick_all();
-                }
+        // The flag and the writer's copy change together: two calls racing
+        // between swap and send could leave the writer on the losing value.
+        let changed = {
+            let _order = self.online_order.lock();
+            let changed = self.online.swap(online, Ordering::Relaxed) != online;
+            if changed {
+                self.writer.set_online(online);
+            }
+            changed
+        };
+        if changed && online {
+            for rt in self.accounts.lock().values() {
+                rt.ops_kick.kick();
+                rt.outbox_kick.kick();
+                rt.poll_kick.kick();
+                rt.online_kick.kick_all();
             }
         }
     }
