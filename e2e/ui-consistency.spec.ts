@@ -1,10 +1,16 @@
 // Rows never flash back during fast triage or a poll, and a reload keeps
 // queued actions and their numbers (COVERAGE 5.24).
+import type { Route } from "@playwright/test";
+import type { App } from "./app.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A } from "./seeds.ts";
 
 const two = (i: number) => String(i).padStart(2, "0");
+
+/** The last action number the page has seen acked on the channel. */
+const pageAck = (app: App): Promise<number> =>
+  app.page.evaluate<number>("window.__ub.pending().ack");
 
 test("UIC-01 rows you just acted on never flash back during fast triage or a poll", async ({
   app,
@@ -86,6 +92,39 @@ test("UIC-01 rows you just acted on never flash back during fast triage or a pol
 
   // The highlight is on the row after the last archived one.
   await expect(app.highlighted).toContainText("Bulk 11");
+});
+
+test("UIC-01 an action the core has not applied yet stays applied when the one before it is acked", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await expect(app.highlighted).toContainText("Person 1");
+  const p2 = await app.rowKey("Person 2");
+  // The page's submits wait here, so they reach the core one at a time.
+  const parked: Route[] = [];
+  await app.page.route(/\/invoke\/submit$/, (route) => {
+    parked.push(route);
+  });
+  await app.press("e");
+  await expect.poll(() => parked.length).toBe(1);
+  await app.press("e");
+  await expect(app.row("Person 1")).toHaveCount(0);
+  await expect(app.row("Person 2")).toHaveCount(0);
+  const probe = await app.watchRows();
+  const before = await pageAck(app);
+
+  // The core applies the first archive and acks it; the second is submitted and waits.
+  await parked[0]?.continue();
+  await expect.poll(() => parked.length).toBe(2);
+  await expect.poll(() => pageAck(app)).toBeGreaterThan(before);
+  await expect(app.row("Person 2"), "still archived while the core lacks it").toHaveCount(0);
+
+  await parked[1]?.continue();
+  await app.page.unroute(/\/invoke\/submit$/);
+  await app.settle();
+  await expect(app.row("Person 2")).toHaveCount(0);
+  expect(await probe.added(), "Person 2 never came back").not.toContain(p2);
 });
 
 test("UIC-02 a reload keeps queued actions and keeps action numbers going", async ({
