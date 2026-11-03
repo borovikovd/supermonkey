@@ -60,18 +60,17 @@ pub fn parse_address_list(header: &str) -> Vec<Addr> {
 }
 
 /// Splits on top-level `,` and `;`, dropping group names (`name:`).
-fn split_segments(header: &str) -> Vec<String> {
+fn split_segments(header: &str) -> Vec<&str> {
     let mut segments = Vec::new();
-    let mut current = String::new();
+    let mut start = 0;
     let mut in_quote = false;
     let mut escaped = false;
     let mut in_angle = false;
     let mut comment_depth = 0u32;
 
-    for c in header.chars() {
+    for (i, c) in header.char_indices() {
         if escaped {
             escaped = false;
-            current.push(c);
             continue;
         }
         match c {
@@ -82,19 +81,21 @@ fn split_segments(header: &str) -> Vec<String> {
             '<' if !in_quote && comment_depth == 0 => in_angle = true,
             '>' if !in_quote && comment_depth == 0 => in_angle = false,
             ',' | ';' if !in_quote && comment_depth == 0 && !in_angle => {
-                segments.push(std::mem::take(&mut current));
-                continue;
+                segments.push(&header[start..i]);
+                start = i + 1;
             }
-            ':' if !in_quote && comment_depth == 0 && !in_angle && !current.contains('@') => {
+            ':' if !in_quote
+                && comment_depth == 0
+                && !in_angle
+                && !header[start..i].contains('@') =>
+            {
                 // Group start: what came before is the group's name.
-                current.clear();
-                continue;
+                start = i + 1;
             }
             _ => {}
         }
-        current.push(c);
     }
-    segments.push(current);
+    segments.push(&header[start..]);
     segments
 }
 

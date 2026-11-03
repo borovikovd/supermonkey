@@ -99,8 +99,8 @@ pub fn parse(
         let (visible, quote) = ub_mime::split_quoted_history(&raw);
         let text = text.unwrap_or_else(|| ub_mime::html_to_text(&raw));
         Body {
-            html: ub_mime::sanitize_html(&visible, &cid_data),
-            quote: quote.map(|q| ub_mime::sanitize_html(&q, &cid_data)),
+            html: ub_mime::sanitize_html(visible, &cid_data),
+            quote: quote.map(|q| ub_mime::sanitize_html(q, &cid_data)),
             text,
             plain,
         }

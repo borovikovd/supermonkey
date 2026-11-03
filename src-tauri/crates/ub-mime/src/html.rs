@@ -88,7 +88,7 @@ static CSS_URL: LazyLock<Regex> = LazyLock::new(|| {
 /// `<style>` blocks, which ammonia passes through. Whitespace and CSS escapes
 /// are dropped before the scheme is read.
 fn defuse_css_urls(html: &str) -> Cow<'_, str> {
-    CSS_URL.replace_all(html, |c: &Captures<'_>| {
+    CSS_URL.replace_all(html, |c: &Captures<'_>| -> &str {
         let inner: String = c[1]
             .trim_matches(|ch| ch == '\'' || ch == '"')
             .chars()
@@ -96,9 +96,9 @@ fn defuse_css_urls(html: &str) -> Cow<'_, str> {
             .collect::<String>()
             .to_ascii_lowercase();
         if inner.starts_with("javascript:") || inner.starts_with("vbscript:") {
-            "url()".to_string()
+            "url()"
         } else {
-            c[0].to_string()
+            &html[c.get_match().range()]
         }
     })
 }
@@ -117,18 +117,22 @@ pub fn sanitize_html(html: &str, cid_data: &HashMap<String, String>) -> String {
     let rewritten = if cid_data.is_empty() {
         Cow::Borrowed(html)
     } else {
-        CID_REF.replace_all(html, |c: &Captures<'_>| {
+        CID_REF.replace_all(html, |c: &Captures<'_>| -> &str {
             let raw = &c[1];
-            let decoded = String::from_utf8_lossy(&percent_decode(raw)).into_owned();
+            let decoded = percent_decode(raw);
+            let decoded = String::from_utf8_lossy(&decoded);
             let key = decoded.trim_start_matches('<').trim_end_matches('>');
             match cid_data.get(raw).or_else(|| cid_data.get(key)) {
-                Some(uri) => uri.clone(),
-                None => c[0].to_string(),
+                Some(uri) => uri,
+                None => &html[c.get_match().range()],
             }
         })
     };
     let clean = SANITIZER.clean(&rewritten).to_string();
-    defuse_css_urls(&clean).into_owned()
+    match defuse_css_urls(&clean) {
+        Cow::Borrowed(_) => clean,
+        Cow::Owned(defused) => defused,
+    }
 }
 
 /// Comments, `<!DOCTYPE>`/`<![CDATA[` declarations, and `<?xml ?>` processing instructions.
@@ -179,9 +183,12 @@ pub(crate) fn html_to_plain(html: &str) -> String {
 /// Walks the tags of `html` and writes its text. `plain` adds the formatting meant for a
 /// readable text/plain part.
 fn render_text(html: &str, plain: bool) -> String {
-    let mut html = COMMENT.replace_all(html, "").into_owned();
+    // Most bodies match few of these; copy only when one does.
+    let mut html = COMMENT.replace_all(html, "");
     for re in HIDDEN_BLOCKS.iter() {
-        html = re.replace_all(&html, " ").into_owned();
+        if let Cow::Owned(replaced) = re.replace_all(&html, " ") {
+            html = Cow::Owned(replaced);
+        }
     }
 
     let mut w = TextWriter {
@@ -441,20 +448,29 @@ static DATA_URI: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Rewrites `data:` URIs in `html` whose decoded bytes equal a known inline part's data into
 /// `cid:<content_id>`. Returns the rewritten HTML and the parts it referenced, in order of first
-/// use and without duplicates. Unmatched `data:` URIs are left as they are.
-pub fn data_images_to_cid(html: &str, known: &[InlinePart]) -> (String, Vec<InlinePart>) {
+/// use and without duplicates; the rest of `known` is dropped. Unmatched `data:` URIs are left
+/// as they are.
+pub fn data_images_to_cid(html: &str, mut known: Vec<InlinePart>) -> (String, Vec<InlinePart>) {
     let mut used: Vec<InlinePart> = Vec::new();
-    let rewritten = DATA_URI.replace_all(html, |c: &Captures<'_>| {
-        let found = decode_base64(&c[1]).and_then(|bytes| known.iter().find(|p| p.data == bytes));
-        match found {
-            Some(part) => {
-                if !used.iter().any(|u| u.content_id == part.content_id) {
-                    used.push(part.clone());
-                }
-                format!("cid:{}", part.content_id)
-            }
-            None => c[0].to_string(),
+    let rewritten = DATA_URI.replace_all(html, |c: &Captures<'_>| -> Cow<'_, str> {
+        let Some(bytes) = decode_base64(&c[1]) else {
+            return Cow::Borrowed(&html[c.get_match().range()]);
+        };
+        // A part moves to `used` on first use, so a repeat finds it there. Nothing that
+        // moved had these bytes otherwise, so the first match in `known` is still the
+        // first in the original order.
+        if let Some(part) = used.iter().find(|p| p.data == bytes) {
+            return Cow::Owned(format!("cid:{}", part.content_id));
         }
+        let Some(i) = known.iter().position(|p| p.data == bytes) else {
+            return Cow::Borrowed(&html[c.get_match().range()]);
+        };
+        let part = known.remove(i);
+        let cid = format!("cid:{}", part.content_id);
+        if !used.iter().any(|u| u.content_id == part.content_id) {
+            used.push(part);
+        }
+        Cow::Owned(cid)
     });
     (rewritten.into_owned(), used)
 }

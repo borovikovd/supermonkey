@@ -88,21 +88,18 @@ pub fn parse_gmail_payload(payload: &Value) -> ParsedMessage {
 
     let mut found = Collected::default();
     found.visit(payload);
-    msg.html = join_bodies(&found.html);
-    msg.text = join_bodies(&found.text);
+    msg.html = found.html;
+    msg.text = found.text;
     msg.parts = found.parts;
     msg
 }
 
-fn join_bodies(bodies: &[String]) -> Option<String> {
-    (!bodies.is_empty()).then(|| bodies.join("\n"))
-}
-
-/// What a walk of the part tree collects, in document order.
+/// What a walk of the part tree collects, in document order. Several body parts of one
+/// type are joined with newlines.
 #[derive(Default)]
 struct Collected {
-    html: Vec<String>,
-    text: Vec<String>,
+    html: Option<String>,
+    text: Option<String>,
     parts: Vec<PartInfo>,
 }
 
@@ -144,12 +141,19 @@ impl Collected {
         if is_body {
             if let Some(bytes) = data {
                 let charset = header_param(content_type, "charset");
-                let bodies = if mime_type == "text/html" {
+                let decoded = decode_charset(bytes, charset.as_deref());
+                let body = if mime_type == "text/html" {
                     &mut self.html
                 } else {
                     &mut self.text
                 };
-                bodies.push(decode_charset(&bytes, charset.as_deref()));
+                match body {
+                    Some(joined) => {
+                        joined.push('\n');
+                        joined.push_str(&decoded);
+                    }
+                    None => *body = Some(decoded),
+                }
             }
             return;
         }

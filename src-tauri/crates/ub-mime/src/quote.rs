@@ -51,13 +51,13 @@ static TRAILING_BREAKS: LazyLock<Regex> =
 /// everything from the first element whose class includes `gmail_quote` onward. Trailing
 /// `<br>`s and whitespace are trimmed from the editor part. `before + quote` reproduces the
 /// input apart from that trimming, so tags opened before the quote may be closed inside it.
-pub fn split_gmail_quote(html: &str) -> (String, Option<String>) {
+pub fn split_gmail_quote(html: &str) -> (&str, Option<&str>) {
     match GMAIL_QUOTE.find(html) {
         Some(m) => (
             trim_trailing_breaks(&html[..m.start()]),
-            Some(html[m.start()..].to_string()),
+            Some(&html[m.start()..]),
         ),
-        None => (html.to_string(), None),
+        None => (html, None),
     }
 }
 
@@ -66,22 +66,24 @@ pub fn split_gmail_quote(html: &str) -> (String, Option<String>) {
 /// quotes from [`text_to_html`](crate::text_to_html)), Thunderbird/Yahoo/Proton quote classes,
 /// and Outlook's reply header. Returns `(visible_html, Some(quoted_html))`, or the whole HTML
 /// and `None` when there is no marker, nothing visible above it, or the block is a forward.
-pub fn split_quoted_history(html: &str) -> (String, Option<String>) {
+pub fn split_quoted_history(html: &str) -> (&str, Option<&str>) {
     let Some(m) = HISTORY_START.find(html) else {
-        return (html.to_string(), None);
+        return (html, None);
     };
     let (visible, quoted) = html.split_at(m.start());
     let quoted_text = html_to_text(quoted);
     let is_forward = quoted_text.starts_with("---------- Forwarded message")
         || quoted_text.starts_with("Begin forwarded message");
     if html_to_text(visible).is_empty() || is_forward {
-        return (html.to_string(), None);
+        return (html, None);
     }
-    (trim_trailing_breaks(visible), Some(quoted.to_string()))
+    (trim_trailing_breaks(visible), Some(quoted))
 }
 
-fn trim_trailing_breaks(html: &str) -> String {
-    TRAILING_BREAKS.replace(html, "").into_owned()
+fn trim_trailing_breaks(html: &str) -> &str {
+    TRAILING_BREAKS
+        .find(html)
+        .map_or(html, |m| &html[..m.start()])
 }
 
 /// Gmail's reply quote block:

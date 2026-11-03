@@ -188,7 +188,7 @@ pub async fn build_raw(e: &Engine, d: &DraftRow) -> Result<Vec<u8>, GmailError> 
         d.quote_html.as_deref().unwrap_or_default()
     );
     let known = quoted_inline(e, d, &html).await?;
-    let (html, inline) = ub_mime::data_images_to_cid(&html, &known);
+    let (html, inline) = ub_mime::data_images_to_cid(&html, known);
     let from = d.from.as_ref().map_or_else(
         || ub_mime::Addr {
             name: None,
@@ -733,8 +733,8 @@ pub async fn store_gmail_draft(e: &Engine, rt: &AccountRt, g: ub_gmail::Draft) {
         })
         .unwrap_or_default();
     let (above, quote) = ub_mime::split_gmail_quote(&raw_html);
-    let body = ub_mime::sanitize_html(&above, &HashMap::new());
-    let quote = quote.map(|q| ub_mime::sanitize_html(&q, &HashMap::new()));
+    let body = ub_mime::sanitize_html(above, &HashMap::new());
+    let quote = quote.map(|q| ub_mime::sanitize_html(q, &HashMap::new()));
     let account = rt.id;
     let gmail_draft = g.id;
     e

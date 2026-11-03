@@ -25,14 +25,14 @@
 //! - [`reply_quote_html`] / [`forward_quote_html`]`(&`[`QuoteSource`]`, tz_offset_minutes)`:
 //!   Gmail-format quote blocks. `tz_offset_minutes` is minutes east of UTC.
 //! - [`reply_subject`] / [`forward_subject`]: add `Re:` / `Fwd:` once.
-//! - [`data_images_to_cid`]`(html, &known) -> (html, used)`: turns `data:` images that came from
+//! - [`data_images_to_cid`]`(html, known) -> (html, used)`: turns `data:` images that came from
 //!   known [`InlinePart`]s back into `cid:` references before building.
 //! - [`build_mime`]`(&`[`Outgoing`]`) -> Vec<u8>`: RFC 5322 bytes for `drafts.create/update`
 //!   (base64url-encode them into `message.raw`). Writes `X-Ubermensch-Draft`, `In-Reply-To`,
 //!   `References`, and a `Message-ID` of `ub.<draft id>.<date_ms>@<message_id_domain>`.
 //!
 //! A typical send: `html = editor_html + quote_html`, then
-//! `let (html, inline) = data_images_to_cid(&html, &original_inline_parts)`, then
+//! `let (html, inline) = data_images_to_cid(&html, original_inline_parts)`, then
 //! `build_mime(&Outgoing { html, inline, .. })`.
 //!
 //! [`decode_encoded_words`] is also exported for other headers (e.g. attachment names).

@@ -1,24 +1,30 @@
 //! Byte and header decoding: charsets, base64url bodies, RFC 2047 encoded-words.
 
+use std::borrow::Cow;
+
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 
 /// Decodes `bytes` in the named charset. Unknown or missing charsets fall back to UTF-8,
 /// then to windows-1252 when the bytes are not valid UTF-8.
-pub(crate) fn decode_charset(bytes: &[u8], charset: Option<&str>) -> String {
+pub(crate) fn decode_charset(bytes: Vec<u8>, charset: Option<&str>) -> String {
     let label = charset.map_or("", |c| c.trim().trim_matches('"'));
     // RFC 2231 allows a language suffix: `utf-8*en`.
     let label = label.split('*').next().unwrap_or(label);
-    if let Some(enc) = encoding_rs::Encoding::for_label(label.as_bytes()) {
-        return enc.decode_without_bom_handling(bytes).0.into_owned();
-    }
-    match std::str::from_utf8(bytes) {
-        Ok(s) => s.to_string(),
-        Err(_) => encoding_rs::WINDOWS_1252
-            .decode_without_bom_handling(bytes)
+    let bytes = match encoding_rs::Encoding::for_label(label.as_bytes()) {
+        Some(enc) => match enc.decode_without_bom_handling(&bytes).0 {
+            Cow::Owned(decoded) => return decoded,
+            // Borrowed: the bytes already are that text in UTF-8, so keep the buffer.
+            Cow::Borrowed(_) => bytes,
+        },
+        None => bytes,
+    };
+    String::from_utf8(bytes).unwrap_or_else(|e| {
+        encoding_rs::WINDOWS_1252
+            .decode_without_bom_handling(e.as_bytes())
             .0
-            .into_owned(),
-    }
+            .into_owned()
+    })
 }
 
 /// Decodes Gmail's base64url `body.data`. Also accepts padding, whitespace and the
@@ -50,13 +56,13 @@ pub(crate) fn encode_base64(data: &[u8]) -> String {
 /// Whitespace between adjacent encoded-words is dropped, and adjacent words in the same charset
 /// are decoded together so multi-byte characters split across words survive.
 /// Malformed words are left as they are.
-pub fn decode_encoded_words(input: &str) -> String {
+pub fn decode_encoded_words(input: &str) -> Cow<'_, str> {
     if !input.contains("=?") {
-        return input.to_string();
+        return Cow::Borrowed(input);
     }
     let mut out = String::new();
     // Pending bytes of adjacent encoded-words in one charset, decoded when the run ends.
-    let mut pending: Option<(String, Vec<u8>)> = None;
+    let mut pending: Option<(&str, Vec<u8>)> = None;
     // Whitespace seen after an encoded-word; dropped if another encoded-word follows.
     let mut gap = String::new();
     let mut rest = input;
@@ -65,7 +71,7 @@ pub fn decode_encoded_words(input: &str) -> String {
         if let Some((charset, bytes, len)) = rest.strip_prefix("=?").and_then(parse_word) {
             gap.clear();
             match &mut pending {
-                Some((cs, buf)) if cs.eq_ignore_ascii_case(&charset) => buf.extend(bytes),
+                Some((cs, buf)) if cs.eq_ignore_ascii_case(charset) => buf.extend(bytes),
                 _ => {
                     flush(&mut out, &mut pending);
                     pending = Some((charset, bytes));
@@ -87,18 +93,18 @@ pub fn decode_encoded_words(input: &str) -> String {
     }
     flush(&mut out, &mut pending);
     out.push_str(&gap);
-    out
+    Cow::Owned(out)
 }
 
-fn flush(out: &mut String, pending: &mut Option<(String, Vec<u8>)>) {
+fn flush(out: &mut String, pending: &mut Option<(&str, Vec<u8>)>) {
     if let Some((charset, bytes)) = pending.take() {
-        out.push_str(&decode_charset(&bytes, Some(&charset)));
+        out.push_str(&decode_charset(bytes, Some(charset)));
     }
 }
 
 /// Parses `charset?E?text?=` (the part after `=?`). Returns the charset, decoded bytes,
 /// and the number of bytes consumed.
-fn parse_word(s: &str) -> Option<(String, Vec<u8>, usize)> {
+fn parse_word(s: &str) -> Option<(&str, Vec<u8>, usize)> {
     let mut fields = s.splitn(3, '?');
     let charset = fields.next()?;
     let encoding = fields.next()?;
@@ -116,7 +122,7 @@ fn parse_word(s: &str) -> Option<(String, Vec<u8>, usize)> {
         _ => return None,
     };
     let consumed = charset.len() + 1 + encoding.len() + 1 + end + 2;
-    Some((charset.to_string(), bytes, consumed))
+    Some((charset, bytes, consumed))
 }
 
 fn decode_q(text: &str) -> Vec<u8> {
@@ -175,7 +181,10 @@ pub(crate) fn header_param(value: &str, param: &str) -> Option<String> {
         extended.push((index, encoded, unquoted));
     }
     if extended.is_empty() {
-        return plain.map(|p| decode_encoded_words(&p));
+        return plain.map(|p| match decode_encoded_words(&p) {
+            Cow::Borrowed(_) => p,
+            Cow::Owned(decoded) => decoded,
+        });
     }
     extended.sort_by_key(|(i, _, _)| *i);
     let mut charset = None;
@@ -196,7 +205,7 @@ pub(crate) fn header_param(value: &str, param: &str) -> Option<String> {
         }
         bytes.extend(percent_decode(val));
     }
-    Some(decode_charset(&bytes, charset.as_deref()))
+    Some(decode_charset(bytes, charset.as_deref()))
 }
 
 /// Splits a structured header on `;` outside quotes.
