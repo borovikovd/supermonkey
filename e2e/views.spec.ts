@@ -77,7 +77,7 @@ test("VIEW-01 a thread's latest message sets its row", async ({ app, gmail }) =>
     date: dates.minutesAgo(1),
   });
   // m1 from Pat and m2 from Rex, both spam.
-  const [pat] = await gmail.deliverMany([
+  await gmail.deliverMany([
     {
       account: A,
       from: "Pat Spam <pat@junk.test>",
@@ -98,7 +98,6 @@ test("VIEW-01 a thread's latest message sets its row", async ({ app, gmail }) =>
       poll: false,
     },
   ]);
-  expect(pat).toBeDefined();
   // A thread that is only a draft.
   await gmail.createDraft(A, {
     to: ["Kim Kato <kim@kite.test>"],

@@ -38,7 +38,6 @@ test("PAL-01 open, filter, run, and close the palette", async ({ app, gmail }) =
   await expect(app.palette.getByRole("combobox")).toBeFocused();
 
   // Actions and views, each with its shortcut on the right.
-  await expect(item(app, "Mark done")).toContainText("E");
   await expect(item(app, "Mark done").locator("kbd")).toHaveText(["E"]);
   await expect(item(app, "Go to Sent").locator("kbd")).toHaveText(["G", "T"]);
   await expect(item(app, "Trash").locator("kbd")).toHaveText(["#"]);

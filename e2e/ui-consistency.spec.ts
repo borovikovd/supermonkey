@@ -24,7 +24,7 @@ test("UIC-01 rows you just acted on never flash back during fast triage or a pol
   const afterFirstFive = (await probe.added()).length;
   // Halfway: two messages arrive in other threads, and a poll runs.
   // Bulk 31's reply is the newer one, so it leads the list.
-  const replies = await Promise.all(
+  await Promise.all(
     (
       [
         ["important30", 30_000],
@@ -42,7 +42,6 @@ test("UIC-01 rows you just acted on never flash back during fast triage or a pol
       }),
     ),
   );
-  expect(replies).toHaveLength(2);
   await gmail.poll();
   await app.press("e", "e", "e", "e", "e");
   await expect(app.row("Bulk 10")).toHaveCount(0);
