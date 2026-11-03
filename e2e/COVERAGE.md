@@ -1711,6 +1711,19 @@ _ST · §Addressing_
   - In the request log, `attachments.get` comes before `drafts.update`.
   - In the offline variant, the composer opens while offline, and the result after reconnecting is the same.
 
+#### REP-13 · P1 · Reply keys pressed before the conversation loads open one composer
+
+_EG · §Keyboard ("a stray `r` leaves nothing behind")_
+
+- **Steps:**
+  1. Highlight `p3`. Park the page's submits, press `r` then `f`, release, `settle()`.
+  2. `Esc` `Esc`, `settle()`.
+  3. `Esc`, highlight `p5`. Park the submits, press `r`, `Esc`, `Enter`, release, `settle()`.
+- **Expect:**
+  - After step 1, one composer is open, a forward (To empty).
+  - After step 2, the conversation has no draft stub and Gmail has no draft.
+  - After step 3, `p5` is open with no composer: the reply was for a visit that ended.
+
 ### 5.12 `compose-new.spec.ts` (NEW)
 
 #### NEW-01 · P1 · `c` replaces the screen, and closing it returns to where it came from

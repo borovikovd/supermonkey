@@ -141,8 +141,16 @@ export function resumeDraft(draft: string, thread: number | null, target: number
   openInline(draft, thread, target);
 }
 
-/** Waits for the conversation's data (first load) before aiming a composer. */
+/** Stops the reply waiting for its conversation's data, if one is. */
+let stopWaiting: (() => void) | null = null;
+
+/**
+ * Waits for the conversation's data (first load) before aiming a composer.
+ * Only the latest reply key waits, or each would start its own draft, and it
+ * waits only while that conversation stays on screen.
+ */
 function whenLoaded(thread: number, run: (data: ConversationData) => void) {
+  stopWaiting?.();
   const ready = () => {
     const d = conversationRef.data;
     return d && d.thread === thread ? d : null;
@@ -152,21 +160,31 @@ function whenLoaded(thread: number, run: (data: ConversationData) => void) {
     run(now);
     return;
   }
-  // Several mirror updates can queue frames before one finds the data; only
-  // the first may run, or each would start its own draft.
-  let done = false;
-  const unsub = useMirror.subscribe(() => {
+  const onScreen = () => {
+    const screen = useChrome.getState().current()?.screen;
+    return screen?.kind === "conversation" && screen.thread === thread;
+  };
+  let frame = 0;
+  const stop = () => {
+    unsubMirror();
+    unsubChrome();
+    cancelAnimationFrame(frame);
+    if (stopWaiting === stop) stopWaiting = null;
+  };
+  const unsubChrome = useChrome.subscribe(() => {
+    if (!onScreen()) stop();
+  });
+  const unsubMirror = useMirror.subscribe(() => {
     // conversationRef updates in an effect after the mirror changes.
-    requestAnimationFrame(() => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
       const d = ready();
-      if (d && !done) {
-        done = true;
-        unsub();
-        run(d);
-      }
+      if (!d) return;
+      stop();
+      run(d);
     });
   });
-  setTimeout(unsub, 5000);
+  stopWaiting = stop;
 }
 
 /**

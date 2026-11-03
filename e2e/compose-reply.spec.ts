@@ -884,3 +884,34 @@ test("REP-12 a Gmail draft's attachments are downloaded before its first upsert"
   expect(offline.pdf?.body.equals(files.specPdf.buffer)).toBe(true);
   await order(second.id, second.messageId);
 });
+
+test("REP-13 reply keys pressed before the conversation loads open one composer", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await highlight(app, "Person 3");
+  // Nothing reaches the core, so the conversation stays unloaded.
+  const release = await app.park("submit");
+  await app.press("r", "f");
+  await release();
+  await app.settle();
+  await expect(app.editor).toHaveCount(1);
+  // The later key wins: a forward starts with an empty To.
+  await expect(app.chips("To")).toHaveCount(0);
+
+  await closeComposer(app);
+  await expect(stubs(app)).toHaveCount(0);
+  expect((await gmail.gmail(A)).drafts).toHaveLength(0);
+
+  // A reply key whose conversation was left before it loaded is dropped,
+  // even if the conversation is opened again.
+  await app.press("Escape");
+  await highlight(app, "Person 5");
+  const again = await app.park("submit");
+  await app.press("r", "Escape", "Enter");
+  await again();
+  await app.settle();
+  await expect(app.conversationTitle).toHaveText("Person 5");
+  await expect(app.editor).toHaveCount(0);
+});
