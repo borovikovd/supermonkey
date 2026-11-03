@@ -9,6 +9,8 @@
 //! UI actions and first loads run before any queued sync job.
 
 use std::collections::HashSet;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use crossbeam_channel::{Receiver, Sender, select_biased, unbounded};
 use rusqlite::{Connection, Transaction, params};
@@ -201,12 +203,15 @@ type Queued = (Job, Busy);
 pub struct Writer {
     ui: Sender<Queued>,
     sync: Sender<Queued>,
+    /// The highest action number queued so far, committed or not.
+    received: Arc<AtomicI64>,
 }
 
 impl Writer {
     /// Starts the writer thread. `effects` receives post-commit work.
     pub fn start(db_path: &std::path::Path, effects: EffectSender) -> anyhow::Result<Writer> {
         let conn = crate::db::open_writer(db_path)?;
+        let received = Arc::new(AtomicI64::new(stored_last_action(&conn)));
         let (ui_tx, ui_rx) = unbounded();
         let (sync_tx, sync_rx) = unbounded();
         std::thread::Builder::new()
@@ -224,6 +229,7 @@ impl Writer {
         Ok(Writer {
             ui: ui_tx,
             sync: sync_tx,
+            received,
         })
     }
 
@@ -233,7 +239,16 @@ impl Writer {
 
     /// Queues UI actions. Returns as soon as they are queued.
     pub fn actions(&self, actions: Vec<NumberedAction>) {
+        if let Some(n) = actions.iter().map(|a| a.n).max() {
+            self.received.fetch_max(n, Ordering::AcqRel);
+        }
         self.queue_ui(Job::Actions(actions));
+    }
+
+    /// The last action number received, applied or still queued: where a
+    /// reloaded page continues, so it never reuses a queued number.
+    pub fn last_action(&self) -> i64 {
+        self.received.load(Ordering::Acquire)
     }
 
     /// Queues a sync job (runs after pending UI work).
@@ -313,6 +328,11 @@ fn run_and_reply<T: 'static>(
     }
 }
 
+/// The last action number committed; a fresh database has none.
+fn stored_last_action(conn: &Connection) -> i64 {
+    crate::db::queries::last_action(conn).unwrap_or(0)
+}
+
 struct WriterState {
     conn: Connection,
     rev: i64,
@@ -328,13 +348,7 @@ impl WriterState {
         let rev = conn
             .query_row("SELECT value FROM meta WHERE key = 'rev'", [], |r| r.get(0))
             .unwrap_or(0);
-        let ack = conn
-            .query_row(
-                "SELECT value FROM meta WHERE key = 'last_action'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
+        let ack = stored_last_action(&conn);
         WriterState {
             conn,
             rev,

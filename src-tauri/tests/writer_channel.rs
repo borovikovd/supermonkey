@@ -379,3 +379,62 @@ fn a_section_change_in_place_reaches_the_mirror() {
     assert_eq!(after["s1"].len(), 1);
     assert_ne!(before["s1"][0].split, after["s1"][0].split);
 }
+
+/// A reloaded page continues action numbers from the last one Rust has
+/// received, not the last one committed: actions queued behind a slow job
+/// would otherwise share numbers with the new page's reset and first
+/// subscribe, and the writer would drop the new page's ones.
+#[test]
+fn launch_numbers_continue_after_actions_still_queued() {
+    use ubermensch_lib::engine::{Config, Engine, platform::NoPlatform};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.db");
+    fixture::generate(&path, &SIZE, &["a@example.com"]).unwrap();
+    let (etx, _erx) = tokio::sync::mpsc::unbounded_channel();
+    let writer = Writer::start(&path, etx).unwrap();
+    let engine = Engine::new(
+        Arc::new(NoPlatform),
+        writer.clone(),
+        ubermensch_lib::db::ReadPool::new(&path, 1),
+        dir.path().to_path_buf(),
+        Config::from_env(),
+        Arc::new(ub_gmail::MemoryTokenStore::default()),
+    );
+    let last = ubermensch_lib::api::launch_info(&engine)
+        .unwrap()
+        .last_action;
+
+    // A long job holds the writer while the old page's actions arrive.
+    let (started_tx, started) = std::sync::mpsc::sync_channel(1);
+    let (release, release_rx) = std::sync::mpsc::sync_channel::<()>(1);
+    writer.sync(move |_| {
+        started_tx.send(()).unwrap();
+        release_rx.recv().unwrap();
+        Ok(())
+    });
+    started.recv().unwrap();
+    let sub = SubId("old".into());
+    writer.actions(vec![
+        NumberedAction {
+            n: last + 1,
+            action: Action::Subscribe {
+                sub: sub.clone(),
+                key: SubKey::App,
+            },
+        },
+        NumberedAction {
+            n: last + 2,
+            action: Action::Unsubscribe { sub },
+        },
+    ]);
+
+    let launch = ubermensch_lib::api::launch_info(&engine).unwrap();
+    release.send(()).unwrap();
+    writer.call_blocking(|_| Ok(())).unwrap();
+    assert_eq!(
+        launch.last_action,
+        last + 2,
+        "numbers the writer has queued"
+    );
+}

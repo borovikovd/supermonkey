@@ -14,11 +14,11 @@ fn err(e: impl std::fmt::Display) -> String {
     format!("{e:#}")
 }
 
-/// Where the page's action numbers continue.
+/// Where the page's action numbers continue: after the last one Rust has
+/// received, so a reload never reuses numbers still queued in the writer.
 pub fn launch_info(e: &Engine) -> CmdResult<LaunchInfo> {
-    let last_action = e.reads.with(crate::db::queries::last_action).map_err(err)?;
     Ok(LaunchInfo {
-        last_action,
+        last_action: e.writer.last_action(),
         debug: cfg!(debug_assertions),
     })
 }
