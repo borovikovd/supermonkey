@@ -140,6 +140,44 @@ test("DRF-11 a draft discarded while its first upsert is in flight stays gone", 
   await expect(app.row("Person 3")).toHaveCount(0);
 });
 
+test("DRF-12 a second Gmail draft carrying a local draft's id is deleted as an extra copy", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const thread = s.thread("p3").threadId;
+  await openThread(app, "Person 3");
+  await app.reply();
+  await app.type("the real one");
+  await app.settle();
+  await app.press("Escape", "Escape");
+  await app.settle();
+  const [mine] = await draftsIn(gmail, thread);
+  const local = mine?.message.headers["x-ubermensch-draft"] ?? "";
+  expect(local).toMatch(/\S/);
+
+  // Another Gmail draft turns up with the same local id, for example from a
+  // create whose answer was lost.
+  await gmail.createDraft(
+    A,
+    {
+      subject: "Re: Person 3",
+      threadId: thread,
+      inReplyTo: s.latest("p3").messageId,
+      html: "<p>a stray copy</p>",
+      headers: [["X-Ubermensch-Draft", local]],
+    },
+    { poll: true },
+  );
+  await app.settle();
+
+  const now = await draftsIn(gmail, thread);
+  expect(now.map((d) => d.id)).toEqual([mine?.id]);
+  expect(bodyOf(now[0])).toContain("the real one");
+  await expect(stub(app, "the real one")).toHaveCount(1);
+  await expect(stub(app, "a stray copy")).toHaveCount(0);
+});
+
 test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app, gmail }) => {
   await seeds.drafts(gmail, app);
   await goDrafts(app);

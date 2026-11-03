@@ -2296,6 +2296,15 @@ _EG · §Drafts ("Discard deletes the local draft and the Gmail draft"), §Gmail
   - After step 3, the conversation shows no draft stub: sync does not bring the draft back.
   - After step 4, Gmail has no draft in `p3`'s thread, and Drafts has no row for it.
 
+#### DRF-12 · P1 · A second Gmail draft carrying a local draft's id is deleted as an extra copy
+
+_EG · §Gmail errors ("If that local draft already has a different live Gmail draft, Rust deletes the extra copy")_
+
+- **Steps:**
+  1. In `p3`, press `r`, type "the real one", `settle()`, `Esc` `Esc`. Read the local id from the Gmail draft's `X-Ubermensch-Draft`.
+  2. `createDraft` in `p3`'s thread with "a stray copy" and that same header, then `poll()`, `settle()`.
+- **Expect:** Gmail has only the first draft, still with "the real one". The conversation shows one draft stub, "the real one".
+
 ### 5.16 `undo-send.spec.ts` (SND)
 
 Outbox state machine (§Send and undo):

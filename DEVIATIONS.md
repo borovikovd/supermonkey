@@ -67,6 +67,11 @@ written. Each keeps the spec's intent.
   follows carries the save.
 - Undo of a waiting send clears the draft's defaults, so the reopened draft is
   never discarded as untouched.
+- A Gmail draft found by its `X-Ubermensch-Draft` header (Gmail errors): when
+  the local draft already has a live Gmail draft, the one found by header is
+  the extra copy and is deleted. Otherwise only its Gmail ids are stored on
+  the local draft; the local text is kept, since the copy holds text this app
+  wrote and the local draft is never older.
 - Demo mode: debug builds with `--features fake` and `UBERMENSCH_FAKE=1`
   (`pnpm demo`) run an in-process fake Gmail with demo mail and two accounts.
 

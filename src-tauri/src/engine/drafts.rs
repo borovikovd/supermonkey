@@ -614,7 +614,8 @@ pub async fn read_skipped(e: Arc<Engine>, rt: Arc<AccountRt>, draft: DraftId) {
         )
         .await;
     match read {
-        Ok(g) => store_gmail_draft(&e, &rt, g).await,
+        // The draft's own Gmail draft: no other copy is in question.
+        Ok(g) => store_gmail_draft(&e, &rt, g, Arc::default()).await,
         Err(err) => log::warn!("read skipped draft change: {:?}", err.outcome),
     }
 }
@@ -696,7 +697,7 @@ pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
     // The outbox writes and sends its drafts itself, so Gmail's copy of one is
     // never read back over the version being sent.
     let mut sending = outbox;
-    let live: HashSet<&str> = gmail.iter().map(|d| d.id.as_str()).collect();
+    let live: Arc<HashSet<String>> = Arc::new(gmail.iter().map(|d| d.id.clone()).collect());
     for LocalDraft {
         id,
         gmail: g,
@@ -743,7 +744,7 @@ pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
             )
             .await
         {
-            Ok(full) => store_gmail_draft(e, rt, full).await,
+            Ok(full) => store_gmail_draft(e, rt, full, Arc::clone(&live)).await,
             Err(err) if matches!(err.outcome, Outcome::NotFound) => {}
             Err(err) => return Err(err),
         }
@@ -820,21 +821,39 @@ fn gmail_draft_kind(alone: bool, m: &super::ingest::Incoming) -> DraftKind {
     }
 }
 
-/// The local draft a Gmail draft belongs to: by Gmail draft id, or by its
-/// `X-Ubermensch-Draft` header.
+/// The local draft a Gmail draft belongs to, with the Gmail draft id stored on
+/// it: by Gmail draft id, else by its `X-Ubermensch-Draft` header.
 fn local_for(
     ctx: &crate::writer::Ctx<'_>,
     account: AccountId,
     m: &super::ingest::Incoming,
     gmail_draft: &str,
-) -> rusqlite::Result<Option<DraftId>> {
+) -> rusqlite::Result<Option<(DraftId, Option<String>)>> {
     ctx.tx
         .query_row(
-            "SELECT id FROM drafts WHERE account_id = ?1 AND (gmail_draft_id = ?2 OR id = ?3)",
+            "SELECT id, gmail_draft_id FROM drafts WHERE account_id = ?1 AND (gmail_draft_id = ?2 OR id = ?3)
+             ORDER BY gmail_draft_id IS ?2 DESC LIMIT 1",
             params![account, gmail_draft, m.ub_draft_id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
+}
+
+/// A Gmail draft carrying the id of a local draft that has no Gmail draft, or
+/// whose Gmail draft is gone: this app wrote it, so it is that draft. Its
+/// Gmail ids are stored; the local text stays, as it is never older.
+fn adopt_gmail_draft(
+    ctx: &mut crate::writer::Ctx<'_>,
+    account: AccountId,
+    local: &DraftId,
+    d: &FetchedDraft,
+) -> anyhow::Result<()> {
+    ctx.tx.execute(
+        "UPDATE drafts SET gmail_draft_id = ?2, gmail_message_id = ?3, gmail_thread_id = ?4 WHERE id = ?1",
+        params![local, d.id, d.m.gmail_id, d.m.gmail_thread_id],
+    )?;
+    ctx.touch_draft(account, local)?;
+    Ok(())
 }
 
 /// The stored message row for a Gmail draft's message.
@@ -883,12 +902,18 @@ impl FetchedDraft {
 }
 
 /// Creates or updates the local draft for a Gmail draft. Its kind is decided
-/// once, when it first appears: new, forward (`Fwd:`), or reply.
-pub async fn store_gmail_draft(e: &Engine, rt: &AccountRt, g: ub_gmail::Draft) {
+/// once, when it first appears: new, forward (`Fwd:`), or reply. `live` holds
+/// the account's Gmail draft ids, as `drafts.list` just gave them.
+pub async fn store_gmail_draft(
+    e: &Engine,
+    rt: &AccountRt,
+    g: ub_gmail::Draft,
+    live: Arc<HashSet<String>>,
+) {
     let d = FetchedDraft::parse(&g);
     let account = rt.id;
     e.writer
-        .call(move |ctx| apply_gmail_draft(ctx, account, &d))
+        .call(move |ctx| apply_gmail_draft(ctx, account, &d, &live))
         .await
         .log_err("store_gmail_draft");
 }
@@ -897,6 +922,7 @@ fn apply_gmail_draft(
     ctx: &mut crate::writer::Ctx<'_>,
     account: AccountId,
     d: &FetchedDraft,
+    live: &HashSet<String>,
 ) -> anyhow::Result<()> {
     let m = &d.m;
     // Discarded here, and its delete has not reached Gmail yet.
@@ -904,12 +930,21 @@ fn apply_gmail_draft(
         return Ok(());
     }
     let existing = local_for(ctx, account, m, &d.id)?;
-    // The outbox sends its own version; Gmail's copy may be older.
-    if let Some(local) = &existing
-        && crate::drafts::in_outbox(ctx.tx, local)?
-    {
-        return Ok(());
+    if let Some((local, gmail)) = &existing {
+        // The outbox sends its own version; Gmail's copy may be older.
+        if crate::drafts::in_outbox(ctx.tx, local)? {
+            return Ok(());
+        }
+        // Found by its header (SPEC Gmail errors): an extra copy when the
+        // local draft already has a live Gmail draft, else that draft.
+        if gmail.as_deref() != Some(d.id.as_str()) {
+            return match gmail {
+                Some(other) if live.contains(other) => delete_gmail_draft(ctx, account, &d.id),
+                _ => adopt_gmail_draft(ctx, account, local, d),
+            };
+        }
     }
+    let existing = existing.map(|(local, _)| local);
     // The thread and message rows for the draft (and its siblings).
     // Actions don't change a draft's labels, so no read to guard.
     let pending = super::ingest::PendingOps::load(ctx.tx, account, Vec::new())?;
