@@ -101,6 +101,8 @@ written. Each keeps the spec's intent.
   shadows for the palette, sheets, and toasts). Recipients show as blue
   names, Cc/Bcc sit behind a chevron on the To row, and the footer has Send
   on the left and attach and discard icons on the right.
+- In Drafts the hint bar reads `Enter to open draft · C to compose · ⌘K for
+  commands`: the spec's example hints (`E`, `H`) do nothing there.
 
 ## Decided while designing the E2E suite
 

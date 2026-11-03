@@ -248,6 +248,9 @@ test("VIEW-04 Drafts lists every draft, and mail actions do nothing there", asyn
   await expect(app.row("Re: Person 2")).toHaveCount(2);
   await expect(app.row("dTwoA")).toHaveCount(1);
   await expect(app.row("dTwoB")).toHaveCount(1);
+  // The hint bar offers what works here, not the mail actions that do nothing.
+  await expect(app.page.getByText("Enter to open draft")).toBeVisible();
+  await expect(app.page.getByText("E to Mark Done")).toHaveCount(0);
 
   // A draft composed offline is listed before it reaches Gmail.
   await gmail.offline(true);
