@@ -2434,6 +2434,17 @@ _EP · §Send and undo ("Rust then fetches that message and stores it at once")_
   - The conversation shows the sent message, and the Sending row is gone.
   - In the log, a message or thread fetch for the sent id comes right after `drafts.send`.
 
+#### SND-13 · P1 · A draft reconcile in the undo window keeps the version that was sent
+
+_EG · §Drafts, §Send and undo ("the outbox writes the final version itself")_
+
+- **Steps:**
+  1. Reply to `p3`, type "one", `settle()`: Gmail has the draft with "one".
+  2. `fault(drafts.update, 503)`. Type " two", `settle()`: Gmail still has "one".
+  3. Send. `clearFaults()`, then `poll()`: the poll reconciles drafts while Gmail holds the older copy.
+  4. `advance(10_000)`, `settle()`.
+- **Expect:** exactly one sent message, with "one two". No Gmail draft is left.
+
 ### 5.17 `offline.spec.ts` (OFF)
 
 #### OFF-01 · P1 · Airplane mode: read, search, autocomplete, and act; it all lands when the network returns

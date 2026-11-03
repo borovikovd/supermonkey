@@ -581,3 +581,43 @@ test("SND-12 the sent message shows without waiting for a poll", async ({ app, g
   expect(fetched, `request after drafts.send: ${next?.api} ${next?.path}`).toBe(true);
   expect(log.slice(send).some((r) => r.api === "history.list")).toBe(false);
 });
+
+/**
+ * From the list: opens the thread and replies "one", which autosaves to
+ * Gmail. Then " two" is typed, but its upsert fails, so Gmail keeps "one"
+ * while the local draft says "one two". Returns with the composer open.
+ */
+async function replyAheadOfGmail(app: App, gmail: Control, subject: string): Promise<void> {
+  await openThread(app, subject);
+  await app.reply();
+  await app.type("one");
+  await app.settle();
+  await gmail.fault("drafts.update", { kind: "status", status: 503 });
+  await app.type(" two");
+  await app.settle();
+}
+
+/** The HTML body of the one message A sent on a Gmail thread. */
+async function sentBody(gmail: Control, threadId: string): Promise<string> {
+  const sent = await sentIn(gmail, threadId);
+  expect(sent).toHaveLength(1);
+  return htmlOf(parseMime(sent[0]?.raw ?? ""));
+}
+
+test("SND-13 a draft reconcile in the undo window keeps the version that was sent", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await replyAheadOfGmail(app, gmail, "Person 3");
+  await app.press("Meta+Enter");
+  await expect(app.editor).toHaveCount(0);
+  await gmail.clearFaults();
+  // A poll in the undo window reconciles drafts while Gmail still holds "one".
+  await gmail.poll();
+  await app.settle();
+  await app.advance(DELAY);
+  await app.settle();
+  expect(await sentBody(gmail, s.thread("p3").threadId)).toContain("one two");
+  expect((await gmail.gmail(A)).drafts).toEqual([]);
+});

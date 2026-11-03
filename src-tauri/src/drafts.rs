@@ -332,7 +332,7 @@ pub fn queue_upsert(ctx: &mut Ctx<'_>, account: AccountId, draft: &DraftId) -> a
     Ok(())
 }
 
-fn in_outbox(conn: &Connection, draft: &DraftId) -> rusqlite::Result<bool> {
+pub fn in_outbox(conn: &Connection, draft: &DraftId) -> rusqlite::Result<bool> {
     conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM outbox WHERE draft_id = ?1)",
         [draft],
