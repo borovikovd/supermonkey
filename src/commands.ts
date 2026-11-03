@@ -98,11 +98,10 @@ function moveAfterRemoval(before: string[], removed: Set<string>) {
   const focus = cur.screen.kind === "conversation" ? String(cur.screen.thread) : cur.highlight;
   if (focus === null || shown.has(focus) || !removed.has(focus)) return;
   const at = before.indexOf(focus);
+  // A conversation opened from elsewhere (a draft in Drafts) has no row to move from.
+  if (at < 0) return;
   const isShown = (k: string) => shown.has(k);
-  const next =
-    before.slice(at + 1).find(isShown) ??
-    before.slice(0, Math.max(at, 0)).findLast(isShown) ??
-    null;
+  const next = before.slice(at + 1).find(isShown) ?? before.slice(0, at).findLast(isShown) ?? null;
   if (cur.screen.kind === "conversation") {
     if (next === null) closeThread();
     else openThread(Number(next));

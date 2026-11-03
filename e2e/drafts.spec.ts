@@ -107,6 +107,16 @@ test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app,
   await app.press("Escape", "Escape");
   await goDrafts(app);
 
+  // A reply aimed at an older message of an unread thread: that message is
+  // selected, not the latest one the conversation would select on its own.
+  await highlight(app, "About message three.");
+  await app.press("Enter");
+  await expect(app.conversationTitle).toContainText("Q4 plan");
+  await expect(app.editor).toContainText("About message three.");
+  await expect(app.selectedMessage).toContainText("Plan message 3");
+  await app.press("Escape", "Escape");
+  await goDrafts(app);
+
   // A forward draft opens its thread in the same reply composer (SPEC Reading).
   await highlight(app, "Fwd: Contract");
   await app.press("Enter");

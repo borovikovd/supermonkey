@@ -134,7 +134,13 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
       known.current = new Set(msgs.map((m) => m.id));
       const expanded = msgs.filter((m) => m.unread).map((m) => m.id);
       if (latest !== null) expanded.push(latest);
-      c.set({ expanded, selectedMessage: latest });
+      // A reply composer opened with the conversation keeps its target selected.
+      const target =
+        c.inline?.thread === data.thread
+          ? (data.drafts.find((d) => d.id === c.inline?.draft)?.target ?? null)
+          : null;
+      const initial = target !== null && msgs.some((m) => m.id === target) ? target : latest;
+      c.set({ expanded, selectedMessage: initial });
       latestRef.current = latest;
       const firstUnread = msgs.find((m) => m.unread)?.id ?? latest;
       requestAnimationFrame(() => {
