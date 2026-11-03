@@ -60,8 +60,8 @@ pub struct Outgoing {
 
 /// Builds the RFC 5322 bytes of `o`. The tree is
 /// `multipart/mixed { multipart/related { multipart/alternative { text/plain, text/html },
-/// inline parts… }, attachments… }`, with `multipart/related` dropped when there are no inline
-/// parts and `multipart/mixed` dropped when there are no attachments. The `text/plain` part is
+/// inline parts… }, attachments… }`, with `multipart/mixed` dropped when there are no
+/// attachments. `multipart/related` stays even with no inline parts (SPEC Drafts). The `text/plain` part is
 /// generated from the HTML. Non-ASCII names, subjects and filenames are encoded by mail-builder
 /// (RFC 2047 / RFC 2231). Empty address lists are omitted; `Bcc` is written when present, as
 /// Gmail needs it to deliver and then strips it.
@@ -110,10 +110,8 @@ fn body(o: &Outgoing) -> MimePart<'_> {
             MimePart::new("text/html", o.html.as_str()),
         ],
     );
-    if !o.inline.is_empty() {
-        let related = iter::once(body).chain(o.inline.iter().map(inline_part));
-        body = MimePart::new("multipart/related", related.collect::<Vec<_>>());
-    }
+    let related = iter::once(body).chain(o.inline.iter().map(inline_part));
+    body = MimePart::new("multipart/related", related.collect::<Vec<_>>());
     if !o.attachments.is_empty() {
         let mixed = iter::once(body).chain(o.attachments.iter().map(attachment_part));
         body = MimePart::new("multipart/mixed", mixed.collect::<Vec<_>>());

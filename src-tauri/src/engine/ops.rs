@@ -141,6 +141,7 @@ async fn reject(e: &EngineRef, account: AccountId, op: &Op, status: u16, message
                 }
                 "label_create" => {
                     let p: LabelCreate = serde_json::from_str(&op.payload)?;
+                    drop_label_uses(ctx, account, &p.id)?;
                     ctx.tx.execute(
                         "DELETE FROM labels WHERE account_id = ?1 AND id = ?2 AND gmail_id IS NULL",
                         params![account, p.id],
@@ -161,6 +162,35 @@ async fn reject(e: &EngineRef, account: AccountId, op: &Op, status: u16, message
         })
         .await
         .log_err("reject op");
+}
+
+/// A label Gmail refused to create can't be applied either: the queued
+/// changes that use it are rolled back locally and dropped with their undo entries.
+fn drop_label_uses(
+    ctx: &mut crate::writer::Ctx<'_>,
+    account: AccountId,
+    label: &str,
+) -> anyhow::Result<()> {
+    let queued: Vec<(i64, Option<i64>, String)> = {
+        let mut stmt = ctx.tx.prepare(
+            "SELECT id, action, payload FROM ops WHERE account_id = ?1 AND kind = 'modify' ORDER BY id",
+        )?;
+        stmt.query_map([account], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<Result<_, _>>()?
+    };
+    for (id, action, payload) in queued {
+        let p: ModifyOp = serde_json::from_str(&payload)?;
+        if !p.add.iter().chain(&p.remove).any(|l| l == label) {
+            continue;
+        }
+        crate::mail::revert(ctx, None, account, &p.threads, false)?;
+        if let Some(n) = action {
+            ctx.tx
+                .execute("DELETE FROM undo_entries WHERE id = ?1", [n])?;
+        }
+        ctx.tx.execute("DELETE FROM ops WHERE id = ?1", [id])?;
+    }
+    Ok(())
 }
 
 /// Local label id → Gmail label id. A label still waiting for its create has none yet.

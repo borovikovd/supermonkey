@@ -335,10 +335,6 @@ test("SRC-07 Gmail results come 15 at a time; the next page loads near the oldes
   app,
   gmail,
 }) => {
-  test.fail(
-    true,
-    "BUG: Gmail search never loads page 3. Each hit's metadata commit grows the list, ListView asks moreResults again (src/ui/ListView.tsx:214), and search::start cancels the page still in flight (src-tauri/src/engine/search.rs:41), so next_page stays at page 2's token",
-  );
   test.slow();
   const s = await seeds.bulk(gmail, app);
   const pages = async (match: (p: Record<string, string>) => boolean) =>

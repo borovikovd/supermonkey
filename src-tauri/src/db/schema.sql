@@ -169,8 +169,9 @@ CREATE TABLE IF NOT EXISTS drafts (
 CREATE INDEX IF NOT EXISTS drafts_thread ON drafts(thread_id);
 CREATE INDEX IF NOT EXISTS drafts_gmail ON drafts(account_id, gmail_draft_id);
 
+-- AUTOINCREMENT: the UI keys send toasts by id, so an id is never reused.
 CREATE TABLE IF NOT EXISTS outbox (
-  id                INTEGER PRIMARY KEY,
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
   account_id        INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   draft_id          TEXT NOT NULL,
   thread_id         INTEGER,
@@ -207,8 +208,9 @@ CREATE TABLE IF NOT EXISTS undo_entries (
 );
 CREATE INDEX IF NOT EXISTS undo_account ON undo_entries(account_id, id);
 
+-- AUTOINCREMENT: ids are never reused, because the UI shows each id once.
 CREATE TABLE IF NOT EXISTS notices (
-  id          INTEGER PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   kind        TEXT NOT NULL,         -- rejected | send_failed | send_undone | draft_gone | info
   message     TEXT NOT NULL,

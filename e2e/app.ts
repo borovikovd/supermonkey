@@ -124,10 +124,20 @@ export class App {
 
   private async installClock(): Promise<void> {
     if (this.clockInstalled) return;
+    // Page timers only run when a test moves the clock, so a dismissed toast
+    // waits for its 200 ms unmount indefinitely. It must not catch clicks
+    // meanwhile; in the app it is gone before a person could click.
+    await this.page.addInitScript(() => {
+      addEventListener("DOMContentLoaded", () => {
+        const style = document.createElement("style");
+        style.textContent = '[data-sonner-toast][data-removed="true"]{pointer-events:none}';
+        document.head.append(style);
+      });
+    });
     const now = await this.gmail.now();
     await this.page.clock.install({ time: now });
-    // Date.now() stands still with the core's clock; timers still run, so
-    // focus, animations, and debounces behave as in the app.
+    // Date.now() stands still with the core's clock. Page timers run only when
+    // a test moves the clock (`advance`).
     await this.page.clock.setFixedTime(now);
     this.clockInstalled = true;
   }
@@ -432,8 +442,9 @@ export class App {
     return this.page.getByRole("dialog", { name: title });
   }
 
+  /** Toasts on screen. A dismissed toast stays in the DOM for its exit animation; it is not counted. */
   get toasts(): Locator {
-    return this.page.locator("[data-sonner-toast]");
+    return this.page.locator('[data-sonner-toast]:not([data-removed="true"])');
   }
 
   toast(text: string | RegExp): Locator {
@@ -442,7 +453,7 @@ export class App {
 
   /** Error toasts (Sonner's error style). */
   get errorToasts(): Locator {
-    return this.page.locator('[data-sonner-toast][data-type="error"]');
+    return this.page.locator('[data-sonner-toast][data-type="error"]:not([data-removed="true"])');
   }
 
   // ---------------------------------------------------------------- composer
@@ -470,7 +481,7 @@ export class App {
   }
 
   field(label: "To" | "Cc" | "Bcc"): Locator {
-    return this.page.getByRole("combobox", { name: label });
+    return this.page.getByRole("combobox", { name: label, exact: true });
   }
 
   get editor(): Locator {

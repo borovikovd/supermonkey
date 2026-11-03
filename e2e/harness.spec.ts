@@ -409,7 +409,7 @@ test("MIME: a sent reply's part tree", async ({ app, gmail }) => {
     (m) => m.threadId === s.thread("p3").threadId && m.labels.includes("SENT"),
   );
   const tree = parseMime(sent?.raw ?? "");
-  expect(shape(tree)).toBe("multipart/alternative[text/plain,text/html]");
+  expect(shape(tree)).toBe("multipart/related[multipart/alternative[text/plain,text/html]]");
   expect(htmlOf(tree)).toContain("Thanks for the note");
   expect(tree.headers["in-reply-to"]).toBe(s.message("p3", 1).messageId);
 });

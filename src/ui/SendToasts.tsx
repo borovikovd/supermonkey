@@ -42,6 +42,8 @@ export function SendToasts() {
   const { outbox, notices } = useSummaries();
   const closing = useRef(new Set<number>());
   const shown = useRef(new Set<number>());
+  /** Outbox rows with a toast up. */
+  const open = useRef(new Set<number>());
 
   // One toast per outbox row whose toast is still open.
   useEffect(() => {
@@ -49,15 +51,25 @@ export function SendToasts() {
     for (const r of outbox) {
       if (r.toastClosed) {
         toast.dismiss(`send-${r.id}`);
+        open.current.delete(r.id);
         continue;
       }
+      open.current.add(r.id);
       toast(sendLabel(r), {
         id: `send-${r.id}`,
         duration: Infinity,
         description: r.subject || undefined,
         action:
           r.undoEntry !== null && !r.undoRequested
-            ? { label: "Undo", onClick: () => undoSend(r) }
+            ? {
+                label: "Undo",
+                onClick: (e) => {
+                  // The toast stays: a held undo shows Undoing…, and a row
+                  // that leaves the outbox takes its toast with it.
+                  e.preventDefault();
+                  undoSend(r);
+                },
+              }
             : undefined,
         onDismiss: () => act({ type: "closeToast", outbox: r.id }),
       });
@@ -67,6 +79,13 @@ export function SendToasts() {
           toast.dismiss(`send-${r.id}`);
           act({ type: "closeToast", outbox: r.id });
         }, 4000);
+      }
+    }
+    // A row that left the outbox (undone, or rejected) takes its toast with it.
+    for (const id of open.current) {
+      if (!live.has(id)) {
+        open.current.delete(id);
+        toast.dismiss(`send-${id}`);
       }
     }
     for (const [id, target] of reopenWhenGone) {
@@ -87,7 +106,10 @@ export function SendToasts() {
       const { draft, thread } = n;
       if (n.kind === "sendFailed") toast.error(n.message);
       if (typing()) {
+        // It stays until acted on or closed: the draft is otherwise only in Drafts.
         toast(n.kind === "sendFailed" ? "Your message was not sent" : "Send undone", {
+          duration: Infinity,
+          closeButton: true,
           action: { label: "Open draft", onClick: () => reopenDraft(account, draft, thread) },
         });
       } else {

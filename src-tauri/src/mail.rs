@@ -101,6 +101,13 @@ pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: &ModifyAction) -> anyhow::Result<()>
         .filter(|&l| !add.contains(l))
         .cloned()
         .collect();
+    // Mark unread changes the latest message only, so it can't share an op
+    // with labels meant for every message.
+    let unread = add.contains("UNREAD");
+    anyhow::ensure!(
+        !unread || (add.len() == 1 && remove.is_empty()),
+        "mark unread can't change other labels"
+    );
     let mut changes: Vec<ThreadChange> = Vec::new();
     let mut gmail_ids: Vec<String> = Vec::new();
 
@@ -130,8 +137,11 @@ pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: &ModifyAction) -> anyhow::Result<()>
             snooze_after: snooze_after(m, snooze_before),
         };
         for msg in msgs.iter().filter(|x| !x.is_draft) {
-            // Every message is part of the op: a queued action applies to the messages it recorded.
-            gmail_ids.push(msg.gmail_id.clone());
+            // Every message is part of the op (a queued action applies to the
+            // messages it recorded), except that mark unread sends the latest only.
+            if !unread || latest_live.is_none_or(|latest| latest == msg.id) {
+                gmail_ids.push(msg.gmail_id.clone());
+            }
             if let Some((labels, change)) = label_change(msg, &add, &remove, latest_live) {
                 threads::set_message_labels(ctx, msg.id, &labels)?;
                 tc.changes.push(change);
@@ -209,6 +219,7 @@ pub fn revert(
         else {
             continue;
         };
+        let restores_snooze = snooze_now == tc.snooze_after && tc.snooze_after != tc.snooze_before;
         for c in &tc.changes {
             let Some((gmail_id, labels)) = ctx
                 .tx
@@ -242,17 +253,42 @@ pub fn revert(
                 labels.into_iter().filter(|l| !remove.contains(l)).collect();
             next.extend(add.iter().cloned());
             threads::set_message_labels(ctx, c.msg, &next)?;
-            match ops.iter_mut().find(|o| o.add == add && o.remove == remove) {
-                Some(o) => o.messages.push(gmail_id),
-                None => ops.push(ModifyOp {
-                    messages: vec![gmail_id],
-                    add,
-                    remove,
-                    threads: vec![],
-                }),
+            let i = ops
+                .iter()
+                .position(|o| o.add == add && o.remove == remove)
+                .unwrap_or_else(|| {
+                    ops.push(ModifyOp {
+                        add: add.clone(),
+                        remove: remove.clone(),
+                        ..ModifyOp::default()
+                    });
+                    ops.len() - 1
+                });
+            let Some(op) = ops.get_mut(i) else { continue };
+            op.messages.push(gmail_id);
+            // What this undo changed, so a rejection by Gmail can roll it back.
+            let change = MsgChange {
+                msg: c.msg,
+                added: add,
+                removed: remove,
+            };
+            if let Some(t) = op.threads.iter_mut().find(|t| t.thread == tc.thread) {
+                t.changes.push(change);
+            } else {
+                let (before, after) = if restores_snooze {
+                    (tc.snooze_after, tc.snooze_before)
+                } else {
+                    (snooze_now, snooze_now)
+                };
+                op.threads.push(ThreadChange {
+                    thread: tc.thread,
+                    changes: vec![change],
+                    snooze_before: before,
+                    snooze_after: after,
+                });
             }
         }
-        if snooze_now == tc.snooze_after && tc.snooze_after != tc.snooze_before {
+        if restores_snooze {
             ctx.tx.execute(
                 "UPDATE threads SET snooze_until = ?2 WHERE id = ?1",
                 params![tc.thread, tc.snooze_before],

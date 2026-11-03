@@ -502,6 +502,7 @@ fn apply_history(
     batch: &HistoryBatch,
     fetched: &[(String, Option<u64>, Vec<Incoming>)],
     latest: u64,
+    focused: bool,
 ) -> anyhow::Result<()> {
     let pending = PendingOps::load(ctx.tx, account)?;
     let refetched: HashSet<&str> = fetched.iter().map(|(gid, ..)| gid.as_str()).collect();
@@ -548,7 +549,7 @@ fn apply_history(
         "UPDATE accounts SET history_id = ?2, last_sync = ?3 WHERE id = ?1",
         params![account, latest.to_string(), ctx.now],
     )?;
-    super::notify::from_poll(ctx, account, &batch.added)?;
+    super::notify::from_poll(ctx, account, &batch.added, focused)?;
     ctx.effect(Effect::Badge);
     Ok(())
 }
@@ -612,9 +613,17 @@ pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> 
     }
 
     let account = rt.id;
+    let eng = e.clone();
     let applied = e
         .writer
-        .call(move |ctx| apply_history(ctx, account, &batch, &fetched, latest))
+        .call(move |ctx| {
+            // Read at apply time: whether the window shows the open thread now.
+            let focused = eng
+                .unfocused_since
+                .load(std::sync::atomic::Ordering::Relaxed)
+                == 0;
+            apply_history(ctx, account, &batch, &fetched, latest, focused)
+        })
         .await;
     match applied {
         // Bodies of new messages, at priority 4 ahead of the rest.

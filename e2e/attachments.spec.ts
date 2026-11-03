@@ -147,10 +147,6 @@ test.describe("attachments", () => {
   });
 
   test("ATT-04 MIME tree shape and encoded headers", async ({ app, gmail }) => {
-    test.fail(
-      true,
-      "BUG: build_mime drops multipart/related when there are no inline parts; SPEC Drafts makes it the top part with no attachments, and mixed[related[alternative]] with them (src-tauri/crates/ub-mime/src/build.rs:111)",
-    );
     const s = await seeds.standard(gmail, app);
     const plainSubject = "Grüße – 日本";
 

@@ -118,10 +118,6 @@ test("DRF-03 edits made to a draft in Gmail, with the draft closed or open", asy
   app,
   gmail,
 }) => {
-  test.fail(
-    true,
-    "BUG: a Gmail change skipped while a composer had the draft open is never read on close: src/drafts.rs:486 gates the read on is_untouched(), which is false for every draft without defaults_json (all Gmail-made drafts)",
-  );
   const s = await seeds.drafts(gmail, app);
   /** The draft edited in Gmail web: its message is replaced. */
   const webEdit = (key: string, thread: string, text: string) =>
@@ -175,10 +171,6 @@ test("DRF-03 edits made to a draft in Gmail, with the draft closed or open", asy
 });
 
 test("DRF-04 a draft deleted or sent elsewhere", async ({ app, gmail }) => {
-  test.fail(
-    true,
-    "BUG: an open Gmail draft with attachments, deleted elsewhere, never reaches Gmail again: the composer saves its first-load attachments (path null), so the upsert needs the deleted source attachment row and is rejected ('attachment N is gone', src/engine/attachments.rs:70 via src/engine/drafts.rs:113)",
-  );
   const s = await seeds.drafts(gmail, app);
   const gone = app.toast("Draft was sent or deleted elsewhere");
 

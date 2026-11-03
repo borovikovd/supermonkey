@@ -285,10 +285,6 @@ test("SND-05 undo while sending is held until the send resolves", async ({ app, 
 });
 
 test("SND-06 a rejected send brings the draft back", async ({ app, gmail }) => {
-  test.fail(
-    true,
-    "BUG: a second notice in a session is never shown: notices.id reuses the deleted row's id (src-tauri/src/db/schema.sql:211, no AUTOINCREMENT; acks delete, src/actions.rs:70) and SendToasts skips ids it has shown (src/ui/SendToasts.tsx:79)",
-  );
   const s = await seeds.standard(gmail, app);
   await gmail.fault("drafts.send", { kind: "status", status: 400, reason: "Invalid To header" });
 
@@ -299,7 +295,12 @@ test("SND-06 a rejected send brings the draft back", async ({ app, gmail }) => {
   await app.advance(DELAY);
   await expect(app.conversationTitle).toContainText("Person 3");
   await expect(app.editor).toContainText("rejected reply");
-  await expect(app.errorToasts.filter({ hasText: "Injected fault" })).not.toHaveCount(0);
+  // Shown during the advance, so its own 4 s may have run out: count it even on its way out.
+  await expect(
+    app.page
+      .locator('[data-sonner-toast][data-type="error"]')
+      .filter({ hasText: "Injected fault" }),
+  ).not.toHaveCount(0);
   await app.press("Escape", "Escape", "Escape");
 
   // Typing in another composer: no takeover; Open draft swaps composers.
@@ -489,10 +490,6 @@ test("SND-10 send toasts stay across accounts", async ({ app, gmail }) => {
 });
 
 test("SND-11 undoing a waiting send while another composer is open", async ({ app, gmail }) => {
-  test.fail(
-    true,
-    "BUG: re-sending after an undo loses the new send's toast: outbox.id reuses the undone row's id (src-tauri/src/db/schema.sql:173, no AUTOINCREMENT), so the Sonner toast `send-<id>` still being dismissed and its closeToast land on the new row (src/ui/SendToasts.tsx:56-62)",
-  );
   await seeds.standard(gmail, app);
 
   // The other composer is touched: kept in Drafts.

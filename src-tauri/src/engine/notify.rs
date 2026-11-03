@@ -11,12 +11,13 @@ use crate::notify::Notification;
 use crate::writer::{Ctx, Effect};
 
 /// Notifications for a poll: messages added with `INBOX` and `UNREAD`, not
-/// from a connected account, and not in a conversation already on screen.
-/// More than three for one account become one summary.
+/// from a connected account, and not in a conversation the focused window
+/// already shows. More than three for one account become one summary.
 pub fn from_poll(
     ctx: &mut Ctx<'_>,
     account: AccountId,
     new_ids: &HashSet<String>,
+    focused: bool,
 ) -> anyhow::Result<()> {
     if new_ids.is_empty() {
         return Ok(());
@@ -40,7 +41,11 @@ pub fn from_poll(
     for a in ids {
         mine.extend(queries::my_addresses(ctx.tx, a)?);
     }
-    let open = ctx.subs.open_threads();
+    let open = if focused {
+        ctx.subs.open_threads()
+    } else {
+        HashSet::new()
+    };
     let mut out: Vec<Notification> = Vec::new();
     let mut stmt = ctx.tx.prepare_cached(
         "SELECT thread_id, from_name, from_email, subject, snippet, label_ids FROM messages

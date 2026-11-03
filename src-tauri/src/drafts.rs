@@ -369,13 +369,34 @@ pub fn save(ctx: &mut Ctx<'_>, draft: &str, save: DraftSave) -> anyhow::Result<(
                 },
             )
         }
-        DraftSave::Update { fields } => {
+        DraftSave::Update { mut fields } => {
             let Some((account, thread)) = account_of(ctx, draft)? else {
                 return Ok(());
             };
+            // The composer holds attachments as first loaded; a local copy
+            // stored since (for example after the source left Gmail) is kept.
+            let stored: Vec<DraftAttachment> = ctx
+                .tx
+                .query_row(
+                    "SELECT attachments_json FROM drafts WHERE id = ?1",
+                    [draft],
+                    |r| r.get::<_, String>(0),
+                )
+                .map(|j| from_json(&j))?;
+            for a in &mut fields.attachments {
+                if a.path.is_none() {
+                    a.path = stored
+                        .iter()
+                        .find(|s| s.id == a.id)
+                        .and_then(|s| s.path.clone());
+                }
+            }
             ctx.tx.execute(
+                // An edit after a skipped Gmail change wins over it (last writer wins),
+                // so that change is no longer read on close.
                 "UPDATE drafts SET from_json = ?2, to_json = ?3, cc_json = ?4, bcc_json = ?5, subject = ?6,
-                    body_html = ?7, attachments_json = ?8, updated_at = ?9 WHERE id = ?1",
+                    body_html = ?7, attachments_json = ?8, updated_at = ?9, pending_gmail_read = 0
+                 WHERE id = ?1",
                 params![
                     draft,
                     to_json(&fields.from),
@@ -482,8 +503,9 @@ pub fn close(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
     ctx.tx
         .execute("UPDATE drafts SET started_fresh = 0 WHERE id = ?1", [draft])?;
     ctx.touch_draft(account, draft)?;
-    // A Gmail change skipped while this composer was open is read now, if no edits were saved.
-    if pending_read && untouched {
+    // A Gmail change skipped while this composer was open is read now. Edits
+    // saved after it cleared the flag.
+    if pending_read {
         ctx.effect(Effect::ReadDraft {
             account,
             draft: draft.to_string(),

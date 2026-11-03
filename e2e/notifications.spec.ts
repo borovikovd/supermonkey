@@ -77,10 +77,6 @@ test.describe("notifications", () => {
   });
 
   test("NOT-02 when a notification is not raised", async ({ app, gmail }) => {
-    test.fail(
-      true,
-      "BUG: an open conversation suppresses notifications even when the window is unfocused; from_poll skips every open thread without checking focus (src-tauri/src/engine/notify.rs:43, :68)",
-    );
     const s = await seeds.standard(gmail, app);
     const p2 = s.thread("p2");
     const reply = (text: string) =>

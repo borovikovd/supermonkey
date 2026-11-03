@@ -232,10 +232,6 @@ test("TRI-04 ! moves to Spam", async ({ app, gmail }) => {
 });
 
 test("TRI-05 star and read toggles", async ({ app, gmail }) => {
-  test.fail(
-    true,
-    "BUG: u marks only the latest message unread locally, but the batchModify adds UNREAD to every message id of the thread (src-tauri/src/mail.rs:134,169)",
-  );
   const s = await seeds.standard(gmail, app);
   const own = () => app.row("Budget draft");
 

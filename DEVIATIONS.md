@@ -98,3 +98,15 @@ the spec's wording:
   through the web bridge against the real core and the fake Gmail; Tauri's
   WebDriver has no macOS support. Unit tests are kept only for complex pure
   logic.
+
+## Decided while fixing what the E2E suite found
+
+- **Clicking a split name** in the list header moves the highlight to that
+  split's first row, as `Tab` does, and scrolls its section header to the top.
+- **"Your message was not sent" and "Send undone"** toasts with `Open draft`
+  stay until clicked or closed, rather than Sonner's 4 s.
+- **Sign-in.** Clicking "Add a Gmail account" (or the palette's `Add account`)
+  while a sign-in waits in the browser starts over: the waiting one is
+  cancelled and its loopback port closed.
+- **A Gmail draft change skipped while a composer had it open** is read on
+  close unless the user saved an edit after it (last writer wins).

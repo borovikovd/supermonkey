@@ -107,10 +107,16 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
         } => crate::splits::save(ctx, account, &splits, deleted),
         Action::RemoveAccount { account } => crate::accounts::remove(ctx, account),
         Action::MoreResults { sub } => {
-            if let Some(s) = ctx.subs.map.get(&sub)
-                && let Some(token) = s.next_page.clone()
-                && let Some((account, query)) = gmail_query(ctx, &s.key)
-            {
+            // The token is taken: asking again while this page loads does
+            // nothing, instead of restarting it. The page brings the next token.
+            let Some(s) = ctx.subs.map.get_mut(&sub) else {
+                return Ok(());
+            };
+            let Some(token) = s.next_page.take() else {
+                return Ok(());
+            };
+            let key = s.key.clone();
+            if let Some((account, query)) = gmail_query(ctx, &key) {
                 ctx.effect(Effect::GmailList {
                     sub,
                     account,

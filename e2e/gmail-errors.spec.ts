@@ -245,10 +245,6 @@ test("ERR-03 a quiet sync status after 30 s of retrying", async ({ app, gmail })
 });
 
 test("ERR-04 a rejection rolls the action back and shows Gmail's error", async ({ app, gmail }) => {
-  test.fail(
-    true,
-    "BUG: a rejection after an acked one shows no toast: notice ids are reused (src-tauri/src/db/schema.sql:211, no AUTOINCREMENT) and SendToasts skips ids it has shown (src/ui/SendToasts.tsx:103)",
-  );
   test.slow();
   const s = await seeds.standard(gmail, app);
   const errors = await errorToastProbe(app);
@@ -613,10 +609,6 @@ test("ERR-08 a 404 while fetching a body is dropped silently", async ({ app, gma
 });
 
 test("ERR-09 a rejected undo or label create", async ({ app, gmail }) => {
-  test.fail(
-    true,
-    "BUG: a rejected undo is not rolled back (src-tauri/src/mail.rs:251 queues the undo op with threads: [], so ops.rs:141 reverts nothing); a rejected labels.create still sends its apply with the local label id (src-tauri/src/engine/ops.rs:163); notice id reuse hides toasts (src/ui/SendToasts.tsx:103)",
-  );
   const s = await seeds.standard(gmail, app);
   const errors = await errorToastProbe(app);
 

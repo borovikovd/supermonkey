@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, OptionalExtension as _};
 
 const SCHEMA: &str = include_str!("schema.sql");
 
@@ -32,7 +32,34 @@ pub fn open_writer(path: &Path) -> anyhow::Result<Connection> {
     let conn = Connection::open(path)?;
     tune(&conn)?;
     conn.execute_batch(SCHEMA)?;
+    for table in ["notices", "outbox"] {
+        add_autoincrement(&conn, table)?;
+    }
     Ok(conn)
+}
+
+/// The UI keys notices and send toasts by id, so those ids are never reused.
+/// Databases from before these tables had AUTOINCREMENT get them rebuilt with
+/// their rows. Neither table has indexes or tables referencing it.
+fn add_autoincrement(conn: &Connection, table: &str) -> rusqlite::Result<()> {
+    let sql: Option<String> = conn
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            [table],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if sql.is_none_or(|s| s.contains("AUTOINCREMENT")) {
+        return Ok(());
+    }
+    // One transaction, so a crash can't strand the rows in `{table}_old`.
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(&format!("ALTER TABLE {table} RENAME TO {table}_old"))?;
+    tx.execute_batch(SCHEMA)?;
+    tx.execute_batch(&format!(
+        "INSERT INTO {table} SELECT * FROM {table}_old; DROP TABLE {table}_old"
+    ))?;
+    tx.commit()
 }
 
 fn open_reader(path: &Path) -> anyhow::Result<Connection> {
@@ -83,4 +110,63 @@ pub fn to_json<T: serde::Serialize>(v: &T) -> String {
 
 pub fn from_json<T: serde::de::DeserializeOwned + Default>(s: &str) -> T {
     serde_json::from_str(s).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A database from before AUTOINCREMENT keeps its rows and stops reusing ids.
+    #[test]
+    fn old_outbox_and_notices_get_autoincrement() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.sqlite");
+        {
+            let conn = open_writer(&path).unwrap();
+            conn.execute_batch(
+                "DROP TABLE outbox; DROP TABLE notices;
+                 CREATE TABLE outbox (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL,
+                   draft_id TEXT NOT NULL, thread_id INTEGER, send_after INTEGER NOT NULL,
+                   state TEXT NOT NULL, gmail_draft_id TEXT, sent_message_id TEXT,
+                   undo_requested INTEGER NOT NULL DEFAULT 0, toast_closed INTEGER NOT NULL DEFAULT 0,
+                   delayed INTEGER NOT NULL DEFAULT 0, error TEXT, rev INTEGER NOT NULL DEFAULT 0);
+                 CREATE TABLE notices (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL,
+                   kind TEXT NOT NULL, message TEXT NOT NULL, draft_id TEXT, thread_id INTEGER,
+                   created_at INTEGER NOT NULL);
+                 INSERT INTO accounts (id, email, position, hue) VALUES (1, 'a@x.test', 0, 0);
+                 INSERT INTO outbox (id, account_id, draft_id, send_after, state) VALUES (7, 1, 'd', 0, 'waiting');
+                 INSERT INTO notices (id, account_id, kind, message, created_at) VALUES (3, 1, 'info', 'hi', 0);",
+            )
+            .unwrap();
+        }
+        let conn = open_writer(&path).unwrap();
+        let kept: String = conn
+            .query_row("SELECT draft_id FROM outbox WHERE id = 7", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, "d");
+        conn.execute_batch(
+            "DELETE FROM outbox; DELETE FROM notices;
+             INSERT INTO outbox (account_id, draft_id, send_after, state) VALUES (1, 'e', 0, 'waiting');
+             INSERT INTO notices (account_id, kind, message, created_at) VALUES (1, 'info', 'again', 0);",
+        )
+        .unwrap();
+        let outbox: i64 = conn
+            .query_row("SELECT id FROM outbox", [], |r| r.get(0))
+            .unwrap();
+        let notice: i64 = conn
+            .query_row("SELECT id FROM notices", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            outbox > 7 && notice > 3,
+            "ids reused: outbox {outbox}, notice {notice}"
+        );
+        let leftovers: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name LIKE '%_old'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(leftovers, 0);
+    }
 }
