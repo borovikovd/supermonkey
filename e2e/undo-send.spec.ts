@@ -82,7 +82,14 @@ async function passSendAfter(app: App): Promise<void> {
 const newMessage = (app: App): Locator => app.page.getByRole("heading", { name: "New Message" });
 
 test("SND-01 the send waits ten seconds, then goes out once", async ({ app, gmail }) => {
-  await seeds.standard(gmail, app);
+  const s = await seeds.standard(gmail, app);
+  const p6Labels = async () =>
+    (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p6", 1).id)?.labels ?? [];
+  // An older entry: once the send's entry leaves the history, `z` reaches it.
+  await highlight(app, "Person 6");
+  await app.press("e");
+  await app.settle();
+  expect(await p6Labels()).not.toContain("INBOX");
   await sendNew(app, "Ten seconds", "Body of the timed send");
   const toast = sendToast(app, "Ten seconds");
   await expect(toast).toContainText("Sending…");
@@ -103,13 +110,15 @@ test("SND-01 the send waits ten seconds, then goes out once", async ({ app, gmai
   await app.press("g", "t");
   await expect(app.row("Ten seconds")).toHaveCount(1);
 
-  // The toast closes; a stray `z` then never trashes delivered mail.
+  // The toast closes; a stray `z` then never trashes delivered mail, and
+  // undoes the entry before the send instead.
   await app.advance(5_000);
   await expect(toast).toHaveCount(0);
   await app.press("z");
   await app.settle();
   const after = (await gmail.gmail(A)).messages.find((m) => m.id === sent[0]?.id);
   expect(after?.labels).not.toContain("TRASH");
+  expect(await p6Labels()).toContain("INBOX");
   expect(await gmail.requests("drafts.send")).toHaveLength(1);
 });
 
@@ -282,6 +291,27 @@ test("SND-05 undo while sending is held until the send resolves", async ({ app, 
   await expect(app.conversationTitle).toContainText("Person 5");
   await expect(app.editor).toContainText("held then rejected");
   expect(await sentIn(gmail, s.thread("p5").threadId)).toEqual([]);
+
+  // drop: not sent, and drafts.get finds the draft. The held undo wins (Q6):
+  // no second drafts.send, and the draft is back in a composer.
+  await app.press("Escape", "Escape", "Escape", "g", "i");
+  hold = await gmail.hold("drafts.send");
+  await sendReply(app, "Person 1", "held then dropped");
+  await app.press("Escape");
+  await app.advance(DELAY);
+  const toast1 = sendToast(app, "Person 1");
+  await undoOn(toast1).click();
+  await expect(undoOn(toast1)).toHaveCount(0);
+  const sends = await count(gmail, "drafts.send");
+  const gets = await count(gmail, "drafts.get");
+  await hold.release({ kind: "drop" });
+  await app.advance(30_000, { stepwise: true });
+  await app.settle();
+  await expect(app.conversationTitle).toContainText("Person 1");
+  await expect(app.editor).toContainText("held then dropped");
+  expect(await count(gmail, "drafts.get")).toBeGreaterThan(gets);
+  expect(await count(gmail, "drafts.send")).toBe(sends);
+  expect(await sentIn(gmail, s.thread("p1").threadId)).toEqual([]);
 });
 
 test("SND-06 a rejected send brings the draft back", async ({ app, gmail }) => {
@@ -461,7 +491,14 @@ test("SND-09 outbox rows across a quit and relaunch", async ({ app, gmail }) => 
   expect(await count(gmail, "drafts.get")).toBeGreaterThan(getsBefore);
   expect(await sentIn(gmail, s.thread("p6").threadId)).toHaveLength(1);
 
-  // Sent, toast still open, then a quit: the send entry is dropped on launch.
+  // Sent, toast still open, then a quit: the send entry is dropped on launch,
+  // so `z` reaches the entry before it.
+  const p2Labels = async () =>
+    (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p2", 1).id)?.labels ?? [];
+  await highlight(app, "Person 2");
+  await app.press("e");
+  await app.settle();
+  expect(await p2Labels()).not.toContain("INBOX");
   await sendReply(app, "Person 1", "delivered");
   await passSendAfter(app);
   await expect(sendToast(app, "Person 1")).toContainText("Sent");
@@ -472,6 +509,7 @@ test("SND-09 outbox rows across a quit and relaunch", async ({ app, gmail }) => 
     (m) => m.labels.includes("SENT") && m.labels.includes("TRASH"),
   );
   expect(trashed).toEqual([]);
+  expect(await p2Labels()).toContain("INBOX");
   expect(await sentIn(gmail, s.thread("p1").threadId)).toHaveLength(1);
 });
 

@@ -168,6 +168,23 @@ test("DRF-03 edits made to a draft in Gmail, with the draft closed or open", asy
   await app.settle();
   await app.reply("r");
   await expect(app.editor).toContainText("from web 2");
+  await app.press("Escape", "Escape", "Escape");
+
+  // Open, no edits, then sent: the send carries the text on screen, so the
+  // local draft was not replaced with Gmail's version behind the editor.
+  await openThread(app, "Person 6");
+  await app.reply("r");
+  await expect(app.editor).toContainText("Aimed at nobody.");
+  await webEdit("dUnknown", "p6", "from web 6");
+  await app.settle();
+  await app.press("Meta+Enter");
+  await app.advance(10_000);
+  await app.settle();
+  const sent = (await gmail.gmail(A)).messages.find(
+    (m) => m.threadId === s.thread("p6").threadId && m.labels.includes("SENT"),
+  );
+  expect(htmlOf(parseMime(sent?.raw ?? ""))).toContain("Aimed at nobody.");
+  expect(htmlOf(parseMime(sent?.raw ?? ""))).not.toContain("from web 6");
 });
 
 test("DRF-04 a draft deleted or sent elsewhere", async ({ app, gmail }) => {
@@ -205,9 +222,14 @@ test("DRF-04 a draft deleted or sent elsewhere", async ({ app, gmail }) => {
     await app.settle();
     await expect(gone).toBeVisible();
     await expect(app.editor).toContainText(text);
+    const seqBefore = Math.max(0, ...(await gmail.requests()).map((r) => r.seq));
     await app.press("Meta+Shift+m");
     await app.type(` ${how} again`);
     await app.settle();
+    const next = (await gmail.requests(undefined, { account: A })).find(
+      (r) => r.seq > seqBefore && (r.api === "drafts.create" || r.api === "drafts.update"),
+    );
+    expect(next?.api, "the next upsert after the draft left Gmail").toBe("drafts.create");
     expect(await creates(gmail)).toHaveLength(createsBefore + 1);
     const now = await draftsIn(gmail, gmailThread);
     expect(now).toHaveLength(1);
