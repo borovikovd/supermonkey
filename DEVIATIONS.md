@@ -54,6 +54,12 @@ written. Each keeps the spec's intent.
   judging net labels after the batch.
 - After a restart the app re-lists Inbox (unchanged threads are skipped by
   historyId) and fetches any bodies the connect sync had not reached.
+- A draft reconcile (`drafts.list`, then reads) leaves alone a local draft
+  that changed after its first request, or is being written to Gmail, as the
+  full resync does for threads: Gmail's answer may predate it. The next
+  reconcile, which the write itself triggers through history, looks again. A
+  Gmail change read for a draft whose composer opened meanwhile is read when
+  that composer closes, as if the composer had been open all along.
 - Notification clicks: the macOS notification plugin does not report clicks,
   so a click only brings the app forward. See Notifications (step 6).
 

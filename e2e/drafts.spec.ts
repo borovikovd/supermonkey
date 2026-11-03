@@ -178,6 +178,73 @@ test("DRF-12 a second Gmail draft carrying a local draft's id is deleted as an e
   await expect(stub(app, "a stray copy")).toHaveCount(0);
 });
 
+test("DRF-13 a draft reconcile on a stale list keeps a draft written meanwhile", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  // Another client's draft makes the next poll reconcile drafts; the list's
+  // answer is taken now and arrives late.
+  await gmail.createDraft(A, { subject: "From the web", to: ["kim@kite.test"], html: "<p>web</p>" });
+  const list = await gmail.holdAnswer("drafts.list");
+  await gmail.poll();
+  await app.settle();
+
+  // Meanwhile a reply is written to Gmail and closed.
+  await openThread(app, "Person 4");
+  await app.reply();
+  await app.type("written meanwhile");
+  await app.settle();
+  await app.press("Escape", "Escape");
+  await app.settle();
+  expect(await draftsIn(gmail, s.thread("p4").threadId)).toHaveLength(1);
+
+  await list.release();
+  await app.settle();
+  await expect(stub(app, "written meanwhile")).toHaveCount(1);
+  await app.press("Escape");
+  await goDrafts(app);
+  await expect(app.row("written meanwhile")).toHaveCount(1);
+  await expect(app.row("From the web")).toHaveCount(1);
+});
+
+test("DRF-14 a Gmail edit read back after the draft was reopened and edited does not replace the edit", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.drafts(gmail, app);
+  const p6 = s.thread("p6");
+  // Edited in Gmail web while closed; reading that edit back is slow.
+  await gmail.updateDraft(A, s.draft("dUnknown").id, {
+    subject: `Re: ${p6.subject}`,
+    threadId: p6.threadId,
+    inReplyTo: "<nobody@x.test>",
+    html: "<p>from web</p>",
+  });
+  const read = await gmail.holdAnswer({ api: "drafts.get", query: { format: "full" } });
+  await gmail.poll();
+  await app.settle();
+
+  // Meanwhile the draft is reopened and edited.
+  await openThread(app, "Person 6");
+  await app.reply("r");
+  await expect(app.editor).toContainText("Aimed at nobody.");
+  await app.press("Meta+Shift+m");
+  await app.type(" Mine.");
+  await app.settle();
+
+  await read.release();
+  await app.settle();
+  await app.press("Escape", "Escape");
+  await app.settle();
+  // The app's edit wins (Q24): locally and in Gmail.
+  await app.reply("r");
+  await expect(app.editor).toContainText("Aimed at nobody. Mine.");
+  await expect(app.editor).not.toContainText("from web");
+  const [d] = await draftsIn(gmail, p6.threadId);
+  expect(bodyOf(d)).toContain("Aimed at nobody. Mine.");
+});
+
 test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app, gmail }) => {
   await seeds.drafts(gmail, app);
   await goDrafts(app);

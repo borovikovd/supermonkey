@@ -605,6 +605,8 @@ pub async fn read_skipped(e: Arc<Engine>, rt: Arc<AccountRt>, draft: DraftId) {
     let Some(gid) = gmail_draft_id(&e, &draft) else {
         return;
     };
+    // The draft's own Gmail draft: no other copy is in question.
+    let reconcile = Reconcile::start(&e, Arc::default());
     let read = rt
         .sched
         .run(
@@ -614,21 +616,82 @@ pub async fn read_skipped(e: Arc<Engine>, rt: Arc<AccountRt>, draft: DraftId) {
         )
         .await;
     match read {
-        // The draft's own Gmail draft: no other copy is in question.
-        Ok(g) => store_gmail_draft(&e, &rt, g, Arc::default()).await,
+        Ok(g) => store_gmail_draft(&e, &rt, g, reconcile).await,
         Err(err) => log::warn!("read skipped draft change: {:?}", err.outcome),
+    }
+}
+
+/// What Gmail said about the account's drafts, and since when. Gmail's
+/// answers are only as new as the request: a local draft written while one
+/// was in flight, or still being written, is left for the next reconcile.
+#[derive(Clone)]
+pub struct Reconcile {
+    /// The account's Gmail draft ids, as `drafts.list` gave them.
+    live: Arc<HashSet<String>>,
+    /// The last `rev` committed before the first request.
+    started: i64,
+    writes: Arc<DraftWrites>,
+}
+
+impl Reconcile {
+    /// Call before the first request.
+    fn start(e: &Engine, live: Arc<HashSet<String>>) -> Reconcile {
+        let started = e
+            .reads
+            .with(|c| {
+                Ok(c.query_row("SELECT value FROM meta WHERE key = 'rev'", [], |r| {
+                    r.get(0)
+                })?)
+            })
+            .inspect_err(|err| log::warn!("read rev for a draft reconcile: {err:#}"))
+            // Unknown: every local draft counts as changed, so none is touched.
+            .unwrap_or(i64::MIN);
+        Reconcile {
+            live,
+            started,
+            writes: Arc::clone(&e.draft_writes),
+        }
+    }
+
+    /// Whether the local draft changed or is being written since the start.
+    fn moved(&self, ctx: &crate::writer::Ctx<'_>, draft: &DraftId) -> rusqlite::Result<bool> {
+        if self.writes.busy(draft) {
+            return Ok(true);
+        }
+        let rev: Option<i64> = ctx
+            .tx
+            .query_row("SELECT rev FROM drafts WHERE id = ?1", [draft], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        Ok(rev.is_some_and(|rev| rev > self.started))
     }
 }
 
 /// Drafts deleted on Gmail (for example sent from a phone) are deleted here,
 /// unless a composer has one open: then it keeps its text, loses its Gmail
-/// id, and a notice says so (SPEC Drafts).
+/// id, and a notice says so (SPEC Drafts). A draft that got a Gmail draft the
+/// list could not know about yet is not gone.
 fn drop_gone(
     ctx: &mut crate::writer::Ctx<'_>,
     account: AccountId,
     gone: Vec<DraftId>,
+    reconcile: &Reconcile,
 ) -> anyhow::Result<()> {
     for d in gone {
+        let gmail: Option<String> = ctx
+            .tx
+            .query_row(
+                "SELECT gmail_draft_id FROM drafts WHERE id = ?1",
+                [&d],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
+        let still_gone = gmail.is_some_and(|g| !reconcile.live.contains(&g));
+        if !still_gone || reconcile.moved(ctx, &d)? {
+            continue;
+        }
         if ctx.subs.is_draft_open(&d) {
             // The composer stays; the next upsert uses drafts.create.
             ctx.tx.execute(
@@ -663,7 +726,9 @@ fn drop_gone(
 
 /// Reconciles local drafts with `drafts.list` (SPEC Drafts).
 pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
+    let mut reconcile = Reconcile::start(e, Arc::default());
     let gmail = list_all(rt).await?;
+    reconcile.live = Arc::new(gmail.iter().map(|d| d.id.clone()).collect());
     let (local, outbox): (Vec<LocalDraft>, HashSet<String>) = e
         .reads
         .with(|c| {
@@ -697,7 +762,6 @@ pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
     // The outbox writes and sends its drafts itself, so Gmail's copy of one is
     // never read back over the version being sent.
     let mut sending = outbox;
-    let live: Arc<HashSet<String>> = Arc::new(gmail.iter().map(|d| d.id.clone()).collect());
     for LocalDraft {
         id,
         gmail: g,
@@ -708,7 +772,7 @@ pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
         let Some(g) = g else { continue };
         if in_outbox {
             sending.insert(g);
-        } else if live.contains(g.as_str()) {
+        } else if reconcile.live.contains(g.as_str()) {
             by_gmail.insert(g, (id, m));
         } else {
             gone.push(id);
@@ -716,8 +780,9 @@ pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
     }
     if !gone.is_empty() {
         let account = rt.id;
+        let r = reconcile.clone();
         e.writer
-            .call(move |ctx| drop_gone(ctx, account, gone))
+            .call(move |ctx| drop_gone(ctx, account, gone, &r))
             .await
             .log_err("sync_list");
     }
@@ -728,7 +793,7 @@ pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
             continue;
         }
         if let Some((local, msg)) = by_gmail.remove(&g.id) {
-            if msg.as_deref() == Some(g.message.id.as_str()) {
+            if msg.as_deref() == Some(g.message.id.as_str()) || e.draft_writes.busy(&local) {
                 continue;
             }
             if defer_if_open(e, local).await {
@@ -744,7 +809,7 @@ pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
             )
             .await
         {
-            Ok(full) => store_gmail_draft(e, rt, full, Arc::clone(&live)).await,
+            Ok(full) => store_gmail_draft(e, rt, full, reconcile.clone()).await,
             Err(err) if matches!(err.outcome, Outcome::NotFound) => {}
             Err(err) => return Err(err),
         }
@@ -908,12 +973,12 @@ pub async fn store_gmail_draft(
     e: &Engine,
     rt: &AccountRt,
     g: ub_gmail::Draft,
-    live: Arc<HashSet<String>>,
+    reconcile: Reconcile,
 ) {
     let d = FetchedDraft::parse(&g);
     let account = rt.id;
     e.writer
-        .call(move |ctx| apply_gmail_draft(ctx, account, &d, &live))
+        .call(move |ctx| apply_gmail_draft(ctx, account, &d, &reconcile))
         .await
         .log_err("store_gmail_draft");
 }
@@ -922,26 +987,43 @@ fn apply_gmail_draft(
     ctx: &mut crate::writer::Ctx<'_>,
     account: AccountId,
     d: &FetchedDraft,
-    live: &HashSet<String>,
+    reconcile: &Reconcile,
 ) -> anyhow::Result<()> {
     let m = &d.m;
     // Discarded here, and its delete has not reached Gmail yet.
     if delete_queued(ctx, account, &d.id)? {
         return Ok(());
     }
+    // A write of the draft it names is in flight: its answer settles it.
+    if m.ub_draft_id
+        .as_ref()
+        .is_some_and(|local| reconcile.writes.busy(local))
+    {
+        return Ok(());
+    }
     let existing = local_for(ctx, account, m, &d.id)?;
     if let Some((local, gmail)) = &existing {
         // The outbox sends its own version; Gmail's copy may be older.
-        if crate::drafts::in_outbox(ctx.tx, local)? {
+        if crate::drafts::in_outbox(ctx.tx, local)? || reconcile.moved(ctx, local)? {
             return Ok(());
         }
         // Found by its header (SPEC Gmail errors): an extra copy when the
         // local draft already has a live Gmail draft, else that draft.
         if gmail.as_deref() != Some(d.id.as_str()) {
             return match gmail {
-                Some(other) if live.contains(other) => delete_gmail_draft(ctx, account, &d.id),
+                Some(other) if reconcile.live.contains(other) => {
+                    delete_gmail_draft(ctx, account, &d.id)
+                }
                 _ => adopt_gmail_draft(ctx, account, local, d),
             };
+        }
+        // Opened since the list was read: read once its composer closes.
+        if ctx.subs.is_draft_open(local) {
+            ctx.tx.execute(
+                "UPDATE drafts SET pending_gmail_read = 1 WHERE id = ?1",
+                [local],
+            )?;
+            return Ok(());
         }
     }
     let existing = existing.map(|(local, _)| local);

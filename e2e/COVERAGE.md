@@ -2305,6 +2305,27 @@ _EG · §Gmail errors ("If that local draft already has a different live Gmail d
   2. `createDraft` in `p3`'s thread with "a stray copy" and that same header, then `poll()`, `settle()`.
 - **Expect:** Gmail has only the first draft, still with "the real one". The conversation shows one draft stub, "the real one".
 
+#### DRF-13 · P1 · A draft reconcile on a stale list keeps a draft written meanwhile
+
+_EG · §Drafts ("A draft deleted on Gmail … is deleted locally"), §Sync (the list is not a snapshot)_
+
+- **Steps:**
+  1. `createDraft` a new message, so the next poll reconciles drafts. `holdAnswer(drafts.list)`, `poll()`, `settle()`: the list is taken now and answers late.
+  2. In `p4`, press `r`, type, `settle()`: Gmail now has that draft too. `Esc` `Esc`, `settle()`.
+  3. Release the list's answer, `settle()`.
+- **Expect:** `p4` still shows the draft stub, and Drafts lists it and the draft from step 1: a draft missing from a list taken before it reached Gmail is not gone.
+
+#### DRF-14 · P1 · A Gmail edit read back after the draft was reopened and edited does not replace the edit
+
+_EG · §Drafts ("unless a composer has it open"), Q24 (last writer wins)_
+
+- **Seed:** `drafts`.
+- **Steps:**
+  1. `updateDraft` `dUnknown` with "from web". `holdAnswer(drafts.get, format=full)`, `poll()`, `settle()`: the read of the change answers late.
+  2. Open `p6`, press `r` (it shows "Aimed at nobody."), and type " Mine.", `settle()`.
+  3. Release the read's answer, `settle()`. `Esc` `Esc`, `settle()`, then `r` again.
+- **Expect:** the composer shows "Aimed at nobody. Mine." and not "from web". Gmail's draft holds "Aimed at nobody. Mine.".
+
 ### 5.16 `undo-send.spec.ts` (SND)
 
 Outbox state machine (§Send and undo):
