@@ -1534,6 +1534,15 @@ _ST · §Snooze, §Undo_
 | `h` `p1`, then `Shift+E` from Snoozed                                  | The snooze is cleared, `p1` is in Inbox, and Gmail has `+INBOX`.                                                                               |
 | `h` `p1`, then `e` from Snoozed, then `z`                              | After `e`, `p1` is in Done, with no snooze and not in Inbox. After `z`, it is back in Snoozed with wake time Tue 08:00 and still not in Inbox. |
 
+#### SNZ-08 · P2 · `Enter` before the typed time's options arrive snoozes until that time
+
+_EG · §Snooze_
+
+- **Steps:**
+  1. On `p1`, press `h`. Park the page's `snooze_options` invokes for anything typed, type "fri 9am", press `Enter`.
+  2. Release, `settle()`, open Snoozed.
+- **Expect:** the picker closes and `p1` wakes Fri Nov 6, not at the first option shown before the reply (Later today).
+
 ### 5.11 `compose-reply.spec.ts` (REP)
 
 #### REP-01 · P1 · `r` opens the reply composer under the thread, ready to type

@@ -27,7 +27,7 @@ import {
 } from "../compose/start";
 import { act, addAccount, snoozeOptions } from "../ipc/bridge";
 import { reportSignIn } from "./signIn";
-import type { PinKind, View } from "../ipc/types";
+import type { PinKind, SnoozeChoice, View } from "../ipc/types";
 import { appHooks } from "../keyboard/refs";
 import { goSplit } from "../keyboard/nav";
 import { measure } from "../keyboard/meter";
@@ -61,11 +61,18 @@ function Chip({ keys }: { keys: string }) {
   );
 }
 
-function useCommands(mode: PaletteMode, query: string): { items: Item[]; placeholder: string } {
+type Commands = {
+  items: Item[];
+  placeholder: string;
+  /** Snooze: the options on screen are for an earlier query. */
+  stale?: boolean;
+};
+
+function useCommands(mode: PaletteMode, query: string): Commands {
   const { account } = useCurrent();
   const summary = useSummary(account);
   const app = useAppState();
-  const [snoozes, setSnoozes] = useState<{ label: string; at: number }[]>([]);
+  const [snoozes, setSnoozes] = useState<{ query: string; options: SnoozeChoice[] } | null>(null);
   // What the palette acts on, read once when it opens: keys go to the palette
   // while it is open, so the selection cannot move under it.
   const [opened] = useState(() => {
@@ -76,7 +83,7 @@ function useCommands(mode: PaletteMode, query: string): { items: Item[]; placeho
   useEffect(() => {
     if (mode.kind !== "snooze") return;
     let live = true;
-    void snoozeOptions(query).then((o) => live && setSnoozes(o));
+    void snoozeOptions(query).then((options) => live && setSnoozes({ query, options }));
     return () => {
       live = false;
     };
@@ -241,8 +248,13 @@ function useCommands(mode: PaletteMode, query: string): { items: Item[]; placeho
       };
     case "snooze":
       return {
-        items: snoozes.map((o) => ({ id: `${o.at}`, label: o.label, run: () => snooze(o.at) })),
+        items: (snoozes?.options ?? []).map((o) => ({
+          id: `${o.at}`,
+          label: o.label,
+          run: () => snooze(o.at),
+        })),
         placeholder: "Snooze until… (try “fri 9am”)",
+        stale: snoozes?.query !== query,
       };
     case "switchAccount":
       return {
@@ -314,7 +326,7 @@ const itemValue = (it: Item) => `${it.label} ${it.id}`;
 
 function PaletteBody({ mode }: { mode: PaletteMode }) {
   const [query, setQuery] = useState("");
-  const { items, placeholder } = useCommands(mode, query);
+  const { items, placeholder, stale } = useCommands(mode, query);
   // Snooze options arrive from Rust, already filtered, after each keystroke:
   // keep the first one selected so Enter always picks something.
   const fromRust = mode.kind === "snooze";
@@ -346,6 +358,15 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
               e.preventDefault();
               e.stopPropagation();
               close();
+            } else if (e.key === "Enter" && stale) {
+              // The options on screen are for an earlier query: Enter takes the
+              // first option for what is typed now, once it arrives.
+              e.preventDefault();
+              void snoozeOptions(query).then(([first]) => {
+                if (!first || useChrome.getState().palette !== mode) return;
+                close();
+                snooze(first.at);
+              });
             } else measure("paletteKey", start);
           }}
         >

@@ -487,3 +487,23 @@ test("SNZ-07 undo, Shift+E, and e on snoozed threads", async ({ app, gmail }) =>
   await app.settle();
   expect(await gmailInbox(gmail, p1)).toBe(false);
 });
+
+test("SNZ-08 Enter before the typed time's options arrive snoozes until that time", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await expect(app.highlighted).toContainText("Person 1");
+  await app.press("h");
+  await expect(picker(app).getByRole("option").first()).toContainText("Later today");
+  // The options for anything typed wait, so the screen still shows the named ones.
+  const release = await app.park("snooze_options", (body) => body.includes("fri"));
+  await app.type("fri 9am");
+  await app.press("Enter");
+  await release();
+  await expect(picker(app)).toHaveCount(0);
+  await app.settle();
+  await goView(app, "h");
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await expect(wakeTime(app, "Person 1")).toHaveText(FRI_9AM);
+});
