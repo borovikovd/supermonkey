@@ -388,3 +388,18 @@ test("NAV-08 j keeps the prefetched neighbors it still needs", async ({ app, gma
   expect(after[p1]).toBe(before[p1]);
   expect(after[p2]).toBe(before[p2]);
 });
+
+test("NAV-09 g o highlights Other however long the Inbox takes to load", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  await app.press("g", "e");
+  await app.settle();
+  // The Inbox list's subscribe waits while page time runs well past a moment.
+  const release = await app.park("submit");
+  await app.press("g", "o");
+  await app.page.clock.runFor(2_000);
+  await release();
+  await app.settle();
+  await expect(app.activeSplit).toHaveText("Other");
+  const other = (await app.sections()).find((g) => g.name.startsWith("Other"));
+  await expect(app.highlighted).toContainText(other?.subjects[0] ?? "no Other section");
+});

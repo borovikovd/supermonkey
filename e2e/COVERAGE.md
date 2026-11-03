@@ -598,6 +598,14 @@ _EG · §Performance (prefetch), §Subscriptions_
 - **Steps:** with `p1` highlighted, `settle()` (the prefetch holds `p1` and `p2`). Press `j`, `settle()`.
 - **Expect:** three conversation subscriptions, and `p1` and `p2` keep the subscription ids they had: not dropped (data cleared) and made again.
 
+#### NAV-09 · P2 · `g o` highlights Other however long the Inbox takes to load
+
+_EG · §Views (`g` then `o`)_
+
+- **Seed:** `standard`.
+- **Steps:** `g e`, `settle()`. Park the page's submits, press `g o`, run page time 2 s, release, `settle()`.
+- **Expect:** the highlight is on the first row of Other, and Other is the active split.
+
 ### 5.3 `views.spec.ts` (VIEW)
 
 #### VIEW-01 · P2 · A thread's latest message sets its row

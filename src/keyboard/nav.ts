@@ -147,14 +147,32 @@ export function goSplit(kind: "important" | "other", splitIdOf: (kind: string) =
   const target = splitIdOf(kind);
   // A hidden empty split shows its header after this jump.
   useChrome.getState().set({ forcedSplit: target });
-  // The list loads asynchronously; highlight once rows for the split arrive.
-  const tryHighlight = (left: number) => {
+  const highlight = () => {
     const split = visibleSplits().find((s) => s.split === target);
     if (split) useChrome.getState().patchCurrent({ highlight: split.first });
-    else if (left > 0) setTimeout(() => tryHighlight(left - 1), 30);
+    return split !== undefined;
   };
-  tryHighlight(10);
+  stopSplitWait?.();
+  if (highlight()) return;
+  // The list loads asynchronously: highlight once rows for the split arrive,
+  // however long that takes, unless the Inbox is left first.
+  const { account } = useChrome.getState();
+  const stop = () => {
+    unsubMirror();
+    unsubChrome();
+    if (stopSplitWait === stop) stopSplitWait = null;
+  };
+  const unsubMirror = useMirror.subscribe(() => {
+    if (highlight()) stop();
+  });
+  const unsubChrome = useChrome.subscribe((s) => {
+    if (s.account !== account || currentView()?.kind !== "inbox") stop();
+  });
+  stopSplitWait = stop;
 }
+
+/** Ends the wait of the last `g i` / `g o` for its split's rows, if one is waiting. */
+let stopSplitWait: (() => void) | null = null;
 
 // ------------------------------------------------------------ conversation
 
