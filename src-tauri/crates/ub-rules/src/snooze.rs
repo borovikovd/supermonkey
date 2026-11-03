@@ -33,6 +33,7 @@ pub struct SnoozeOption<Tz: TimeZone> {
     pub at: DateTime<Tz>,
 }
 
+#[expect(clippy::expect_used, reason = "callers pass literal hours below 24")]
 fn hour(h: u32) -> NaiveTime {
     NaiveTime::from_hms_opt(h, 0, 0).expect("valid hour")
 }

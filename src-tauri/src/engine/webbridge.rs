@@ -104,7 +104,7 @@ pub fn start(app: &AppHandle) {
     if !cfg!(debug_assertions) || std::env::var("UBERMENSCH_WEB_BRIDGE").as_deref() != Ok("1") {
         return;
     }
-    let engine = app.state::<Arc<Engine>>().inner().clone();
+    let engine = Arc::clone(app.state::<Arc<Engine>>().inner());
     tauri::async_runtime::spawn(async move {
         match tokio::net::TcpListener::bind("127.0.0.1:1430").await {
             Ok(listener) => {
@@ -158,7 +158,7 @@ async fn events(State(bridge): State<Bridge>) -> Response {
         return down();
     };
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<ChannelMessage>();
-    let shared = bridge.0.clone();
+    let shared = Arc::clone(&bridge.0);
     engine.writer.set_channel(move |m| {
         *shared.sent.lock() = (m.rev, m.ack);
         let _ = tx.send(m);

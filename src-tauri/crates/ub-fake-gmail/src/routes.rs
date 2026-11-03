@@ -157,7 +157,7 @@ impl FromRequestParts<Arc<Shared>> for Caller {
             .and_then(|v| v.strip_prefix("Bearer "))
             .unwrap_or_default();
         Ok(Caller {
-            state: state.clone(),
+            state: Arc::clone(state),
             user: params.remove("user").unwrap_or_default(),
             token: token.to_owned(),
         })

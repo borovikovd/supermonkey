@@ -308,10 +308,10 @@ impl State {
                     waiter.notify.notify_one();
                 }
                 Admit::WhenSlotFrees => {
-                    blocked.insert(waiter.account.clone());
+                    blocked.insert(Arc::clone(&waiter.account));
                 }
                 Admit::At(at) => {
-                    blocked.insert(waiter.account.clone());
+                    blocked.insert(Arc::clone(&waiter.account));
                     next_wake = Some(next_wake.map_or(at, |t| t.min(at)));
                     // It may be sleeping without a timer (it was waiting for a slot).
                     // Wake it so it arms one.
@@ -348,7 +348,7 @@ impl Scheduler {
     /// The handle for one account's requests.
     pub fn account(&self, email: impl Into<Arc<str>>) -> AccountScheduler {
         AccountScheduler {
-            inner: self.inner.clone(),
+            inner: Arc::clone(&self.inner),
             account: email.into(),
         }
     }
@@ -388,11 +388,11 @@ impl AccountScheduler {
             state.waiters.insert(
                 id,
                 Waiter {
-                    account: self.account.clone(),
+                    account: Arc::clone(&self.account),
                     priority,
                     cost,
                     granted: false,
-                    notify: notify.clone(),
+                    notify: Arc::clone(&notify),
                 },
             );
             state.pump(&self.inner.cfg);
@@ -410,8 +410,8 @@ impl AccountScheduler {
                     state.waiters.remove(&id);
                     queued.done = true;
                     return Permit {
-                        inner: self.inner.clone(),
-                        account: self.account.clone(),
+                        inner: Arc::clone(&self.inner),
+                        account: Arc::clone(&self.account),
                     };
                 }
                 state.next_wake

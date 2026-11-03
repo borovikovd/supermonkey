@@ -37,6 +37,15 @@
 //!
 //! [`decode_encoded_words`] is also exported for other headers (e.g. attachment names).
 
+/// Compiles one of this crate's fixed patterns.
+#[expect(
+    clippy::expect_used,
+    reason = "every pattern is a constant; a bad one fails every test that parses mail"
+)]
+fn regex(pattern: &str) -> regex::Regex {
+    regex::Regex::new(pattern).expect("valid regex")
+}
+
 mod address;
 mod build;
 mod encoding;

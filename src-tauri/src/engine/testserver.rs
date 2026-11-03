@@ -337,7 +337,7 @@ impl Server {
     /// The running engine, if the core is up.
     async fn engine(&self) -> Option<Arc<Engine>> {
         match &*self.core.lock().await {
-            Core::Running(e) => Some(e.clone()),
+            Core::Running(e) => Some(Arc::clone(e)),
             Core::Ready { .. } | Core::Down => None,
         }
     }
@@ -513,14 +513,14 @@ async fn start(State(s): State<Arc<Server>>) -> Ctl {
         quota: s.quota.lock().clone(),
     };
     let engine = Engine::new(
-        s.platform.clone(),
+        Arc::<TestPlatform>::clone(&s.platform),
         writer,
         reads,
         s.data_dir.clone(),
         config,
-        s.store.clone(),
+        Arc::<MemoryTokenStore>::clone(&s.store),
     );
-    s.bridge.set_engine(Some(engine.clone()));
+    s.bridge.set_engine(Some(Arc::clone(&engine)));
     engine.run(effects);
     *core = Core::Running(engine);
     Ok(done())

@@ -1,7 +1,9 @@
 //! Priority order, the in-flight cap, and the quota bucket rules, on tokio's paused clock.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+
+use parking_lot::Mutex;
 use std::time::Duration;
 
 use tokio::time::{Instant, sleep};
@@ -26,11 +28,11 @@ async fn queued_requests_run_in_priority_order() {
     let blocker = account.acquire(Priority::P1, 1).await;
     let mut tasks = Vec::new();
     for level in [5, 3, 6, 1, 2, 4, 1] {
-        let (account, order) = (account.clone(), order.clone());
+        let (account, order) = (account.clone(), Arc::clone(&order));
         tasks.push(tokio::spawn(async move {
             account
                 .run(Priority::new(level), 1, async {
-                    order.lock().unwrap().push(level);
+                    order.lock().push(level);
                 })
                 .await;
         }));
@@ -41,7 +43,7 @@ async fn queued_requests_run_in_priority_order() {
     for task in tasks {
         task.await.unwrap();
     }
-    assert_eq!(*order.lock().unwrap(), vec![1, 1, 2, 3, 4, 5, 6]);
+    assert_eq!(*order.lock(), vec![1, 1, 2, 3, 4, 5, 6]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -53,7 +55,7 @@ async fn at_most_eight_requests_run_at_once_per_account() {
     for account in [A, "b@example.com"] {
         for _ in 0..20 {
             let account = scheduler.account(account);
-            let (running, peak) = (running.clone(), peak.clone());
+            let (running, peak) = (Arc::clone(&running), Arc::clone(&peak));
             tasks.push(tokio::spawn(async move {
                 account
                     .run(Priority::P2, 1, async {
@@ -134,17 +136,17 @@ async fn a_cheap_request_does_not_overtake_an_earlier_one_waiting_for_budget() {
     let mut tasks = Vec::new();
     // 400 units take 5 s to refill; 10 would take 125 ms.
     for cost in [400, 10] {
-        let (account, order) = (account.clone(), order.clone());
+        let (account, order) = (account.clone(), Arc::clone(&order));
         tasks.push(tokio::spawn(async move {
             drop(account.acquire(Priority::P1, cost).await);
-            order.lock().unwrap().push(cost);
+            order.lock().push(cost);
         }));
         settle().await;
     }
     for task in tasks {
         task.await.unwrap();
     }
-    assert_eq!(*order.lock().unwrap(), vec![400, 10]);
+    assert_eq!(*order.lock(), vec![400, 10]);
 }
 
 #[tokio::test(start_paused = true)]

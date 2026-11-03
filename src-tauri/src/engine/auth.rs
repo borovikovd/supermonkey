@@ -57,7 +57,7 @@ async fn sign_in_once(e: &Engine) -> anyhow::Result<SignIn> {
         refresh_token.clone(),
         auth.access_token,
     ));
-    let gmail = Gmail::new(&e.config.gmail_base, e.http.clone(), tokens.clone());
+    let gmail = Gmail::new(&e.config.gmail_base, e.http.clone(), Arc::clone(&tokens));
     let profile = e
         .scheduler
         .account("sign-in")

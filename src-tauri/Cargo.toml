@@ -122,3 +122,9 @@ significant_drop_in_scrutinee = "warn"
 map_err_ignore = "warn"
 # Numeric conversions are explicit (`From` / `try_from`), never `as`.
 as_conversions = "warn"
+# Panics only in tests (clippy.toml allows them there).
+expect_used = "warn"
+unwrap_in_result = "warn"
+# An Arc clone reads as `Arc::clone(&x)`, never like a deep copy.
+clone_on_ref_ptr = "warn"
+needless_pass_by_ref_mut = "warn"

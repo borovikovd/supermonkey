@@ -167,7 +167,7 @@ pub fn start(
         config,
         store,
     );
-    app.manage(engine.clone());
+    app.manage(Arc::clone(&engine));
     webbridge::start(app);
     engine.run(effects);
 }
@@ -205,7 +205,7 @@ impl Engine {
     /// Starts accounts and the effect loop.
     pub fn run(self: &Arc<Self>, effects: EffectReceiver) {
         launch(self);
-        self.spawn("dispatch", dispatch(self.clone(), effects));
+        self.spawn("dispatch", dispatch(Arc::clone(self), effects));
     }
 
     /// Runs `fut` as an engine task (see [`crate::clock::spawn`]). After
@@ -288,7 +288,7 @@ impl Engine {
                     .is_ok()
                 {
                     // Still retrying 30 s later, with no success between: a quiet status.
-                    let (e, rt) = (self.clone(), rt.clone());
+                    let (e, rt) = (Arc::clone(self), Arc::clone(rt));
                     self.spawn("sync status", async move {
                         crate::clock::sleep(QUIET_STATUS_AFTER).await;
                         if rt.retrying_since.load(Ordering::Acquire) == now && !rt.is_stopped() {
@@ -368,15 +368,15 @@ impl Engine {
             retrying_since: AtomicI64::new(0),
             landed: Arc::default(),
         });
-        let replaced = self.accounts.lock().insert(id, rt.clone());
+        let replaced = self.accounts.lock().insert(id, Arc::clone(&rt));
         if let Some(old) = replaced {
             old.stop();
         }
-        self.spawn("sync", sync::run(self.clone(), rt.clone()));
-        self.spawn("ops", ops::run(self.clone(), rt.clone()));
-        self.spawn("outbox", outbox::run(self.clone(), rt.clone()));
+        self.spawn("sync", sync::run(Arc::clone(self), Arc::clone(&rt)));
+        self.spawn("ops", ops::run(Arc::clone(self), Arc::clone(&rt)));
+        self.spawn("outbox", outbox::run(Arc::clone(self), Arc::clone(&rt)));
         for _ in 0..work::WORKERS {
-            self.spawn("worker", work::worker(self.clone(), rt.clone()));
+            self.spawn("worker", work::worker(Arc::clone(self), Arc::clone(&rt)));
         }
     }
 
@@ -400,7 +400,7 @@ impl Engine {
         for rt in accounts {
             rt.poll_kick.kick();
             // Labels and sendAs addresses refresh on focus (SPEC Sync).
-            let e = self.clone();
+            let e = Arc::clone(self);
             self.spawn("refresh", async move {
                 sync::refresh_labels(&e, &rt)
                     .await
@@ -452,7 +452,7 @@ fn launch(engine: &Arc<Engine>) {
         }
     }
     update_badge(engine);
-    engine.spawn("snooze", snooze::run(engine.clone()));
+    engine.spawn("snooze", snooze::run(Arc::clone(engine)));
 }
 
 async fn dispatch(engine: Arc<Engine>, mut effects: EffectReceiver) {
@@ -474,7 +474,10 @@ async fn dispatch(engine: Arc<Engine>, mut effects: EffectReceiver) {
             }
             Effect::FetchThread { account, thread } => {
                 if let Some(rt) = e.account(account) {
-                    e.spawn("fetch thread", sync::fetch_opened(e.clone(), rt, thread));
+                    e.spawn(
+                        "fetch thread",
+                        sync::fetch_opened(Arc::clone(e), rt, thread),
+                    );
                 }
             }
             Effect::GmailList {
@@ -485,16 +488,19 @@ async fn dispatch(engine: Arc<Engine>, mut effects: EffectReceiver) {
             } => search::start(e, sub, account, query, page_token),
             Effect::CancelSub(sub) => search::cancel(e, &sub),
             Effect::AccountRemoved { account, email } => {
-                e.spawn("forget account", auth::forget(e.clone(), account, email));
+                e.spawn(
+                    "forget account",
+                    auth::forget(Arc::clone(e), account, email),
+                );
             }
             Effect::DraftParts { account, draft } => {
                 if e.account(account).is_some() {
-                    e.spawn("draft parts", drafts::download_parts(e.clone(), draft));
+                    e.spawn("draft parts", drafts::download_parts(Arc::clone(e), draft));
                 }
             }
             Effect::ReadDraft { account, draft } => {
                 if let Some(rt) = e.account(account) {
-                    e.spawn("read draft", drafts::read_skipped(e.clone(), rt, draft));
+                    e.spawn("read draft", drafts::read_skipped(Arc::clone(e), rt, draft));
                 }
             }
             Effect::OnScreen(a) => {
@@ -507,7 +513,7 @@ async fn dispatch(engine: Arc<Engine>, mut effects: EffectReceiver) {
             Effect::Snoozes => e.snooze_kick.kick(),
             Effect::RefreshLabels(a) => {
                 if let Some(rt) = e.account(a) {
-                    let e = e.clone();
+                    let e = Arc::clone(e);
                     engine.spawn("refresh labels", async move {
                         sync::refresh_labels(&e, &rt)
                             .await

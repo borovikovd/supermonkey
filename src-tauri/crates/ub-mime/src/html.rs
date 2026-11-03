@@ -80,9 +80,8 @@ static SANITIZER: LazyLock<ammonia::Builder<'static>> = LazyLock::new(|| {
 });
 
 /// A CSS `url(…)`, quoted or not.
-static CSS_URL: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)url\(\s*('[^']*'|"[^"]*"|[^)'"]*)\s*\)"#).expect("valid regex")
-});
+static CSS_URL: LazyLock<Regex> =
+    LazyLock::new(|| crate::regex(r#"(?i)url\(\s*('[^']*'|"[^"]*"|[^)'"]*)\s*\)"#));
 
 /// Empties CSS `url(…)` values with a script scheme, in `style` attributes and
 /// `<style>` blocks, which ammonia passes through. Whitespace and CSS escapes
@@ -103,8 +102,7 @@ fn defuse_css_urls(html: &str) -> Cow<'_, str> {
     })
 }
 
-static CID_REF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?i)\bcid:([^"'\s)>]+)"#).expect("valid regex"));
+static CID_REF: LazyLock<Regex> = LazyLock::new(|| crate::regex(r#"(?i)\bcid:([^"'\s)>]+)"#));
 
 /// Sanitizes received HTML for storage and display.
 ///
@@ -137,20 +135,18 @@ pub fn sanitize_html(html: &str, cid_data: &HashMap<String, String>) -> String {
 
 /// Comments, `<!DOCTYPE>`/`<![CDATA[` declarations, and `<?xml ?>` processing instructions.
 static COMMENT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?s)<!--.*?-->|<![^>]*>|<\?[^>]*>").expect("valid regex"));
+    LazyLock::new(|| crate::regex(r"(?s)<!--.*?-->|<![^>]*>|<\?[^>]*>"));
 static HIDDEN_BLOCKS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     ["head", "style", "script", "title", "noscript", "template"]
         .iter()
-        .map(|t| Regex::new(&format!(r"(?is)<{t}\b[^>]*>.*?</{t}\s*>")).expect("valid regex"))
+        .map(|t| crate::regex(&format!(r"(?is)<{t}\b[^>]*>.*?</{t}\s*>")))
         .collect()
 });
 static TAG: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"<(/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>"#)
-        .expect("valid regex")
+    crate::regex(r#"<(/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>"#)
 });
-static HREF: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"(?i)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#).expect("valid regex")
-});
+static HREF: LazyLock<Regex> =
+    LazyLock::new(|| crate::regex(r#"(?i)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#));
 
 /// Plain text of an HTML body for full-text search and snippets: no `<head>`, `<style>`,
 /// `<script>` or comments, entities decoded, all whitespace collapsed to single spaces.
@@ -240,17 +236,12 @@ fn render_text(html: &str, plain: bool) -> String {
             ) => w.block(),
             ("td" | "th", true) => w.text(" ", true),
             ("a", false) if plain => {
-                link = HREF.captures(&m[3]).map(|h| {
-                    let href = h
-                        .get(1)
-                        .or(h.get(2))
-                        .or(h.get(3))
-                        .expect("one href form matched")
-                        .as_str();
-                    (
+                link = HREF.captures(&m[3]).and_then(|h| {
+                    let href = h.get(1).or(h.get(2)).or(h.get(3))?.as_str();
+                    Some((
                         html_escape::decode_html_entities(href).into_owned(),
                         w.out.len(),
-                    )
+                    ))
                 });
             }
             ("a", true) if plain => {
@@ -353,8 +344,7 @@ impl TextWriter {
     }
 }
 
-static URL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"https?://[^\s<>"]+"#).expect("valid regex"));
+static URL: LazyLock<Regex> = LazyLock::new(|| crate::regex(r#"https?://[^\s<>"]+"#));
 
 /// Converts a plain-text body to HTML: escaped, newlines as `<br>`, spaces preserved with
 /// `white-space:pre-wrap`, http(s) URLs linked. A trailing block of `>`-quoted lines (with the
@@ -442,9 +432,8 @@ fn linkify(line: &str) -> String {
     out
 }
 
-static DATA_URI: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)data:[a-z]+/[a-z0-9.+-]+;base64,([a-z0-9+/=]+)").expect("valid regex")
-});
+static DATA_URI: LazyLock<Regex> =
+    LazyLock::new(|| crate::regex(r"(?i)data:[a-z]+/[a-z0-9.+-]+;base64,([a-z0-9+/=]+)"));
 
 /// Rewrites `data:` URIs in `html` whose decoded bytes equal a known inline part's data into
 /// `cid:<content_id>`. Returns the rewritten HTML and the parts it referenced, in order of first

@@ -28,6 +28,10 @@ const BASE64URL_LENIENT: GeneralPurpose = GeneralPurpose::new(
 
 /// A reqwest client with the timeouts the error rule relies on: a connect timeout (Offline)
 /// and a read timeout (`NoResponse`).
+#[expect(
+    clippy::expect_used,
+    reason = "fails only if the TLS backend can't start, and nothing works without it"
+)]
 pub fn default_http_client() -> reqwest::Client {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))

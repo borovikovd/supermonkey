@@ -30,6 +30,11 @@
 //! Every request is logged ([`FakeGmail::requests`]) with its Gmail method name, account,
 //! body, and answer.
 
+#![expect(
+    clippy::expect_used,
+    reason = "A test double: a broken invariant is a test failure."
+)]
+
 mod mailbox;
 mod mime;
 mod routes;
@@ -526,11 +531,11 @@ impl FakeGmail {
         });
         let (offline, offline_rx) = watch::channel(false);
         let (listening_tx, listening) = watch::channel(true);
-        let router = routes::router(shared.clone());
+        let router = routes::router(Arc::clone(&shared));
         let server = tokio::spawn(serve(
             listener,
             addr,
-            shared.clone(),
+            Arc::clone(&shared),
             router,
             offline_rx,
             listening_tx,
@@ -574,7 +579,7 @@ impl FakeGmail {
             .insert(email.to_owned(), Mailbox::new(email));
         let refresh_token = world.issue_refresh_token(email);
         FakeUser {
-            shared: self.shared.clone(),
+            shared: Arc::clone(&self.shared),
             email: email.to_owned(),
             refresh_token,
         }
@@ -1021,7 +1026,7 @@ async fn serve(
             tokio::select! {
                 accepted = l.accept() => {
                     if let Ok((stream, _)) = accepted {
-                        tokio::spawn(connection(stream, shared.clone(), router.clone(), offline_for_connections.clone()));
+                        tokio::spawn(connection(stream, Arc::clone(&shared), router.clone(), offline_for_connections.clone()));
                     }
                 }
                 _ = offline.wait_for(|&o| o) => {
@@ -1047,9 +1052,14 @@ async fn connection(
     mut offline: watch::Receiver<bool>,
 ) {
     let kill = Arc::new(Notify::new());
-    let service_kill = kill.clone();
+    let service_kill = Arc::clone(&kill);
     let service = hyper::service::service_fn(move |req| {
-        handle(shared.clone(), router.clone(), service_kill.clone(), req)
+        handle(
+            Arc::clone(&shared),
+            router.clone(),
+            Arc::clone(&service_kill),
+            req,
+        )
     });
     let conn =
         hyper::server::conn::http1::Builder::new().serve_connection(TokioIo::new(stream), service);

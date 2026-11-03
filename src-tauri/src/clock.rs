@@ -121,7 +121,7 @@ impl Manual {
             let id = s.next_id;
             s.next_id += 1;
             let key = (s.mono.saturating_add(ms), id);
-            s.sleepers.insert(key, sleeper.clone());
+            s.sleepers.insert(key, Arc::clone(&sleeper));
             key
         };
         let _registered = Registered { clock: self, key };
@@ -417,7 +417,7 @@ mod tests {
     async fn a_task_is_busy_until_it_parks_and_again_once_kicked() {
         let kick = Arc::new(Kick::default());
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let k = kick.clone();
+        let k = Arc::clone(&kick);
         let task = tokio::spawn(TASK.scope(Task::new("test-kick"), async move {
             k.wait(Duration::from_secs(3600)).await;
             let _ = tx.send(busy("test-kick"));
@@ -447,7 +447,7 @@ mod tests {
     async fn advance_fires_due_sleeps_once_and_jump_fires_none() {
         let clock = Arc::new(manual(1_000));
         let started = |ms: u64| {
-            let c = clock.clone();
+            let c = Arc::clone(&clock);
             tokio::spawn(async move { drop(c.sleep(Duration::from_millis(ms)).await) })
         };
         let (short, long) = (started(500), started(2_000));
@@ -471,7 +471,7 @@ mod tests {
     #[tokio::test]
     async fn a_dropped_sleep_leaves_no_deadline_behind() {
         let clock = Arc::new(manual(0));
-        let c = clock.clone();
+        let c = Arc::clone(&clock);
         let sleeping = tokio::spawn(async move { drop(c.sleep(Duration::from_millis(300)).await) });
         until("the sleep registers", || {
             clock.next_due_within(300) == Some(300)

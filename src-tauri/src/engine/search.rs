@@ -39,7 +39,10 @@ pub fn start(
     };
     // A newer query cancels the older one's queued fetches.
     cancel(e, &sub);
-    if let Some(handle) = e.spawn("search", list_page(e.clone(), rt, sub.clone(), query, page)) {
+    if let Some(handle) = e.spawn(
+        "search",
+        list_page(Arc::clone(e), rt, sub.clone(), query, page),
+    ) {
         e.searches.lock().insert(sub, handle);
     }
 }

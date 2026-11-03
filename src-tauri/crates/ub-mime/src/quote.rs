@@ -27,7 +27,7 @@ const GMAIL_QUOTE_START: &str =
     r#"<[a-zA-Z][^>]*\bclass\s*=\s*["']?[^"'>]*\bgmail_quote(?:[\s"'>/])"#;
 
 static GMAIL_QUOTE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(&format!("(?i){GMAIL_QUOTE_START}")).expect("valid regex"));
+    LazyLock::new(|| crate::regex(&format!("(?i){GMAIL_QUOTE_START}")));
 
 static HISTORY_START: LazyLock<Regex> = LazyLock::new(|| {
     let markers = [
@@ -41,11 +41,11 @@ static HISTORY_START: LazyLock<Regex> = LazyLock::new(|| {
         // Outlook desktop: the reply header's top border
         r#"<div\b[^>]*\bstyle\s*=\s*["'][^"']*border-top:\s*solid\s+#(?:E1E1E1|B5C4DF)"#,
     ];
-    Regex::new(&format!("(?i){}", markers.join("|"))).expect("valid regex")
+    crate::regex(&format!("(?i){}", markers.join("|")))
 });
 
 static TRAILING_BREAKS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)(?:\s|<br\s*/?>|&nbsp;)+$").expect("valid regex"));
+    LazyLock::new(|| crate::regex(r"(?i)(?:\s|<br\s*/?>|&nbsp;)+$"));
 
 /// Splits a draft read from Gmail into the part that goes into the editor and the quote block:
 /// everything from the first element whose class includes `gmail_quote` onward. Trailing

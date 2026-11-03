@@ -3,6 +3,8 @@
 //! inside them. Run with
 //! `UBERMENSCH_PERF_DB=<path> cargo test --release --test perf_search -- --ignored --nocapture`.
 
+#![expect(clippy::expect_used, reason = "Tests fail loudly on purpose.")]
+
 use std::time::{Duration, Instant};
 
 /// SPEC Performance: local search results for each keystroke.

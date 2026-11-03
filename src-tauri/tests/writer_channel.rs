@@ -3,10 +3,16 @@
 //! a list built from its first load plus patches equals a fresh first load at
 //! that `rev`.
 
-#![expect(clippy::unwrap_used, reason = "Tests fail loudly on purpose.")]
+#![expect(
+    clippy::unwrap_used,
+    clippy::unwrap_in_result,
+    reason = "Tests fail loudly on purpose."
+)]
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 use proptest::prelude::*;
 use ubermensch_lib::db::queries;
@@ -164,11 +170,11 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
     let state = Arc::new(Mutex::new(Rebuilt::default()));
     let views: Arc<Mutex<HashMap<String, View>>> = Arc::default();
     {
-        let state = state.clone();
-        let views = views.clone();
+        let state = Arc::clone(&state);
+        let views = Arc::clone(&views);
         let reader = rusqlite::Connection::open(&path).unwrap();
         writer.set_channel(move |msg: ChannelMessage| {
-            let mut st = state.lock().unwrap();
+            let mut st = state.lock();
             for u in &msg.updates {
                 if let SubUpdate::List {
                     sub,
@@ -178,7 +184,7 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
                     moved,
                     ..
                 } = u
-                    && views.lock().unwrap().contains_key(sub)
+                    && views.lock().contains_key(sub)
                 {
                     let next = if *first {
                         ids.clone().unwrap_or_default()
@@ -190,7 +196,7 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
                 }
             }
             // Compare every open list with a fresh first load at this rev.
-            let diverged = stale_lists(&reader, &st.lists, &views.lock().unwrap());
+            let diverged = stale_lists(&reader, &st.lists, &views.lock());
             for s in diverged {
                 st.failures.push(format!("rev {}: {s} differs", msg.rev));
             }
@@ -222,7 +228,7 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
                 seq += 1;
                 let sub = format!("s{seq}");
                 slots.insert(slot, sub.clone());
-                views.lock().unwrap().insert(sub.clone(), v.clone());
+                views.lock().insert(sub.clone(), v.clone());
                 writer.actions(vec![next(Action::Subscribe {
                     sub,
                     key: SubKey::List {
@@ -234,8 +240,8 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
             Op::Unsubscribe(slot) => {
                 if let Some(sub) = slots.remove(&slot) {
                     // The mirror drops a closed subscription; stop checking it.
-                    views.lock().unwrap().remove(&sub);
-                    state.lock().unwrap().lists.remove(&sub);
+                    views.lock().remove(&sub);
+                    state.lock().lists.remove(&sub);
                     writer.actions(vec![next(Action::Unsubscribe { sub })]);
                 }
             }
@@ -307,11 +313,11 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
     }
     // Drain: a blocking call runs after everything queued before it.
     writer.call_blocking(|_| Ok(())).unwrap();
-    let st = state.lock().unwrap();
+    let st = state.lock();
     prop_assert!(st.failures.is_empty(), "{:?}", st.failures);
     // A change whose patch never came shows only here, after the last message.
     let conn = rusqlite::Connection::open(&path).unwrap();
-    let diverged = stale_lists(&conn, &st.lists, &views.lock().unwrap());
+    let diverged = stale_lists(&conn, &st.lists, &views.lock());
     prop_assert!(diverged.is_empty(), "after the last message: {diverged:?}");
     Ok(st.lists.clone())
 }

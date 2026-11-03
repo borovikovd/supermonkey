@@ -222,7 +222,7 @@ impl Landed {
         let at = log.next;
         *log.reads.entry(at).or_default() += 1;
         Read {
-            landed: self.clone(),
+            landed: Arc::clone(self),
             at,
         }
     }
@@ -445,7 +445,7 @@ fn fmt_addr(a: &Addr) -> String {
 }
 
 fn store_parts(
-    ctx: &mut Ctx<'_>,
+    ctx: &Ctx<'_>,
     message: MessageId,
     parts: &[ub_mime::PartInfo],
 ) -> anyhow::Result<()> {

@@ -65,6 +65,7 @@ pub struct Outgoing {
 /// generated from the HTML. Non-ASCII names, subjects and filenames are encoded by mail-builder
 /// (RFC 2047 / RFC 2231). Empty address lists are omitted; `Bcc` is written when present, as
 /// Gmail needs it to deliver and then strips it.
+#[expect(clippy::expect_used, reason = "writing to a Vec cannot fail")]
 pub fn build_mime(o: &Outgoing) -> Vec<u8> {
     let mut message = MessageBuilder::new().from(address(&o.from));
     if !o.to.is_empty() {

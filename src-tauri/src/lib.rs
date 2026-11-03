@@ -56,7 +56,7 @@ fn show_main(app: &tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let built = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main(app);
         }))
@@ -113,8 +113,14 @@ pub fn run() {
             commands::snooze_options,
             commands::add_attachment,
         ])
-        .build(tauri::generate_context!())
-        .expect("error while building Ubermensch");
+        .build(tauri::generate_context!());
+    let app = match built {
+        Ok(app) => app,
+        Err(err) => {
+            log::error!("could not start Ubermensch: {err:#}");
+            std::process::exit(1);
+        }
+    };
 
     app.run(|app, event| match event {
         // Clicking the Dock icon shows the window again.

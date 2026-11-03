@@ -613,7 +613,7 @@ pub async fn poll(e: &Arc<Engine>, rt: &AccountRt) -> Result<(), GmailError> {
     }
 
     let account = rt.id;
-    let eng = e.clone();
+    let eng = Arc::clone(e);
     let applied = e
         .writer
         .call(move |ctx| {
