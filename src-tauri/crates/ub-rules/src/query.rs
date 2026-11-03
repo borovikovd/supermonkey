@@ -278,6 +278,19 @@ impl Query {
         walk(&self.expr)
     }
 
+    /// True when a bare word or phrase is present: only those read the body
+    /// in [`Mode::Search`], so a caller can skip loading it otherwise.
+    pub fn reads_body(&self) -> bool {
+        fn walk(e: &Expr) -> bool {
+            match e {
+                Expr::And(xs) | Expr::Or(xs) => xs.iter().any(walk),
+                Expr::Term(t) => t.field == Field::Any,
+                Expr::IsList | Expr::Unsupported(_) => false,
+            }
+        }
+        walk(&self.expr)
+    }
+
     /// False when the query is empty or holds only unsupported terms, so local
     /// search has nothing to go on and should leave results to Gmail.
     pub fn has_local_terms(&self) -> bool {

@@ -1,5 +1,7 @@
 //! Local search (SPEC Search): FTS5 matches plus the Gmail hits for the query.
 
+use std::collections::HashMap;
+
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::model::{AccountId, ListEntry, Millis, ThreadId};
@@ -49,8 +51,9 @@ pub fn ids(
                 stmt.query_map([account], |r| r.get(0))?
                     .collect::<Result<_, _>>()?
             };
+            let names = user_label_names(conn, account)?;
             for t in candidates {
-                if let Some(time) = thread_matches(conn, account, t, &q)? {
+                if let Some(time) = thread_matches(conn, t, &q, &names)? {
                     matched.push((time, t));
                 }
             }
@@ -80,24 +83,44 @@ pub fn ids(
         .collect())
 }
 
-/// The thread's sort time when any live message matches, like Gmail search
-/// skips threads with no message outside trash and spam.
-pub fn thread_matches(
+/// The account's user labels, id to name, read once per search rather than
+/// once per label of each candidate thread.
+fn user_label_names(
     conn: &Connection,
     account: AccountId,
+) -> anyhow::Result<HashMap<String, String>> {
+    let mut stmt =
+        conn.prepare_cached("SELECT id, name FROM labels WHERE account_id = ?1 AND system = 0")?;
+    let rows = stmt.query_map([account], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    Ok(rows.collect::<Result<_, _>>()?)
+}
+
+/// The thread's sort time when any live message matches, like Gmail search
+/// skips threads with no message outside trash and spam.
+fn thread_matches(
+    conn: &Connection,
     thread: ThreadId,
     q: &ub_rules::Query,
+    label_names: &HashMap<String, String>,
 ) -> anyhow::Result<Option<Millis>> {
     let msgs = crate::threads::messages(conn, thread)?;
     if !msgs.iter().any(crate::threads::Msg::live) {
         return Ok(None);
     }
-    let labels = crate::threads::thread_labels(&msgs);
-    let user_labels = crate::splits::user_label_names(conn, account, &labels)?;
+    let user_labels: Vec<String> = crate::threads::thread_labels(&msgs)
+        .iter()
+        .filter_map(|l| label_names.get(l).cloned())
+        .collect();
+    // Only bare words read the body; `label:` or `is:list` alone never do.
+    let reads_body = q.reads_body();
     let mut body_stmt =
         conn.prepare_cached("SELECT coalesce(body_text, '') FROM messages WHERE id = ?1")?;
     for m in msgs.iter().filter(|m| m.live()) {
-        let body: String = body_stmt.query_row([m.id], |r| r.get(0))?;
+        let body: String = if reads_body {
+            body_stmt.query_row([m.id], |r| r.get(0))?
+        } else {
+            String::new()
+        };
         let s = RuleMsg {
             msg: m,
             body: &body,
