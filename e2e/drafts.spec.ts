@@ -306,11 +306,12 @@ test("DRF-07 sending cancels a queued upsert", async ({ app, gmail }) => {
   expect(sent).toHaveLength(1);
   expect(htmlOf(parseMime(sent[0]?.raw ?? ""))).toContain("final");
 
+  // Requests made offline never reach the fake, so the log holds only what ran
+  // after reconnecting: the outbox's own write, then the send. A queued upsert
+  // that survived the send would add a second `drafts.update`.
   const log = await gmail.requests(undefined, { account: A });
-  const send = log.find((r) => r.api === "drafts.send");
-  expect(send).toBeDefined();
-  const late = log.filter((r) => r.api === "drafts.update" && r.seq > (send?.seq ?? 0));
-  expect(late).toEqual([]);
+  const writes = log.filter((r) => r.api === "drafts.update" || r.api === "drafts.send");
+  expect(writes.map((r) => r.api)).toEqual(["drafts.update", "drafts.send"]);
   expect(await draftsIn(gmail, p4)).toEqual([]);
 });
 
