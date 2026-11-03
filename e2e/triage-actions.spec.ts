@@ -1,5 +1,7 @@
 // Triage actions (COVERAGE 5.5, TRI): archive, return to inbox, trash, spam,
 // star, read, selection, the removal table, and the ids an action records.
+import type { Route } from "@playwright/test";
+
 import type { App } from "./app.ts";
 import type { Control, GmailState } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
@@ -78,6 +80,39 @@ async function snoozeHighlighted(app: App): Promise<void> {
   await expect(app.palette.getByRole("option").first()).toBeVisible();
   await app.press("Enter");
   await expect(app.palette).toHaveCount(0);
+}
+
+/**
+ * Parks the page's action submits, so Rust has not seen the action and only
+ * the mirror's same-frame effect shows (SPEC UI state). Navigate first: a view
+ * switch subscribes through the same submit.
+ */
+async function parkSubmits(app: App): Promise<() => Promise<void>> {
+  const parked: Route[] = [];
+  let open = false;
+  const submit = /\/invoke\/submit$/;
+  await app.page.route(submit, (route) => (open ? route.continue() : parked.push(route)));
+  return async () => {
+    open = true;
+    await each(parked, (r) => r.continue());
+    await app.page.unroute(submit);
+  };
+}
+
+/** Runs `action` on `row` with submits parked: the row leaves before Rust sees it, and stays out. */
+async function leavesAtOnce(
+  app: App,
+  row: string,
+  where: string,
+  action: () => Promise<void>,
+): Promise<void> {
+  await highlight(app, row);
+  const release = await parkSubmits(app);
+  await action();
+  await expect(app.row(row), `${row} leaves ${where} at once`).toHaveCount(0);
+  await release();
+  await app.settle();
+  await expect(app.row(row), `${row} stays out of ${where}`).toHaveCount(0);
 }
 
 /** Selects the rows containing `first` and the `count - 1` below it (`x`, `Shift+J`). */
@@ -165,6 +200,10 @@ test("TRI-03 # moves to Trash and never touches draft messages", async ({ app, g
   await app.settle();
   const [draft] = (await gmail.gmail(A)).drafts;
   expect(draft?.message.threadId).toBe(s.thread("p4").threadId);
+  // A poll stores Gmail's copy of the draft message in the local thread, so
+  // the trash has a draft message it must leave out.
+  await gmail.poll();
+  await app.settle();
   await app.press("Escape");
   await expect(app.highlighted).toContainText("Person 4");
 
@@ -445,32 +484,31 @@ test("TRI-09 Esc closes the open overlay before it clears a selection", async ({
 });
 
 test.describe("TRI-10 each action removes its row from the right lists", () => {
-  // Every case holds batchModify, so only the app's own removal is observed.
-  test("TRI-10 e: leaves Snoozed, stays in Starred", async ({ app, gmail }) => {
+  // Every removal is checked with submits parked: Rust's own list patch would
+  // remove the row too, so only a parked submit shows the mirror's table.
+  test("TRI-10 e: leaves Inbox and Snoozed, stays in Starred", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
-    // Not in the table: the row stays, and the thread is still starred.
+    await leavesAtOnce(app, "Person 1", "Inbox", () => app.press("e"));
+
+    await highlight(app, "Person 3");
+    await snoozeHighlighted(app);
+    await go(app, "h");
+    await leavesAtOnce(app, "Person 3", "Snoozed", () => app.press("e"));
+
+    // Not in the table: the row stays, still starred, and keeps the highlight.
+    await go(app, "i");
     await highlight(app, "Person 2");
     await app.press("s");
     await go(app, "s");
     await highlight(app, "Person 2");
     await app.press("e");
     await app.settle();
-    await expect(app.row("Person 2")).toHaveCount(1);
     await expect(app.row("Person 2")).toHaveAttribute("data-starred", "true");
-
-    await gmail.hold("messages.batchModify");
-    await go(app, "i");
-    await highlight(app, "Person 1");
-    await snoozeHighlighted(app);
-    await go(app, "h");
-    await highlight(app, "Person 1");
-    await app.press("e");
-    await expect(app.row("Person 1")).toHaveCount(0);
+    await expect(app.highlighted).toContainText("Person 2");
   });
 
   test("TRI-10 Shift+E: leaves Done, Snoozed, Trash, Spam", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
-    await gmail.hold("messages.batchModify");
     await highlight(app, "Person 1");
     await app.press("e");
     await highlight(app, "Person 2");
@@ -483,75 +521,51 @@ test.describe("TRI-10 each action removes its row from the right lists", () => {
     ];
     await each(cases, async ([view, row]) => {
       await go(app, view);
-      await highlight(app, row);
-      await app.press("Shift+E");
-      await expect(app.row(row), `${row} in g ${view}`).toHaveCount(0);
+      await leavesAtOnce(app, row, `g ${view}`, () => app.press("Shift+E"));
     });
   });
 
   test("TRI-10 h: leaves Inbox and Done", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
-    await gmail.hold("messages.batchModify");
     await highlight(app, "Person 1");
     await app.press("e");
-    await highlight(app, "Person 2");
-    await snoozeHighlighted(app);
-    await expect(app.row("Person 2")).toHaveCount(0);
+    await leavesAtOnce(app, "Person 2", "Inbox", () => snoozeHighlighted(app));
 
     await go(app, "e");
-    await highlight(app, "Person 1");
-    await snoozeHighlighted(app);
-    await expect(app.row("Person 1")).toHaveCount(0);
+    await leavesAtOnce(app, "Person 1", "Done", () => snoozeHighlighted(app));
   });
 
   test("TRI-10 #: leaves Starred, Sent, a label view, Done", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
-    await gmail.hold("messages.batchModify");
     await highlight(app, "Person 1");
     await app.press("e");
 
     await go(app, "s");
-    await highlight(app, "Trip ideas");
-    await app.press("#");
-    await expect(app.row("Trip ideas")).toHaveCount(0);
+    await leavesAtOnce(app, "Trip ideas", "Starred", () => app.press("#"));
 
     await go(app, "t");
-    await highlight(app, "Sent 10 days ago");
-    await app.press("#");
-    await expect(app.row("Sent 10 days ago")).toHaveCount(0);
+    await leavesAtOnce(app, "Sent 10 days ago", "Sent", () => app.press("#"));
 
     await goLabel(app, "Projects");
-    await highlight(app, "Project alpha");
-    await app.press("#");
-    await expect(app.row("Project alpha")).toHaveCount(0);
+    await leavesAtOnce(app, "Project alpha", "Projects", () => app.press("#"));
 
     await go(app, "e");
-    await highlight(app, "Person 1");
-    await app.press("#");
-    await expect(app.row("Person 1")).toHaveCount(0);
+    await leavesAtOnce(app, "Person 1", "Done", () => app.press("#"));
   });
 
   test("TRI-10 !: leaves Starred and Trash", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
-    await gmail.hold("messages.batchModify");
     await go(app, "s");
-    await highlight(app, "Trip ideas");
-    await app.press("!");
-    await expect(app.row("Trip ideas")).toHaveCount(0);
+    await leavesAtOnce(app, "Trip ideas", "Starred", () => app.press("!"));
 
     await go(app, "#");
-    await highlight(app, "Old trash");
-    await app.press("!");
-    await expect(app.row("Old trash")).toHaveCount(0);
+    await leavesAtOnce(app, "Old trash", "Trash", () => app.press("!"));
   });
 
   test("TRI-10 unstar: leaves Starred", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
-    await gmail.hold("messages.batchModify");
     await go(app, "s");
-    await highlight(app, "Trip ideas");
-    await app.press("s");
-    await expect(app.row("Trip ideas")).toHaveCount(0);
+    await leavesAtOnce(app, "Trip ideas", "Starred", () => app.press("s"));
   });
 
   test("TRI-10 y, or l removing the current label: leaves the label view", async ({
@@ -561,41 +575,49 @@ test.describe("TRI-10 each action removes its row from the right lists", () => {
     const s = await seeds.standard(gmail, app);
     await gmail.modify(A, s.message("p1", 1).id, [s.label(A, "Travel")], [], { poll: true });
     await app.settle();
-    await gmail.hold("messages.batchModify");
     await goLabel(app, "Travel");
     await expect(app.row("Person 1")).toHaveCount(1);
 
-    await highlight(app, "Trip ideas");
-    await app.press("y");
-    await expect(app.row("Trip ideas")).toHaveCount(0);
-
-    await highlight(app, "Person 1");
-    await app.press("l");
-    await app.palette.getByRole("option", { name: "✓ Travel" }).click();
-    await expect(app.row("Person 1")).toHaveCount(0);
+    await leavesAtOnce(app, "Trip ideas", "Travel", () => app.press("y"));
+    await leavesAtOnce(app, "Person 1", "Travel", async () => {
+      await app.press("l");
+      await app.palette.getByRole("option", { name: "✓ Travel" }).click();
+    });
   });
 
   test("TRI-10 send or discard: leaves Drafts", async ({ app, gmail }) => {
     await seeds.drafts(gmail, app);
     await go(app, "d");
+    await expect(app.row("Fwd: Contract")).toHaveCount(1);
+    const drafts = await app.rows.count();
 
     // Send a new-message draft: the c screen opens and closes back onto Drafts.
     await highlight(app, "Idea");
     await app.press("Enter");
     await expect(app.page.getByRole("heading", { name: "New Message" })).toBeVisible();
     await app.settle();
+    const releaseSend = await parkSubmits(app);
     await app.press("Meta+Enter");
     await expect(app.list).toBeVisible();
+    await expect(app.rows).toHaveCount(drafts - 1);
+    await expect(app.row("Idea")).toHaveCount(0);
+    await releaseSend();
+    await app.settle();
     await expect(app.row("Idea")).toHaveCount(0);
 
     // Discard a reply draft: its conversation opens with the composer.
     await app.row("Fwd: Contract").click();
     await expect(app.editor).toBeVisible();
     await app.settle();
+    const releaseDiscard = await parkSubmits(app);
     await app.press("Meta+Shift+Comma");
     await expect(app.editor).toHaveCount(0);
     await app.press("Escape");
     await expect(app.list).toBeVisible();
+    await expect(app.rows).toHaveCount(drafts - 2);
+    await expect(app.row("Fwd: Contract")).toHaveCount(0);
+    await releaseDiscard();
+    await app.settle();
     await expect(app.row("Fwd: Contract")).toHaveCount(0);
   });
 });
@@ -621,11 +643,16 @@ test("TRI-11 an action changes only the messages it recorded; a reply arriving m
     labels: ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
   });
   await app.settle();
-  await hold.release();
+  // The first try fails, so the archive is still queued once m2 is stored
+  // locally: the retry must name only the message it recorded.
+  await hold.release({ kind: "status", status: 503 });
+  await app.settle();
+  await gmail.clearFaults();
   await app.settle();
 
-  const [req] = await gmail.requests("messages.batchModify");
-  expect(req?.body).toMatchObject({ ids: [m1.id] });
+  const reqs = await gmail.requests("messages.batchModify");
+  expect(reqs.map((r) => r.answer)).toEqual([503, 204]);
+  for (const req of reqs) expect(req.body).toMatchObject({ ids: [m1.id] });
   const state = await gmail.gmail(A);
   expect(state.messages.find((m) => m.id === m1.id)?.labels).not.toContain("INBOX");
   expect(state.messages.find((m) => m.id === m2.id)?.labels).toContain("INBOX");

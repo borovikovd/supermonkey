@@ -212,6 +212,18 @@ test("UND-04 each account has its own undo history", async ({ app, gmail }) => {
   expect(await gmail.requests("messages.batchModify", { account: B })).toEqual([]);
   expect(await has(gmail, s, "p1", "INBOX")).toBe(false);
 
+  // With A's entry made before B's first, B's z undoes B's entry, then nothing.
+  await highlight(app, "Bea Blue");
+  await app.press("e");
+  await expect(app.row("Bea Blue")).toHaveCount(0);
+  await app.press("z");
+  await expect(app.row("Bea Blue")).toHaveCount(1);
+  await app.settle();
+  const bRequests = (await gmail.requests("messages.batchModify", { account: B })).length;
+  await app.press("z");
+  await app.settle();
+  expect(await gmail.requests("messages.batchModify", { account: B })).toHaveLength(bRequests);
+
   await highlight(app, "Bea Blue");
   await app.press("e");
   await expect(app.row("Bea Blue")).toHaveCount(0);
@@ -219,6 +231,7 @@ test("UND-04 each account has its own undo history", async ({ app, gmail }) => {
   // A's z undoes A's entry only.
   await app.press("Control+1");
   await expect(app.row("Person 2")).toHaveCount(1);
+  await expect(app.row("Person 1")).toHaveCount(0);
   await app.press("z");
   await expect(app.row("Person 1")).toHaveCount(1);
   await app.settle();
