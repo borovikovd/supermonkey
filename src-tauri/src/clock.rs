@@ -398,9 +398,7 @@ mod tests {
             k.wait(Duration::from_secs(3600)).await;
             let _ = tx.send(busy("test-kick"));
         }));
-        while busy("test-kick") > 0 {
-            tokio::task::yield_now().await;
-        }
+        until("the task parks", || busy("test-kick") == 0).await;
         kick.kick();
         // Busy from the kick until the task has resumed and finished.
         assert!(busy("test-kick") + busy("kick") >= 1);
@@ -429,9 +427,10 @@ mod tests {
             tokio::spawn(async move { drop(c.sleep(Duration::from_millis(ms)).await) })
         };
         let (short, long) = (started(500), started(2_000));
-        while clock.state.lock().sleepers.len() < 2 {
-            tokio::task::yield_now().await;
-        }
+        until("both sleeps register", || {
+            clock.state.lock().sleepers.len() == 2
+        })
+        .await;
         assert_eq!(clock.next_due_within(400), None);
         assert_eq!(clock.next_due_within(500), Some(500));
         clock.jump(10_000);

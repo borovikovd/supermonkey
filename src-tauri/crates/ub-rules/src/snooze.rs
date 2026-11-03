@@ -543,9 +543,28 @@ mod tests {
 
     #[test]
     fn works_with_local_and_utc() {
-        assert!(snooze_options(&chrono::Local::now()).len() >= 2);
+        let local = chrono::Local
+            .with_ymd_and_hms(2026, 11, 2, 9, 0, 0)
+            .earliest()
+            .unwrap();
+        let later = &snooze_options(&local)[0];
+        assert_eq!(later.kind, SnoozeKind::LaterToday);
+        assert_eq!(later.at.naive_local().to_string(), "2026-11-02 18:00:00");
+
+        // Monday 09:00 UTC.
         let utc = chrono::Utc.with_ymd_and_hms(2026, 11, 2, 9, 0, 0).unwrap();
-        assert_eq!(snooze_options(&utc).len(), 3);
+        let times: Vec<String> = snooze_options(&utc)
+            .iter()
+            .map(|o| o.at.to_string())
+            .collect();
+        assert_eq!(
+            times,
+            [
+                "2026-11-02 18:00:00 UTC",
+                "2026-11-03 08:00:00 UTC",
+                "2026-11-09 08:00:00 UTC"
+            ]
+        );
     }
 
     // --- free text --------------------------------------------------------
