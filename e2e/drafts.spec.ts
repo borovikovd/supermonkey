@@ -106,6 +106,40 @@ test("DRF-10 an edit saved while the draft's upsert is in flight still reaches G
   expect(bodyOf(now[0])).toContain("one two three");
 });
 
+test("DRF-11 a draft discarded while its first upsert is in flight stays gone", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const thread = s.thread("p3").threadId;
+  const create = await gmail.hold("drafts.create");
+  await openThread(app, "Person 3");
+  await app.reply();
+  await app.type("discard me");
+  await expect.poll(async () => (await creates(gmail)).some((r) => r.held)).toBe(true);
+  await app.press("Meta+Shift+Comma");
+  await expect(app.editor).toHaveCount(0);
+  await app.settle();
+
+  // The create lands after the discard. A poll reconciles drafts before the
+  // copy it made is deleted, and again after.
+  const del = await gmail.hold("drafts.delete");
+  await create.release();
+  await app.settle();
+  await gmail.poll();
+  await app.settle();
+  await expect(stub(app, "discard me")).toHaveCount(0);
+  await del.release();
+  await app.settle();
+  await gmail.poll();
+  await app.settle();
+  expect(await draftsIn(gmail, thread)).toEqual([]);
+  await expect(stub(app, "discard me")).toHaveCount(0);
+  await app.press("Escape");
+  await goDrafts(app);
+  await expect(app.row("Person 3")).toHaveCount(0);
+});
+
 test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app, gmail }) => {
   await seeds.drafts(gmail, app);
   await goDrafts(app);

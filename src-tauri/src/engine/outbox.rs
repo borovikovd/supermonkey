@@ -201,7 +201,7 @@ async fn send(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError> {
             };
         }
     };
-    super::drafts::store_ids(e, &row.draft, &draft).await;
+    super::drafts::store_ids(e, &row.draft, &draft, None).await;
     record_gmail_draft(e, row.id, draft.id.clone()).await;
     // 4: drafts.send.
     send_draft(e, rt, row, &draft.id).await

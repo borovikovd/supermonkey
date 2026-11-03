@@ -372,8 +372,15 @@ async fn list_all(rt: &AccountRt) -> Result<Vec<ub_gmail::Draft>, GmailError> {
     }
 }
 
-/// Stores the Gmail ids an upsert returned.
-pub async fn store_ids(e: &Engine, local: &DraftId, g: &ub_gmail::Draft) {
+/// Stores the Gmail ids an upsert returned. With `orphan` (the account), a
+/// draft discarded while its upsert was in flight has the Gmail draft that
+/// upsert made deleted too, or sync would bring the draft back.
+pub async fn store_ids(
+    e: &Engine,
+    local: &DraftId,
+    g: &ub_gmail::Draft,
+    orphan: Option<AccountId>,
+) {
     let (id, msg, thread) = (
         g.id.clone(),
         g.message.id.clone(),
@@ -387,7 +394,12 @@ pub async fn store_ids(e: &Engine, local: &DraftId, g: &ub_gmail::Draft) {
                 .tx
                 .query_row("SELECT account_id FROM drafts WHERE id = ?1", [&local], |r| r.get(0))
                 .optional()?;
-            let Some(account) = account else { return Ok(()) };
+            let Some(account) = account else {
+                return match orphan {
+                    Some(owner) => delete_gmail_draft(ctx, owner, &id),
+                    None => Ok(()),
+                };
+            };
             ctx.tx.execute(
                 "UPDATE drafts SET gmail_draft_id = ?2, gmail_message_id = ?3, gmail_thread_id = ?4 WHERE id = ?1",
                 params![local, id, msg, thread],
@@ -397,6 +409,38 @@ pub async fn store_ids(e: &Engine, local: &DraftId, g: &ub_gmail::Draft) {
         })
         .await
         .log_err("store_ids");
+}
+
+/// Whether a delete of this Gmail draft is waiting in the queue.
+fn delete_queued(
+    ctx: &crate::writer::Ctx<'_>,
+    account: AccountId,
+    gmail_draft: &str,
+) -> rusqlite::Result<bool> {
+    ctx.tx.query_row(
+        "SELECT EXISTS (SELECT 1 FROM ops WHERE account_id = ?1 AND kind = 'draft_delete'
+                          AND json_extract(payload, '$.gmail_draft') = ?2)",
+        params![account, gmail_draft],
+        |r| r.get(0),
+    )
+}
+
+/// Queues the delete of a Gmail draft no local draft owns, once.
+fn delete_gmail_draft(
+    ctx: &mut crate::writer::Ctx<'_>,
+    account: AccountId,
+    gmail_draft: &str,
+) -> anyhow::Result<()> {
+    if !delete_queued(ctx, account, gmail_draft)? {
+        crate::queue::push(
+            ctx,
+            account,
+            None,
+            "draft_delete",
+            &serde_json::json!({ "gmail_draft": gmail_draft }),
+        )?;
+    }
+    Ok(())
 }
 
 pub async fn execute_op(
@@ -434,7 +478,7 @@ pub async fn execute_op(
                 return Ok(Done::Finished);
             };
             let g = write(e, rt, &d).await?;
-            store_ids(e, &local, &g).await;
+            store_ids(e, &local, &g, Some(rt.id)).await;
             Ok(Done::Finished)
         }
         "draft_delete" => {
@@ -806,6 +850,10 @@ fn apply_gmail_draft(
     d: &FetchedDraft,
 ) -> anyhow::Result<()> {
     let m = &d.m;
+    // Discarded here, and its delete has not reached Gmail yet.
+    if delete_queued(ctx, account, &d.id)? {
+        return Ok(());
+    }
     let existing = local_for(ctx, account, m, &d.id)?;
     // The outbox sends its own version; Gmail's copy may be older.
     if let Some(local) = &existing

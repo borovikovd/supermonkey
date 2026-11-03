@@ -2283,6 +2283,19 @@ _EG · §Drafts ("They also upsert to Gmail drafts")_
   4. Release the write, `settle()`.
 - **Expect:** Gmail has one draft in `p3`'s thread, with "one two three".
 
+#### DRF-11 · P1 · A draft discarded while its first upsert is in flight stays gone
+
+_EG · §Drafts ("Discard deletes the local draft and the Gmail draft"), §Gmail errors (`X-Ubermensch-Draft` on sync)_
+
+- **Steps:**
+  1. `hold(drafts.create)`. In `p3`, press `r` and type; wait until the create is parked.
+  2. Press `Cmd+Shift+,`, `settle()`.
+  3. `hold(drafts.delete)`. Release the create, `settle()`, then `poll()`, `settle()`: the poll reconciles while the copy the create made is still in Gmail.
+  4. Release the delete, `settle()`, `poll()`, `settle()`.
+- **Expect:**
+  - After step 3, the conversation shows no draft stub: sync does not bring the draft back.
+  - After step 4, Gmail has no draft in `p3`'s thread, and Drafts has no row for it.
+
 ### 5.16 `undo-send.spec.ts` (SND)
 
 Outbox state machine (§Send and undo):
