@@ -281,22 +281,22 @@ Files are independent and can be written in parallel. Each depends only on the s
 | File                       | Prefix | Scope                                                                                        | Main seeds                               | Harness beyond H1–H3        | Cases   | P1      | P2     | P3    |
 | -------------------------- | ------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | ------- | ------- | ------ | ----- |
 | `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 13      | 9       | 4      | 0     |
-| `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 7       | 4       | 3      | 0     |
+| `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 9       | 4       | 5      | 0     |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 5       | 3       | 2      | 0     |
-| `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 14      | 2       | 11     | 1     |
+| `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 15      | 2       | 12     | 1     |
 | `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 11      | 7       | 4      | 0     |
 | `undo.spec.ts`             | UND    | the `z` stack, partial revert, per-account history, persistence                              | `standard`                               | H15                         | 8       | 4       | 3      | 1     |
 | `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 8       | 2       | 6      | 0     |
 | `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 7       | 3       | 3      | 1     |
 | `splits.spec.ts`           | SPL    | routing, `Tab`, pins, own reply, custom splits, starters, hiding, cap                        | `standard`, `splits`, `bulk`, `bulk1000` | H10, H12, H15               | 10      | 6       | 3      | 1     |
-| `snooze.spec.ts`           | SNZ    | picker, snooze, wake triggers, clearing rules, history echo, undo                            | `standard`                               | H13, H14, H15               | 7       | 6       | 0      | 1     |
-| `compose-reply.spec.ts`    | REP    | inline composer, addressing, quoting, forward, resume rules, Gmail drafts                    | `standard`, `drafts`                     | H4, H6                      | 12      | 9       | 3      | 0     |
+| `snooze.spec.ts`           | SNZ    | picker, snooze, wake triggers, clearing rules, history echo, undo                            | `standard`                               | H13, H14, H15               | 8       | 6       | 1      | 1     |
+| `compose-reply.spec.ts`    | REP    | inline composer, addressing, quoting, forward, resume rules, Gmail drafts                    | `standard`, `drafts`                     | H4, H6                      | 15      | 10      | 5      | 0     |
 | `compose-new.spec.ts`      | NEW    | `c` screen, formatting, shortcuts, `Esc` machine, untouched rule, discard                    | `standard`                               | H4                          | 12      | 7       | 5      | 0     |
-| `recipients.spec.ts`       | RCP    | chips, autocomplete, ranking, invalid addresses, Cc/Bcc                                      | `contacts`, `standard`                   | H23                         | 8       | 3       | 5      | 0     |
-| `attachments.spec.ts`      | ATT    | attach, download on demand, offline forward, MIME tree                                       | `standard`                               | H4, H9, H23                 | 4       | 3       | 1      | 0     |
-| `drafts.spec.ts`           | DRF    | autosave and upsert, Drafts `Enter`, Gmail-side edits and deletes, offline, reload and crash | `standard`, `drafts`                     | H6, H15, H16                | 15      | 12      | 2      | 1     |
+| `recipients.spec.ts`       | RCP    | chips, autocomplete, ranking, invalid addresses, Cc/Bcc                                      | `contacts`, `standard`                   | H23                         | 10      | 3       | 7      | 0     |
+| `attachments.spec.ts`      | ATT    | attach, download on demand, offline forward, MIME tree                                       | `standard`                               | H4, H9, H23                 | 6       | 5       | 1      | 0     |
+| `drafts.spec.ts`           | DRF    | autosave and upsert, Drafts `Enter`, Gmail-side edits and deletes, offline, reload and crash | `standard`, `drafts`                     | H6, H15, H16                | 17      | 14      | 2      | 1     |
 | `undo-send.spec.ts`        | SND    | the outbox state machine, held undo, rejection, no clear answer, restart                     | `standard`                               | H8a, H8b, H9, H13, H15      | 18      | 15      | 3      | 0     |
-| `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 6       | 5       | 1      | 0     |
+| `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 7       | 6       | 1      | 0     |
 | `gmail-errors.spec.ts`     | ERR    | the outcome matrix for actions and `drafts.create`, back-off, 401, 404                       | `standard`                               | H6, H8, H9, H10, H13        | 9       | 5       | 3      | 1     |
 | `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 9       | 5       | 2      | 2     |
 | `notifications.spec.ts`    | NOT    | when to notify, summary, mute, Dock badge, click                                             | `standard`                               | H17, H18                    | 6       | 5       | 1      | 0     |
@@ -304,7 +304,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0     |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0     |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0     |
-| **Total**                  |        |                                                                                              |                                          |                             | **184** | **107** | **68** | **9** |
+| **Total**                  |        |                                                                                              |                                          |                             | **216** | **128** | **79** | **9** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -2272,7 +2272,7 @@ _EG · §Actions ("the body is editable at once, and later saves carry the full 
   - After step 2, To shows Carol, the editor reads "Early words", and the Gmail draft has To Carol, Subject "Re: Offsite venue", and "Early words".
   - After step 3, the same Gmail draft still has To Carol and reads "Early words" then "More words".
 
-#### DRF-10 · P1 · An edit saved while the draft's upsert is in flight still reaches Gmail
+#### DRF-12 · P1 · An edit saved while the draft's upsert is in flight still reaches Gmail
 
 _EG · §Drafts ("They also upsert to Gmail drafts")_
 
@@ -2283,7 +2283,7 @@ _EG · §Drafts ("They also upsert to Gmail drafts")_
   4. Release the write, `settle()`.
 - **Expect:** Gmail has one draft in `p3`'s thread, with "one two three".
 
-#### DRF-11 · P1 · A draft discarded while its first upsert is in flight stays gone
+#### DRF-13 · P1 · A draft discarded while its first upsert is in flight stays gone
 
 _EG · §Drafts ("Discard deletes the local draft and the Gmail draft"), §Gmail errors (`X-Ubermensch-Draft` on sync)_
 
@@ -2296,7 +2296,7 @@ _EG · §Drafts ("Discard deletes the local draft and the Gmail draft"), §Gmail
   - After step 3, the conversation shows no draft stub: sync does not bring the draft back.
   - After step 4, Gmail has no draft in `p3`'s thread, and Drafts has no row for it.
 
-#### DRF-12 · P1 · A second Gmail draft carrying a local draft's id is deleted as an extra copy
+#### DRF-14 · P1 · A second Gmail draft carrying a local draft's id is deleted as an extra copy
 
 _EG · §Gmail errors ("If that local draft already has a different live Gmail draft, Rust deletes the extra copy")_
 
@@ -2305,7 +2305,7 @@ _EG · §Gmail errors ("If that local draft already has a different live Gmail d
   2. `createDraft` in `p3`'s thread with "a stray copy" and that same header, then `poll()`, `settle()`.
 - **Expect:** Gmail has only the first draft, still with "the real one". The conversation shows one draft stub, "the real one".
 
-#### DRF-13 · P1 · A draft reconcile on a stale list keeps a draft written meanwhile
+#### DRF-15 · P1 · A draft reconcile on a stale list keeps a draft written meanwhile
 
 _EG · §Drafts ("A draft deleted on Gmail … is deleted locally"), §Sync (the list is not a snapshot)_
 
@@ -2315,7 +2315,7 @@ _EG · §Drafts ("A draft deleted on Gmail … is deleted locally"), §Sync (the
   3. Release the list's answer, `settle()`.
 - **Expect:** `p4` still shows the draft stub, and Drafts lists it and the draft from step 1: a draft missing from a list taken before it reached Gmail is not gone.
 
-#### DRF-14 · P1 · A Gmail edit read back after the draft was reopened and edited does not replace the edit
+#### DRF-16 · P1 · A Gmail edit read back after the draft was reopened and edited does not replace the edit
 
 _EG · §Drafts ("unless a composer has it open"), Q24 (last writer wins)_
 
@@ -2326,7 +2326,7 @@ _EG · §Drafts ("unless a composer has it open"), Q24 (last writer wins)_
   3. Release the read's answer, `settle()`. `Esc` `Esc`, `settle()`, then `r` again.
 - **Expect:** the composer shows "Aimed at nobody. Mine." and not "from web". Gmail's draft holds "Aimed at nobody. Mine.".
 
-#### DRF-15 · P1 · A Gmail draft read before its thread's messages is aimed at the thread's messages
+#### DRF-17 · P1 · A Gmail draft read before its thread's messages is aimed at the thread's messages
 
 _EG · §Reply composer ("A draft from Gmail is aimed at the message its `In-Reply-To` names … A draft from Gmail counts as started on the latest message when …")_
 
@@ -3230,7 +3230,7 @@ _EG · §UI state (Actions: "`Cmd+Q` first closes an open composer as a second `
 | Reply composer              | REP-01, REP-02, REP-07 to REP-10, NEW-01                                                                                                                                    |
 | Addressing                  | REP-03 to REP-06, REP-11, REP-12, ATT-03, NEW-10                                                                                                                            |
 | Recipients and autocomplete | RCP-01 to RCP-08, NEW-09                                                                                                                                                    |
-| Drafts                      | DRF-01 to DRF-15, ATT-01, ATT-04, NEW-11, VIEW-04, SND-13, SND-18                                                                                                           |
+| Drafts                      | DRF-01 to DRF-17, ATT-01, ATT-04, NEW-11, VIEW-04, SND-13, SND-18                                                                                                           |
 | Send and undo               | SND-01 to SND-18, REP-10, ATT-03                                                                                                                                            |
 | Archive, trash, star, read  | TRI-01 to TRI-11, ERR-04                                                                                                                                                    |
 | Labels                      | LAB-01 to LAB-07                                                                                                                                                            |
@@ -3241,7 +3241,7 @@ _EG · §UI state (Actions: "`Cmd+Q` first closes an open composer as a second `
 | Offline                     | OFF-01 to OFF-07, LAB-04, DRF-05, DRF-06, SRC-05                                                                                                                            |
 | Notifications               | NOT-01 to NOT-06, CONV-09, SYN-04                                                                                                                                           |
 | Sync                        | SYN-01 to SYN-07, LAB-07, VIEW-05                                                                                                                                           |
-| Gmail errors                | ERR-01 to ERR-09, ACC-08, SND-05 to SND-08, LAB-05, DRF-04, OFF-05, DRF-11, DRF-12, SND-18                                                                                  |
+| Gmail errors                | ERR-01 to ERR-09, ACC-08, SND-05 to SND-08, LAB-05, DRF-04, OFF-05, DRF-13, DRF-14, SND-18                                                                                  |
 | Data                        | ACC-07, ACC-10, SEC-04                                                                                                                                                      |
 | UI state                    | TRI-10, UND-05, UIC-01 to UIC-05, DRF-08, CONV-03, CONV-09, NEW-12                                                                                                          |
 | Security                    | SEC-01 to SEC-04, ACC-01                                                                                                                                                    |

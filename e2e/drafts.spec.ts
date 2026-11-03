@@ -81,7 +81,7 @@ test("DRF-01 drafts autosave and update a single Gmail draft", async ({ app, gma
   expect(await app.rows.first().getAttribute("data-row")).toBe(local);
 });
 
-test("DRF-10 an edit saved while the draft's upsert is in flight still reaches Gmail", async ({
+test("DRF-12 an edit saved while the draft's upsert is in flight still reaches Gmail", async ({
   app,
   gmail,
 }) => {
@@ -106,7 +106,7 @@ test("DRF-10 an edit saved while the draft's upsert is in flight still reaches G
   expect(bodyOf(now[0])).toContain("one two three");
 });
 
-test("DRF-11 a draft discarded while its first upsert is in flight stays gone", async ({
+test("DRF-13 a draft discarded while its first upsert is in flight stays gone", async ({
   app,
   gmail,
 }) => {
@@ -140,7 +140,7 @@ test("DRF-11 a draft discarded while its first upsert is in flight stays gone", 
   await expect(app.row("Person 3")).toHaveCount(0);
 });
 
-test("DRF-12 a second Gmail draft carrying a local draft's id is deleted as an extra copy", async ({
+test("DRF-14 a second Gmail draft carrying a local draft's id is deleted as an extra copy", async ({
   app,
   gmail,
 }) => {
@@ -178,7 +178,7 @@ test("DRF-12 a second Gmail draft carrying a local draft's id is deleted as an e
   await expect(stub(app, "a stray copy")).toHaveCount(0);
 });
 
-test("DRF-13 a draft reconcile on a stale list keeps a draft written meanwhile", async ({
+test("DRF-15 a draft reconcile on a stale list keeps a draft written meanwhile", async ({
   app,
   gmail,
 }) => {
@@ -212,7 +212,7 @@ test("DRF-13 a draft reconcile on a stale list keeps a draft written meanwhile",
   await expect(app.row("From the web")).toHaveCount(1);
 });
 
-test("DRF-14 a Gmail edit read back after the draft was reopened and edited does not replace the edit", async ({
+test("DRF-16 a Gmail edit read back after the draft was reopened and edited does not replace the edit", async ({
   app,
   gmail,
 }) => {
@@ -249,7 +249,7 @@ test("DRF-14 a Gmail edit read back after the draft was reopened and edited does
   expect(bodyOf(d)).toContain("Aimed at nobody. Mine.");
 });
 
-test("DRF-15 a Gmail draft read before its thread's messages is aimed at the thread's messages", async ({
+test("DRF-17 a Gmail draft read before its thread's messages is aimed at the thread's messages", async ({
   app,
   gmail,
 }) => {
