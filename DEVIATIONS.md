@@ -39,6 +39,10 @@ written. Each keeps the spec's intent.
   ahead of newer ones and sends them again after 100 ms, doubling to at most
   5 s while it keeps failing. Rust drops numbers at or below its `ack`, so a
   batch that did arrive is not applied twice.
+- **`Cmd+Q` waits at most 5 s** for Rust to commit the actions the page has
+  sent (the composer's close among them), then quits anyway, so a core that
+  stopped answering cannot keep the app from quitting. Rust then commits
+  the UI jobs it has queued before it exits.
 
 ## Sync (step 2)
 

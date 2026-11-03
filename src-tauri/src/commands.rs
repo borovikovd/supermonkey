@@ -97,7 +97,19 @@ pub fn add_attachment(
 /// Quits after the UI has closed an open composer (SPEC Undo send: Cmd+Q).
 #[tauri::command]
 pub fn quit_now(app: AppHandle) {
-    app.exit(0);
+    quit(&app);
+}
+
+/// Exits once the writer has committed the UI jobs queued so far, so the
+/// last actions the page sent are not lost; queued sync jobs are dropped.
+pub fn quit(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(engine) = app.try_state::<Arc<Engine>>() {
+            engine.shutdown().await;
+        }
+        app.exit(0);
+    });
 }
 
 #[tauri::command]

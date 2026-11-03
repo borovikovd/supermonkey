@@ -126,7 +126,8 @@ pub fn run() {
     app.run(|app, event| match event {
         // Clicking the Dock icon shows the window again.
         RunEvent::Reopen { .. } => show_main(app),
-        // Cmd+Q: let the UI close an open composer first, then it calls quit_now.
+        // Cmd+Q: let the UI close an open composer first, then it calls
+        // quit_now. Either way the writer commits what it has queued first.
         RunEvent::ExitRequested {
             code: None, api, ..
         } => {
@@ -134,9 +135,11 @@ pub fn run() {
                 .get_webview_window("main")
                 .and_then(|w| w.is_visible().ok())
                 .unwrap_or(false);
+            api.prevent_exit();
             if visible {
-                api.prevent_exit();
                 let _ = app.emit("quit-requested", ());
+            } else {
+                commands::quit(app);
             }
         }
         _ => {}

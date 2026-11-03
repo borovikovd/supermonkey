@@ -302,8 +302,8 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `settings.spec.ts`         | SET    | the sheet, remote images                                                                     | `standard`                               | H15, H20                    | 2       | 1       | 1      | 0     |
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0     |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0     |
-| `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows                                      | `bulk`, `standard`                       | H8a, H16, H23               | 4       | 1       | 3      | 0     |
-| **Total**                  |        |                                                                                              |                                          |                             | **183** | **106** | **68** | **9** |
+| `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0     |
+| **Total**                  |        |                                                                                              |                                          |                             | **184** | **107** | **68** | **9** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -2857,6 +2857,19 @@ _EG · §UI state (Subscriptions: "Closing a subscription drops its rows unless 
   3. Search `Batch` and scroll to the bottom.
 - **Expect:** `Batch 90` shows as read.
 
+#### UIC-05 · P1 · `Cmd+Q` quits only once the composer's close has committed
+
+_EG · §UI state (Actions: "`Cmd+Q` first closes an open composer as a second `Esc` would, and quits once that action commits")_
+
+- **Steps:**
+  1. Reply to `p3` and type a line; do not wait for the autosave.
+  2. Park the page's submits with `page.route` and pause the page clock.
+  3. Quit (`app.quit()`, not awaited). Once the close's submit is parked, run the page clock 2 s.
+  4. Let the submit through, resume the clock, finish the quit, and relaunch.
+- **Expect:**
+  - While the close is parked, the page has not called `quit_now`: the submit is its only invoke in flight.
+  - Gmail has one draft, with the typed line.
+
 ---
 
 ## 6. Done-when traceability
@@ -2905,7 +2918,7 @@ _EG · §UI state (Subscriptions: "Closing a subscription drops its rows unless 
 | Sync                        | SYN-01 to SYN-07, LAB-07, VIEW-05                                                                                                                                           |
 | Gmail errors                | ERR-01 to ERR-09, ACC-08, SND-05 to SND-08, LAB-05, DRF-04, OFF-05                                                                                                          |
 | Data                        | ACC-07, ACC-10, SEC-04                                                                                                                                                      |
-| UI state                    | TRI-10, UND-05, UIC-01 to UIC-04, DRF-08, CONV-03, CONV-09, NEW-12                                                                                                          |
+| UI state                    | TRI-10, UND-05, UIC-01 to UIC-05, DRF-08, CONV-03, CONV-09, NEW-12                                                                                                          |
 | Security                    | SEC-01 to SEC-04, ACC-01                                                                                                                                                    |
 | DEVIATIONS                  | TRI-05 (`u` on the latest message only), NEW-07 (an undo-reopened draft is never discarded), NOT-06 (click heuristic), SNZ-04 (wake detection), SYN-02 (re-list on restart) |
 

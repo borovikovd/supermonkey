@@ -5,7 +5,15 @@ import { switchAccount } from "./accounts";
 import { App } from "./App";
 import { goTo } from "./commands";
 import { closeComposerOnScreen } from "./compose/start";
-import { connect, inTauri, onEvent, pendingWork, quitNow, subscribe } from "./ipc/bridge";
+import {
+  connect,
+  inTauri,
+  onEvent,
+  pendingWork,
+  quitNow,
+  subscribe,
+  whenCommitted,
+} from "./ipc/bridge";
 import { onKeyDown } from "./keyboard/keys";
 import { trackFocus } from "./keyboard/nav";
 import { appHooks } from "./keyboard/refs";
@@ -46,7 +54,7 @@ onEvent("notification-open", ({ account, thread }) => {
 // Cmd+Q: close an open composer as a second Esc would, then quit once it commits.
 onEvent("quit-requested", () => {
   closeComposerOnScreen();
-  setTimeout(() => void quitNow(), 150);
+  void whenCommitted(5_000).then(quitNow);
 });
 
 const root = document.querySelector("#root");

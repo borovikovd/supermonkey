@@ -240,3 +240,32 @@ test("UIC-04 a row that changed while no list held it is not shown from an old c
   await app.settle();
   await expect(app.row("Batch 90")).not.toHaveAttribute("data-unread");
 });
+
+test("UIC-05 Cmd+Q quits only once the composer's close has committed", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  await app.press("j", "j", "Enter");
+  await app.reply();
+  await app.type("Written just before the quit");
+  // The submit carrying the close waits here; page timers wait for the test.
+  const parked: Route[] = [];
+  const submit = /\/invoke\/submit$/;
+  await app.page.route(submit, (route) => {
+    parked.push(route);
+  });
+  await app.page.clock.pauseAt(await app.now());
+
+  const quitting = app.quit();
+  await expect.poll(() => parked.length).toBe(1);
+  await app.page.clock.runFor(2_000);
+  const owed = await app.page.evaluate<number>("window.__ub.pending().invokes");
+  expect(owed, "only the close is in flight: the page has not asked to quit").toBe(1);
+
+  await Promise.all(parked.map((r) => r.continue()));
+  await app.page.unroute(submit);
+  await app.page.clock.resume();
+  await quitting;
+  await app.launch();
+  const drafts = (await gmail.gmail(A)).drafts;
+  expect(drafts).toHaveLength(1);
+  expect(drafts[0]?.message.raw).toContain("Written just before the quit");
+});

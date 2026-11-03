@@ -103,6 +103,29 @@ async function flush(): Promise<void> {
   }
 }
 
+/**
+ * Resolves once Rust has committed every action sent so far, or after
+ * `timeoutMs` if it does not answer (logged).
+ */
+export function whenCommitted(timeoutMs: number): Promise<void> {
+  const last = nextN - 1;
+  return new Promise((resolve) => {
+    if (useMirror.getState().ack >= last) return resolve();
+    const done = () => {
+      stop();
+      clearTimeout(timer);
+      resolve();
+    };
+    const stop = useMirror.subscribe((s) => {
+      if (s.ack >= last) done();
+    });
+    const timer = setTimeout(() => {
+      console.warn(`actions up to ${last} not committed after ${timeoutMs} ms; going on`);
+      done();
+    }, timeoutMs);
+  });
+}
+
 /** Web mode: the UI's pending work, and the last channel message it applied. */
 export const pendingWork = () => ({ ...pending, buffered: buffer.length });
 
