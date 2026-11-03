@@ -85,6 +85,16 @@ unused_must_use = "deny"
 rust_2018_idioms = { level = "warn", priority = -1 }
 unused_qualifications = "warn"
 
+[workspace.lints.rustdoc]
+# Doc warnings fail `cargo doc` (the `lint:rust` task).
+broken_intra_doc_links = "deny"
+private_intra_doc_links = "deny"
+invalid_codeblock_attributes = "deny"
+invalid_html_tags = "deny"
+invalid_rust_codeblocks = "deny"
+bare_urls = "deny"
+redundant_explicit_links = "deny"
+
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 pedantic = { level = "warn", priority = -1 }

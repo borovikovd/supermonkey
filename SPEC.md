@@ -726,7 +726,7 @@ Tauri's dev and build commands are `vp dev` and `vp build`.
 
 ## Testing
 
-Gates before a commit: `vp check`, `cargo test`, `cargo clippy`, and the end-to-end suite, all run by `scripts/gate.sh`. Before a release, the performance budgets on the perf fixture.
+Gates before a commit: `vp check`, `cargo test`, `cargo clippy`, and the end-to-end suite, all run by `vp run gate`. Before a release, the performance budgets on the perf fixture.
 
 - End to end: Playwright drives the built UI in WebKit. The UI talks to the real Rust core through the web bridge, and the core talks to the fake Gmail. A test server controls app time, waits for the core to go idle, restarts or crashes the app, and records what the native shell would do: notifications, the Dock badge, opened URLs and files, and stored tokens. `e2e/COVERAGE.md` maps each user case in this spec to a test. Tauri's WebDriver has no macOS support, so this is the end-to-end path.
 - Unit tests only for complex logic the end-to-end suite can't pin down: the sanitizer against hostile HTML, MIME parsing that never panics, the split query language and snooze phrases, the Gmail scheduler, and the OAuth state check, shared refresh, and secrets kept out of debug output.

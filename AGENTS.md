@@ -14,7 +14,7 @@ When you have to choose something the spec doesn't decide, record it in
   delete branches without asking.
 - One logical change per commit. The message has an imperative subject line, then a
   body that says why.
-- Commit only when `./scripts/gate.sh` is green. Never skip the pre-commit hook
+- Commit only when `vp run gate` is green. Never skip the pre-commit hook
   (`--no-verify`).
 
 ## Commands
@@ -28,7 +28,8 @@ vp run tauri dev           # app against real Gmail (needs google-oauth-client.j
 vp run tauri build         # release .app
 vp check --fix             # format + lint + type check (TS)
 vp exec playwright test    # end-to-end suite (builds the UI and the e2e-server first)
-./scripts/gate.sh          # every check: run before each commit
+vp run gate                # every check: run before each commit
+vp run <task>              # one step: test:rust, lint:rust, lint:ts, typecheck, bindings, e2e
 ```
 
 Rust lives in `src-tauri`, so run `cargo` commands from there:

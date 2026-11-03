@@ -25,7 +25,8 @@ vp run tauri build     # src-tauri/target/release/bundle/macos/Ubermensch.app
 ## Checks
 
 ```sh
-./scripts/gate.sh       # vp check, cargo fmt, cargo test, cargo clippy, bindings, E2E suite
+vp run gate             # every check: Rust tests, lints, type checks, bindings, then the E2E suite
+vp run lint:rust        # one step (tasks are in vite.config.ts): test:rust, lint:rust, lint:ts, typecheck, bindings, e2e
 vp exec playwright test # E2E suite alone (Playwright + WebKit; `vp exec playwright install webkit` once)
 vp config --hooks       # once per clone: pre-commit runs `vp staged` (format and lint staged files)
 ```

@@ -121,6 +121,48 @@ export default defineConfig({
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
   },
 
+  // `vp run <task>`. `gate` runs every check; run it before each commit.
+  run: {
+    // Off: the task cache's file tracking misses files the native tsc (TS 7)
+    // reads, so a new file with a type error replayed a cached pass. Cargo
+    // and Playwright keep their own caches anyway.
+    cache: false,
+    tasks: {
+      // Also regenerates src/bindings (ts-rs), which the TypeScript checks read.
+      "test:rust": { command: "cargo test --workspace -q", cwd: "src-tauri" },
+      "lint:rust": {
+        command: [
+          "cargo fmt --all --check",
+          "cargo clippy --workspace --all-targets -q -- -D warnings",
+          "cargo clippy --workspace --all-targets --features fake -q -- -D warnings",
+          "cargo doc --workspace --no-deps -q",
+        ],
+        cwd: "src-tauri",
+      },
+      "lint:ts": { command: "vp check", dependsOn: ["test:rust"] },
+      typecheck: {
+        command: [
+          "tsc -p tsconfig.app.json --noEmit",
+          "tsc -p tsconfig.node.json --noEmit",
+          "tsc -p e2e --noEmit",
+        ],
+        dependsOn: ["test:rust"],
+      },
+      // Regenerated bindings must be staged or committed.
+      bindings: {
+        command: "git diff --exit-code --stat -- src/bindings",
+        dependsOn: ["test:rust"],
+      },
+      // Builds the UI and the e2e-server first (playwright.config.ts).
+      e2e: "playwright test",
+      // Last and alone: the end-to-end suite is timing-sensitive under load.
+      gate: {
+        command: "vp run e2e",
+        dependsOn: ["lint:rust", "lint:ts", "typecheck", "bindings"],
+      },
+    },
+  },
+
   // Pre-commit: format and lint the staged files.
   staged: {
     "*.{ts,tsx,js,json,css,md,html}": "vp check --fix --no-error-on-unmatched-pattern",
