@@ -659,3 +659,48 @@ test("ACC-11 a task left from before Sign in again does not sign the account out
   await app.settle();
   await expect(app.row("Still syncing")).toHaveCount(1);
 });
+
+test("ACC-12 re-adding an account while its removal is still revoking keeps the new sign-in", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const old = (await gmail.keychain()).find((k) => k.account === B)?.token;
+  // The removal's revoke is slow to answer.
+  const revoke = await gmail.hold("oauth.revoke");
+  await app.press("Meta+,");
+  const settings = app.sheet("Settings");
+  await settingsBlock(app, B).getByRole("button", { name: "Remove account" }).click();
+  await settings.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(app.account(B)).toHaveCount(0);
+  await app.press("Escape");
+  await expect
+    .poll(async () => (await gmail.requests("oauth.revoke")).some((r) => r.held))
+    .toBe(true);
+
+  // B is added again before the revoke answers.
+  await gmail.nextSignIn({ email: B });
+  await command(app, "Add account");
+  // The sign-in gets as far as it can while the revoke is held.
+  await app.settle();
+  await revoke.release();
+  await expect(app.account(B)).toBeVisible();
+  await app.settle();
+
+  expect(await gmail.revocations()).toEqual([{ account: B, token: old }]);
+  const fresh = (await gmail.keychain()).find((k) => k.account === B)?.token;
+  expect(fresh, "the new token stays in the Keychain").toBeDefined();
+  expect(fresh).not.toBe(old);
+  // The new grant works: B refreshes its token and syncs.
+  await gmail.expireAccessTokens(B);
+  await gmail.deliver({
+    account: B,
+    from: "Bea Blue <bea@blue.test>",
+    subject: "After",
+    text: "Hi.",
+  });
+  await app.settle();
+  await expect(app.signInMarker(B)).toHaveCount(0);
+  await app.press("Control+2");
+  await expect(app.row("After")).toHaveCount(1);
+});

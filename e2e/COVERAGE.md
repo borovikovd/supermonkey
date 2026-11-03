@@ -279,7 +279,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 
 | File                       | Prefix | Scope                                                                                        | Main seeds                               | Harness beyond H1–H3        | Cases   | P1      | P2     | P3    |
 | -------------------------- | ------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | ------- | ------- | ------ | ----- |
-| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 11      | 8       | 3      | 0     |
+| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 12      | 8       | 4      | 0     |
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 7       | 4       | 3      | 0     |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 5       | 3       | 2      | 0     |
 | `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 14      | 2       | 11     | 1     |
@@ -476,6 +476,16 @@ _EG · §Accounts, §Gmail errors (401)_
   3. Sign in again from Settings (the old grant stays revoked), then `clearFaults()`.
   4. `advance(60_000)`, then `deliver` another thread.
 - **Expect:** after step 4, A has no Sign in again marker and the new thread is listed: the old runtime's fetch, retrying on the dead grant, signs nothing out.
+
+#### ACC-12 · P2 · Re-adding an account while its removal is still revoking keeps the new sign-in
+
+_EG · §Accounts, §Settings (Remove account)_
+
+- **Seed:** `standard`.
+- **Steps:** `hold("oauth.revoke")`. Remove B in Settings and wait until the revoke is held. `nextSignIn({ email: B })`, run **Add account**, `settle()`, then release the revoke.
+- **Expect:**
+  - B is back. `revocations()` lists only B's old token, and `keychain()` holds a new B token.
+  - After `expireAccessTokens(B)`, new mail for B still syncs and B shows no Sign in again marker: the new grant was not revoked.
 
 ### 5.2 `inbox-navigation.spec.ts` (NAV)
 

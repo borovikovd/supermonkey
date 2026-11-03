@@ -27,11 +27,24 @@ pub fn create(ctx: &mut Ctx<'_>, email: &str) -> anyhow::Result<AccountId> {
         [],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
-    ctx.tx.execute(
-        "INSERT INTO accounts (email, display_name, position, hue) VALUES (?1, ?1, ?2, ?3)",
-        params![email, position, hue],
+    // Ids are never reused, as AUTOINCREMENT would do (the table predates it
+    // and is referenced too widely to rebuild): a removed account's clean-up
+    // and leftover tasks act by id and must not reach one added after it.
+    let id: AccountId = ctx.tx.query_row(
+        "SELECT max(coalesce((SELECT value FROM meta WHERE key = 'account_seq'), 0),
+                    coalesce((SELECT max(id) FROM accounts), 0)) + 1",
+        [],
+        |r| r.get(0),
     )?;
-    let id = AccountId(ctx.tx.last_insert_rowid());
+    ctx.tx.execute(
+        "INSERT INTO meta (key, value) VALUES ('account_seq', ?1)
+         ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        [id],
+    )?;
+    ctx.tx.execute(
+        "INSERT INTO accounts (id, email, display_name, position, hue) VALUES (?1, ?2, ?2, ?3, ?4)",
+        params![id, email, position, hue],
+    )?;
     crate::splits::create_defaults(ctx, id)?;
     for (label, name) in SYSTEM_LABELS {
         ctx.tx.execute(

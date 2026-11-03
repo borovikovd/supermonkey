@@ -27,6 +27,9 @@ impl SignIn {
 /// Starting a sign-in cancels the one before it: the user left it in the
 /// browser, and its loopback listener would otherwise wait forever.
 async fn sign_in(e: &Engine) -> anyhow::Result<SignIn> {
+    // A removed account still being revoked: its revoke would also kill a
+    // grant for the same address made now.
+    drop(crate::clock::parked(e.forgetting.write()).await);
     let (cancel, cancelled) = tokio::sync::oneshot::channel();
     let previous = e.sign_in_cancel.lock().replace(cancel);
     if let Some(previous) = previous {
@@ -114,20 +117,36 @@ pub async fn sign_in_again(e: &Arc<Engine>, account: AccountId) -> anyhow::Resul
 }
 
 /// After Remove account: stop sync, revoke and delete the token, delete files.
+/// A sign-in waits until this is done (see [`Engine::forgetting`]).
 pub async fn forget(e: Arc<Engine>, account: AccountId, email: String) {
+    let _forgetting = e.forgetting.read().await;
     e.stop_account(account);
-    if let Ok(Some(token)) = e.store.load_refresh_token(&email) {
-        ub_gmail::revoke(&e.config.oauth, &e.http, &token.0)
+    let store = Arc::clone(&e.store);
+    let who = email.clone();
+    let token = tokio::task::spawn_blocking(move || store.load_refresh_token(&who))
+        .await
+        .map_err(anyhow::Error::from)
+        .and_then(|r| r.map_err(|err| anyhow::anyhow!("Keychain: {}", err.0)));
+    match token {
+        Ok(Some(token)) => ub_gmail::revoke(&e.config.oauth, &e.http, &token.0)
             .await
-            .log_err("revoke token");
+            .log_err("revoke token"),
+        Ok(None) => {}
+        Err(err) => log::warn!("read refresh token of a removed account: {err:#}"),
     }
-    e.store
-        .delete_refresh_token(&email)
-        .log_err("delete refresh token");
-    match std::fs::remove_dir_all(super::attachments::account_dir(&e, account)) {
-        Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
-            log::warn!("delete attachments of account {account}: {err}");
+    let store = Arc::clone(&e.store);
+    let dir = super::attachments::account_dir(&e, account);
+    let cleaned = tokio::task::spawn_blocking(move || {
+        store
+            .delete_refresh_token(&email)
+            .log_err("delete refresh token");
+        match std::fs::remove_dir_all(dir) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+                log::warn!("delete attachments of account {account}: {err}");
+            }
+            _ => {}
         }
-        _ => {}
-    }
+    })
+    .await;
+    cleaned.log_err("forget account");
 }

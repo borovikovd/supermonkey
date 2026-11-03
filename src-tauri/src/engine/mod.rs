@@ -139,6 +139,9 @@ pub struct Engine {
     /// Cancels the sign-in waiting in the browser, if any. A new sign-in
     /// replaces one the user abandoned.
     pub sign_in_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    /// Held (shared) by each removed account's clean-up. A sign-in waits for
+    /// them first: a revoke landing after it would kill the new grant too.
+    pub forgetting: Arc<tokio::sync::RwLock<()>>,
     /// Every task the engine started, so [`Engine::shutdown`] can stop them.
     tasks: Mutex<Vec<AbortHandle>>,
     shut_down: AtomicBool,
@@ -200,6 +203,7 @@ impl Engine {
             unfocused_since: AtomicI64::new(0),
             snooze_kick: Kick::default(),
             sign_in_cancel: Mutex::new(None),
+            forgetting: Arc::default(),
             tasks: Mutex::new(Vec::new()),
             shut_down: AtomicBool::new(false),
         })
