@@ -255,6 +255,9 @@ export async function connect(): Promise<LaunchInfo> {
     await new Promise<void>((resolve) => {
       source.addEventListener("open", () => resolve(), { once: true });
     });
+    // The stream reconnected: messages sent meanwhile are lost, and the core
+    // may have restarted. Start over, as a reload resyncs everything.
+    source.addEventListener("open", () => location.reload());
     launch = await invoke<LaunchInfo>("connect");
   }
   nextN = launch.lastAction + 1;

@@ -153,6 +153,9 @@ fn down() -> Response {
     )
 }
 
+/// Streams channel messages and app events to one page: a new stream takes
+/// the writer's channel from the page before. A page whose stream reconnects
+/// reloads, since it missed what was sent meanwhile.
 async fn events(State(bridge): State<Bridge>) -> Response {
     let Some(engine) = bridge.engine() else {
         return down();
