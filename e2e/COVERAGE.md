@@ -1741,6 +1741,13 @@ _EG · §Keyboard ("a stray `r` leaves nothing behind")_
   - After step 2, the conversation has no draft stub and Gmail has no draft.
   - After step 3, `p5` is open with no composer: the reply was for a visit that ended.
 
+#### REP-14 · P2 · Compose keys work while focus is inside a message
+
+_EG · §Keyboard (compose blurred)_
+
+- **Steps:** open `p3`, press `r`, type "Kept". Click inside the message body, then press `Esc` `Esc`, `settle()`.
+- **Expect:** the composer closes, and the conversation shows the kept draft's stub.
+
 ### 5.12 `compose-new.spec.ts` (NEW)
 
 #### NEW-01 · P1 · `c` replaces the screen, and closing it returns to where it came from

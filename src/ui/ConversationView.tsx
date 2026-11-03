@@ -6,7 +6,6 @@ import { Composer } from "../compose/Composer";
 import { startReply } from "../compose/start";
 import { openAttachment } from "../ipc/bridge";
 import type { AttachmentInfo, DraftSummary, MessageSummary, OutboxRow } from "../ipc/types";
-import { onKeyDown } from "../keyboard/keys";
 import { appHooks, conversationRef } from "../keyboard/refs";
 import { useChrome } from "../store/chrome";
 import { useAppState, useConversation, useSubscription } from "../store/hooks";
@@ -329,7 +328,6 @@ function Message({
           onSelect={select}
           remoteImages={remoteImages}
           quoteOpen={quoteOpen}
-          onKey={onKeyDown}
         />
       </div>
       {files.length > 0 && <Attachments files={files} />}

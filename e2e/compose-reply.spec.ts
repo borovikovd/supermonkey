@@ -915,3 +915,16 @@ test("REP-13 reply keys pressed before the conversation loads open one composer"
   await expect(app.conversationTitle).toHaveText("Person 5");
   await expect(app.editor).toHaveCount(0);
 });
+
+test("REP-14 compose keys work while focus is inside a message", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  await open(app, "Person 3");
+  await app.reply("r");
+  await app.type("Kept");
+  await app.messageBody(0).locator("body").click();
+  await expect(app.editor).not.toBeFocused();
+  await app.press("Escape", "Escape");
+  await expect(app.editor).toHaveCount(0);
+  await app.settle();
+  await expect(stubs(app)).toHaveCount(1);
+});
