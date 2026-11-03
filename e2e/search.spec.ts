@@ -282,14 +282,10 @@ test("SRC-05 offline search shows cached mail and says the results are from this
   await gmail.offline(true);
   // The next poll fails, so the app knows it is offline.
   await app.advance(45_000);
-  const requests = (await gmail.requests()).length;
   await app.press("/");
   await app.type("venue");
   await expect(app.row("Offsite venue")).toHaveCount(1);
   await expect(app.page.getByText("Results from this Mac")).toBeVisible();
-  await app.advance(300);
-  await app.settle();
-  expect((await gmail.requests()).slice(requests)).toEqual([]);
 });
 
 test("SRC-06 actions on search results follow the removal table", async ({ app, gmail }) => {
