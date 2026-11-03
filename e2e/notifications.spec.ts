@@ -3,7 +3,7 @@ import type { App } from "./app.ts";
 import type { Control, Delivery } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
-import { A, B, C } from "./seeds.ts";
+import { A, B, C, dates } from "./seeds.ts";
 
 /** The Dock badge; 0 when cleared. */
 async function badge(gmail: Control): Promise<number> {
@@ -199,7 +199,8 @@ test.describe("notifications", () => {
     await app.settle();
     expect(await notes(gmail)).toEqual([]);
     expect(await avatarCount(app, A)).toBe(a0 + 1);
-    expect(await badge(gmail)).toBe(await avatarCount(app, B));
+    // B's two unread threads only.
+    expect(await badge(gmail)).toBe(2);
 
     // Settings shows A muted.
     await app.press("Meta+,");
@@ -211,7 +212,8 @@ test.describe("notifications", () => {
     // Unmute: A counts again and notifies again.
     await command(app, "Unmute notifications");
     await app.settle();
-    expect(await badge(gmail)).toBe((await avatarCount(app, A)) + (await avatarCount(app, B)));
+    // A's 9 seeded unread threads and "While muted", plus B's 2.
+    expect(await badge(gmail)).toBe(12);
     await gmail.clearRecorded();
     await gmail.deliver(fresh(A, "After unmute", { poll: true }));
     await app.settle();
@@ -224,7 +226,8 @@ test.describe("notifications", () => {
     await expect(muteSwitch(app, 0)).toHaveAttribute("aria-checked", "false");
     await app.press("Escape");
     await app.settle();
-    expect(await badge(gmail)).toBe(await avatarCount(app, A));
+    // A's 10 and "After unmute"; B left out.
+    expect(await badge(gmail)).toBe(11);
     await app.press("Meta+k");
     await expect(items.filter({ hasText: "Mute notifications" })).toHaveCount(1);
     await expect(items.filter({ hasText: "Unmute notifications" })).toHaveCount(0);
@@ -301,7 +304,10 @@ test.describe("notifications", () => {
 
     // A notification for B, clicked (focus within 30 s): B's Inbox on the thread.
     await app.focus(false);
-    const u = await gmail.deliver(fresh(B, "Urgent for Ben", { poll: true }));
+    // Older than B 1, so it is not the row highlighted by default.
+    const u = await gmail.deliver(
+      fresh(B, "Urgent for Ben", { poll: true, date: dates.minutesAgo(20) }),
+    );
     await app.settle();
     expect(await app.focus(true)).toEqual({ account: B, thread: u.threadId });
     await expect(app.highlighted).toContainText("Urgent for Ben");

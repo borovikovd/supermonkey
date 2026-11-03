@@ -63,8 +63,7 @@ async function messageId(
 }
 
 /**
- * How far the conversation's scroller is from having message `id` at its top
- * (or from its end, when the content is too short to bring it there), in px.
+ * How far the conversation's scroller is from having message `id` at its top, in px.
  */
 function scrollOffset(app: App, id: string): Promise<number> {
   return app.page.evaluate((mid) => {
@@ -74,8 +73,7 @@ function scrollOffset(app: App, id: string): Promise<number> {
     while (sc && !/(auto|scroll)/.test(getComputedStyle(sc).overflowY)) sc = sc.parentElement;
     if (!sc) return Number.POSITIVE_INFINITY;
     const top = el.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
-    const want = Math.min(sc.scrollHeight - sc.clientHeight, top);
-    return Math.abs(sc.scrollTop - want);
+    return Math.abs(sc.scrollTop - top);
   }, id);
 }
 
@@ -120,11 +118,18 @@ const latestRuleNames = (t: string) =>
 
 const PLAN_DEFAULT = ["c1", "fold7", "c9", "E10", "E11", "E12*"];
 
+/**
+ * Short enough that each opened conversation can scroll its target message to
+ * the top, even before its bodies load, so where it lands is observable.
+ */
+const SHORT = { width: 1280, height: 200 };
+
 test.describe("conversation", () => {
   test("CONV-01 a long thread opens with read messages collapsed and folded, scrolled to the first unread", async ({
     app,
     gmail,
   }) => {
+    await app.page.setViewportSize(SHORT);
     const s = await seeds.standard(gmail, app);
     const avatar = await avatarCount(app, A);
     await app.row("Q4 plan").click();
@@ -153,6 +158,7 @@ test.describe("conversation", () => {
   });
 
   test("CONV-02 fold boundary: four collapsed messages show, five fold", async ({ app, gmail }) => {
+    await app.page.setViewportSize(SHORT);
     await seeds.standard(gmail, app);
     await app.row("Fold check").click();
     await expect
@@ -172,6 +178,7 @@ test.describe("conversation", () => {
   });
 
   test("CONV-03 expansion is fixed when the conversation opens", async ({ app, gmail }) => {
+    await app.page.setViewportSize(SHORT);
     await seeds.standard(gmail, app);
     await app.row("Q4 plan").click();
     await expect.poll(() => layout(app)).toEqual(PLAN_DEFAULT);
@@ -221,6 +228,7 @@ test.describe("conversation", () => {
   });
 
   test("CONV-05 n, p, and o select and expand messages", async ({ app, gmail }) => {
+    await app.page.setViewportSize(SHORT);
     await seeds.standard(gmail, app);
     await app.row("Q4 plan").click();
     await expect.poll(() => layout(app)).toEqual(PLAN_DEFAULT);
@@ -418,6 +426,8 @@ test.describe("conversation", () => {
     await app.settle();
     await app.press("Escape", "Escape");
     await expect(app.editor).toHaveCount(0);
+    // The poll brings the Gmail draft message into the thread's messages.
+    await gmail.poll();
     await app.settle();
     await expect(app.messages).toHaveCount(1);
     const stub = app.conversation.getByRole("button", { name: /Draft/ });
