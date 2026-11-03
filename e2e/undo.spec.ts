@@ -1,5 +1,7 @@
 // Undo (COVERAGE 5.6, UND): the `z` stack, partial revert, entries that are
 // not made, per-account history, persistence, and the 50-entry cap.
+import type { Route } from "@playwright/test";
+
 import type { App } from "./app.ts";
 import type { Control, GmailState } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
@@ -58,6 +60,22 @@ async function highlight(app: App, text: string): Promise<void> {
 
 const repeat = (key: string, n: number) => Array.from({ length: n }, () => key);
 
+/**
+ * Parks the page's action submits, so Rust has not seen the action and only
+ * the mirror's same-frame effect shows (SPEC UI state).
+ */
+async function parkSubmits(app: App): Promise<() => Promise<void>> {
+  const parked: Route[] = [];
+  let open = false;
+  const submit = /\/invoke\/submit$/;
+  await app.page.route(submit, (route) => (open ? route.continue() : parked.push(route)));
+  return async () => {
+    open = true;
+    await Promise.all(parked.map((r) => r.continue()));
+    await app.page.unroute(submit);
+  };
+}
+
 // ------------------------------------------------------------------ cases
 
 test("UND-01 z walks back through the stack", async ({ app, gmail }) => {
@@ -95,9 +113,13 @@ test("UND-01 z walks back through the stack", async ({ app, gmail }) => {
   expect(await has(gmail, s, "p2", "TRASH")).toBe(false);
   expect(await has(gmail, s, "p2", "INBOX")).toBe(true);
 
+  // Before Rust sees this z, the mirror puts p1 back in its old place.
+  const release = await parkSubmits(app);
   await app.press("z");
   await expect.poll(() => app.subjects()).toEqual(order);
+  await release();
   await app.settle();
+  expect(await app.subjects()).toEqual(order);
   const requests = (await gmail.requests("messages.batchModify")).length;
 
   // Nothing left to undo.

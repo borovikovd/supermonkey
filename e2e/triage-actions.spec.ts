@@ -158,6 +158,23 @@ test("TRI-01 e on the list removes the row before Gmail answers, and moves the h
   await expect(app.row("Your receipt")).toHaveCount(1);
 });
 
+test("TRI-01 e on a long thread archives every one of its messages", async ({ app, gmail }) => {
+  const s = await seeds.standard(gmail, app);
+  const fold = s.thread("fold");
+  const ids = fold.messages.map((m) => m.id);
+  expect(ids).toHaveLength(11);
+  await highlight(app, "Fold check");
+  await app.press("e");
+  await expect(app.row("Fold check")).toHaveCount(0);
+  await app.settle();
+
+  const [req] = await gmail.requests("messages.batchModify");
+  expect(req?.body).toMatchObject({ ids, removeLabelIds: ["INBOX"] });
+  const msgs = threadMessages(await gmail.gmail(A), fold.threadId);
+  expect(msgs).toHaveLength(11);
+  expect(msgs.filter((m) => m.labels.includes("INBOX"))).toEqual([]);
+});
+
 test("TRI-02 e in an open conversation opens the next one, or the previous one, or returns to the empty list", async ({
   app,
   gmail,
@@ -348,6 +365,17 @@ test("TRI-06 x and Shift+J / Shift+K select; actions apply to the whole selectio
   await expect.poll(() => app.subjects()).toEqual(before);
   await app.settle();
   expect(await hasEach(gmail, s, ["p2", "p3", "p4"], "INBOX")).toEqual([true, true, true]);
+
+  // Shift+K extends upward.
+  await highlight(app, "Person 4");
+  await app.press("x", "Shift+K", "Shift+K");
+  await expect(app.selected).toHaveCount(3);
+  await each([2, 3, 4], (n) =>
+    expect(app.row(`Person ${n}`)).toHaveAttribute("data-selected", "true"),
+  );
+  await expect(app.highlighted).toContainText("Person 2");
+  await app.press("Escape");
+  await expect(app.selected).toHaveCount(0);
 
   // Plain j replaces the selection with the row it lands on.
   await highlight(app, "Person 2");
