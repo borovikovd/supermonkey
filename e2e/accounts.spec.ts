@@ -621,3 +621,41 @@ test("ACC-10 accounts with the same Gmail thread id stay separate", async ({ app
   await app.settle();
   expect(await labelsOf(gmail, A, s.latest(twinOf).id)).toContain("INBOX");
 });
+
+test("ACC-11 a task left from before Sign in again does not sign the account out again", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  // A body fetch fails and backs off.
+  await gmail.fault(
+    { api: "threads.get", query: { format: "full" } },
+    { kind: "status", status: 500 },
+  );
+  const from = seeds.PERSONS[0] ?? "";
+  await gmail.deliver({ account: A, from, subject: "Backing off", text: "Hi." });
+  await app.settle();
+  // Meanwhile the grant is revoked: the next poll signs A out.
+  await gmail.invalidGrant(A, true);
+  await gmail.expireAccessTokens(A);
+  await gmail.poll();
+  await app.settle();
+  await expect(app.signInMarker(A)).toBeVisible();
+
+  // Signing in again gives a fresh grant; the old one stays dead.
+  await app.press("Meta+,");
+  await gmail.nextSignIn({ email: A });
+  await settingsBlock(app, A).getByRole("button", { name: "Sign in again" }).click();
+  await app.settle();
+  await expect(app.signInMarker(A)).toHaveCount(0);
+  await app.press("Escape");
+  await gmail.clearFaults();
+
+  // The old fetch's back-off ends: it must not retry on the dead grant.
+  await app.advance(60_000);
+  await app.settle();
+  await expect(app.signInMarker(A)).toHaveCount(0);
+  await gmail.deliver({ account: A, from, subject: "Still syncing", text: "Yes." });
+  await app.settle();
+  await expect(app.row("Still syncing")).toHaveCount(1);
+});

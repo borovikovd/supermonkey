@@ -273,16 +273,23 @@ impl Engine {
     pub fn note_ok(&self, rt: &AccountRt) {
         rt.retrying_since.store(0, Ordering::Relaxed);
         self.set_online(true);
-        self.set_status(rt.id, "idle");
+        // A stopped runtime's task may finish after its account was signed in
+        // again; the status is the new runtime's to set.
+        if !rt.is_stopped() {
+            self.set_status(rt.id, "idle");
+        }
     }
 
     pub fn note_err(self: &Arc<Self>, rt: &Arc<AccountRt>, err: &GmailError) {
+        if rt.is_stopped() {
+            return;
+        }
         match err.outcome {
             Outcome::Offline => {
                 self.set_online(false);
                 self.set_status(rt.id, "offline");
             }
-            Outcome::InvalidGrant => self.needs_signin(rt.id),
+            Outcome::InvalidGrant => self.needs_signin(rt),
             Outcome::RateLimited { .. } | Outcome::ServerError { .. } | Outcome::NoResponse => {
                 let now = now_ms();
                 if rt
@@ -332,12 +339,23 @@ impl Engine {
         });
     }
 
-    /// `invalid_grant`: the account shows Sign in again; its queue and outbox wait.
-    pub fn needs_signin(&self, account: AccountId) {
-        let removed = self.accounts.lock().remove(&account);
-        if let Some(rt) = removed {
-            rt.stop();
+    /// `invalid_grant`: the account shows Sign in again; its queue and outbox
+    /// wait. Only for the account's live runtime: a task of one already
+    /// stopped or replaced (signed in again, or removed and re-added with the
+    /// same id) holds a grant that is no longer the account's.
+    pub fn needs_signin(&self, rt: &Arc<AccountRt>) {
+        let account = rt.id;
+        {
+            let mut accounts = self.accounts.lock();
+            if !accounts
+                .get(&account)
+                .is_some_and(|live| Arc::ptr_eq(live, rt))
+            {
+                return;
+            }
+            accounts.remove(&account);
         }
+        rt.stop();
         self.writer.sync(move |ctx| {
             ctx.tx.execute(
                 "UPDATE accounts SET needs_signin = 1 WHERE id = ?1",

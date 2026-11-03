@@ -279,7 +279,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 
 | File                       | Prefix | Scope                                                                                        | Main seeds                               | Harness beyond H1–H3        | Cases   | P1      | P2     | P3    |
 | -------------------------- | ------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | ------- | ------- | ------ | ----- |
-| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 10      | 7       | 3      | 0     |
+| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 11      | 8       | 3      | 0     |
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 7       | 4       | 3      | 0     |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 5       | 3       | 2      | 0     |
 | `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 14      | 2       | 11     | 1     |
@@ -464,6 +464,18 @@ _EG · §Data_
   - B shows "B collide" content.
   - After `e`, `gmail(B)` `collide` is archived.
   - A's `p1` is still in A's Inbox with A's content, and `gmail(A)` `p1` is unchanged.
+
+#### ACC-11 · P1 · A task left from before Sign in again does not sign the account out again
+
+_EG · §Accounts, §Gmail errors (401)_
+
+- **Seed:** `standard`.
+- **Steps:**
+  1. Fault every `threads.get format=full` with a 500, then `deliver` a new thread, so its body fetch backs off.
+  2. `invalidGrant(A, true)`, `expireAccessTokens(A)`, `poll()`: A shows Sign in again.
+  3. Sign in again from Settings (the old grant stays revoked), then `clearFaults()`.
+  4. `advance(60_000)`, then `deliver` another thread.
+- **Expect:** after step 4, A has no Sign in again marker and the new thread is listed: the old runtime's fetch, retrying on the dead grant, signs nothing out.
 
 ### 5.2 `inbox-navigation.spec.ts` (NAV)
 

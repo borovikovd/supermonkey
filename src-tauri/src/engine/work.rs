@@ -147,6 +147,11 @@ pub async fn worker(e: Arc<Engine>, rt: Arc<AccountRt>) {
                             crate::clock::sleep(d).await;
                         }
                     }
+                    // Stopped while waiting: the retry would use a grant that
+                    // may no longer be the account's.
+                    if rt.is_stopped() {
+                        return;
+                    }
                 }
             }
         }
