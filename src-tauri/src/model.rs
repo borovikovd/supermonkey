@@ -7,16 +7,11 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-pub type AccountId = i64;
-pub type ThreadId = i64;
-pub type MessageId = i64;
-pub type SplitId = i64;
-pub type OutboxId = i64;
-pub type UndoEntryId = i64;
-pub type NoticeId = i64;
-pub type AttachmentId = i64;
-pub type DraftId = String;
-pub type SubId = String;
+pub use crate::ids::{
+    AccountId, AttachmentId, DraftId, MessageId, NoticeId, OutboxId, SplitId, SubId, ThreadId,
+    UndoEntryId,
+};
+
 /// Milliseconds since the Unix epoch.
 pub type Millis = i64;
 
@@ -45,21 +40,17 @@ pub enum SubKey {
     App,
     /// One per account, always open.
     Account {
-        #[ts(type = "number")]
         account: AccountId,
     },
     List {
-        #[ts(type = "number")]
         account: AccountId,
         view: View,
     },
     Search {
-        #[ts(type = "number")]
         account: AccountId,
         query: String,
     },
     Conversation {
-        #[ts(type = "number")]
         thread: ThreadId,
         /// Opened from Trash or Spam: every non-draft message is listed.
         #[serde(rename = "trashMode")]
@@ -97,7 +88,6 @@ pub struct SendAs {
 #[ts(export)]
 pub struct ListRow {
     pub key: String,
-    #[ts(type = "number | null")]
     pub thread: Option<ThreadId>,
     pub draft: Option<DraftId>,
     pub sender: String,
@@ -114,7 +104,6 @@ pub struct ListRow {
     pub labels: Vec<String>,
     #[ts(type = "number | null")]
     pub snooze_until: Option<Millis>,
-    #[ts(type = "number | null")]
     pub split: Option<SplitId>,
     #[ts(type = "number")]
     pub rev: i64,
@@ -125,7 +114,6 @@ pub struct ListRow {
 #[ts(export)]
 pub struct ListEntry {
     pub key: String,
-    #[ts(type = "number | null")]
     pub split: Option<SplitId>,
 }
 
@@ -135,7 +123,6 @@ pub struct ListEntry {
 #[ts(export)]
 pub struct ListMove {
     pub key: String,
-    #[ts(type = "number | null")]
     pub split: Option<SplitId>,
     pub after: Option<String>,
 }
@@ -144,7 +131,6 @@ pub struct ListMove {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct AttachmentInfo {
-    #[ts(type = "number")]
     pub id: AttachmentId,
     pub filename: String,
     pub mime_type: String,
@@ -162,7 +148,6 @@ pub struct AttachmentInfo {
     reason = "Independent flags the UI reads per message."
 )]
 pub struct MessageSummary {
-    #[ts(type = "number")]
     pub id: MessageId,
     pub from: Addr,
     pub to: Vec<Addr>,
@@ -190,7 +175,6 @@ pub struct MessageSummary {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct MessageBody {
-    #[ts(type = "number")]
     pub id: MessageId,
     pub html: String,
     pub quote_html: Option<String>,
@@ -235,7 +219,6 @@ pub struct DraftAttachment {
     /// Local file once available.
     pub path: Option<String>,
     /// Source attachment row when carried from a forwarded message or a Gmail draft.
-    #[ts(type = "number | null")]
     pub source: Option<AttachmentId>,
 }
 
@@ -246,7 +229,6 @@ pub struct DraftAttachment {
 pub struct DraftSummary {
     pub id: DraftId,
     pub kind: DraftKind,
-    #[ts(type = "number | null")]
     pub target: Option<MessageId>,
     pub started_on_latest: bool,
     pub to: Vec<Addr>,
@@ -278,12 +260,9 @@ impl OutboxState {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct OutboxRow {
-    #[ts(type = "number")]
     pub id: OutboxId,
-    #[ts(type = "number")]
     pub account: AccountId,
     pub draft: DraftId,
-    #[ts(type = "number | null")]
     pub thread: Option<ThreadId>,
     #[ts(type = "number")]
     pub send_after: Millis,
@@ -297,7 +276,6 @@ pub struct OutboxRow {
     pub snippet: String,
     pub subject: String,
     /// The undo entry for this send, if it is still in the history.
-    #[ts(type = "number | null")]
     pub undo_entry: Option<UndoEntryId>,
 }
 
@@ -305,9 +283,7 @@ pub struct OutboxRow {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct ConversationData {
-    #[ts(type = "number")]
     pub thread: ThreadId,
-    #[ts(type = "number")]
     pub account: AccountId,
     pub subject: String,
     pub labels: Vec<String>,
@@ -328,13 +304,10 @@ pub struct ConversationData {
 #[ts(export)]
 pub struct DraftState {
     pub id: DraftId,
-    #[ts(type = "number")]
     pub account: AccountId,
     pub kind: DraftKind,
     pub reply_all: bool,
-    #[ts(type = "number | null")]
     pub thread: Option<ThreadId>,
-    #[ts(type = "number | null")]
     pub target: Option<MessageId>,
     pub from: Option<Addr>,
     pub to: Vec<Addr>,
@@ -383,7 +356,6 @@ impl SplitKind {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct SplitInfo {
-    #[ts(type = "number")]
     pub id: SplitId,
     pub name: String,
     pub kind: SplitKind,
@@ -399,7 +371,6 @@ pub struct SplitInfo {
 pub struct PinInfo {
     pub kind: PinKind,
     pub value: String,
-    #[ts(type = "number")]
     pub split: SplitId,
 }
 
@@ -445,7 +416,6 @@ pub enum SyncStatus {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct AccountInfo {
-    #[ts(type = "number")]
     pub id: AccountId,
     pub email: String,
     pub name: String,
@@ -462,13 +432,11 @@ pub struct AccountInfo {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct UndoEntryInfo {
-    #[ts(type = "number")]
     pub id: UndoEntryId,
     pub kind: UndoKind,
     pub label: String,
     #[ts(type = "number[]")]
     pub threads: Vec<ThreadId>,
-    #[ts(type = "number | null")]
     pub outbox: Option<OutboxId>,
 }
 
@@ -522,12 +490,10 @@ impl NoticeKind {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct Notice {
-    #[ts(type = "number")]
     pub id: NoticeId,
     pub kind: NoticeKind,
     pub message: String,
     pub draft: Option<DraftId>,
-    #[ts(type = "number | null")]
     pub thread: Option<ThreadId>,
 }
 
@@ -668,7 +634,6 @@ impl ModifyKind {
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct ModifyAction {
-    #[ts(type = "number")]
     pub account: AccountId,
     pub kind: ModifyKind,
     #[ts(type = "number[]")]
@@ -701,13 +666,10 @@ pub enum DraftSave {
     /// A fresh composer's first save. Rust fills From, To, Cc, Subject, and the quote.
     #[serde(rename_all = "camelCase")]
     Create {
-        #[ts(type = "number")]
         account: AccountId,
         kind: DraftKind,
         reply_all: bool,
-        #[ts(type = "number | null")]
         thread: Option<ThreadId>,
-        #[ts(type = "number | null")]
         target: Option<MessageId>,
         /// The composer was aimed at the thread's latest message.
         started_on_latest: bool,
@@ -732,14 +694,11 @@ pub enum Action {
     },
     Modify(ModifyAction),
     Undo {
-        #[ts(type = "number")]
         account: AccountId,
-        #[ts(type = "number")]
         entry: UndoEntryId,
     },
     /// Create a label (with a UI-made local id) and optionally apply it in the same action.
     CreateLabel {
-        #[ts(type = "number")]
         account: AccountId,
         id: String,
         name: String,
@@ -760,29 +719,23 @@ pub enum Action {
     },
     /// The user closed a send toast.
     CloseToast {
-        #[ts(type = "number")]
         outbox: OutboxId,
     },
     AckNotice {
-        #[ts(type = "number")]
         notice: NoticeId,
     },
     SetSetting {
-        #[ts(type = "number | null")]
         account: Option<AccountId>,
         key: String,
         value: String,
     },
     Pin {
-        #[ts(type = "number")]
         account: AccountId,
         kind: PinKind,
         value: String,
-        #[ts(type = "number")]
         split: SplitId,
     },
     SaveSplits {
-        #[ts(type = "number")]
         account: AccountId,
         splits: Vec<SplitInfo>,
         /// Ids of custom splits to delete.
@@ -790,7 +743,6 @@ pub enum Action {
         deleted: Vec<SplitId>,
     },
     RemoveAccount {
-        #[ts(type = "number")]
         account: AccountId,
     },
     /// Fetch older search pages / view pages from Gmail.

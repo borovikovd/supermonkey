@@ -9,6 +9,7 @@ pub mod db;
 pub mod drafts;
 pub mod engine;
 pub mod fixture;
+mod ids;
 pub mod labels;
 pub mod mail;
 pub mod model;

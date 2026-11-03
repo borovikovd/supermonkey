@@ -7,10 +7,14 @@
 
 use std::time::{Duration, Instant};
 
+use ubermensch_lib::model::AccountId;
+
 /// SPEC Performance: local search results for each keystroke.
 const SEARCH_BUDGET: Duration = Duration::from_millis(100);
 /// SPEC Performance: autocomplete suggestions for each keystroke.
 const AUTOCOMPLETE_BUDGET: Duration = Duration::from_millis(50);
+/// The perf fixture's first account.
+const ACCOUNT: AccountId = AccountId(1);
 
 fn perf_db() -> rusqlite::Connection {
     let path = std::env::var("UBERMENSCH_PERF_DB")
@@ -37,7 +41,7 @@ fn local_search_per_keystroke() {
         "subject:lunch",
     ] {
         let t = Instant::now();
-        let ids = ubermensch_lib::subs::search::ids(&conn, 1, q, &[]).unwrap();
+        let ids = ubermensch_lib::subs::search::ids(&conn, ACCOUNT, q, &[]).unwrap();
         let took = t.elapsed();
         println!(
             "{q:>18}: {:>4} hits in {:>6.1} ms",
@@ -48,7 +52,7 @@ fn local_search_per_keystroke() {
     }
     // The fixture's names, subjects and labels: an empty result would be fast for the wrong reason.
     for q in ["from:ada", "q3 planning", "label:Receipts", "subject:lunch"] {
-        let ids = ubermensch_lib::subs::search::ids(&conn, 1, q, &[]).unwrap();
+        let ids = ubermensch_lib::subs::search::ids(&conn, ACCOUNT, q, &[]).unwrap();
         assert!(!ids.is_empty(), "{q:?} found nothing on the perf fixture");
     }
 }
@@ -59,7 +63,7 @@ fn autocomplete_per_keystroke() {
     let conn = perf_db();
     for q in ["a", "ad", "ada", "ada l", "gr", "hamilton", "x"] {
         let t = Instant::now();
-        let s = ubermensch_lib::engine::contacts::suggest(&conn, 1, q, 6).unwrap();
+        let s = ubermensch_lib::engine::contacts::suggest(&conn, ACCOUNT, q, 6).unwrap();
         let took = t.elapsed();
         println!(
             "{q:>10}: {} suggestions in {:>5.1} ms",
@@ -68,6 +72,6 @@ fn autocomplete_per_keystroke() {
         );
         assert!(took <= AUTOCOMPLETE_BUDGET, "{q:?} took {took:?}");
     }
-    let ada = ubermensch_lib::engine::contacts::suggest(&conn, 1, "ada", 6).unwrap();
+    let ada = ubermensch_lib::engine::contacts::suggest(&conn, ACCOUNT, "ada", 6).unwrap();
     assert!(!ada.is_empty(), "no contact named Ada on the perf fixture");
 }

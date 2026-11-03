@@ -2,6 +2,7 @@
 //! the action that made them; the last 50 per account are kept.
 
 use rusqlite::{OptionalExtension, params};
+use serde::Deserialize;
 
 use crate::model::{AccountId, OutboxId, UndoEntryId};
 use crate::writer::Ctx;
@@ -55,7 +56,9 @@ pub fn undo(
     match kind.as_str() {
         "mail" => crate::mail::undo(ctx, n, account, &payload),
         "pin" => crate::splits::undo_pin(ctx, account, &payload),
-        "send" => crate::outbox::undo_send(ctx, account, payload["outbox"].as_i64().unwrap_or(0)),
+        "send" => {
+            crate::outbox::undo_send(ctx, account, OutboxId::deserialize(&payload["outbox"])?)
+        }
         other => anyhow::bail!("unknown undo kind {other}"),
     }
 }

@@ -158,12 +158,12 @@ impl Ctx<'_> {
         Ok(())
     }
 
-    pub fn touch_draft(&mut self, account: AccountId, draft: &str) -> rusqlite::Result<()> {
+    pub fn touch_draft(&mut self, account: AccountId, draft: &DraftId) -> rusqlite::Result<()> {
         self.tx.execute(
             "UPDATE drafts SET rev = ?1 WHERE id = ?2",
             params![self.rev, draft],
         )?;
-        self.touched.drafts.insert(draft.to_string());
+        self.touched.drafts.insert(draft.clone());
         self.touched.draft_lists.insert(account);
         self.touched.summaries.insert(account);
         Ok(())

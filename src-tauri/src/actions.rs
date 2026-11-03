@@ -2,7 +2,7 @@
 
 use rusqlite::{Connection, OptionalExtension, params};
 
-use crate::model::{AccountId, Action, SubId, SubKey, View};
+use crate::model::{AccountId, Action, DraftId, SubId, SubKey, View};
 use crate::writer::{Ctx, Effect, GmailListQuery};
 
 #[expect(clippy::too_many_lines, reason = "One short arm per action variant.")]
@@ -77,14 +77,14 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
             key,
             value,
         } => {
-            let acc = account.unwrap_or(0);
+            let acc = account.unwrap_or(AccountId::NONE);
             ctx.tx.execute(
                 "INSERT INTO settings (account_id, key, value) VALUES (?1, ?2, ?3)
                  ON CONFLICT (account_id, key) DO UPDATE SET value = excluded.value",
                 params![acc, key, value],
             )?;
             ctx.touch_app();
-            if acc != 0 {
+            if acc != AccountId::NONE {
                 ctx.touch_summary(acc);
             }
             if key == "muted" {
@@ -126,7 +126,7 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
     }
 }
 
-fn close_composer_sub(ctx: &mut Ctx<'_>, draft: &str) {
+fn close_composer_sub(ctx: &mut Ctx<'_>, draft: &DraftId) {
     let id = ctx
         .subs
         .map

@@ -106,8 +106,9 @@ cargo clippy --workspace --all-targets --features fake -- -D warnings
   - Write `Arc<T>` out. No alias hides an `Arc` or `Box` around a named type. Take `&T`
     when the function only reads, `&Arc<T>` only to clone the handle into a spawned task
     or `'static` closure, and `Arc<T>` by value to keep it.
-  - Every kind of id has an alias in `model.rs` (`AccountId`, `OutboxId`, …), and times
-    are `Millis`. Use them in place of raw `i64`/`String`.
+  - Every kind of id is a newtype (`AccountId`, `OutboxId`, `DraftId`, …, in `ids.rs`,
+    re-exported from `model.rs`), and times are `Millis`. Use them in place of raw
+    `i64`/`String`, and convert only at the edges: SQL (`ToSql`/`FromSql`) and serde.
   - Helpers that only read SQLite take `&Connection`, not `&Ctx`.
   - Locks are `parking_lot::Mutex`; a tokio `Mutex` only when it must be held across
     `.await`. No guard across `.await`, and no outside code (callbacks, clocks) under a lock.

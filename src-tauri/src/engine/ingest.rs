@@ -10,7 +10,7 @@ use parking_lot::Mutex;
 use rusqlite::{OptionalExtension, params};
 
 use crate::db::{from_json, queries, to_json};
-use crate::model::{AccountId, Addr, MessageId, Millis, ThreadId};
+use crate::model::{AccountId, Addr, DraftId, MessageId, Millis, ThreadId};
 use crate::writer::{Ctx, Effect};
 
 /// One message, parsed and (when the body was fetched) sanitized.
@@ -32,7 +32,7 @@ pub struct Incoming {
     pub in_reply_to: Option<String>,
     pub references: Vec<String>,
     pub is_list: bool,
-    pub ub_draft_id: Option<String>,
+    pub ub_draft_id: Option<DraftId>,
     pub body: Option<Body>,
     pub parts: Vec<ub_mime::PartInfo>,
 }
@@ -125,7 +125,7 @@ pub fn parse(
         in_reply_to: parsed.in_reply_to,
         references: parsed.references,
         is_list: parsed.is_list,
-        ub_draft_id: parsed.ub_draft_id,
+        ub_draft_id: parsed.ub_draft_id.map(DraftId),
         body,
         parts: parsed.parts,
     }
@@ -292,7 +292,7 @@ pub fn store_thread(
             "INSERT INTO threads (account_id, gmail_id) VALUES (?1, ?2)",
             params![account, gmail_thread_id],
         )?;
-        ctx.tx.last_insert_rowid()
+        ThreadId(ctx.tx.last_insert_rowid())
     };
     if let Some(h) = history_id {
         ctx.tx.execute(
@@ -395,7 +395,7 @@ fn store_message(
                 has_attachments,
             ],
         )?;
-        let id = ctx.tx.last_insert_rowid();
+        let id = MessageId(ctx.tx.last_insert_rowid());
         store_parts(ctx, id, &m.parts)?;
         id
     };

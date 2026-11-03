@@ -51,7 +51,7 @@ impl Subs {
         );
     }
 
-    pub fn unsubscribe(&mut self, id: &str) -> Option<Sub> {
+    pub fn unsubscribe(&mut self, id: &SubId) -> Option<Sub> {
         self.map.remove(id)
     }
 
@@ -66,7 +66,7 @@ impl Subs {
             .collect()
     }
 
-    pub fn is_draft_open(&self, draft: &str) -> bool {
+    pub fn is_draft_open(&self, draft: &DraftId) -> bool {
         self.map
             .values()
             .any(|s| matches!(&s.key, SubKey::Composer { draft: d } if d == draft))
@@ -181,7 +181,7 @@ impl Subs {
 /// A forced patch is sent even when empty, so `searching` and `more` reach the mirror.
 fn list_patch(
     conn: &Connection,
-    id: &str,
+    id: &SubId,
     sub: &mut Sub,
     ids: Vec<ListEntry>,
     t: &Touched,
@@ -195,7 +195,7 @@ fn list_patch(
         .iter()
         .filter(|e| {
             if drafts {
-                t.drafts.contains(&e.key)
+                t.drafts.contains(e.key.as_str())
             } else {
                 e.key
                     .parse()
@@ -209,7 +209,7 @@ fn list_patch(
     }
     let rows = queries::rows_for_keys(conn, drafts, &changed)?;
     Ok(Some(SubUpdate::List {
-        sub: id.to_string(),
+        sub: id.clone(),
         first: false,
         ids: None,
         removed,
@@ -222,18 +222,18 @@ fn list_patch(
 
 fn first_load(
     conn: &Connection,
-    id: &str,
+    id: &SubId,
     sub: &mut Sub,
     online: bool,
 ) -> anyhow::Result<SubUpdate> {
     Ok(match &sub.key {
         SubKey::App => SubUpdate::App {
-            sub: id.to_string(),
+            sub: id.clone(),
             first: true,
             state: queries::app_state(conn, online)?,
         },
         SubKey::Account { account } => SubUpdate::Account {
-            sub: id.to_string(),
+            sub: id.clone(),
             first: true,
             summary: queries::account_summary(conn, *account)?
                 .unwrap_or_else(|| empty_summary(*account)),
@@ -250,12 +250,12 @@ fn first_load(
         SubKey::Conversation {
             thread, trash_mode, ..
         } => SubUpdate::Conversation {
-            sub: id.to_string(),
+            sub: id.clone(),
             first: true,
             data: queries::conversation(conn, *thread, *trash_mode)?,
         },
         SubKey::Composer { draft } => SubUpdate::Composer {
-            sub: id.to_string(),
+            sub: id.clone(),
             first: true,
             draft: queries::draft_state(conn, draft)?,
         },
@@ -264,7 +264,7 @@ fn first_load(
 
 fn list_first(
     conn: &Connection,
-    id: &str,
+    id: &SubId,
     sub: &mut Sub,
     ids: Vec<ListEntry>,
     drafts: bool,
@@ -277,7 +277,7 @@ fn list_first(
     let rows = queries::rows_for_keys(conn, drafts, &window)?;
     sub.ids.clone_from(&ids);
     Ok(SubUpdate::List {
-        sub: id.to_string(),
+        sub: id.clone(),
         first: true,
         ids: Some(ids),
         removed: vec![],

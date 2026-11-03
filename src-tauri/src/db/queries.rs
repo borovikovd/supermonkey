@@ -4,15 +4,16 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, ToSql, params};
+use serde::Deserialize;
 
 use super::from_json;
 use crate::model::{
     AccountId, AccountInfo, AccountSummary, Addr, AppState, AttachmentInfo, ConversationData,
-    DraftAttachment, DraftKind, DraftState, DraftSummary, GlobalSettings, LabelInfo, ListEntry,
-    ListRow, MessageBody, MessageId, MessageSummary, Millis, Notice, NoticeKind, OutboxRow,
-    OutboxState, PinInfo, PinKind, SendAs, SplitInfo, SplitKind, SyncStatus, ThreadId,
-    UndoEntryInfo, UndoKind, View,
+    DraftAttachment, DraftId, DraftKind, DraftState, DraftSummary, GlobalSettings, LabelInfo,
+    ListEntry, ListRow, MessageBody, MessageId, MessageSummary, Millis, Notice, NoticeKind,
+    OutboxId, OutboxRow, OutboxState, PinInfo, PinKind, SendAs, SplitInfo, SplitKind, SyncStatus,
+    ThreadId, UndoEntryInfo, UndoKind, View,
 };
 
 pub const HUES: [&str; 6] = [
@@ -327,7 +328,7 @@ pub fn conversation(
     let Some((account, subject, snooze_until, rev)) = head else {
         return Ok(ConversationData {
             thread,
-            account: 0,
+            account: AccountId::NONE,
             subject: String::new(),
             labels: vec![],
             snooze_until: None,
@@ -391,7 +392,7 @@ pub enum OutboxFilter {
 }
 
 pub fn outbox_rows(conn: &Connection, filter: OutboxFilter) -> anyhow::Result<Vec<OutboxRow>> {
-    let (filter_sql, key) = match filter {
+    let (filter_sql, key): (&str, &dyn ToSql) = match &filter {
         // A sent row shows until its message is stored on the thread.
         OutboxFilter::Thread(t) => (
             "o.thread_id = ?1 AND NOT (o.state = 'sent' AND EXISTS
@@ -428,7 +429,7 @@ pub fn outbox_rows(conn: &Connection, filter: OutboxFilter) -> anyhow::Result<Ve
     Ok(rows.collect::<Result<_, _>>()?)
 }
 
-pub fn draft_state(conn: &Connection, id: &str) -> anyhow::Result<DraftState> {
+pub fn draft_state(conn: &Connection, id: &DraftId) -> anyhow::Result<DraftState> {
     let row = conn
         .query_row(
             "SELECT account_id, kind, reply_all, thread_id, target_message_id, from_json, to_json, cc_json, bcc_json,
@@ -437,7 +438,7 @@ pub fn draft_state(conn: &Connection, id: &str) -> anyhow::Result<DraftState> {
             [id],
             |r| {
                 Ok(DraftState {
-                    id: id.to_string(),
+                    id: id.clone(),
                     account: r.get(0)?,
                     kind: DraftKind::parse(&r.get::<_, String>(1)?),
                     reply_all: r.get(2)?,
@@ -459,8 +460,8 @@ pub fn draft_state(conn: &Connection, id: &str) -> anyhow::Result<DraftState> {
         )
         .optional()?;
     Ok(row.unwrap_or_else(|| DraftState {
-        id: id.to_string(),
-        account: 0,
+        id: id.clone(),
+        account: AccountId::NONE,
         kind: DraftKind::New,
         reply_all: false,
         thread: None,
@@ -491,7 +492,7 @@ pub fn setting(conn: &Connection, account: AccountId, key: &str) -> anyhow::Resu
 
 pub fn global_settings(conn: &Connection) -> anyhow::Result<GlobalSettings> {
     Ok(GlobalSettings {
-        remote_images: setting(conn, 0, "remote_images")?.as_deref() != Some("off"),
+        remote_images: setting(conn, AccountId::NONE, "remote_images")?.as_deref() != Some("off"),
     })
 }
 
@@ -607,9 +608,13 @@ pub fn account_summary(
                 label: r.get(2)?,
                 threads: v["threads"]
                     .as_array()
-                    .map(|a| a.iter().filter_map(|t| t["thread"].as_i64()).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|t| ThreadId::deserialize(&t["thread"]).ok())
+                            .collect()
+                    })
                     .unwrap_or_default(),
-                outbox: v["outbox"].as_i64(),
+                outbox: OutboxId::deserialize(&v["outbox"]).ok(),
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()?

@@ -16,14 +16,14 @@ use crate::model::{
 use crate::threads;
 use crate::writer::Ctx;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MsgChange {
     pub msg: MessageId,
     pub added: Vec<String>,
     pub removed: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadChange {
     pub thread: ThreadId,

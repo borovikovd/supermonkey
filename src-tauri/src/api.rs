@@ -3,8 +3,8 @@
 
 use crate::engine::Engine;
 use crate::model::{
-    AccountId, AttachmentId, ContactSuggestion, DraftAttachment, LaunchInfo, ListRow, MessageBody,
-    MessageId, NumberedAction, SnoozeChoice,
+    AccountId, AttachmentId, ContactSuggestion, DraftAttachment, DraftId, LaunchInfo, ListRow,
+    MessageBody, MessageId, NumberedAction, SnoozeChoice,
 };
 use std::sync::Arc;
 
@@ -83,7 +83,7 @@ pub fn open_url(e: &Engine, url: &str) -> CmdResult<()> {
 
 /// Copies a file the user picked into the draft's folder (SPEC Compose: attachments).
 pub fn add_attachment(
-    draft: &str,
+    draft: &DraftId,
     filename: &str,
     mime_type: &str,
     data: &str,
@@ -92,7 +92,7 @@ pub fn add_attachment(
 }
 
 fn store_attachment(
-    draft: &str,
+    draft: &DraftId,
     filename: &str,
     mime_type: &str,
     data_b64: &str,

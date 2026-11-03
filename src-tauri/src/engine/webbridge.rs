@@ -24,7 +24,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::Engine;
 use crate::api;
-use crate::model::ChannelMessage;
+use crate::model::{ChannelMessage, DraftId};
 
 /// What the bridge serves: the engine, which the E2E server swaps when it
 /// restarts the core, and the app events it forwards to the page.
@@ -250,7 +250,7 @@ async fn run(bridge: &Bridge, e: &Arc<Engine>, cmd: &str, args: &Value) -> Resul
             Value::Null
         }
         "add_attachment" => json!(api::add_attachment(
-            &arg::<String>(args, "draft")?,
+            &arg::<DraftId>(args, "draft")?,
             &arg::<String>(args, "filename")?,
             &arg::<String>(args, "mimeType")?,
             &arg::<String>(args, "data")?,

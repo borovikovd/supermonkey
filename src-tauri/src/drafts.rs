@@ -141,7 +141,7 @@ fn dedup<'a>(list: impl IntoIterator<Item = &'a Addr>, mut seen: HashSet<String>
 
 /// A fresh composer's first save (SPEC UI state → Actions).
 struct NewDraft<'a> {
-    draft: &'a str,
+    draft: &'a DraftId,
     account: AccountId,
     kind: DraftKind,
     reply_all: bool,
@@ -301,7 +301,7 @@ fn create(ctx: &mut Ctx<'_>, d: &NewDraft<'_>) -> anyhow::Result<()> {
 
 pub fn account_of(
     conn: &Connection,
-    draft: &str,
+    draft: &DraftId,
 ) -> anyhow::Result<Option<(AccountId, Option<ThreadId>)>> {
     Ok(conn
         .query_row(
@@ -313,7 +313,7 @@ pub fn account_of(
 }
 
 /// Queues one upsert per draft; the runner reads the draft's latest state.
-pub fn queue_upsert(ctx: &mut Ctx<'_>, account: AccountId, draft: &str) -> anyhow::Result<()> {
+pub fn queue_upsert(ctx: &mut Ctx<'_>, account: AccountId, draft: &DraftId) -> anyhow::Result<()> {
     let exists: bool = ctx.tx.query_row(
         "SELECT EXISTS (SELECT 1 FROM ops WHERE account_id = ?1 AND kind = 'draft_upsert'
                           AND json_extract(payload, '$.draft') = ?2)",
@@ -332,7 +332,7 @@ pub fn queue_upsert(ctx: &mut Ctx<'_>, account: AccountId, draft: &str) -> anyho
     Ok(())
 }
 
-fn in_outbox(conn: &Connection, draft: &str) -> rusqlite::Result<bool> {
+fn in_outbox(conn: &Connection, draft: &DraftId) -> rusqlite::Result<bool> {
     conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM outbox WHERE draft_id = ?1)",
         [draft],
@@ -340,7 +340,7 @@ fn in_outbox(conn: &Connection, draft: &str) -> rusqlite::Result<bool> {
     )
 }
 
-pub fn save(ctx: &mut Ctx<'_>, draft: &str, save: DraftSave) -> anyhow::Result<()> {
+pub fn save(ctx: &mut Ctx<'_>, draft: &DraftId, save: DraftSave) -> anyhow::Result<()> {
     // A save that arrives after its draft was sent or discarded is dropped.
     if in_outbox(ctx.tx, draft)? {
         return Ok(());
@@ -436,7 +436,7 @@ struct StoredFields {
 
 /// Untouched: subject, body, and attachments as the composer started them,
 /// and recipients and From the defaults.
-pub fn is_untouched(conn: &Connection, draft: &str) -> anyhow::Result<bool> {
+pub fn is_untouched(conn: &Connection, draft: &DraftId) -> anyhow::Result<bool> {
     let row = conn
         .query_row(
             "SELECT from_json, to_json, cc_json, bcc_json, subject, body_html, attachments_json, defaults_json
@@ -481,7 +481,7 @@ pub fn is_untouched(conn: &Connection, draft: &str) -> anyhow::Result<bool> {
 
 /// Closing a composer (second Esc, switching, quitting). A draft started fresh
 /// and untouched is discarded, locally and on Gmail.
-pub fn close(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
+pub fn close(ctx: &mut Ctx<'_>, draft: &DraftId) -> anyhow::Result<()> {
     let row: Option<(AccountId, bool, bool)> = ctx
         .tx
         .query_row(
@@ -508,14 +508,14 @@ pub fn close(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
     if pending_read {
         ctx.effect(Effect::ReadDraft {
             account,
-            draft: draft.to_string(),
+            draft: draft.clone(),
         });
     }
     Ok(())
 }
 
 /// Deletes the local draft and the Gmail draft.
-pub fn discard(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
+pub fn discard(ctx: &mut Ctx<'_>, draft: &DraftId) -> anyhow::Result<()> {
     let row: Option<(AccountId, Option<ThreadId>, Option<String>)> = ctx
         .tx
         .query_row(
@@ -533,7 +533,7 @@ pub fn discard(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
     )?;
     ctx.tx
         .execute("DELETE FROM drafts WHERE id = ?1", [draft])?;
-    ctx.touched.drafts.insert(draft.to_string());
+    ctx.touched.drafts.insert(draft.clone());
     ctx.touched.draft_lists.insert(account);
     ctx.touch_summary(account);
     if let Some(t) = thread {
@@ -567,8 +567,8 @@ pub fn discard(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
 }
 
 /// Where a draft's added files are kept until sent or discarded.
-pub fn draft_dir(draft: &str) -> std::path::PathBuf {
-    let name = draft.replace(['/', '.'], "_");
+pub fn draft_dir(draft: &DraftId) -> std::path::PathBuf {
+    let name = draft.as_str().replace(['/', '.'], "_");
     match DRAFT_FILES.get() {
         Some(base) => base.join(name),
         None => std::env::temp_dir().join(name),
@@ -602,9 +602,9 @@ pub fn on_rejected(
 ) -> anyhow::Result<()> {
     let v: serde_json::Value = serde_json::from_str(payload).unwrap_or_default();
     if kind == "draft_upsert"
-        && let Some(d) = v["draft"].as_str()
+        && let Ok(d) = DraftId::deserialize(&v["draft"])
     {
-        ctx.touch_draft(account, d)?;
+        ctx.touch_draft(account, &d)?;
     }
     Ok(())
 }

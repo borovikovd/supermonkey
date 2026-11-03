@@ -10,7 +10,7 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use rusqlite::params;
 
-use crate::model::{Addr, SendAs};
+use crate::model::{Addr, SendAs, ThreadId};
 use crate::subs::Subs;
 use crate::writer::{Ctx, Touched};
 
@@ -196,7 +196,7 @@ pub fn generate(path: &Path, size: &Size, accounts: &[&str]) -> anyhow::Result<(
                 "INSERT INTO threads (account_id, gmail_id) VALUES (?1, ?2)",
                 params![account, gid],
             )?;
-            let thread = ctx.tx.last_insert_rowid();
+            let thread = ThreadId(ctx.tx.last_insert_rowid());
             thread_ids.push(thread);
             let in_inbox = t < size.inbox;
             let count = if t == 3 {

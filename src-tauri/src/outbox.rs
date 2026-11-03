@@ -12,7 +12,7 @@ use crate::writer::{Ctx, Effect};
 /// The undo window. Fixed at ten seconds, as in Superhuman; tests shorten it.
 pub static DELAY_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(10_000);
 
-pub fn send(ctx: &mut Ctx<'_>, n: i64, draft: &str) -> anyhow::Result<()> {
+pub fn send(ctx: &mut Ctx<'_>, n: i64, draft: &DraftId) -> anyhow::Result<()> {
     let row = ctx
         .tx
         .query_row(
@@ -64,7 +64,7 @@ pub fn send(ctx: &mut Ctx<'_>, n: i64, draft: &str) -> anyhow::Result<()> {
             gmail_draft
         ],
     )?;
-    let outbox = ctx.tx.last_insert_rowid();
+    let outbox = OutboxId(ctx.tx.last_insert_rowid());
     crate::undo::record(
         ctx,
         n,

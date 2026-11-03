@@ -16,7 +16,7 @@ use crate::writer::{Ctx, GmailListQuery};
 
 const PAGE: u32 = 15;
 
-pub fn cancel(e: &Engine, sub: &str) {
+pub fn cancel(e: &Engine, sub: &SubId) {
     let running = e.searches.lock().remove(sub);
     if let Some(h) = running {
         h.abort();

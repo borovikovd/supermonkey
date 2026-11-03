@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rusqlite::{OptionalExtension, params};
+use serde::Deserialize;
 use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
 
 use super::attachments::DownloadError;
@@ -41,7 +42,7 @@ pub struct DraftRow {
     pub needs_parts: bool,
 }
 
-pub fn load(e: &Engine, draft: &str) -> Option<DraftRow> {
+pub fn load(e: &Engine, draft: &DraftId) -> Option<DraftRow> {
     e.reads
         .with(|c| {
             Ok(c.query_row(
@@ -52,7 +53,7 @@ pub fn load(e: &Engine, draft: &str) -> Option<DraftRow> {
                 [draft],
                 |r| {
                     Ok(DraftRow {
-                        id: draft.to_string(),
+                        id: draft.clone(),
                         account: r.get(0)?,
                         from: serde_json::from_str(&r.get::<_, String>(1)?).unwrap_or(None),
                         to: from_json(&r.get::<_, String>(2)?),
@@ -78,7 +79,7 @@ pub fn load(e: &Engine, draft: &str) -> Option<DraftRow> {
 }
 
 /// The Gmail draft id stored for a local draft, if it has one.
-fn gmail_draft_id(e: &Engine, draft: &str) -> Option<String> {
+fn gmail_draft_id(e: &Engine, draft: &DraftId) -> Option<String> {
     e.reads
         .with(|c| {
             Ok(c.query_row(
@@ -215,7 +216,7 @@ pub async fn build_raw(e: &Engine, d: &DraftRow) -> Result<Vec<u8>, GmailError> 
             .split_whitespace()
             .map(str::to_string)
             .collect(),
-        ub_draft_id: d.id.clone(),
+        ub_draft_id: d.id.to_string(),
         attachments,
         inline,
         date_ms: crate::clock::now_ms(),
@@ -290,7 +291,7 @@ async fn create_with_recovery(
 async fn recover_create(
     e: &Engine,
     rt: &AccountRt,
-    local: &str,
+    local: &DraftId,
 ) -> Result<Option<ub_gmail::Draft>, GmailError> {
     if let Some(gid) = gmail_draft_id(e, local) {
         let g = rt
@@ -332,7 +333,7 @@ async fn recover_create(
             .as_ref()
             .map(ub_mime::parse_gmail_payload)
             .and_then(|p| p.ub_draft_id);
-        if header.as_deref() == Some(local) {
+        if header.as_deref() == Some(local.as_str()) {
             ours.push(g);
         }
     }
@@ -372,13 +373,13 @@ async fn list_all(rt: &AccountRt) -> Result<Vec<ub_gmail::Draft>, GmailError> {
 }
 
 /// Stores the Gmail ids an upsert returned.
-pub async fn store_ids(e: &Engine, local: &str, g: &ub_gmail::Draft) {
+pub async fn store_ids(e: &Engine, local: &DraftId, g: &ub_gmail::Draft) {
     let (id, msg, thread) = (
         g.id.clone(),
         g.message.id.clone(),
         g.message.thread_id.clone(),
     );
-    let local = local.to_string();
+    let local = local.clone();
     e
         .writer
         .call(move |ctx| {
@@ -407,8 +408,10 @@ pub async fn execute_op(
     let v: serde_json::Value = serde_json::from_str(payload).map_err(bad)?;
     match kind {
         "draft_upsert" => {
-            let local = v["draft"].as_str().unwrap_or_default();
-            let Some(d) = load(e, local) else {
+            let Ok(local) = DraftId::deserialize(&v["draft"]) else {
+                return Ok(Done::Finished);
+            };
+            let Some(d) = load(e, &local) else {
                 return Ok(Done::Finished);
             };
             let in_outbox = e
@@ -416,7 +419,7 @@ pub async fn execute_op(
                 .with(|c| {
                     Ok(c.query_row(
                         "SELECT EXISTS (SELECT 1 FROM outbox WHERE draft_id = ?1)",
-                        [local],
+                        [&local],
                         |r| r.get(0),
                     )?)
                 })
@@ -425,13 +428,13 @@ pub async fn execute_op(
                 return Ok(Done::Finished);
             }
             if d.needs_parts {
-                download_parts_now(e, local).await?;
+                download_parts_now(e, &local).await?;
             }
-            let Some(d) = load(e, local) else {
+            let Some(d) = load(e, &local) else {
                 return Ok(Done::Finished);
             };
             let g = write(e, rt, &d).await?;
-            store_ids(e, local, &g).await;
+            store_ids(e, &local, &g).await;
             Ok(Done::Finished)
         }
         "draft_delete" => {
@@ -467,7 +470,7 @@ pub async fn execute_op(
 
 /// Downloads a Gmail draft's attachments and inline parts before its first
 /// upsert (SPEC Addressing).
-async fn download_parts_now(e: &Engine, draft: &str) -> Result<(), GmailError> {
+async fn download_parts_now(e: &Engine, draft: &DraftId) -> Result<(), GmailError> {
     let Some(DraftRow {
         attachments: mut atts,
         ..
@@ -483,7 +486,7 @@ async fn download_parts_now(e: &Engine, draft: &str) -> Result<(), GmailError> {
             a.path = Some(p.to_string_lossy().into_owned());
         }
     }
-    let local = draft.to_string();
+    let local = draft.clone();
     e.writer
         .call(move |ctx| {
             ctx.tx.execute(
@@ -707,11 +710,7 @@ fn gmail_draft_rows(
         .tx
         .query_row(
             "SELECT id FROM drafts WHERE account_id = ?1 AND (gmail_draft_id = ?2 OR id = ?3)",
-            params![
-                account,
-                gmail_draft,
-                m.ub_draft_id.as_deref().unwrap_or_default()
-            ],
+            params![account, gmail_draft, m.ub_draft_id],
             |r| r.get(0),
         )
         .optional()?;
@@ -780,7 +779,7 @@ pub async fn store_gmail_draft(e: &Engine, rt: &AccountRt, g: ub_gmail::Draft) {
                 ctx.touch_draft(account, &local)?;
             } else {
                 let kind = gmail_draft_kind(others.is_empty(), &m);
-                let local = m.ub_draft_id.unwrap_or_else(|| format!("g-{gmail_draft}"));
+                let local = m.ub_draft_id.unwrap_or_else(|| DraftId(format!("g-{gmail_draft}")));
                 ctx.tx.execute(
                     "INSERT INTO drafts (id, account_id, kind, thread_id, target_message_id, started_on_latest,
                         from_json, to_json, cc_json, bcc_json, subject, body_html, quote_html, attachments_json,

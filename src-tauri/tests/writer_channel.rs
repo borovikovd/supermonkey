@@ -20,6 +20,9 @@ use ubermensch_lib::fixture::{self, Size};
 use ubermensch_lib::model::*;
 use ubermensch_lib::writer::Writer;
 
+/// The fixture's only account.
+const ACCOUNT: AccountId = AccountId(1);
+
 const SIZE: Size = Size {
     threads: 40,
     inbox: 25,
@@ -108,7 +111,7 @@ fn effect(kind: ModifyKind) -> (Vec<String>, Vec<String>, Option<SnoozeChange>) 
 /// The mirror's side: lists rebuilt from first loads and patches.
 #[derive(Default)]
 struct Rebuilt {
-    lists: HashMap<String, Vec<ListEntry>>,
+    lists: HashMap<SubId, Vec<ListEntry>>,
     failures: Vec<String>,
 }
 
@@ -143,14 +146,14 @@ fn apply(list: &[ListEntry], removed: &[String], moved: &[ListMove]) -> Vec<List
 /// Every open list that differs from a fresh first load.
 fn stale_lists(
     conn: &rusqlite::Connection,
-    lists: &HashMap<String, Vec<ListEntry>>,
-    views: &HashMap<String, View>,
+    lists: &HashMap<SubId, Vec<ListEntry>>,
+    views: &HashMap<SubId, View>,
 ) -> Vec<String> {
     lists
         .iter()
         .filter_map(|(sub, list)| {
             let v = views.get(sub)?;
-            (queries::list_ids(conn, 1, v).unwrap() != *list).then(|| format!("{sub} {v:?}"))
+            (queries::list_ids(conn, ACCOUNT, v).unwrap() != *list).then(|| format!("{sub} {v:?}"))
         })
         .collect()
 }
@@ -160,7 +163,7 @@ fn stale_lists(
     clippy::too_many_lines,
     reason = "The property harness: set up, replay ops, check."
 )]
-fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
+fn run(ops: Vec<Op>) -> Result<HashMap<SubId, Vec<ListEntry>>, TestCaseError> {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("t.db");
     fixture::generate(&path, &SIZE, &["a@example.com"]).unwrap();
@@ -168,7 +171,7 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
     let writer = Writer::start(&path, etx).unwrap();
 
     let state = Arc::new(Mutex::new(Rebuilt::default()));
-    let views: Arc<Mutex<HashMap<String, View>>> = Arc::default();
+    let views: Arc<Mutex<HashMap<SubId, View>>> = Arc::default();
     {
         let state = Arc::clone(&state);
         let views = Arc::clone(&views);
@@ -203,7 +206,7 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
         });
     }
 
-    let threads: Vec<i64> = {
+    let threads: Vec<ThreadId> = {
         let c = rusqlite::Connection::open(&path).unwrap();
         let mut s = c.prepare("SELECT id FROM threads ORDER BY id").unwrap();
         s.query_map([], |r| r.get(0))
@@ -212,7 +215,7 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
             .collect()
     };
     let mut n = 0i64;
-    let mut slots: HashMap<usize, String> = HashMap::new();
+    let mut slots: HashMap<usize, SubId> = HashMap::new();
     let mut seq = 0;
     let mut next = |a: Action| {
         n += 1;
@@ -226,13 +229,13 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
                 }
                 // Like the UI, never reuse a subscription id.
                 seq += 1;
-                let sub = format!("s{seq}");
+                let sub = SubId(format!("s{seq}"));
                 slots.insert(slot, sub.clone());
                 views.lock().insert(sub.clone(), v.clone());
                 writer.actions(vec![next(Action::Subscribe {
                     sub,
                     key: SubKey::List {
-                        account: 1,
+                        account: ACCOUNT,
                         view: v,
                     },
                 })]);
@@ -248,7 +251,7 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
             Op::Modify(kind, idx) => {
                 let (add, remove, snooze) = effect(kind);
                 writer.actions(vec![next(Action::Modify(ModifyAction {
-                    account: 1,
+                    account: ACCOUNT,
                     kind,
                     threads: idx.iter().map(|i| threads[i % threads.len()]).collect(),
                     add,
@@ -258,7 +261,7 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
                 }))]);
             }
             Op::Undo => {
-                let entry: Option<i64> = writer
+                let entry: Option<UndoEntryId> = writer
                     .call_blocking(|ctx| {
                         Ok(ctx
                             .tx
@@ -271,7 +274,10 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
                     })
                     .unwrap();
                 if let Some(entry) = entry {
-                    writer.actions(vec![next(Action::Undo { account: 1, entry })]);
+                    writer.actions(vec![next(Action::Undo {
+                        account: ACCOUNT,
+                        entry,
+                    })]);
                 }
             }
             Op::Remote(i, label, add) => {

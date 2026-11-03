@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
 
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::Deserialize;
 
 use crate::model::{AccountId, PinKind, SplitId, SplitInfo, SplitKind, ThreadId};
 use crate::threads::{Msg, RuleMsg};
@@ -219,7 +220,7 @@ pub fn undo_pin(
 ) -> anyhow::Result<()> {
     let kind = payload["kind"].as_str().unwrap_or("sender");
     let value = payload["value"].as_str().unwrap_or_default();
-    match payload["replaced"].as_i64() {
+    match Option::<SplitId>::deserialize(&payload["replaced"])? {
         Some(prev) => {
             ctx.tx.execute(
                 "UPDATE split_overrides SET split_id = ?4 WHERE account_id = ?1 AND kind = ?2 AND value = ?3",
@@ -265,7 +266,7 @@ pub fn save(
             ub_rules::Query::parse_strict(&s.query)
                 .map_err(|e| anyhow::anyhow!("{}: {e}", s.name))?;
         }
-        if s.id > 0 {
+        if s.id.is_saved() {
             ctx.tx.execute(
                 "UPDATE splits SET name = ?3, position = ?4, query = ?5, hide_when_empty = ?6,
                     enabled = CASE kind WHEN 'other' THEN 1 ELSE ?7 END

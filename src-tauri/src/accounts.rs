@@ -31,7 +31,7 @@ pub fn create(ctx: &mut Ctx<'_>, email: &str) -> anyhow::Result<AccountId> {
         "INSERT INTO accounts (email, display_name, position, hue) VALUES (?1, ?1, ?2, ?3)",
         params![email, position, hue],
     )?;
-    let id = ctx.tx.last_insert_rowid();
+    let id = AccountId(ctx.tx.last_insert_rowid());
     crate::splits::create_defaults(ctx, id)?;
     for (label, name) in SYSTEM_LABELS {
         ctx.tx.execute(
