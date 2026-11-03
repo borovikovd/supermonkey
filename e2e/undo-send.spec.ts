@@ -621,3 +621,24 @@ test("SND-13 a draft reconcile in the undo window keeps the version that was sen
   expect(await sentBody(gmail, s.thread("p3").threadId)).toContain("one two");
   expect((await gmail.gmail(A)).drafts).toEqual([]);
 });
+
+test("SND-14 a crash while the send writes the draft still sends the final version", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await replyAheadOfGmail(app, gmail, "Person 3");
+  await app.press("Meta+Enter");
+  await expect(app.editor).toHaveCount(0);
+  await gmail.clearFaults();
+  // The row is sending, and its write of "one two" is in flight when the app dies.
+  const write = await gmail.hold("drafts.update");
+  await app.advance(DELAY);
+  await app.crashAndRelaunch(async () => {
+    // The crash dropped the parked write; end the hold.
+    await write.release({ kind: "drop" }, { min: 0 });
+  });
+  await app.settle();
+  expect(await sentBody(gmail, s.thread("p3").threadId)).toContain("one two");
+  expect((await gmail.gmail(A)).drafts).toEqual([]);
+});

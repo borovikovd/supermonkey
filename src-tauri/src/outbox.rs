@@ -16,14 +16,13 @@ pub fn send(ctx: &mut Ctx<'_>, n: i64, draft: &DraftId) -> anyhow::Result<()> {
     let row = ctx
         .tx
         .query_row(
-            "SELECT account_id, thread_id, gmail_draft_id, to_json, cc_json, bcc_json FROM drafts WHERE id = ?1",
+            "SELECT account_id, thread_id, to_json, cc_json, bcc_json FROM drafts WHERE id = ?1",
             [draft],
             |r| {
                 Ok(SendSource {
                     account: r.get(0)?,
                     thread: r.get(1)?,
-                    gmail_draft: r.get(2)?,
-                    recipients: [r.get(3)?, r.get(4)?, r.get(5)?],
+                    recipients: [r.get(2)?, r.get(3)?, r.get(4)?],
                 })
             },
         )
@@ -31,7 +30,6 @@ pub fn send(ctx: &mut Ctx<'_>, n: i64, draft: &DraftId) -> anyhow::Result<()> {
     let Some(SendSource {
         account,
         thread,
-        gmail_draft,
         recipients,
     }) = row
     else {
@@ -53,15 +51,16 @@ pub fn send(ctx: &mut Ctx<'_>, n: i64, draft: &DraftId) -> anyhow::Result<()> {
     )?;
     ctx.tx
         .execute("UPDATE drafts SET started_fresh = 0 WHERE id = ?1", [draft])?;
+    // The row gets its Gmail draft id only once the outbox has written the
+    // final version: an older autosave must never be what gets sent.
     ctx.tx.execute(
-        "INSERT INTO outbox (account_id, draft_id, thread_id, send_after, state, gmail_draft_id)
-         VALUES (?1, ?2, ?3, ?4, 'waiting', ?5)",
+        "INSERT INTO outbox (account_id, draft_id, thread_id, send_after, state)
+         VALUES (?1, ?2, ?3, ?4, 'waiting')",
         params![
             account,
             draft,
             thread,
             ctx.now + DELAY_MS.load(std::sync::atomic::Ordering::Relaxed),
-            gmail_draft
         ],
     )?;
     let outbox = OutboxId(ctx.tx.last_insert_rowid());
@@ -86,7 +85,6 @@ pub fn send(ctx: &mut Ctx<'_>, n: i64, draft: &DraftId) -> anyhow::Result<()> {
 struct SendSource {
     account: AccountId,
     thread: Option<ThreadId>,
-    gmail_draft: Option<String>,
     /// To, Cc, and Bcc as JSON.
     recipients: [String; 3],
 }

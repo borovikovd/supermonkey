@@ -95,6 +95,11 @@ pub async fn run(e: Arc<Engine>, rt: Arc<AccountRt>) {
     }
 }
 
+/// Moves a row between waiting and sending. Only a waiting row starts
+/// sending, so a row undone meanwhile, or taken by another runner, is left
+/// alone. Starting clears the row's Gmail draft id: until this pass has
+/// written the final version, the Gmail draft may hold an older autosave, and
+/// `settle` must not send that.
 async fn set_state(
     e: &Engine,
     account: AccountId,
@@ -102,12 +107,15 @@ async fn set_state(
     state: &'static str,
     delayed: bool,
 ) -> bool {
+    let sql = if state == "sending" {
+        "UPDATE outbox SET state = ?2, delayed = delayed OR ?3, gmail_draft_id = NULL
+         WHERE id = ?1 AND state = 'waiting'"
+    } else {
+        "UPDATE outbox SET state = ?2, delayed = delayed OR ?3 WHERE id = ?1 AND state != 'sent'"
+    };
     e.writer
         .call(move |ctx| {
-            let n = ctx.tx.execute(
-                "UPDATE outbox SET state = ?2, delayed = delayed OR ?3 WHERE id = ?1 AND state != 'sent'",
-                params![outbox, state, delayed],
-            )?;
+            let n = ctx.tx.execute(sql, params![outbox, state, delayed])?;
             if n > 0 {
                 ctx.touch_outbox(account, outbox)?;
                 touch_row_thread(ctx, account, outbox)?;
@@ -146,7 +154,7 @@ fn touch_row_thread(
 
 async fn send(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError> {
     let late = crate::clock::now_ms() > row.send_after + 5_000;
-    // Undone meanwhile: the row is gone.
+    // Undone meanwhile (the row is gone), or already taken.
     if !set_state(e, rt.id, row.id, "sending", late).await {
         return Ok(());
     }

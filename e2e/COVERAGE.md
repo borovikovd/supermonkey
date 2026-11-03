@@ -2445,6 +2445,16 @@ _EG · §Drafts, §Send and undo ("the outbox writes the final version itself")_
   4. `advance(10_000)`, `settle()`.
 - **Expect:** exactly one sent message, with "one two". No Gmail draft is left.
 
+#### SND-14 · P1 · A crash while the send writes the draft still sends the final version
+
+_EG · §Send and undo ("A sending row with no answer at quit is settled by `drafts.get` on the next launch")_
+
+- **Steps:**
+  1. As SND-13 steps 1–3, without the poll: Gmail's draft has "one", the local draft "one two", and the send is waiting.
+  2. `hold(drafts.update)`, then `advance(10_000)`: the row is sending and its write is parked.
+  3. `crash()`; while down, release the parked write as `drop`. Relaunch, `settle()`.
+- **Expect:** exactly one sent message, with "one two": the relaunch does not send the older Gmail draft it finds. No Gmail draft is left.
+
 ### 5.17 `offline.spec.ts` (OFF)
 
 #### OFF-01 · P1 · Airplane mode: read, search, autocomplete, and act; it all lands when the network returns
