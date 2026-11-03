@@ -100,6 +100,19 @@ cargo clippy --workspace --all-targets --features fake -- -D warnings
   - No `unwrap`/`expect` outside tests.
   - No `unsafe`.
   - No silent `as` casts: use `try_from`.
+- **Rust ownership:**
+  - Borrow to read (`&str`, `&[T]`, `&T`, `&Path`); take by value to keep or move. Never
+    take `&T` and clone it inside; let the caller move. Don't clone at a value's last use.
+  - Write `Arc<T>` out. No alias hides an `Arc` or `Box` around a named type. Take `&T`
+    when the function only reads, `&Arc<T>` only to clone the handle into a spawned task
+    or `'static` closure, and `Arc<T>` by value to keep it.
+  - Every kind of id has an alias in `model.rs` (`AccountId`, `OutboxId`, …), and times
+    are `Millis`. Use them in place of raw `i64`/`String`.
+  - Helpers that only read SQLite take `&Connection`, not `&Ctx`.
+  - Locks are `parking_lot::Mutex`; a tokio `Mutex` only when it must be held across
+    `.await`. No guard across `.await`, and no outside code (callbacks, clocks) under a lock.
+  - No trait with a single implementation, and no boxed-future alias to support one.
+  - Parsers return slices or `Cow` instead of copying strings.
 - **TypeScript:**
   - Every `oxlint-disable-next-line` names its rules and carries a reason.
   - Never suppress `react-hooks` rules, because that makes the React Compiler skip the
