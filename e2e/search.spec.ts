@@ -212,6 +212,7 @@ test("SRC-03 Gmail hits are merged in as their metadata arrives", async ({ app, 
   await expect(hit).toContainText("Old Billing");
   await expect(hit).toContainText("Your invoice from 2019");
   await expect(hit.locator(".tabular")).toHaveText(/\d/);
+  await expect(app.page.getByText("Results from this Mac")).toHaveCount(0);
 
   // Opening the hit fetches its body at once.
   await app.press("Enter");
@@ -295,10 +296,14 @@ test("SRC-06 actions on search results follow the removal table", async ({ app, 
   await app.press("Enter");
   await expect(app.highlighted).toContainText("Person 1");
 
-  // e: stays, since the thread still matches.
+  // e: stays, since the thread still matches. Never removed and re-added.
+  const p1Key = await app.rowKey("Person 1");
+  const rows = await app.watchRows();
   await app.press("e");
   await app.settle();
   await expect(app.row("Person 1")).toHaveCount(1);
+  await expect(app.highlighted).toContainText("Person 1");
+  expect(await rows.added()).not.toContain(p1Key);
   const p1 = (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p1", 1).id);
   expect(p1?.labels).not.toContain("INBOX");
 

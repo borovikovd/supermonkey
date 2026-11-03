@@ -435,12 +435,20 @@ test("SPL-06 custom splits: add, order, rename, turn off, delete", async ({ app,
   await highlightRow(app, "Your receipt");
   await pin(app, "Add to split", "Sender billing@shop.test → Receipts");
   await expectSplit(app, "Your receipt", "Receipts");
-  await editSplits(app, async (s) => {
-    await (await sheetRow(s, "Receipts")).getByRole("button", { name: "×" }).click();
-  });
+  const deleteReceipts = (s: Locator) =>
+    sheetRow(s, "Receipts").then((row) => row.getByRole("button", { name: "×" }).click());
+  await editSplits(app, deleteReceipts);
   await expectSplit(app, "Your receipt", "Other", "after deleting Receipts");
   await editSplits(app, (s) => addSplit(s, "Receipts", NOTHING));
   await expectSplit(app, "Your receipt", "Other", "a new Receipts does not bring the pin back");
+  // The new Receipts is the newest split, so a split added after deleting it
+  // takes its id: a pin left behind would match it.
+  await highlightRow(app, "Your receipt");
+  await pin(app, "Add to split", "Sender billing@shop.test → Receipts");
+  await expectSplit(app, "Your receipt", "Receipts");
+  await editSplits(app, deleteReceipts);
+  await editSplits(app, (s) => addSplit(s, "Receipts", NOTHING));
+  await expectSplit(app, "Your receipt", "Other", "a split that reuses the id gets no pin");
 
   // 9. A CATEGORY_ id matches the message's own labels.
   await editSplits(app, (s) => addSplit(s, "Promo", "label:CATEGORY_PROMOTIONS"));
@@ -522,11 +530,12 @@ test("SPL-08 empty splits hide themselves, except after g i / g o", async ({ app
   await expectHeader(app, "Other 7");
   await expect(app.section("Important")).toHaveCount(0);
 
-  // Empty, hide off: the name with no count (Q22).
+  // Empty, hide off: the name with no count, and no section header (Q22).
   await editSplits(app, async (s) => {
     await (await sheetRow(s, "Important")).getByRole("checkbox").uncheck();
   });
   await expectHeader(app, "Important · Other 7");
+  await expect(app.section("Important")).toHaveCount(0);
 
   await editSplits(app, async (s) => {
     await (await sheetRow(s, "Important")).getByRole("checkbox").check();
