@@ -81,6 +81,31 @@ test("DRF-01 drafts autosave and update a single Gmail draft", async ({ app, gma
   expect(await app.rows.first().getAttribute("data-row")).toBe(local);
 });
 
+test("DRF-10 an edit saved while the draft's upsert is in flight still reaches Gmail", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const thread = s.thread("p3").threadId;
+  await openThread(app, "Person 3");
+  await app.reply();
+  await app.type("one");
+  await app.settle();
+
+  const write = await gmail.hold("drafts.update");
+  await app.type(" two");
+  await expect.poll(async () => (await updates(gmail)).some((r) => r.held)).toBe(true);
+  // Saved while the write of "one two" is in flight.
+  await app.type(" three");
+  await app.settle();
+  await write.release();
+  await app.settle();
+
+  const now = await draftsIn(gmail, thread);
+  expect(now).toHaveLength(1);
+  expect(bodyOf(now[0])).toContain("one two three");
+});
+
 test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app, gmail }) => {
   await seeds.drafts(gmail, app);
   await goDrafts(app);

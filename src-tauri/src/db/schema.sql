@@ -187,8 +187,10 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 
 -- Gmail mutations waiting to run, in order per account.
+-- AUTOINCREMENT: an op deleted while it runs (by send, discard, or a newer
+-- save) must not lend its id to a new op, which its runner would then delete.
 CREATE TABLE IF NOT EXISTS ops (
-  id          INTEGER PRIMARY KEY,
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
   account_id  INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   action      INTEGER,               -- UI action number that queued it, if any
   kind        TEXT NOT NULL,         -- modify | label_create | draft_upsert | draft_delete | trash_message

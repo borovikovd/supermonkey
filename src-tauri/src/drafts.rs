@@ -313,22 +313,22 @@ pub fn account_of(
 }
 
 /// Queues one upsert per draft; the runner reads the draft's latest state.
+/// The queued op may already be running with the state it read before this
+/// save, so it is replaced by a new one at the end of the queue: the running
+/// write finishes, and the next one carries this save.
 pub fn queue_upsert(ctx: &mut Ctx<'_>, account: AccountId, draft: &DraftId) -> anyhow::Result<()> {
-    let exists: bool = ctx.tx.query_row(
-        "SELECT EXISTS (SELECT 1 FROM ops WHERE account_id = ?1 AND kind = 'draft_upsert'
-                          AND json_extract(payload, '$.draft') = ?2)",
+    ctx.tx.execute(
+        "DELETE FROM ops WHERE account_id = ?1 AND kind = 'draft_upsert'
+           AND json_extract(payload, '$.draft') = ?2",
         params![account, draft],
-        |r| r.get(0),
     )?;
-    if !exists {
-        crate::queue::push(
-            ctx,
-            account,
-            None,
-            "draft_upsert",
-            &serde_json::json!({ "draft": draft }),
-        )?;
-    }
+    crate::queue::push(
+        ctx,
+        account,
+        None,
+        "draft_upsert",
+        &serde_json::json!({ "draft": draft }),
+    )?;
     Ok(())
 }
 

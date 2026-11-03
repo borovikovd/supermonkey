@@ -2272,6 +2272,17 @@ _EG · §Actions ("the body is editable at once, and later saves carry the full 
   - After step 2, To shows Carol, the editor reads "Early words", and the Gmail draft has To Carol, Subject "Re: Offsite venue", and "Early words".
   - After step 3, the same Gmail draft still has To Carol and reads "Early words" then "More words".
 
+#### DRF-10 · P1 · An edit saved while the draft's upsert is in flight still reaches Gmail
+
+_EG · §Drafts ("They also upsert to Gmail drafts")_
+
+- **Steps:**
+  1. In `p3`, press `r`, type "one", `settle()`.
+  2. `hold(drafts.update)`. Type " two" and wait until its upsert is parked.
+  3. Type " three", `settle()`: this save lands while the write of "one two" is in flight.
+  4. Release the write, `settle()`.
+- **Expect:** Gmail has one draft in `p3`'s thread, with "one two three".
+
 ### 5.16 `undo-send.spec.ts` (SND)
 
 Outbox state machine (§Send and undo):
@@ -3215,7 +3226,7 @@ Also kept, because they test logic the E2E suite can't observe:
 - `crates/ub-gmail/tests/scheduler.rs`: priorities, concurrency, quota, and back-off.
 - `crates/ub-gmail/tests/oauth.rs`: the `state` check, token caching and early refresh, one refresh shared by concurrent 401s, and secrets kept out of debug output.
 - `src-tauri/src/clock.rs`: the activity tracking `settle()` relies on, and that closing a `Kick` (an account stopping) wakes a loop even between its last check and its wait.
-- `src-tauri/src/db/mod.rs`: older databases get `AUTOINCREMENT` on `notices` and `outbox` without losing rows.
+- `src-tauri/src/db/mod.rs`: older databases get `AUTOINCREMENT` on `notices`, `outbox`, and `ops` without losing rows or the `ops` index.
 
 Everything else was deleted, because a case here covers it: the contact ranking (RCP-02), the MIME build and Gmail payload tests (ATT-04, CONV), the address, encoding, quote and HTML helpers, the list diff (UIC-01), the mirror's Vitest tests (UIC, UND), `ub-gmail/tests/{api,outcomes}.rs` (ERR), and `src-tauri/tests/{sync_fake,compose_fake,splits}.rs` (SYN, SND, DRF, SPL).
 

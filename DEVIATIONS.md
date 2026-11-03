@@ -62,7 +62,9 @@ written. Each keeps the spec's intent.
 - Attachments are picked with the webview's file input and copied into the
   draft's folder by an `add_attachment` command, so no dialog plugin is added.
 - One `draft_upsert` op per draft at a time; it writes the draft's latest
-  state when it runs, so fast typing does not queue a write per save.
+  state when it runs, so fast typing does not queue a write per save. A save
+  that lands while that op is running queues it again, so the write that
+  follows carries the save.
 - Undo of a waiting send clears the draft's defaults, so the reopened draft is
   never discarded as untouched.
 - Demo mode: debug builds with `--features fake` and `UBERMENSCH_FAKE=1`

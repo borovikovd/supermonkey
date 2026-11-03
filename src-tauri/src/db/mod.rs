@@ -31,15 +31,15 @@ pub fn open_writer(path: &Path) -> anyhow::Result<Connection> {
     let conn = Connection::open(path)?;
     tune(&conn)?;
     conn.execute_batch(SCHEMA)?;
-    for table in ["notices", "outbox"] {
+    for table in ["notices", "outbox", "ops"] {
         add_autoincrement(&conn, table)?;
     }
     Ok(conn)
 }
 
-/// The UI keys notices and send toasts by id, so those ids are never reused.
-/// Databases from before these tables had AUTOINCREMENT get them rebuilt with
-/// their rows. Neither table has indexes or tables referencing it.
+/// The UI keys notices and send toasts by id, and an op's runner deletes it by
+/// id, so those ids are never reused. Databases from before these tables had
+/// AUTOINCREMENT get them rebuilt with their rows. No table references them.
 fn add_autoincrement(conn: &Connection, table: &str) -> rusqlite::Result<()> {
     let sql: Option<String> = conn
         .query_row(
@@ -58,6 +58,8 @@ fn add_autoincrement(conn: &Connection, table: &str) -> rusqlite::Result<()> {
     tx.execute_batch(&format!(
         "INSERT INTO {table} SELECT * FROM {table}_old; DROP TABLE {table}_old"
     ))?;
+    // The table's indexes went with the old table; create them again.
+    tx.execute_batch(SCHEMA)?;
     tx.commit()
 }
 
@@ -188,5 +190,47 @@ mod tests {
             outbox_again > outbox && notice_again > notice,
             "ids reused after reopening: outbox {outbox_again}, notice {notice_again}"
         );
+    }
+
+    /// An old op queue keeps its rows and its index, and stops reusing ids.
+    #[test]
+    fn old_ops_get_autoincrement_and_keep_their_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.sqlite");
+        {
+            let conn = open_writer(&path).unwrap();
+            conn.execute_batch(
+                "DROP TABLE ops;
+                 CREATE TABLE ops (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL,
+                   action INTEGER, kind TEXT NOT NULL, payload TEXT NOT NULL,
+                   attempts INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+                 CREATE INDEX ops_account ON ops(account_id, id);
+                 INSERT INTO accounts (id, email, position, hue) VALUES (1, 'a@x.test', 0, 0);
+                 INSERT INTO ops (id, account_id, kind, payload, created_at) VALUES (5, 1, 'modify', '{}', 0);",
+            )
+            .unwrap();
+        }
+        let conn = open_writer(&path).unwrap();
+        let kept: String = conn
+            .query_row("SELECT kind FROM ops WHERE id = 5", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, "modify");
+        let index: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = 'ops_account' AND tbl_name = 'ops'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(index, 1);
+        conn.execute_batch(
+            "DELETE FROM ops;
+             INSERT INTO ops (account_id, kind, payload, created_at) VALUES (1, 'modify', '{}', 0);",
+        )
+        .unwrap();
+        let id: i64 = conn
+            .query_row("SELECT id FROM ops", [], |r| r.get(0))
+            .unwrap();
+        assert!(id > 5, "op id reused: {id}");
     }
 }
