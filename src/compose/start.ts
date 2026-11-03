@@ -141,6 +141,36 @@ export function resumeDraft(draft: string, thread: number | null, target: number
   openInline(draft, thread, target);
 }
 
+/**
+ * Text typed after a reply key and before its editor takes it, or null when
+ * no reply is on its way. Those keys are the start of the reply, not
+ * shortcuts.
+ */
+let typedAhead: string | null = null;
+
+/** Keydown: keeps a key typed while a reply is on its way; true if kept. */
+export function typeAhead(e: KeyboardEvent): boolean {
+  if (typedAhead === null || e.metaKey || e.ctrlKey || e.altKey) return false;
+  const c = useChrome.getState();
+  if (c.current()?.screen.kind !== "conversation" || openComposer.draft === c.inline?.draft) {
+    // The reply was dropped, or its editor is up and took the text.
+    typedAhead = null;
+    return false;
+  }
+  if (e.key.length === 1) typedAhead += e.key;
+  else if (e.key === "Backspace") typedAhead = typedAhead.slice(0, -1);
+  else return false;
+  e.preventDefault();
+  return true;
+}
+
+/** The reply editor takes what was typed ahead of it. */
+export function takeTypedAhead(): string {
+  const text = typedAhead ?? "";
+  typedAhead = null;
+  return text;
+}
+
 /** Stops the reply waiting for its conversation's data, if one is. */
 let stopWaiting: (() => void) | null = null;
 
@@ -172,7 +202,9 @@ function whenLoaded(thread: number, run: (data: ConversationData) => void) {
     if (stopWaiting === stop) stopWaiting = null;
   };
   const unsubChrome = useChrome.subscribe(() => {
-    if (!onScreen()) stop();
+    if (onScreen()) return;
+    stop();
+    typedAhead = null;
   });
   const unsubMirror = useMirror.subscribe(() => {
     // conversationRef updates in an effect after the mirror changes.
@@ -223,6 +255,7 @@ export function startReply(mode: ReplyMode, draftId?: string) {
 
   closeComposerOnScreen();
   const account = c.account;
+  typedAhead ??= "";
   whenLoaded(thread, (data) => {
     const msgs = data.messages;
     const latest = msgs.at(-1)?.id ?? null;

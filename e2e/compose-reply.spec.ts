@@ -55,16 +55,18 @@ async function inOrder<T>(
   );
 }
 
-/** Highlights a list row with `j` without opening it. */
+/** Highlights a list row with `j` or `k` without opening it. */
 async function highlight(app: App, subject: string): Promise<void> {
   await expect(app.row(subject)).toHaveCount(1);
-  const down = async (tries: number): Promise<void> => {
-    if ((await app.highlighted.textContent())?.includes(subject)) return;
-    if (tries === 0) throw new Error(`could not highlight ${subject}`);
-    await app.press("j");
-    await down(tries - 1);
-  };
-  await down(40);
+  const keys = await app.rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-row")));
+  const target = keys.indexOf(await app.rowKey(subject));
+  const lit = (await app.highlighted.count()) > 0;
+  const at = lit ? keys.indexOf(await app.highlighted.getAttribute("data-row")) : -1;
+  if (at !== target)
+    await app.press(
+      ...Array.from({ length: Math.abs(target - at) }, () => (at < target ? "j" : "k")),
+    );
+  await expect(app.highlighted).toContainText(subject);
 }
 
 /** Sends the composer on screen once its autosave has run, and lets the outbox send it. */
@@ -890,15 +892,16 @@ test("REP-13 reply keys pressed before the conversation loads open one composer"
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  await highlight(app, "Person 3");
-  // Nothing reaches the core, so the conversation stays unloaded.
+  await highlight(app, "Offsite venue");
+  // Nothing reaches the core, so the conversation stays unloaded. Letters
+  // typed after r are the reply's text (REP-15); Enter is reply all.
   const release = await app.park("submit");
-  await app.press("r", "f");
+  await app.press("r", "Enter");
   await release();
   await app.settle();
   await expect(app.editor).toHaveCount(1);
-  // The later key wins: a forward starts with an empty To.
-  await expect(app.chips("To")).toHaveCount(0);
+  // The later key wins: reply all puts Dave and Erin on Cc.
+  expect(await chipAddresses(app, "Cc")).toEqual(["dave@corp.test", "erin@corp.test"]);
 
   await closeComposer(app);
   await expect(stubs(app)).toHaveCount(0);
@@ -927,4 +930,26 @@ test("REP-14 compose keys work while focus is inside a message", async ({ app, g
   await expect(app.editor).toHaveCount(0);
   await app.settle();
   await expect(stubs(app)).toHaveCount(1);
+});
+
+test("REP-15 text typed before the reply opens goes into the reply", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  await highlight(app, "Person 3");
+  // The conversation cannot load yet, so the editor is not there to type in.
+  const release = await app.park("submit");
+  await app.press("r");
+  await app.type("thanks");
+  await release();
+  await app.settle();
+  await expect(app.editor).toHaveText("thanks");
+  await expect(app.editor).toBeFocused();
+  // No key acted as a shortcut (h would have opened the snooze picker).
+  await expect(app.page.getByRole("dialog")).toHaveCount(0);
+  await expect(app.conversationTitle).toHaveText("Person 3");
+
+  // On a conversation that is loaded, the same (f: a fresh forward).
+  await closeComposer(app);
+  await app.press("f");
+  await app.type("ok");
+  await expect(app.editor).toHaveText("ok");
 });

@@ -21,6 +21,7 @@ import {
   loadedDraft,
   openComposer,
   sendOnScreen,
+  takeTypedAhead,
 } from "./start";
 
 const SAVE_DELAY = 500;
@@ -340,6 +341,13 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       if (openComposer.draft === draft) openComposer.draft = null;
     };
   }, [draft, editor, update, attach]);
+
+  // Text typed after the reply key, before this editor had focus, starts the reply.
+  useEffect(() => {
+    if (!editor || !inline) return;
+    const text = takeTypedAhead();
+    if (text) editor.chain().focus("end").insertContent(text).run();
+  }, [editor, inline]);
 
   // A reply scrolls fully into view with the editor focused; a new message starts in To.
   useEffect(() => {

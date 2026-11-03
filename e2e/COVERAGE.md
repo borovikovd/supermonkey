@@ -265,7 +265,7 @@ The API is documented where it lives: `e2e/control.ts` (the `gmail` fixture), `e
 - **Faults** take a method name or a `Match` (account, query parameters, `nth`, `times`; unlimited by default). Outcomes: `drop`, `noResponse`, `status`, `statusAfterApply`, `delay`, `omitThreads`. `clearFaults()` and `offline(false)` retry what is backing off at once, as a network change would.
 - **Changes by another client** (`modify`, `deleteMessage`, `deleteThread`, `label`, `sendAs`, `createDraft`, `updateDraft`, `deleteDraft`, `sendDraft`) do not poll; call `gmail.poll()` (or pass `{ poll: true }`). `deliver` polls unless `poll: false`.
 - **The request log:** `gmail.requests("messages.batchModify", { account: A })` gives, in order, the method name, account, `params` (repeated keys joined by commas), JSON `body`, app time `at`, `held`, `answer` (status, `dropped`, or `noResponse`), `origin`, and `userAgent`.
-- **Composers:** `app.compose()` and `app.reply("r" | "Enter" | "f")` wait until the composer is ready. Keys typed before the editor has focus go to the shortcut handler, and fields typed before the draft's first load are overwritten.
+- **Composers:** `app.compose()` and `app.reply("r" | "Enter" | "f")` wait until the composer is ready. Text typed after `r`, `f`, or `Enter` before the reply editor has focus goes into the reply (REP-15), and fields typed before the draft's first load are kept (DRF-11); after `c`, keys typed before To has focus are lost.
 - **Restart and crash:** `app.restart(async () => { /* while down */ })` quits as `Cmd+Q` does (an open composer closes first) and relaunches on the same database, fake Gmail, and clock; `app.crashAndRelaunch(...)` skips the composer close. Fake Gmail, holds, and `app.advance` all work while the app is down.
 - **Focus:** `app.focus(false)` sets the page's `document.hasFocus()` and the core's focus rules together; `app.focus(true)` returns the notification the focus counts as a click on, and the page opens it as the app does.
 - **Platform:** `gmail.platform()` records notifications (`title`, `body`, `account` email, Gmail `thread`), the badge, opened URLs (message links go through the core's `open_url`) and files; `gmail.clearRecorded()` resets it. `app.popups` lists popup windows.
@@ -1763,6 +1763,17 @@ _EG · §Keyboard (compose blurred)_
 
 - **Steps:** open `p3`, press `r`, type "Kept". Click inside the message body, then press `Esc` `Esc`, `settle()`.
 - **Expect:** the composer closes, and the conversation shows the kept draft's stub.
+
+#### REP-15 · P2 · Text typed before the reply opens goes into the reply
+
+_EG · §Keyboard ("while compose … is focused, keystrokes go to that field"), DEVIATIONS (typed ahead)_
+
+- **Steps:**
+  1. Highlight `p3`. Park the page's submits, press `r`, type "thanks". Release, `settle()`.
+  2. `Esc` `Esc`, press `f`, type "ok".
+- **Expect:**
+  - After step 1, the editor has focus and reads "thanks"; no dialog opened (`h` was not taken as snooze), and `p3` is open.
+  - After step 2, the forward's editor reads "ok".
 
 ### 5.12 `compose-new.spec.ts` (NEW)
 

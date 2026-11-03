@@ -17,7 +17,7 @@ import {
   trash,
   undo,
 } from "../commands";
-import { startCompose, startReply } from "../compose/start";
+import { startCompose, startReply, typeAhead } from "../compose/start";
 import type { View } from "../ipc/types";
 import { useChrome } from "../store/chrome";
 import { measure } from "./meter";
@@ -121,6 +121,8 @@ export function onKeyDown(e: KeyboardEvent) {
     c.set({ sheet: "settings", palette: null });
     return;
   }
+  // Typed after r, f, or Enter, before the reply editor has focus: the reply's text.
+  if (typeAhead(e)) return;
   if (c.palette || isTyping(e.target) || c.inline || cur?.screen.kind === "compose") {
     // Owned by the palette, a field, or the composer.
     return;

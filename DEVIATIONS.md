@@ -134,3 +134,8 @@ the spec's wording:
   load is in: fields typed meanwhile win, files join the loaded ones, and a
   body typed before a resumed draft's body follows it. Send waits for the
   load; close leaves the screen at once and sends the close after it.
+- **Keys typed after `r`, `f`, or `Enter`** before the reply editor has focus
+  (its conversation still loading, or the composer not yet drawn) are the
+  start of the reply, not shortcuts: printable keys and Backspace are kept
+  and put in the editor when it opens. Leaving the conversation first drops
+  them. `c` does not do this.
