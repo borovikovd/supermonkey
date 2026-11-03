@@ -106,16 +106,6 @@ function AttachmentList({
 }) {
   return (
     <div className="mt-3 flex flex-wrap gap-2">
-      {attaching.map((a) => (
-        <span
-          key={`attaching-${a.key}`}
-          aria-busy="true"
-          className="flex items-center gap-1.5 rounded-control border border-dashed border-border-2 px-2 py-1 text-row text-text-3"
-        >
-          <Paperclip size={12} strokeWidth={1.5} />
-          <span className="max-w-[220px] truncate">{a.name}</span>
-        </span>
-      ))}
       {attachments.map((a) => (
         <span
           key={a.id}
@@ -131,6 +121,16 @@ function AttachmentList({
           >
             <X size={12} />
           </button>
+        </span>
+      ))}
+      {attaching.map((a) => (
+        <span
+          key={`attaching-${a.key}`}
+          aria-busy="true"
+          className="flex items-center gap-1.5 rounded-control border border-dashed border-border-2 px-2 py-1 text-row text-text-3"
+        >
+          <Paperclip size={12} strokeWidth={1.5} />
+          <span className="max-w-[220px] truncate">{a.name}</span>
         </span>
       ))}
     </div>
