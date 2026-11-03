@@ -14,15 +14,15 @@ use rusqlite::{OptionalExtension, params};
 use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
 
 use super::{AccountRt, Engine};
-use crate::model::{AccountId, DraftId, MessageId, ThreadId};
+use crate::model::{AccountId, DraftId, MessageId, Millis, OutboxId, ThreadId};
 
 #[derive(Debug)]
 struct Row {
-    id: i64,
+    id: OutboxId,
     draft: DraftId,
     /// Handed to Gmail with no clear answer yet; otherwise waiting.
     sending: bool,
-    send_after: i64,
+    send_after: Millis,
 }
 
 fn rows(e: &Engine, account: AccountId) -> Vec<Row> {
@@ -59,7 +59,7 @@ pub async fn run(e: Arc<Engine>, rt: Arc<AccountRt>) {
             return;
         }
         let now = crate::clock::now_ms();
-        let mut next_due: Option<i64> = None;
+        let mut next_due: Option<Millis> = None;
         let mut failed: Option<GmailError> = None;
         for row in rows(&e, rt.id) {
             let r = if row.sending {
@@ -98,7 +98,7 @@ pub async fn run(e: Arc<Engine>, rt: Arc<AccountRt>) {
 async fn set_state(
     e: &Engine,
     account: AccountId,
-    outbox: i64,
+    outbox: OutboxId,
     state: &'static str,
     delayed: bool,
 ) -> bool {
@@ -122,7 +122,7 @@ async fn set_state(
 fn touch_row_thread(
     ctx: &mut crate::writer::Ctx<'_>,
     account: AccountId,
-    outbox: i64,
+    outbox: OutboxId,
 ) -> anyhow::Result<()> {
     let t: Option<ThreadId> = ctx
         .tx
@@ -172,7 +172,7 @@ async fn send(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError> {
     send_draft(e, rt, row, &draft.id).await
 }
 
-async fn record_gmail_draft(e: &Engine, outbox: i64, gid: String) {
+async fn record_gmail_draft(e: &Engine, outbox: OutboxId, gid: String) {
     e.writer
         .call(move |ctx| {
             ctx.tx.execute(
@@ -231,7 +231,7 @@ async fn send_draft(
     }
 }
 
-fn undo_requested(e: &Engine, outbox: i64) -> bool {
+fn undo_requested(e: &Engine, outbox: OutboxId) -> bool {
     e.reads
         .with(|c| {
             Ok(c.query_row(
@@ -349,7 +349,6 @@ async fn sent(e: &Engine, rt: &AccountRt, row: &Row, msg: String, gmail_thread: 
             }
             ctx.touch_outbox(account, outbox)?;
             touch_row_thread(ctx, account, outbox)?;
-            crate::drafts::account_of(ctx.tx, &draft)?;
             Ok(())
         })
         .await

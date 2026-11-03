@@ -8,7 +8,7 @@ use rusqlite::{OptionalExtension, params};
 use ub_gmail::{Outcome, Priority, cost};
 
 use super::Engine;
-use crate::model::AccountId;
+use crate::model::{AccountId, AttachmentId};
 
 /// Account, Gmail message id, filename, Gmail attachment id, cached path.
 type AttachmentRow = (AccountId, String, String, Option<String>, Option<String>);
@@ -56,7 +56,7 @@ impl fmt::Display for DownloadError {
 impl std::error::Error for DownloadError {}
 
 /// Downloads an attachment row if it is not cached yet. Returns its path.
-pub async fn ensure(e: &Engine, attachment: i64) -> anyhow::Result<PathBuf> {
+pub async fn ensure(e: &Engine, attachment: AttachmentId) -> anyhow::Result<PathBuf> {
     let row: Option<AttachmentRow> = e.reads.with(|c| {
         Ok(c.query_row(
             "SELECT m.account_id, m.gmail_id, a.filename, a.gmail_att_id, a.local_path
@@ -100,7 +100,7 @@ pub async fn ensure(e: &Engine, attachment: i64) -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
-pub async fn open(e: &Engine, attachment: i64) -> anyhow::Result<()> {
+pub async fn open(e: &Engine, attachment: AttachmentId) -> anyhow::Result<()> {
     let path = ensure(e, attachment).await?;
     e.platform.open_path(&path)
 }

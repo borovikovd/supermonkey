@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use super::Engine;
 use super::ingest::PendingOps;
-use crate::model::{AccountId, ModifyAction, ModifyKind, SnoozeChange, ThreadId};
+use crate::model::{AccountId, Millis, ModifyAction, ModifyKind, SnoozeChange, ThreadId};
 use crate::writer::Ctx;
 
 /// A snoozed thread that gains `INBOX` from outside this app loses its snooze.
@@ -74,7 +74,7 @@ pub fn wake_due(e: &Engine) {
 /// Wakes snoozes as they come due while the app runs.
 pub async fn run(e: Arc<Engine>) {
     loop {
-        let next: Option<i64> = e
+        let next: Option<Millis> = e
             .reads
             .with(|c| {
                 Ok(c.query_row(

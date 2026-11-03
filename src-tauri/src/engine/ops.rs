@@ -13,12 +13,12 @@ use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
 
 use super::{AccountRt, Engine};
 use crate::mail::ModifyOp;
-use crate::model::AccountId;
+use crate::model::{AccountId, UndoEntryId};
 
 #[derive(Debug)]
 pub struct Op {
     pub id: i64,
-    pub action: Option<i64>,
+    pub action: Option<UndoEntryId>,
     pub kind: String,
     pub payload: String,
 }
@@ -183,7 +183,7 @@ fn drop_label_uses(
     account: AccountId,
     label: &str,
 ) -> anyhow::Result<()> {
-    let queued: Vec<(i64, Option<i64>, String)> = {
+    let queued: Vec<(i64, Option<UndoEntryId>, String)> = {
         let mut stmt = ctx.tx.prepare(
             "SELECT id, action, payload FROM ops WHERE account_id = ?1 AND kind = 'modify' ORDER BY id",
         )?;

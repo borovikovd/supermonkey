@@ -38,7 +38,7 @@ use ub_gmail::{AccountScheduler, Gmail, GmailError, OAuthConfig, Outcome, Schedu
 
 use crate::clock::{Kick, now_ms};
 use crate::db::ReadPool;
-use crate::model::{AccountId, SubId};
+use crate::model::{AccountId, Millis, SubId};
 use crate::writer::{EffectReceiver, Writer};
 
 /// How long Gmail errors may go on before the account shows a quiet sync status.
@@ -128,7 +128,7 @@ pub struct Engine {
     pub online: AtomicBool,
     pub searches: Mutex<HashMap<SubId, AbortHandle>>,
     /// The last notification shown, for click-through.
-    pub last_notification: Mutex<Option<(crate::notify::Notification, i64)>>,
+    pub last_notification: Mutex<Option<(crate::notify::Notification, Millis)>>,
     /// When the window last lost focus (0 while focused).
     pub unfocused_since: AtomicI64,
     /// Wakes the snooze timer when a snooze time changes.

@@ -10,7 +10,7 @@ use parking_lot::Mutex;
 use rusqlite::{OptionalExtension, params};
 
 use crate::db::{from_json, queries, to_json};
-use crate::model::{AccountId, Addr, MessageId, ThreadId};
+use crate::model::{AccountId, Addr, MessageId, Millis, ThreadId};
 use crate::writer::{Ctx, Effect};
 
 /// One message, parsed and (when the body was fetched) sanitized.
@@ -18,7 +18,7 @@ use crate::writer::{Ctx, Effect};
 pub struct Incoming {
     pub gmail_id: String,
     pub gmail_thread_id: String,
-    pub internal_date: i64,
+    pub internal_date: Millis,
     /// Gmail label ids.
     pub labels: Vec<String>,
     pub snippet: String,

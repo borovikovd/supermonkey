@@ -17,7 +17,9 @@ use super::attachments::DownloadError;
 use super::ops::{Done, bad};
 use super::{AccountRt, Engine};
 use crate::db::{from_json, to_json};
-use crate::model::{AccountId, Addr, DraftAttachment, DraftId, DraftKind, MessageId, ThreadId};
+use crate::model::{
+    AccountId, Addr, AttachmentId, DraftAttachment, DraftId, DraftKind, MessageId, ThreadId,
+};
 
 /// A draft as stored, for building its MIME.
 pub struct DraftRow {
@@ -101,7 +103,7 @@ fn mime_addr(a: &Addr) -> ub_mime::Addr {
 
 /// Downloads an attachment for a draft write. Offline and transient failures
 /// keep the write waiting; anything else rejects it.
-async fn download(e: &Engine, attachment: i64) -> Result<PathBuf, GmailError> {
+async fn download(e: &Engine, attachment: AttachmentId) -> Result<PathBuf, GmailError> {
     super::attachments::ensure(e, attachment)
         .await
         .map_err(|err| match err.downcast_ref::<DownloadError>() {
@@ -154,7 +156,7 @@ async fn quoted_inline(
     if !html.contains("data:") {
         return Ok(vec![]);
     }
-    let parts: Vec<(i64, String, String, String)> = e
+    let parts: Vec<(AttachmentId, String, String, String)> = e
         .reads
         .with(|c| {
             let mut stmt = c.prepare(
