@@ -193,3 +193,50 @@ test("UIC-03 an action whose submit fails is sent again", async ({ app, gmail })
   await app.reload();
   await expect(app.row("Person 1")).toHaveCount(0);
 });
+
+test("UIC-04 a row that changed while no list held it is not shown from an old copy", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.empty(gmail, app);
+  // 90 threads: the oldest is past the rows a first load carries.
+  const sent = await gmail.deliverMany(
+    Array.from({ length: 90 }, (_, i) => ({
+      account: A,
+      from: `Writer ${two(i + 1)} <writer${i + 1}@rows.test>`,
+      subject: `Batch ${two(i + 1)}`,
+      date: seeds.dates.minutesAgo(i + 1),
+      poll: false,
+    })),
+  );
+  await gmail.poll();
+  await app.settle();
+  const last = sent.at(-1);
+  if (!last) throw new Error("nothing delivered");
+  const scroller = app.list.locator("xpath=..");
+  const toBottom = () =>
+    scroller.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+
+  // The page has Batch 90's row, unread.
+  await toBottom();
+  await expect(app.row("Batch 90")).toHaveAttribute("data-unread");
+
+  // Another client archives it, then marks it read: no open list holds it by then.
+  await gmail.modify(A, last.id, [], ["INBOX"], { poll: true });
+  await app.settle();
+  await expect(app.row("Batch 90")).toHaveCount(0);
+  await gmail.modify(A, last.id, [], ["UNREAD"], { poll: true });
+  await app.settle();
+
+  // A search lists it again, past its first rows: it shows as read.
+  await app.press("/");
+  await app.page.getByPlaceholder("Search").fill("Batch");
+  await app.settle();
+  await expect(app.rows.first()).toBeVisible();
+  await toBottom();
+  await expect(app.row("Batch 90")).toBeVisible();
+  await app.settle();
+  await expect(app.row("Batch 90")).not.toHaveAttribute("data-unread");
+});

@@ -110,10 +110,50 @@ export function applyListPatch(
   return out;
 }
 
-/** Applies one channel message to confirmed state and drops acked actions. */
-export function applyChannel(s: MirrorState, msg: ChannelMessage): MirrorState {
+/**
+ * Drops the rows of `keys` that nothing holds any more: no list lists them, no
+ * conversation is subscribed to them, no undo entry of this session removed
+ * them, and they are not in `keep` (the selection). Patches only keep rows
+ * fresh while a list holds them, so a row kept past that could later show
+ * from an old copy. Mutates `rows`.
+ */
+export function dropUnheldRows(
+  rows: Record<string, ListRow>,
+  subs: Record<string, Sub>,
+  removals: Record<number, Removal[]>,
+  keys: Iterable<string>,
+  keep: ReadonlySet<string>,
+): void {
+  let held: Set<string> | null = null;
+  for (const k of keys) {
+    if (!(k in rows) || keep.has(k)) continue;
+    held ??= heldKeys(subs, removals);
+    if (!held.has(k)) delete rows[k];
+  }
+}
+
+function heldKeys(subs: Record<string, Sub>, removals: Record<number, Removal[]>): Set<string> {
+  const held = new Set<string>();
+  for (const sub of Object.values(subs)) {
+    if (sub.type === "list") for (const e of sub.ids) held.add(e.key);
+    else if (sub.type === "conversation") held.add(String(sub.key.thread));
+  }
+  for (const list of Object.values(removals)) for (const r of list) held.add(r.key);
+  return held;
+}
+
+/**
+ * Applies one channel message to confirmed state and drops acked actions.
+ * Rows that left every list are dropped unless `keep` (the selection) has them.
+ */
+export function applyChannel(
+  s: MirrorState,
+  msg: ChannelMessage,
+  keep: ReadonlySet<string> = new Set(),
+): MirrorState {
   const subs = { ...s.subs };
   const rows = { ...s.rows };
+  const left: string[] = [];
   for (const u of msg.updates) {
     const sub = subs[u.sub];
     // Ignore patches until the subscription's first load arrives.
@@ -124,6 +164,8 @@ export function applyChannel(s: MirrorState, msg: ChannelMessage): MirrorState {
         if (!u.first && !sub.loaded) break;
         for (const r of u.rows) mergeRow(rows, r);
         const ids = u.first ? (u.ids ?? []) : applyListPatch(sub.ids, u.removed, u.moved);
+        if (u.first) left.push(...sub.ids.map((e) => e.key));
+        else left.push(...u.removed);
         subs[u.sub] = { ...sub, loaded: true, ids, searching: u.searching, more: u.more };
         break;
       }
@@ -144,6 +186,7 @@ export function applyChannel(s: MirrorState, msg: ChannelMessage): MirrorState {
         break;
     }
   }
+  dropUnheldRows(rows, subs, s.removals, left, keep);
   return {
     ...s,
     subs,

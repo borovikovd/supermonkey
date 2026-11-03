@@ -302,8 +302,8 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `settings.spec.ts`         | SET    | the sheet, remote images                                                                     | `standard`                               | H15, H20                    | 2       | 1       | 1      | 0     |
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0     |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0     |
-| `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit                                            | `bulk`, `standard`                       | H8a, H16, H23               | 3       | 1       | 2      | 0     |
-| **Total**                  |        |                                                                                              |                                          |                             | **182** | **106** | **67** | **9** |
+| `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows                                      | `bulk`, `standard`                       | H8a, H16, H23               | 4       | 1       | 3      | 0     |
+| **Total**                  |        |                                                                                              |                                          |                             | **183** | **106** | **68** | **9** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -2846,6 +2846,17 @@ _EG · §UI state (Actions: "The UI sends actions one invoke at a time"); DEVIAT
   - `p1` is archived in Gmail.
   - `p1` stays out of the list, also after a reload.
 
+#### UIC-04 · P2 · A row that changed while no list held it is not shown from an old copy
+
+_EG · §UI state (Subscriptions: "Closing a subscription drops its rows unless another subscription holds them")_
+
+- **Seed:** `empty`, then 90 Inbox threads `Batch 01`–`Batch 90`, newest first, so `Batch 90` is past the rows a first load carries.
+- **Steps:**
+  1. Scroll to the bottom: `Batch 90` shows unread.
+  2. Another client archives it (poll), then marks it read (poll).
+  3. Search `Batch` and scroll to the bottom.
+- **Expect:** `Batch 90` shows as read.
+
 ---
 
 ## 6. Done-when traceability
@@ -2894,7 +2905,7 @@ _EG · §UI state (Actions: "The UI sends actions one invoke at a time"); DEVIAT
 | Sync                        | SYN-01 to SYN-07, LAB-07, VIEW-05                                                                                                                                           |
 | Gmail errors                | ERR-01 to ERR-09, ACC-08, SND-05 to SND-08, LAB-05, DRF-04, OFF-05                                                                                                          |
 | Data                        | ACC-07, ACC-10, SEC-04                                                                                                                                                      |
-| UI state                    | TRI-10, UND-05, UIC-01 to UIC-03, DRF-08, CONV-03, CONV-09, NEW-12                                                                                                          |
+| UI state                    | TRI-10, UND-05, UIC-01 to UIC-04, DRF-08, CONV-03, CONV-09, NEW-12                                                                                                          |
 | Security                    | SEC-01 to SEC-04, ACC-01                                                                                                                                                    |
 | DEVIATIONS                  | TRI-05 (`u` on the latest message only), NEW-07 (an undo-reopened draft is never discarded), NOT-06 (click heuristic), SNZ-04 (wake detection), SYN-02 (re-list on restart) |
 
