@@ -275,12 +275,21 @@ for (const [name, seed] of Object.entries(OTHER_SEEDS)) {
   test(`the ${name} seed opens settled`, async ({ app, gmail }) => {
     if (name === "bulk1000") test.slow();
     const t0 = Date.now();
-    const s = await seed(gmail, app);
+    await seed(gmail, app);
     test.info().annotations.push({ type: "open", description: `${Date.now() - t0} ms` });
-    await expect(app.page.getByRole("navigation")).toBeVisible();
-    if (name === "drafts") expect(s.drafts.size).toBe(7);
+    // Read once, without retrying: the seed returns only after its mail is on screen.
+    const subjects = await app.subjects();
+    if (name === "empty") {
+      expect(subjects).toEqual([]);
+      expect(await app.account(A).count()).toBe(1);
+    }
+    if (name === "drafts") expect(await app.splitHeader()).toBe("Important 16 · Other 7");
+    if (name === "contacts") {
+      expect(subjects).toEqual(expect.arrayContaining(["From Sue", "To the alias"]));
+    }
+    if (name === "splits") expect(subjects).toEqual(expect.arrayContaining(["X marks", "Y knot"]));
+    if (name === "security") expect(subjects).toContain("Hostile");
     if (name === "bulk1000") expect(await app.splitHeader()).toMatch(/^Important 999( · |$)/);
-    if (name === "splits") expect(s.thread("X").messages).toHaveLength(2);
   });
 }
 
@@ -389,7 +398,9 @@ test("UI handles: selection, unread, the selected message, the active split", as
   await app.press("Escape", "k", "e");
   await gmail.deliver({ account: A, from: "Ping <ping@x.test>", subject: "Ping" });
   await app.settle();
-  expect(await probe.added()).not.toContain(key);
+  const added = await probe.added();
+  expect(added).toContain(await app.rowKey("Ping"));
+  expect(added).not.toContain(key);
   await app.row("Q4 plan").click();
   await expect(app.selectedMessage).toHaveCount(1);
   await expect(app.selectedMessage).toHaveAttribute("data-message", /\d+/);
