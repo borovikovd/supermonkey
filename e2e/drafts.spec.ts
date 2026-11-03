@@ -245,6 +245,26 @@ test("DRF-14 a Gmail edit read back after the draft was reopened and edited does
   expect(bodyOf(d)).toContain("Aimed at nobody. Mine.");
 });
 
+test("DRF-15 a Gmail draft read before its thread's messages is aimed at the thread's messages", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.drafts(gmail, app, { open: false });
+  // The connect sync reads p2's drafts while the fetch of p2's messages is slow.
+  const thread = await gmail.hold({
+    api: "threads.get",
+    path: `*/threads/${s.thread("p2").threadId}`,
+  });
+  await app.open();
+  await thread.release();
+  await app.settle();
+
+  // `r` on the latest message resumes the newest draft started there.
+  await openThread(app, "Person 2");
+  await app.reply("r");
+  await expect(app.editor).toContainText("dTwoB");
+});
+
 test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app, gmail }) => {
   await seeds.drafts(gmail, app);
   await goDrafts(app);

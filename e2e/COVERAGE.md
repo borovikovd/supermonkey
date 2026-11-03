@@ -2326,6 +2326,17 @@ _EG · §Drafts ("unless a composer has it open"), Q24 (last writer wins)_
   3. Release the read's answer, `settle()`. `Esc` `Esc`, `settle()`, then `r` again.
 - **Expect:** the composer shows "Aimed at nobody. Mine." and not "from web". Gmail's draft holds "Aimed at nobody. Mine.".
 
+#### DRF-15 · P1 · A Gmail draft read before its thread's messages is aimed at the thread's messages
+
+_EG · §Reply composer ("A draft from Gmail is aimed at the message its `In-Reply-To` names … A draft from Gmail counts as started on the latest message when …")_
+
+- **Seed:** `drafts`, not opened yet.
+- **Steps:**
+  1. `hold(threads.get)` on `p2`'s thread only, then `app.open()`: the connect sync reads `p2`'s two drafts while its messages are still parked.
+  2. Release, `settle()`.
+  3. Open `p2` and press `r`.
+- **Expect:** the composer resumes `dTwoB`, the newer draft started on the latest message, rather than starting an empty one.
+
 ### 5.16 `undo-send.spec.ts` (SND)
 
 Outbox state machine (§Send and undo):

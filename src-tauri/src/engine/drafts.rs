@@ -799,6 +799,11 @@ pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
             if defer_if_open(e, local).await {
                 continue;
             }
+        } else if !thread_has_mail(e, rt.id, &g.message.thread_id) {
+            // A draft new to this app gets its kind and target from the
+            // thread's messages once, so they must be stored first.
+            super::sync::fetch_thread(e, rt, &g.message.thread_id, Format::Metadata, Priority::P2)
+                .await?;
         }
         match rt
             .sched
@@ -815,6 +820,21 @@ pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
         }
     }
     Ok(())
+}
+
+/// Whether a Gmail thread's messages other than drafts are stored.
+fn thread_has_mail(e: &Engine, account: AccountId, gmail_thread: &str) -> bool {
+    e.reads
+        .with(|c| {
+            Ok(c.query_row(
+                "SELECT EXISTS (SELECT 1 FROM threads t JOIN messages m ON m.thread_id = t.id
+                                WHERE t.account_id = ?1 AND t.gmail_id = ?2 AND m.is_draft = 0)",
+                params![account, gmail_thread],
+                |r| r.get(0),
+            )?)
+        })
+        .inspect_err(|err| log::warn!("read thread {gmail_thread}: {err:#}"))
+        .unwrap_or(false)
 }
 
 /// A local draft as `sync_list` reconciles it.
