@@ -5336,6 +5336,7 @@ dependencies = [
  "base64 0.22.1",
  "hyper",
  "hyper-util",
+ "parking_lot",
  "serde_json",
  "sha2 0.10.9",
  "tokio",

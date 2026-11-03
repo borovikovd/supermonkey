@@ -30,11 +30,6 @@
 //! Every request is logged ([`FakeGmail::requests`]) with its Gmail method name, account,
 //! body, and answer.
 
-#![expect(
-    clippy::unwrap_used,
-    reason = "A test double: panics are test failures."
-)]
-
 mod mailbox;
 mod mime;
 mod routes;
@@ -43,8 +38,8 @@ mod traffic;
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -52,6 +47,7 @@ use axum::body::Body;
 use axum::response::{IntoResponse, Response};
 use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
+use parking_lot::{Mutex, MutexGuard};
 use tokio::net::{TcpListener, TcpSocket};
 use tokio::sync::{Notify, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -75,7 +71,7 @@ pub struct FakeGmail {
 }
 
 pub(crate) struct Shared {
-    pub world: Mutex<World>,
+    world: Mutex<World>,
     faults: Mutex<Vec<FaultEntry>>,
     next_fault: AtomicU64,
     log: Mutex<Vec<LoggedRequest>>,
@@ -165,12 +161,12 @@ impl World {
 
 impl Shared {
     pub fn world(&self) -> MutexGuard<'_, World> {
-        self.world.lock().unwrap()
+        self.world.lock()
     }
 
     /// App time, if a clock was set; otherwise mailboxes keep their own dates.
     pub fn clock_ms(&self) -> Option<u64> {
-        let clock = self.clock.lock().unwrap().clone();
+        let clock = self.clock.lock().clone();
         clock.map(|now| now())
     }
 
@@ -185,7 +181,7 @@ impl Shared {
     /// The first fault that applies to this request, with its id. Every matching entry counts
     /// the request, applied or not, so `nth` and `times` count from injection.
     fn fault_for(&self, request: &RequestInfo) -> Option<(u64, Fault)> {
-        let mut faults = self.faults.lock().unwrap();
+        let mut faults = self.faults.lock();
         let mut chosen = None;
         for entry in faults.iter_mut().filter(|e| e.matcher.matches(request)) {
             entry.seen += 1;
@@ -197,13 +193,13 @@ impl Shared {
     }
 
     fn set_held(&self, seq: usize, held: bool) {
-        if let Some(entry) = self.log.lock().unwrap().get_mut(seq) {
+        if let Some(entry) = self.log.lock().get_mut(seq) {
             entry.held = held;
         }
     }
 
     fn answered(&self, seq: usize, answer: Answer) {
-        if let Some(entry) = self.log.lock().unwrap().get_mut(seq) {
+        if let Some(entry) = self.log.lock().get_mut(seq) {
             entry.answer = Some(answer);
         }
     }
@@ -211,7 +207,7 @@ impl Shared {
     /// Parks a request until it is released, then returns what it suffers next.
     async fn hold(&self, seq: usize, hold: u64, info: RequestInfo) -> Option<Fault> {
         let (release, released) = oneshot::channel();
-        self.held.lock().unwrap().push(Held {
+        self.held.lock().push(Held {
             seq,
             hold,
             info,
@@ -232,11 +228,7 @@ struct Unhold<'a> {
 
 impl Drop for Unhold<'_> {
     fn drop(&mut self) {
-        self.shared
-            .held
-            .lock()
-            .unwrap()
-            .retain(|h| h.seq != self.seq);
+        self.shared.held.lock().retain(|h| h.seq != self.seq);
         self.shared.set_held(self.seq, false);
     }
 }
@@ -519,8 +511,10 @@ impl FakeGmail {
     /// Starts the fake on `127.0.0.1` on a free port.
     /// Must be called inside a Tokio runtime: the server task is spawned on it.
     pub fn start() -> FakeGmail {
-        let listener = bind("127.0.0.1:0".parse().unwrap()).expect("bind the fake");
-        let addr = listener.local_addr().unwrap();
+        let listener = bind(SocketAddr::from(([127, 0, 0, 1], 0))).expect("bind the fake");
+        let addr = listener
+            .local_addr()
+            .expect("a bound listener has an address");
         let shared = Arc::new(Shared {
             world: Mutex::new(World::default()),
             faults: Mutex::default(),
@@ -593,9 +587,10 @@ impl FakeGmail {
 
     /// Expires every access token issued so far, so the next Gmail call gets a 401.
     pub fn expire_access_tokens(&self) {
-        let past = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        // A token lives while its expiry is after now, so now is already too late.
+        let now = Instant::now();
         for (_, expiry) in self.shared.world().access_tokens.values_mut() {
-            *expiry = past;
+            *expiry = now;
         }
     }
 
@@ -608,7 +603,7 @@ impl FakeGmail {
     /// which [`Release::Hold`] names.
     pub fn inject(&self, matcher: Matcher, fault: Fault) -> u64 {
         let id = self.shared.next_fault.fetch_add(1, Ordering::Relaxed);
-        self.shared.faults.lock().unwrap().push(FaultEntry {
+        self.shared.faults.lock().push(FaultEntry {
             id,
             matcher,
             fault,
@@ -619,19 +614,19 @@ impl FakeGmail {
 
     /// Removes every fault, holds included. Requests already held stay held.
     pub fn clear_faults(&self) {
-        self.shared.faults.lock().unwrap().clear();
+        self.shared.faults.lock().clear();
     }
 
     /// Ends holds and lets the requests they parked go on: handled normally, or suffering
     /// `then`. Returns how many requests it released.
     pub fn release(&self, which: &Release, then: Option<&Fault>) -> usize {
         let is_hold = |id: u64, api: Option<&str>| which.covers(id, api);
-        self.shared.faults.lock().unwrap().retain(|e| {
+        self.shared.faults.lock().retain(|e| {
             !(matches!(e.fault, Fault::Hold | Fault::HoldAnswer)
                 && is_hold(e.id, e.matcher.api.as_deref()))
         });
         let released: Vec<Held> = {
-            let mut held = self.shared.held.lock().unwrap();
+            let mut held = self.shared.held.lock();
             let (go, stay) = held
                 .drain(..)
                 .partition(|h| is_hold(h.hold, Some(h.info.api)));
@@ -649,7 +644,7 @@ impl FakeGmail {
 
     /// Requests parked by a hold now.
     pub fn held(&self) -> usize {
-        self.shared.held.lock().unwrap().len()
+        self.shared.held.lock().len()
     }
 
     /// Requests parked now by the holds `which` names.
@@ -657,7 +652,6 @@ impl FakeGmail {
         self.shared
             .held
             .lock()
-            .unwrap()
             .iter()
             .filter(|h| which.covers(h.hold, Some(h.info.api)))
             .count()
@@ -670,7 +664,7 @@ impl FakeGmail {
 
     /// Every request received so far.
     pub fn requests(&self) -> Vec<LoggedRequest> {
-        self.shared.log.lock().unwrap().clone()
+        self.shared.log.lock().clone()
     }
 
     /// How many requests matched `method` (`"*"` for any) and `path_glob`.
@@ -679,7 +673,6 @@ impl FakeGmail {
         self.shared
             .log
             .lock()
-            .unwrap()
             .iter()
             .filter(|r| matcher.matches(&r.info()))
             .count()
@@ -689,7 +682,7 @@ impl FakeGmail {
     /// what `newer_than:` counts from, and when requests are logged. Default: the system
     /// clock, with new messages a minute apart.
     pub fn set_clock(&self, now_ms: impl Fn() -> u64 + Send + Sync + 'static) {
-        *self.shared.clock.lock().unwrap() = Some(Arc::new(now_ms));
+        *self.shared.clock.lock() = Some(Arc::new(now_ms));
     }
 
     /// The next consent page answers Google's `access_denied` instead of a code.
@@ -704,7 +697,7 @@ impl FakeGmail {
 
     /// Clears the request log.
     pub fn clear_requests(&self) {
-        self.shared.log.lock().unwrap().clear();
+        self.shared.log.lock().clear();
     }
 
     /// Takes the server off the network or back. Offline, the port refuses connections and
@@ -759,10 +752,11 @@ impl FakeUser {
 
     /// Expires every access token of this user, so its next Gmail call gets a 401.
     pub fn expire_access_tokens(&self) {
-        let past = Instant::now().checked_sub(Duration::from_secs(1)).unwrap();
+        // A token lives while its expiry is after now, so now is already too late.
+        let now = Instant::now();
         for (email, expiry) in self.shared.world().access_tokens.values_mut() {
             if *email == self.email {
-                *expiry = past;
+                *expiry = now;
             }
         }
     }
@@ -1087,16 +1081,12 @@ async fn handle(
         &parts.headers,
         &body,
     );
+    // The clock is the caller's code: never run it under the log lock.
+    let at_ms = shared.now_ms();
     let seq = {
-        let mut log = shared.log.lock().unwrap();
+        let mut log = shared.log.lock();
         let seq = log.len();
-        log.push(LoggedRequest::new(
-            seq,
-            &info,
-            &parts.headers,
-            &body,
-            shared.now_ms(),
-        ));
+        log.push(LoggedRequest::new(seq, &info, &parts.headers, &body, at_ms));
         seq
     };
     let _in_flight = InFlight::new(&shared.in_flight);
