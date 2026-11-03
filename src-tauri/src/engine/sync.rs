@@ -459,6 +459,8 @@ struct HistoryBatch {
     deleted: HashSet<String>,
     /// Draft versions are new messages with DRAFT; deletes may be old versions.
     draft_change: bool,
+    /// Gmail thread id → the newest history record that names it.
+    newest: HashMap<String, u64>,
 }
 
 impl HistoryBatch {
@@ -468,23 +470,33 @@ impl HistoryBatch {
             added: HashSet::new(),
             deleted: HashSet::new(),
             draft_change: false,
+            newest: HashMap::new(),
         };
+        let mut newest_by_thread: HashMap<String, u64> = HashMap::new();
         for h in records {
+            let mut newest = |thread: &str| {
+                let n = newest_by_thread.entry(thread.to_string()).or_default();
+                *n = (*n).max(h.id);
+            };
             for m in h.messages_added {
                 let m = m.message;
+                newest(&m.thread_id);
                 batch.draft_change |= m.label_ids.iter().any(|l| l == "DRAFT");
                 batch.added.insert(m.id.clone());
                 batch.label_sets.insert(m.id, (m.thread_id, m.label_ids));
             }
             for c in h.labels_added.into_iter().chain(h.labels_removed) {
                 let m = c.message;
+                newest(&m.thread_id);
                 batch.label_sets.insert(m.id, (m.thread_id, m.label_ids));
             }
             for m in h.messages_deleted {
+                newest(&m.message.thread_id);
                 batch.deleted.insert(m.message.id);
             }
         }
         batch.draft_change |= !batch.deleted.is_empty();
+        batch.newest = newest_by_thread;
         batch
     }
 }
@@ -540,6 +552,11 @@ fn apply_history(
     touched.dedup();
     for &t in &touched {
         crate::threads::refresh(ctx, t)?;
+    }
+    for (gid, &h) in &batch.newest {
+        if let Some(t) = crate::db::queries::thread_by_gmail(ctx.tx, account, gid)? {
+            ingest::advance_history(ctx, t, h)?;
+        }
     }
     // The snooze rule, judged on net labels after the whole batch.
     super::snooze::apply_rule(ctx, &touched, &pending)?;

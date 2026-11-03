@@ -454,3 +454,45 @@ test("SYN-07 an opened thread fetches its bodies right away", async ({ app, gmai
   // Other Inbox bodies are still pending.
   expect((await bodies()).filter((r) => r.answer === 200).length).toBeLessThan(60);
 });
+
+test("SYN-08 a slower thread fetch never undoes a newer one", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  const held = async () => (await gmail.requests("threads.get")).some((r) => r.held);
+  const bodyFetch = { api: "threads.get", query: { format: "full" } } as const;
+  const from = seeds.PERSONS[0] ?? "";
+
+  // A new thread's body fetch reads Gmail now, but its answer comes late.
+  let slow = await gmail.holdAnswer(bodyFetch, { times: 1 });
+  const first = await gmail.deliver({ account: A, from, subject: "Race", text: "First." });
+  await expect.poll(held).toBe(true);
+  // Meanwhile a reply arrives, and a poll stores it.
+  await gmail.deliver({
+    account: A,
+    from,
+    subject: "Re: Race",
+    text: "Second.",
+    threadId: first.threadId,
+    inReplyTo: first.messageId,
+  });
+  await app.settle();
+  await slow.release();
+  await app.settle();
+  await app.row("Race").click();
+  await expect(app.conversationTitle).toHaveText("Race");
+  await expect(app.messages, "the stale answer deletes nothing").toHaveCount(2);
+  await app.press("Escape");
+  await app.settle();
+
+  // A label change a poll brought in stays too.
+  slow = await gmail.holdAnswer(bodyFetch, { times: 1 });
+  const other = await gmail.deliver({ account: A, from, subject: "Late read", text: "Hi." });
+  await expect.poll(held).toBe(true);
+  await gmail.modify(A, other.id, [], ["UNREAD"], { poll: true });
+  await app.settle();
+  await expect(app.row("Late read")).not.toHaveAttribute("data-unread");
+  await slow.release();
+  await app.settle();
+  await expect(app.row("Late read"), "the stale answer keeps it read").not.toHaveAttribute(
+    "data-unread",
+  );
+});

@@ -294,6 +294,15 @@ pub fn store_thread(
         )?;
         ThreadId(ctx.tx.last_insert_rowid())
     };
+    // An answer older than what is stored (a slow fetch overtaken by a poll)
+    // would delete newer messages and undo newer labels: keep only its bodies.
+    if let (Some(h), Some(stored)) = (history_id, thread_history(ctx, thread)?)
+        && h < stored
+    {
+        store_stale_bodies(ctx, account, msgs)?;
+        crate::threads::refresh(ctx, thread)?;
+        return Ok(thread);
+    }
     if let Some(h) = history_id {
         ctx.tx.execute(
             "UPDATE threads SET history_id = ?2 WHERE id = ?1",
@@ -400,34 +409,11 @@ fn store_message(
         id
     };
     let had_body = existing.is_some_and(|(_, b)| b);
-    if let Some(body) = &m.body
-        && !had_body
-    {
-        // Stored bodies never change.
-        ctx.tx.execute(
-            "UPDATE messages SET has_body = 1, body_html = ?2, quote_html = ?3, body_text = ?4, is_plain = ?5 WHERE id = ?1",
-            params![id, body.html, body.quote, body.text, body.plain],
-        )?;
-        if existing.is_some() {
-            // Metadata rows may not have listed every part yet.
-            ctx.tx.execute(
-                "DELETE FROM attachments WHERE message_id = ?1 AND local_path IS NULL",
-                [id],
-            )?;
-            store_parts(ctx, id, &m.parts)?;
-        }
+    if !had_body {
+        store_body(ctx, id, m, existing.is_some())?;
     }
     if !is_draft {
-        let to_text = m.to.iter().map(fmt_addr).collect::<Vec<_>>().join(" ");
-        let cc_text = m.cc.iter().map(fmt_addr).collect::<Vec<_>>().join(" ");
-        let body_text = m.body.as_ref().map(|b| b.text.as_str());
-        ctx.tx
-            .execute("DELETE FROM messages_fts WHERE rowid = ?1", [id])?;
-        ctx.tx.execute(
-            "INSERT INTO messages_fts (rowid, from_text, to_text, cc_text, subject, body)
-             VALUES (?1, ?2, ?3, ?4, ?5, coalesce(?6, (SELECT body_text FROM messages WHERE id = ?1), ''))",
-            params![id, fmt_addr(from), to_text, cc_text, m.subject, body_text],
-        )?;
+        index(ctx, id, m, from)?;
         let spam = m.labels.iter().any(|l| l == "SPAM");
         if !spam {
             count_contacts(ctx, account, m, from, mine)?;
@@ -435,6 +421,93 @@ fn store_message(
     }
     ctx.touch_message(id)?;
     Ok(id)
+}
+
+/// Stores the body of a message that has none yet. Stored bodies never change.
+fn store_body(ctx: &Ctx<'_>, id: MessageId, m: &Incoming, existed: bool) -> anyhow::Result<()> {
+    let Some(body) = &m.body else {
+        return Ok(());
+    };
+    ctx.tx.execute(
+        "UPDATE messages SET has_body = 1, body_html = ?2, quote_html = ?3, body_text = ?4, is_plain = ?5 WHERE id = ?1",
+        params![id, body.html, body.quote, body.text, body.plain],
+    )?;
+    if existed {
+        // Metadata rows may not have listed every part yet.
+        ctx.tx.execute(
+            "DELETE FROM attachments WHERE message_id = ?1 AND local_path IS NULL",
+            [id],
+        )?;
+        store_parts(ctx, id, &m.parts)?;
+    }
+    Ok(())
+}
+
+/// The message's full-text row.
+fn index(ctx: &Ctx<'_>, id: MessageId, m: &Incoming, from: &Addr) -> anyhow::Result<()> {
+    let to_text = m.to.iter().map(fmt_addr).collect::<Vec<_>>().join(" ");
+    let cc_text = m.cc.iter().map(fmt_addr).collect::<Vec<_>>().join(" ");
+    let body_text = m.body.as_ref().map(|b| b.text.as_str());
+    ctx.tx
+        .execute("DELETE FROM messages_fts WHERE rowid = ?1", [id])?;
+    ctx.tx.execute(
+        "INSERT INTO messages_fts (rowid, from_text, to_text, cc_text, subject, body)
+         VALUES (?1, ?2, ?3, ?4, ?5, coalesce(?6, (SELECT body_text FROM messages WHERE id = ?1), ''))",
+        params![id, fmt_addr(from), to_text, cc_text, m.subject, body_text],
+    )?;
+    Ok(())
+}
+
+/// From an answer older than the stored thread, only the bodies of messages
+/// still stored: those never change, while its messages and labels may be gone.
+fn store_stale_bodies(
+    ctx: &mut Ctx<'_>,
+    account: AccountId,
+    msgs: &[Incoming],
+) -> anyhow::Result<()> {
+    for m in msgs.iter().filter(|m| m.body.is_some()) {
+        let row: Option<(MessageId, bool)> = ctx
+            .tx
+            .query_row(
+                "SELECT id, has_body FROM messages WHERE account_id = ?1 AND gmail_id = ?2",
+                params![account, m.gmail_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some((id, false)) = row else { continue };
+        store_body(ctx, id, m, true)?;
+        if !m.labels.iter().any(|l| l == "DRAFT") {
+            let none = Addr {
+                name: None,
+                email: String::new(),
+            };
+            index(ctx, id, m, m.from.as_ref().unwrap_or(&none))?;
+        }
+        ctx.touch_message(id)?;
+    }
+    Ok(())
+}
+
+/// The stored thread's Gmail historyId.
+fn thread_history(ctx: &Ctx<'_>, thread: ThreadId) -> anyhow::Result<Option<u64>> {
+    let h: Option<String> = ctx.tx.query_row(
+        "SELECT history_id FROM threads WHERE id = ?1",
+        [thread],
+        |r| r.get(0),
+    )?;
+    Ok(h.and_then(|h| h.parse().ok()))
+}
+
+/// Moves the stored thread's historyId up to `h`, the newest history record
+/// a poll applied to it, so an answer read before that record counts as older.
+pub fn advance_history(ctx: &Ctx<'_>, thread: ThreadId, h: u64) -> anyhow::Result<()> {
+    if thread_history(ctx, thread)?.is_none_or(|s| s < h) {
+        ctx.tx.execute(
+            "UPDATE threads SET history_id = ?2 WHERE id = ?1",
+            params![thread, h.to_string()],
+        )?;
+    }
+    Ok(())
 }
 
 fn fmt_addr(a: &Addr) -> String {

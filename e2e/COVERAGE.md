@@ -297,7 +297,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `undo-send.spec.ts`        | SND    | the outbox state machine, held undo, rejection, no clear answer, restart                     | `standard`                               | H8a, H8b, H9, H13, H15      | 12      | 9       | 3      | 0     |
 | `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 6       | 5       | 1      | 0     |
 | `gmail-errors.spec.ts`     | ERR    | the outcome matrix for actions and `drafts.create`, back-off, 401, 404                       | `standard`                               | H6, H8, H9, H10, H13        | 9       | 5       | 3      | 1     |
-| `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 7       | 4       | 1      | 2     |
+| `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 8       | 5       | 1      | 2     |
 | `notifications.spec.ts`    | NOT    | when to notify, summary, mute, Dock badge, click                                             | `standard`                               | H17, H18                    | 6       | 5       | 1      | 0     |
 | `settings.spec.ts`         | SET    | the sheet, remote images                                                                     | `standard`                               | H15, H20                    | 2       | 1       | 1      | 0     |
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0     |
@@ -2573,6 +2573,17 @@ _EP · §Sync (priority 2)_
 - **Seed:** `bulk` at the production quota budget, immediately after connect.
 - **Steps:** Open the 50th row before its body has been fetched.
 - **Expect:** its body renders within a few seconds, while other Inbox bodies are still pending.
+
+#### SYN-08 · P1 · A slower thread fetch never undoes a newer one
+
+_EG · §Sync, §Data_
+
+- **Steps:**
+  1. `holdAnswer` on the next `threads.get format=full`. `deliver` a new thread "Race", so its body fetch reads Gmail and its answer parks. Then `deliver` a reply into it (the poll stores it), `settle()`, and release.
+  2. The same with a new thread "Late read": while its body answer is parked, mark it read from another client with `poll: true`, `settle()`, then release.
+- **Expect:**
+  - "Race" opens with both messages: the stale answer deletes nothing.
+  - "Late read" stays read.
 
 ### 5.20 `notifications.spec.ts` (NOT)
 
