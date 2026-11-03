@@ -293,7 +293,10 @@ impl State {
         let mut blocked = HashSet::new();
         let mut next_wake: Option<Instant> = None;
         for (_, _, id) in order {
-            let waiter = self.waiters.get_mut(&id).expect("listed waiter");
+            // Listed just above, under the same lock.
+            let Some(waiter) = self.waiters.get_mut(&id) else {
+                continue;
+            };
             if blocked.contains(&waiter.account) {
                 continue;
             }
