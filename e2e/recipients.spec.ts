@@ -410,3 +410,23 @@ test("RCP-08 new mail updates the suggestions", async ({ app, gmail }) => {
   await app.settle();
   expect(await suggested(app)).toEqual(["quinn@q.test", "quin@people.test"]);
 });
+
+test("RCP-09 suggestions that answer after a chip is made stay closed", async ({ app, gmail }) => {
+  await seeds.contacts(gmail, app);
+  await app.compose();
+  // Page timers wait for the test, so the autosave cannot close the list first.
+  await app.page.clock.pauseAt(await app.now());
+  const release = await app.park("autocomplete");
+  await app.type("sam,");
+  await expect(app.chips("To")).toHaveCount(1);
+  await release();
+  await expect.poll(() => app.page.evaluate<number>("window.__ub.pending().invokes")).toBe(0);
+  await expect(app.suggestions()).toHaveCount(0);
+
+  // Tab leaves the field without adding anyone.
+  await app.press("Tab");
+  await app.page.clock.resume();
+  await app.page.clock.setFixedTime(await app.now());
+  await app.settle();
+  expect(await chipAddresses(app, "To")).toEqual(["sam"]);
+});

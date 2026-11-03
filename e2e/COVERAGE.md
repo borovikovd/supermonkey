@@ -261,7 +261,7 @@ The API is documented where it lives: `e2e/control.ts` (the `gmail` fixture), `e
 - **The Gmail search waits for 300 ms of app time**, so a search needs `app.advance(300)` before Gmail results arrive.
 - **`settle()`** waits for the core (requests held by a hold excepted), the writer, and the page (invokes, buffered actions, a scheduled autosave or prefetch, the latest channel message). Call it before negative assertions and before reading Gmail.
 - **Holds:** `const h = await gmail.hold("messages.batchModify")`, act, assert, then `await h.release()` or `h.release({ kind: "status", status: 400 })`. `release` first waits until the hold has parked a request, so it cannot overtake it. `gmail.holdAnswer(api)` does the work at once and parks only the answer, so the app gets a stale reply (OFF-07).
-- **Parking the page's own invokes:** `const release = await app.park("add_attachment")` holds the page's `/invoke/<cmd>` requests (optionally only those whose JSON body passes a filter) until `await release()`. Use it for races between the UI and its own core calls; `settle()` waits on a parked invoke, so release first.
+- **Parking the page's own invokes:** `const release = await app.park("add_attachment")` holds the page's `/invoke/<cmd>` requests (optionally only those whose JSON body passes a filter) until `await release()`. Use it for races between the UI and its own core calls; `settle()` waits on a parked invoke, so release first. To hold UI timers (the autosave) still meanwhile, `page.clock.pauseAt(await app.now())`; `settle()` needs animation frames, so call `page.clock.resume()` and `page.clock.setFixedTime(await app.now())` before it.
 - **Faults** take a method name or a `Match` (account, query parameters, `nth`, `times`; unlimited by default). Outcomes: `drop`, `noResponse`, `status`, `statusAfterApply`, `delay`, `omitThreads`. `clearFaults()` and `offline(false)` retry what is backing off at once, as a network change would.
 - **Changes by another client** (`modify`, `deleteMessage`, `deleteThread`, `label`, `sendAs`, `createDraft`, `updateDraft`, `deleteDraft`, `sendDraft`) do not poll; call `gmail.poll()` (or pass `{ poll: true }`). `deliver` polls unless `poll: false`.
 - **The request log:** `gmail.requests("messages.batchModify", { account: A })` gives, in order, the method name, account, `params` (repeated keys joined by commas), JSON `body`, app time `at`, `held`, `answer` (status, `dropped`, or `noResponse`), `origin`, and `userAgent`.
@@ -1985,6 +1985,19 @@ _ST · §Recipients_
 - **Expect:**
   - In step 1, Quinn is suggested.
   - In step 2, Quinn is still suggested, now ranked above contacts that are received-only, such as `quin@people.test`.
+
+#### RCP-09 · P2 · Suggestions that answer after a chip is made stay closed
+
+_EG · §Recipients_
+
+- **Seed:** `contacts`.
+- **Steps:**
+  1. Press `c`. Pause page timers and park the page's `autocomplete` invokes. Type "sam,".
+  2. Release, and wait until the page has no invoke pending.
+  3. Press `Tab`, resume timers, `settle()`.
+- **Expect:**
+  - After step 2, no suggestion list is open.
+  - After step 3, To holds only the "sam" chip.
 
 ### 5.14 `attachments.spec.ts` (ATT)
 

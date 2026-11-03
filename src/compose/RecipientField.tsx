@@ -84,6 +84,8 @@ export function RecipientField({
   };
 
   const clearInput = () => {
+    // Suggestions still on their way are for text that is gone.
+    seq.current++;
     setText("");
     setSuggestions([]);
   };
