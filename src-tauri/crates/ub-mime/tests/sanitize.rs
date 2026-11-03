@@ -100,6 +100,14 @@ fn data_urls_only_for_images() {
 }
 
 #[test]
+fn text_leaves_out_a_style_block_in_the_body() {
+    assert_eq!(
+        html_to_text("<div><style>p { color: red }</style>Hi there</div>"),
+        "Hi there"
+    );
+}
+
+#[test]
 fn text_of_hostile_html_has_no_hidden_content() {
     let text = html_to_text(&hostile());
     assert!(text.starts_with("Hello"), "{text}");

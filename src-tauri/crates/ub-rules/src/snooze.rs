@@ -638,6 +638,7 @@ mod tests {
         assert_eq!(parse_at("in 2 weeks"), Some(ny(2026, 11, 16, 10, 0)));
         assert_eq!(parse_at("in 0 hours"), None);
         assert_eq!(parse_at("in 2 hours tomorrow"), None);
+        assert_eq!(parse_at("tomorrow in 2 hours"), None);
         assert_eq!(parse_at("in"), None);
         assert_eq!(parse_at("in 2 fortnights"), None);
     }
@@ -663,6 +664,7 @@ mod tests {
             "12/24",
             "fri 9am blah",
             "in 99999999999999999999 hours",
+            "in 999999999999999999 hours",
         ] {
             assert_eq!(parse_at(text), None, "{text:?}");
         }

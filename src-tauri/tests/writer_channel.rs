@@ -27,8 +27,13 @@ enum Op {
     Unsubscribe(usize),
     Modify(ModifyKind, Vec<usize>),
     Undo,
-    /// A sync result: another client changes a message's labels.
-    Remote(usize, bool),
+    /// A sync result: another client adds or removes a label on a thread's
+    /// latest message. `INBOX` moves it in and out of views; a category moves
+    /// it between the Important and Other sections.
+    Remote(usize, &'static str, bool),
+    /// A sync result: a thread's latest message becomes the newest of all, so
+    /// the thread moves up past the threads it followed.
+    Bump(usize),
 }
 
 fn view() -> impl Strategy<Value = View> {
@@ -60,7 +65,13 @@ fn op() -> impl Strategy<Value = Op> {
         (0usize..4).prop_map(Op::Unsubscribe),
         (kind, proptest::collection::vec(0usize..40, 1..4)).prop_map(|(k, t)| Op::Modify(k, t)),
         Just(Op::Undo),
-        (0usize..40, any::<bool>()).prop_map(|(t, b)| Op::Remote(t, b)),
+        (
+            0usize..40,
+            prop_oneof![Just("INBOX"), Just("CATEGORY_PROMOTIONS")],
+            any::<bool>()
+        )
+            .prop_map(|(t, l, b)| Op::Remote(t, l, b)),
+        (0usize..40).prop_map(Op::Bump),
     ]
 }
 
@@ -257,17 +268,36 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
                     writer.actions(vec![next(Action::Undo { account: 1, entry })]);
                 }
             }
-            Op::Remote(i, inbox) => {
+            Op::Remote(i, label, add) => {
                 let t = threads[i % threads.len()];
                 writer.sync(move |ctx| {
                     let msgs = ubermensch_lib::threads::messages(ctx.tx, t)?;
                     if let Some(m) = msgs.last() {
                         let mut labels: Vec<String> =
-                            m.labels.iter().filter(|l| *l != "INBOX").cloned().collect();
-                        if inbox {
-                            labels.push("INBOX".into());
+                            m.labels.iter().filter(|l| *l != label).cloned().collect();
+                        if add {
+                            labels.push(label.into());
                         }
                         ubermensch_lib::threads::set_message_labels(ctx, m.id, &labels)?;
+                        ubermensch_lib::threads::refresh(ctx, t)?;
+                    }
+                    Ok(())
+                });
+            }
+            Op::Bump(i) => {
+                let t = threads[i % threads.len()];
+                writer.sync(move |ctx| {
+                    let newest: i64 =
+                        ctx.tx
+                            .query_row("SELECT max(internal_date) FROM messages", [], |r| {
+                                r.get(0)
+                            })?;
+                    let msgs = ubermensch_lib::threads::messages(ctx.tx, t)?;
+                    if let Some(m) = msgs.last() {
+                        ctx.tx.execute(
+                            "UPDATE messages SET internal_date = ?2 WHERE id = ?1",
+                            rusqlite::params![m.id, newest + 1],
+                        )?;
                         ubermensch_lib::threads::refresh(ctx, t)?;
                     }
                     Ok(())
@@ -315,4 +345,25 @@ fn done_and_undo_reach_an_open_inbox_through_patches() {
     ])
     .unwrap();
     assert_eq!(undone["s1"].len(), 25);
+}
+
+/// Alone in Inbox, a thread that moves from Important to Other keeps its
+/// place, so the patch must carry the new split without any reordering.
+#[test]
+fn a_section_change_in_place_reaches_the_mirror() {
+    let others: Vec<usize> = (0..40).filter(|&i| i != 1).collect();
+    let before = run(vec![
+        Op::Subscribe(0, View::Inbox),
+        Op::Modify(ModifyKind::Done, others.clone()),
+    ])
+    .unwrap();
+    let after = run(vec![
+        Op::Subscribe(0, View::Inbox),
+        Op::Modify(ModifyKind::Done, others),
+        Op::Remote(1, "CATEGORY_PROMOTIONS", true),
+    ])
+    .unwrap();
+    assert_eq!(before["s1"].len(), 1);
+    assert_eq!(after["s1"].len(), 1);
+    assert_ne!(before["s1"][0].split, after["s1"][0].split);
 }

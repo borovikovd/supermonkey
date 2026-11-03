@@ -378,6 +378,17 @@ mod tests {
         activity().get(label).copied().unwrap_or(0)
     }
 
+    /// Yields until `done`, failing instead of hanging when it never happens.
+    async fn until(what: &str, done: impl Fn() -> bool) {
+        for _ in 0..1000 {
+            if done() {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+        panic!("never happened: {what}");
+    }
+
     #[tokio::test]
     async fn a_task_is_busy_until_it_parks_and_again_once_kicked() {
         let kick = Arc::new(Kick::default());
@@ -396,6 +407,7 @@ mod tests {
         assert_eq!(rx.recv().await, Some(1));
         task.await.unwrap();
         assert_eq!(busy("test-kick"), 0);
+        assert_eq!(busy("kick"), 0, "a taken kick stays busy");
     }
 
     fn manual(wall: i64) -> Manual {
@@ -431,6 +443,21 @@ mod tests {
         assert_eq!(clock.advance(5_000), 1);
         long.await.unwrap();
         assert_eq!(clock.now(), 16_500);
+    }
+
+    #[tokio::test]
+    async fn a_dropped_sleep_leaves_no_deadline_behind() {
+        let clock = Arc::new(manual(0));
+        let c = clock.clone();
+        let sleeping = tokio::spawn(async move { drop(c.sleep(Duration::from_millis(300)).await) });
+        until("the sleep registers", || {
+            clock.next_due_within(300) == Some(300)
+        })
+        .await;
+        sleeping.abort();
+        until("the sleep is dropped", || sleeping.is_finished()).await;
+        assert_eq!(clock.next_due_within(u64::MAX), None);
+        assert_eq!(clock.advance(300), 0);
     }
 
     #[test]

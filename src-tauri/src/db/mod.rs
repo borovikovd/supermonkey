@@ -168,5 +168,27 @@ mod tests {
             )
             .unwrap();
         assert_eq!(leftovers, 0);
+
+        // Opening a migrated database again must not rebuild the tables,
+        // which would reset their sequences and reuse ids once rows are gone.
+        conn.execute_batch("DELETE FROM outbox; DELETE FROM notices;")
+            .unwrap();
+        drop(conn);
+        let conn = open_writer(&path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO outbox (account_id, draft_id, send_after, state) VALUES (1, 'f', 0, 'waiting');
+             INSERT INTO notices (account_id, kind, message, created_at) VALUES (1, 'info', 'later', 0);",
+        )
+        .unwrap();
+        let outbox_again: i64 = conn
+            .query_row("SELECT id FROM outbox", [], |r| r.get(0))
+            .unwrap();
+        let notice_again: i64 = conn
+            .query_row("SELECT id FROM notices", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            outbox_again > outbox && notice_again > notice,
+            "ids reused after reopening: outbox {outbox_again}, notice {notice_again}"
+        );
     }
 }

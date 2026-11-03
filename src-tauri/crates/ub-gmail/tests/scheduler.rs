@@ -126,6 +126,28 @@ async fn priority_one_waits_for_refill_once_the_bucket_is_empty() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_cheap_request_does_not_overtake_an_earlier_one_waiting_for_budget() {
+    let scheduler = Scheduler::new(QuotaConfig::default());
+    let account = scheduler.account(A);
+    drop(account.acquire(Priority::P1, 1000).await);
+    let order = Arc::new(Mutex::new(Vec::new()));
+    let mut tasks = Vec::new();
+    // 400 units take 5 s to refill; 10 would take 125 ms.
+    for cost in [400, 10] {
+        let (account, order) = (account.clone(), order.clone());
+        tasks.push(tokio::spawn(async move {
+            drop(account.acquire(Priority::P1, cost).await);
+            order.lock().unwrap().push(cost);
+        }));
+        settle().await;
+    }
+    for task in tasks {
+        task.await.unwrap();
+    }
+    assert_eq!(*order.lock().unwrap(), vec![400, 10]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn background_spending_is_capped_per_minute() {
     let scheduler = Scheduler::new(QuotaConfig::default());
     let account = scheduler.account(A);
@@ -198,7 +220,13 @@ fn backoff_doubles_to_a_minute_with_jitter() {
             wait >= base.mul_f64(0.8) && wait <= base.mul_f64(1.2).min(Duration::from_secs(60))
         );
     }
-    assert!(backoff(30, None) <= Duration::from_secs(60));
+    for attempt in [30, 32, 1000] {
+        let wait = backoff(attempt, None);
+        assert!(
+            wait >= Duration::from_secs(48) && wait <= Duration::from_secs(60),
+            "attempt {attempt}: {wait:?}"
+        );
+    }
     assert_eq!(
         backoff(3, Some(Duration::from_secs(5))),
         Duration::from_secs(5)
@@ -237,6 +265,27 @@ async fn with_retry_retries_transient_outcomes_only() {
         Err(GmailError::new(Outcome::ServerError { status: 500 }))
     })
     .await;
-    assert!(result.is_err());
+    assert_eq!(
+        result.unwrap_err().outcome,
+        Outcome::ServerError { status: 500 }
+    );
     assert_eq!(calls.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn with_retry_waits_as_long_as_retry_after_says() {
+    let calls = AtomicUsize::new(0);
+    let start = Instant::now();
+    let result = with_retry(2, || async {
+        if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            Err(GmailError::new(Outcome::RateLimited {
+                retry_after: Some(Duration::from_secs(30)),
+            }))
+        } else {
+            Ok("done")
+        }
+    })
+    .await;
+    assert_eq!(result.unwrap(), "done");
+    assert_eq!(Instant::now() - start, Duration::from_secs(30));
 }

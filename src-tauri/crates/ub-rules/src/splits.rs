@@ -84,6 +84,7 @@ mod tests {
         }
         // An unknown category without CATEGORY_PERSONAL is not "no category".
         assert!(!is_person_to_person(&["CATEGORY_PURCHASES"], false));
+        assert!(!is_person_to_person(&["category_purchases"], false));
         // User label ids are not categories.
         assert!(is_person_to_person(&["Label_12"], false));
     }
@@ -110,5 +111,7 @@ mod tests {
         m.is_list = false;
         m.message_label_ids = vec!["CATEGORY_SOCIAL".into()];
         assert_eq!(hits(&m), ["Social"]);
+        m.message_label_ids = vec!["CATEGORY_UPDATES".into()];
+        assert_eq!(hits(&m), ["Updates"]);
     }
 }

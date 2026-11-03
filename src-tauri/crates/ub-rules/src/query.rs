@@ -1086,6 +1086,7 @@ mod tests {
     #[test]
     fn bare_words_differ_by_mode() {
         assert!(m("alice", Mode::Rule));
+        assert!(m("smith", Mode::Rule), "the sender's display name");
         assert!(m("budget", Mode::Rule));
         assert!(m("\"q3 plan\"", Mode::Rule));
         assert!(!m("attached", Mode::Rule));
