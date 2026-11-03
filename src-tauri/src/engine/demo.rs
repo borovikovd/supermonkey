@@ -152,9 +152,35 @@ fn seed(u: &FakeUser, me: &str) {
     });
 }
 
+fn enabled() -> bool {
+    cfg!(debug_assertions) && std::env::var("UBERMENSCH_FAKE").as_deref() == Ok("1")
+}
+
+/// Demo mode's database, emptied first. The fake Gmail lives in memory and is
+/// seeded anew each launch, so mail cached from an earlier launch would no
+/// longer match it (threads shown twice, state lost). Never the real database:
+/// the path is the demo's own.
+pub fn fresh_db() -> Option<std::path::PathBuf> {
+    if !enabled() {
+        return None;
+    }
+    let path = std::env::temp_dir().join("ubermensch-demo.db");
+    for suffix in ["", "-wal", "-shm"] {
+        let mut file = path.clone().into_os_string();
+        file.push(suffix);
+        match std::fs::remove_file(&file) {
+            Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
+                log::warn!("demo: remove {}: {err}", file.to_string_lossy());
+            }
+            _ => {}
+        }
+    }
+    Some(path)
+}
+
 /// Starts the fake server and returns the config, token store, and accounts to create.
 pub fn setup(writer: &Writer) -> Option<(Config, Arc<dyn TokenStore>)> {
-    if !cfg!(debug_assertions) || std::env::var("UBERMENSCH_FAKE").as_deref() != Ok("1") {
+    if !enabled() {
         return None;
     }
     let fake = tauri::async_runtime::block_on(async { FakeGmail::start() });

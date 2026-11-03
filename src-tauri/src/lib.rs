@@ -44,6 +44,10 @@ use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use crate::writer::Writer;
 
 fn db_path(data_dir: &std::path::Path) -> PathBuf {
+    #[cfg(feature = "fake")]
+    if let Some(path) = engine::demo::fresh_db() {
+        return path;
+    }
     std::env::var("UBERMENSCH_DB").map_or_else(|_| data_dir.join("ubermensch.db"), PathBuf::from)
 }
 

@@ -8,7 +8,7 @@
     "build": "vp build",
     "check": "vp check",
     "tauri": "tauri",
-    "demo": "UBERMENSCH_FAKE=1 UBERMENSCH_WEB_BRIDGE=1 UBERMENSCH_DB=${TMPDIR:-/tmp}/ubermensch-demo.db tauri dev --features fake"
+    "demo": "UBERMENSCH_FAKE=1 UBERMENSCH_WEB_BRIDGE=1 tauri dev --features fake"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
