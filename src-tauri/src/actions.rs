@@ -139,9 +139,13 @@ fn close_composer_sub(ctx: &mut Ctx<'_>, draft: &DraftId) {
 }
 
 /// The Gmail listing a subscription needs while online: Search, and the
-/// Label, Trash, and Spam views (SPEC Views).
+/// Done, Label, Trash, and Spam views (SPEC Views).
 fn gmail_query(tx: &Connection, key: &SubKey) -> Option<(AccountId, GmailListQuery)> {
     match key {
+        SubKey::List {
+            account,
+            view: View::Done,
+        } => Some((*account, GmailListQuery::Done)),
         SubKey::Search { account, query } if !query.trim().is_empty() => Some((
             *account,
             GmailListQuery::Search(ub_rules::strip_is_list(query)),

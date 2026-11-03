@@ -633,20 +633,22 @@ _DT · §Views_
 | m1 `INBOX`, m2 `STARRED`+`TRASH` | yes                                       | yes      | –       | **no**: the star is only on a trashed message |
 | m1 `STARRED`, m2 `INBOX`+`SPAM`  | **no**: `INBOX` is only on a spam message | –        | yes     | yes                                           |
 
-#### VIEW-03 · P1 · Done holds threads seen in Inbox that left it
+#### VIEW-03 · P1 · Done lists every thread outside Inbox, from Gmail too
 
-_DT · §Views (Done, `seen_in_inbox`)_
+_DT · §Views (Done, and the `threads.list` merge)_
 
 - **Seed:** `standard`.
 
-| Case                                                                | In Done?                                       |
-| ------------------------------------------------------------------- | ---------------------------------------------- |
-| `e` on `p1` in this app                                             | yes                                            |
-| `archivedOld` (left Inbox before the first connect)                 | no                                             |
-| `p2`, seen in Inbox, then archived by another client, then `poll()` | yes                                            |
-| `p3` snoozed with `h`                                               | no. It is in Snoozed.                          |
-| `p4` archived, then `#` from Done                                   | no. It is in Trash: every message is in trash. |
-| `p5` archived, then `Shift+E` from Done                             | no. It is back in Inbox.                       |
+| Case                                              | In Done?                                                    |
+| ------------------------------------------------- | ----------------------------------------------------------- |
+| `e` on `p1` in this app                           | yes                                                         |
+| `p2` archived by another client, then `poll()`    | yes                                                         |
+| a thread delivered without `INBOX`                | yes                                                         |
+| `archivedOld` (archived before the first connect) | yes, from `threads.list` `q=-in:inbox -in:draft`, 15 a page |
+| `p3` snoozed with `h`                             | no. It is in Snoozed.                                       |
+| `trashOld`, `spamOld`                             | no                                                          |
+| `p4` archived, then `#` from Done                 | no. It is in Trash: every message is in trash.              |
+| `p5` archived, then `Shift+E` from Done           | no. It is back in Inbox.                                    |
 
 #### VIEW-04 · P1 · Drafts lists every draft, and mail actions do nothing there
 
@@ -2834,16 +2836,16 @@ _DT · §Sync · Done when 2_
 
 - **Seed:** `standard` on a fresh database. For the drafts row, use `drafts`.
 
-| Gmail holds                             | The app shows                                                                                       |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| every Inbox thread                      | Inbox lists exactly those threads (ids equal Gmail's `INBOX` threads), newest first                 |
-| drafts                                  | Drafts lists each one                                                                               |
-| `sent10` and `sent89`                   | listed in Sent                                                                                      |
-| `sent91`                                | not listed until a search finds it                                                                  |
-| `starredOld`                            | listed in Starred                                                                                   |
-| `archivedOld`, `projOld*`, `invoiceOld` | not listed anywhere until a search or a label view finds them                                       |
-| user labels                             | all in the `l` picker                                                                               |
-| `sendAs`                                | The From picker lists both of A's addresses. B's display name comes from its `sendAs` (see ACC-02). |
+| Gmail holds                             | The app shows                                                                                                 |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| every Inbox thread                      | Inbox lists exactly those threads (ids equal Gmail's `INBOX` threads), newest first                           |
+| drafts                                  | Drafts lists each one                                                                                         |
+| `sent10` and `sent89`                   | listed in Sent                                                                                                |
+| `sent91`                                | not listed until a search finds it                                                                            |
+| `starredOld`                            | listed in Starred                                                                                             |
+| `archivedOld`, `projOld*`, `invoiceOld` | not fetched by the connect sync (no `threads.get` for them); Done, a search, or a label view lists them later |
+| user labels                             | all in the `l` picker                                                                                         |
+| `sendAs`                                | The From picker lists both of A's addresses. B's display name comes from its `sendAs` (see ACC-02).           |
 
 - **Also:** the request log has no `attachments.get`.
 

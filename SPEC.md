@@ -160,7 +160,7 @@ A thread's views come from its messages' labels. It is in Trash or Spam when any
 | View | What it lists |
 |---|---|
 | Inbox | Threads with `INBOX` by the rule above, not snoozed, grouped into splits |
-| Done | Threads marked `seen_in_inbox` that are no longer in Inbox and not snoozed, and that have at least one message that is not a draft and not in trash or spam. `seen_in_inbox` is set when this app sees the thread with `INBOX` while the account is connected, and is never cleared |
+| Done | Gmail's archive: threads not in Inbox and not snoozed that have at least one message that is not a draft and not in trash or spam. Nothing is stored for it, so Done is the same on every device |
 | Snoozed | Threads with `snooze_until` set, whether or not it has passed |
 | Starred | Gmail `STARRED` by the rule above |
 | Sent | Gmail `SENT` by the rule above |
@@ -169,7 +169,7 @@ A thread's views come from its messages' labels. It is in Trash or Spam when any
 | Search | Local matches, then Gmail matches while online |
 | Trash, Spam | Threads in Trash or Spam by the rule above |
 
-Most labeled, trashed, and spam mail is older than the first sync. Opening a Label, Trash, or Spam view while online therefore also runs `threads.list` with that label's id, and merges the results the way Search does. Trash and Spam set `includeSpamTrash=true`.
+Most archived, labeled, trashed, and spam mail is older than the first sync. Opening Done, a Label, Trash, or Spam view while online therefore also runs `threads.list` and merges the results the way Search does: Done with `q=-in:inbox -in:draft`, the others with that label's id. Trash and Spam set `includeSpamTrash=true`.
 
 `g` then a letter jumps to a view: `e` done, `h` snoozed, `s` starred, `t` sent, `d` drafts, `l` label picker, `#` trash, `!` spam. From any view, `g` then `i` and `g` then `o` open Inbox on the Important and Other splits. The header stays `Inbox`. If that split is hidden because it is empty, the jump shows its header. If Important is turned off, `g` then `i` opens Inbox and does not show that split.
 
@@ -614,7 +614,7 @@ One SQLite file in the app data directory. `rusqlite` with bundled SQLite and FT
 | Table | Holds |
 |---|---|
 | `accounts` | Email, display name, `sendAs` addresses, rail position, avatar hue, `history_id`, last sync time, needs sign-in |
-| `threads` | Subject, snippet, sort time, unread, snooze time, `seen_in_inbox`, assigned split, `rev`, Gmail thread id, Gmail `historyId` at last fetch |
+| `threads` | Subject, snippet, sort time, unread, snooze time, assigned split, `rev`, Gmail thread id, Gmail `historyId` at last fetch |
 | `messages` | Headers, sanitized HTML, plain text, Gmail ids, `Message-ID` and reply ids, list flag, that message's label ids, `rev` |
 | `labels` | Account, Gmail label id, name, system or user |
 | `thread_labels` | Thread to label, derived from message labels by the rule in Views |

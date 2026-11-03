@@ -81,6 +81,8 @@ pub enum Effect {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum GmailListQuery {
     Search(String),
+    /// The Done view: every thread outside Inbox (SPEC Views).
+    Done,
     Label {
         label_gmail_id: String,
         include_spam_trash: bool,

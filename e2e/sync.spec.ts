@@ -165,10 +165,15 @@ test("SYN-01 the connect sync matches Gmail", async ({ app, gmail, page }) => {
   await app.settle();
   await expect(app.row("Trip ideas")).toHaveCount(1);
 
-  // Older mail is nowhere yet.
-  await app.press("g", "e");
-  await app.settle();
-  await expect(app.row(/Archived before|Project alpha|Invoice 2019/)).toHaveCount(0);
+  // The connect sync fetched no older mail.
+  const fetchedThreads = (await gmail.requests("threads.get", { account: A })).map((r) => r.path);
+  for (const key of ["archivedOld", "projOld1", "invoiceOld"]) {
+    const id = s.thread(key).threadId;
+    expect(
+      fetchedThreads.filter((p) => p.endsWith(`/threads/${id}`)),
+      key,
+    ).toEqual([]);
+  }
 
   // The connect sync downloads no attachments. Inline `cid:` images are
   // fetched with the body (§Reading), so fwd's logo is the one fetch allowed;

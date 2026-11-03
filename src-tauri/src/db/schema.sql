@@ -56,7 +56,6 @@ CREATE TABLE IF NOT EXISTS threads (
   in_spam         INTEGER NOT NULL DEFAULT 0,
   has_live        INTEGER NOT NULL DEFAULT 0,  -- a message that is not a draft and not in trash or spam
   snooze_until    INTEGER,
-  seen_in_inbox   INTEGER NOT NULL DEFAULT 0,
   split_id        INTEGER,
   history_id      TEXT,
   rev             INTEGER NOT NULL DEFAULT 0,

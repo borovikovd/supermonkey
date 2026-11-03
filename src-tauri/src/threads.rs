@@ -190,7 +190,7 @@ pub fn refresh(ctx: &mut Ctx<'_>, thread: ThreadId) -> anyhow::Result<()> {
         "UPDATE threads SET subject = ?2, snippet = ?3, sender_name = ?4, sender_email = ?5, sort_time = ?6,
             message_count = ?7, unread = ?8, starred = ?9, has_attachments = ?10, in_inbox = ?11,
             in_trash = ?12, in_spam = ?13, has_live = ?14,
-            seen_in_inbox = seen_in_inbox OR ?11, split_id = ?15
+            split_id = ?15
          WHERE id = ?1",
         params![
             thread,

@@ -36,7 +36,7 @@ pub fn list_ids(
         ),
         View::Done => (
             "SELECT t.id, NULL FROM threads t
-             WHERE t.account_id = ?1 AND t.seen_in_inbox = 1 AND t.in_inbox = 0
+             WHERE t.account_id = ?1 AND t.in_inbox = 0
                AND t.snooze_until IS NULL AND t.has_live = 1
              ORDER BY t.sort_time DESC, t.id DESC",
             None,

@@ -34,7 +34,21 @@ pub fn open_writer(path: &Path) -> anyhow::Result<Connection> {
     for table in ["notices", "outbox", "ops"] {
         add_autoincrement(&conn, table)?;
     }
+    drop_column(&conn, "threads", "seen_in_inbox")?;
     Ok(conn)
+}
+
+/// Drops a column later versions no longer use, in databases that still have it.
+fn drop_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<()> {
+    let has: bool = conn.query_row(
+        "SELECT EXISTS (SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+        [table, column],
+        |r| r.get(0),
+    )?;
+    if has {
+        conn.execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column}"))?;
+    }
+    Ok(())
 }
 
 /// The UI keys notices and send toasts by id, and an op's runner deletes it by
@@ -232,5 +246,41 @@ mod tests {
             .query_row("SELECT id FROM ops", [], |r| r.get(0))
             .unwrap();
         assert!(id > 5, "op id reused: {id}");
+    }
+
+    /// A database from before Done listed Gmail's archive loses the
+    /// `seen_in_inbox` column and keeps its threads.
+    #[test]
+    fn old_threads_lose_seen_in_inbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db.sqlite");
+        {
+            let conn = open_writer(&path).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE threads ADD COLUMN seen_in_inbox INTEGER NOT NULL DEFAULT 0;
+                 INSERT INTO accounts (id, email, position, hue) VALUES (1, 'a@x.test', 0, 0);
+                 INSERT INTO threads (id, account_id, gmail_id, subject, seen_in_inbox)
+                   VALUES (9, 1, 'g9', 'Kept', 1);",
+            )
+            .unwrap();
+        }
+        let column = |conn: &Connection| -> bool {
+            conn.query_row(
+                "SELECT EXISTS (SELECT 1 FROM pragma_table_info('threads') WHERE name = 'seen_in_inbox')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        let conn = open_writer(&path).unwrap();
+        assert!(!column(&conn));
+        let subject: String = conn
+            .query_row("SELECT subject FROM threads WHERE id = 9", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(subject, "Kept");
+        drop(conn);
+        // Opening it again finds nothing to drop.
+        let conn = open_writer(&path).unwrap();
+        assert!(!column(&conn));
     }
 }

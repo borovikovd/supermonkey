@@ -131,6 +131,14 @@ fn thread_list_query(query: GmailListQuery, page: Option<String>) -> ThreadListQ
             max_results: Some(PAGE),
             ..Default::default()
         },
+        // Gmail's archive. Drafts are left out: Done never lists a thread
+        // that has only drafts.
+        GmailListQuery::Done => ThreadListQuery {
+            q: Some("-in:inbox -in:draft".into()),
+            page_token: page,
+            max_results: Some(PAGE),
+            ..Default::default()
+        },
         GmailListQuery::Label {
             label_gmail_id,
             include_spam_trash,

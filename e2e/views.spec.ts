@@ -169,7 +169,7 @@ test("VIEW-02 view membership comes from message labels", async ({ app, gmail })
   await has("Trashed reply", 0);
 });
 
-test("VIEW-03 Done holds threads seen in Inbox that left it", async ({ app, gmail }) => {
+test("VIEW-03 Done lists every thread outside Inbox, from Gmail too", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
   await expect(app.highlighted).toContainText("Person 1");
 
@@ -190,7 +190,7 @@ test("VIEW-03 Done holds threads seen in Inbox that left it", async ({ app, gmai
   await app.press("e");
   await expect(app.highlighted).toContainText("Person 5");
   await app.press("e");
-  // A thread this app syncs but never sees in Inbox.
+  // A thread that arrives already outside Inbox.
   await gmail.deliver({
     account: A,
     from: "Nell Never <nell@never.test>",
@@ -198,7 +198,7 @@ test("VIEW-03 Done holds threads seen in Inbox that left it", async ({ app, gmai
     labels: ["CATEGORY_PERSONAL"],
     poll: false,
   });
-  // p2, seen in Inbox, archived by another client.
+  // p2 archived by another client.
   await gmail.modify(A, s.latest("p2").id, [], ["INBOX"], { poll: true });
   await app.settle();
   await expect(app.row("Person 2")).toHaveCount(0);
@@ -208,10 +208,17 @@ test("VIEW-03 Done holds threads seen in Inbox that left it", async ({ app, gmai
   await expect(app.row("Person 2")).toHaveCount(1);
   await expect(app.row("Person 4")).toHaveCount(1);
   await expect(app.row("Person 5")).toHaveCount(1);
+  await expect(app.row("Never in Inbox")).toHaveCount(1);
+  // Archived before the first connect: listed from Gmail's archive.
+  await expect(app.row("Archived before")).toHaveCount(1);
+  const done = (await gmail.requests("threads.list", { account: A })).filter(
+    (r) => r.params.q === "-in:inbox -in:draft",
+  );
+  expect(done.length).toBeGreaterThanOrEqual(1);
+  expect(done[0]?.params.maxResults).toBe("15");
+  // Snoozed is not Done; nor are Trash and Spam.
   await expect(app.row("Person 3")).toHaveCount(0);
-  // Never seen in Inbox: neither the synced thread nor one archived before the first connect.
-  await expect(app.row("Never in Inbox")).toHaveCount(0);
-  await expect(app.row("Archived before")).toHaveCount(0);
+  await expect(app.row(/Old trash|Old spam/)).toHaveCount(0);
 
   // # from Done: every message is in trash, so it leaves Done for Trash.
   await highlight(app, "Person 4");
