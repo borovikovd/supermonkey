@@ -42,6 +42,9 @@ test("UIC-01 rows you just acted on never flash back during fast triage or a pol
       }),
     ),
   );
+  // Another client stars Bulk 03 while its archive is held, so the poll reads
+  // that thread with Gmail's INBOX still on it.
+  await gmail.modify(A, s.latest("important3").id, ["STARRED"], []);
   await gmail.poll();
   await app.press("e", "e", "e", "e", "e");
   await expect(app.row("Bulk 10")).toHaveCount(0);

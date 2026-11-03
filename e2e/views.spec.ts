@@ -190,6 +190,14 @@ test("VIEW-03 Done holds threads seen in Inbox that left it", async ({ app, gmai
   await app.press("e");
   await expect(app.highlighted).toContainText("Person 5");
   await app.press("e");
+  // A thread this app syncs but never sees in Inbox.
+  await gmail.deliver({
+    account: A,
+    from: "Nell Never <nell@never.test>",
+    subject: "Never in Inbox",
+    labels: ["CATEGORY_PERSONAL"],
+    poll: false,
+  });
   // p2, seen in Inbox, archived by another client.
   await gmail.modify(A, s.latest("p2").id, [], ["INBOX"], { poll: true });
   await app.settle();
@@ -201,7 +209,8 @@ test("VIEW-03 Done holds threads seen in Inbox that left it", async ({ app, gmai
   await expect(app.row("Person 4")).toHaveCount(1);
   await expect(app.row("Person 5")).toHaveCount(1);
   await expect(app.row("Person 3")).toHaveCount(0);
-  // Left Inbox before the first connect: never seen in Inbox.
+  // Never seen in Inbox: neither the synced thread nor one archived before the first connect.
+  await expect(app.row("Never in Inbox")).toHaveCount(0);
   await expect(app.row("Archived before")).toHaveCount(0);
 
   // # from Done: every message is in trash, so it leaves Done for Trash.
