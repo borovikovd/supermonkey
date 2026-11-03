@@ -24,8 +24,6 @@ use sha2::{Digest, Sha256};
 use crate::mailbox::{Mailbox, Missing};
 use crate::{AuthCode, Shared};
 
-type AppState = Arc<Shared>;
-
 const BASE64URL_LENIENT: GeneralPurpose = GeneralPurpose::new(
     &base64::alphabet::URL_SAFE,
     GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
@@ -33,7 +31,7 @@ const BASE64URL_LENIENT: GeneralPurpose = GeneralPurpose::new(
 
 const GMAIL_SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify";
 
-pub(crate) fn router(state: AppState) -> Router {
+pub(crate) fn router(state: Arc<Shared>) -> Router {
     let gmail = Router::new()
         .route("/profile", get(profile))
         .route("/settings/sendAs", get(send_as))
@@ -138,17 +136,17 @@ type ApiResult<T = Json<Value>> = Result<T, ApiError>;
 /// checked by [`Caller::mailbox`], not on extraction, so a malformed body answers 400 before
 /// a bad token answers 401.
 struct Caller {
-    state: AppState,
+    state: Arc<Shared>,
     user: String,
     token: String,
 }
 
-impl FromRequestParts<AppState> for Caller {
+impl FromRequestParts<Arc<Shared>> for Caller {
     type Rejection = PathRejection;
 
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &AppState,
+        state: &Arc<Shared>,
     ) -> Result<Self, Self::Rejection> {
         let Path(mut params) =
             Path::<HashMap<String, String>>::from_request_parts(parts, state).await?;
@@ -518,7 +516,7 @@ fn invalid_grant() -> Response {
 
 /// The consent page: checks the request and redirects to `redirect_uri` with a code.
 async fn auth(
-    State(s): State<AppState>,
+    State(s): State<Arc<Shared>>,
     params: Params,
 ) -> Result<Response, (StatusCode, &'static str)> {
     let bad_request = |message| (StatusCode::BAD_REQUEST, message);
@@ -568,7 +566,7 @@ async fn auth(
 }
 
 /// The token endpoint: `authorization_code` (with PKCE) and `refresh_token` grants.
-async fn token(State(s): State<AppState>, body: Bytes) -> Response {
+async fn token(State(s): State<Arc<Shared>>, body: Bytes) -> Response {
     let form = Params::parse(&body);
     let mut world = s.world();
     let (email, refresh) = match form.get("grant_type") {
@@ -615,7 +613,7 @@ async fn token(State(s): State<AppState>, body: Bytes) -> Response {
 }
 
 /// Revokes the grant behind a refresh or access token: every token of that user dies.
-async fn revoke(State(s): State<AppState>, mut params: Params, body: Bytes) -> Response {
+async fn revoke(State(s): State<Arc<Shared>>, mut params: Params, body: Bytes) -> Response {
     params
         .0
         .extend(url::form_urlencoded::parse(&body).into_owned());

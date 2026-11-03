@@ -10,7 +10,7 @@ use ub_gmail::{Format, GmailError, Outcome, Priority, ThreadListQuery, cost};
 
 use super::ingest::{self, Incoming, PendingOps};
 use super::work::{self, Work};
-use super::{AccountRt, EngineRef};
+use super::{AccountRt, Engine};
 use crate::db::to_json;
 use crate::model::{AccountId, SendAs, ThreadId};
 use crate::writer::Effect;
@@ -36,7 +36,7 @@ const METADATA_HEADERS: &[&str] = &[
 
 /// An account's sync loop: connect if needed, then poll every 45 s, on focus,
 /// and on wake from sleep.
-pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
+pub async fn run(e: Arc<Engine>, rt: Arc<AccountRt>) {
     let connected: bool = e
         .reads
         .with(|c| {
@@ -135,7 +135,7 @@ fn resume(rt: &AccountRt) {
     queue_inbox(rt);
 }
 
-pub async fn connect(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> {
+pub async fn connect(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
     e.set_status(rt.id, "syncing");
     let profile = rt
         .sched
@@ -163,7 +163,7 @@ pub async fn connect(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailErro
     Ok(())
 }
 
-pub async fn refresh_send_as(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> {
+pub async fn refresh_send_as(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
     let list = rt
         .sched
         .run(Priority::P3, cost::SEND_AS_LIST, rt.gmail.list_send_as())
@@ -195,7 +195,7 @@ pub async fn refresh_send_as(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), G
     Ok(())
 }
 
-pub async fn refresh_labels(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> {
+pub async fn refresh_labels(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
     let labels = rt
         .sched
         .run(Priority::P3, cost::LABELS_LIST, rt.gmail.list_labels())
@@ -245,7 +245,7 @@ pub async fn refresh_labels(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), Gm
 /// Whether the cached thread is already at Gmail's `history`, so a metadata
 /// fetch would change nothing.
 pub fn is_current(
-    e: &EngineRef,
+    e: &Engine,
     account: AccountId,
     gmail_thread: &str,
     history: Option<u64>,
@@ -254,7 +254,7 @@ pub fn is_current(
 }
 
 /// The cached thread's Gmail historyId, if any.
-fn cached_history(e: &EngineRef, account: AccountId, gmail_thread: &str) -> Option<u64> {
+fn cached_history(e: &Engine, account: AccountId, gmail_thread: &str) -> Option<u64> {
     e.reads
         .with(|c| {
             Ok(c.query_row(
@@ -271,7 +271,7 @@ fn cached_history(e: &EngineRef, account: AccountId, gmail_thread: &str) -> Opti
 }
 
 /// Whether any message of the thread lacks its body (or the thread is unknown).
-pub fn needs_bodies(e: &EngineRef, account: AccountId, gmail_thread: &str) -> bool {
+pub fn needs_bodies(e: &Engine, account: AccountId, gmail_thread: &str) -> bool {
     e.reads
         .with(|c| {
             Ok(c.query_row(
@@ -341,8 +341,8 @@ pub async fn get_thread(
 
 /// Fetches and stores a thread. A 404 means it is gone: drop it, no toast.
 pub async fn fetch_thread(
-    e: &EngineRef,
-    rt: &Arc<AccountRt>,
+    e: &Engine,
+    rt: &AccountRt,
     gmail_thread: &str,
     format: Format,
     prio: Priority,
@@ -398,7 +398,7 @@ pub fn drop_thread(
 }
 
 /// A thread the user opens, or a prefetched neighbor: both priority 2.
-pub async fn fetch_opened(e: EngineRef, rt: Arc<AccountRt>, thread: ThreadId) {
+pub async fn fetch_opened(e: Arc<Engine>, rt: Arc<AccountRt>, thread: ThreadId) {
     let gid: Option<String> = e
         .reads
         .with(|c| {
@@ -557,7 +557,7 @@ fn apply_history(
 }
 
 /// One poll of `users.history.list` from the stored cursor.
-pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> {
+pub async fn poll(e: &Arc<Engine>, rt: &AccountRt) -> Result<(), GmailError> {
     let start: Option<u64> = e
         .reads
         .with(|c| {
@@ -644,7 +644,7 @@ pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> 
     Ok(())
 }
 
-async fn store_cursor(e: &EngineRef, account: AccountId, history: u64) {
+async fn store_cursor(e: &Engine, account: AccountId, history: u64) {
     e.writer
         .call(move |ctx| {
             ctx.tx.execute(
@@ -661,8 +661,8 @@ async fn store_cursor(e: &EngineRef, account: AccountId, history: u64) {
 /// if unchanged since the resync started and Gmail confirms with a 404), and
 /// refetch metadata where the historyId changed.
 async fn reconcile_cached(
-    e: &EngineRef,
-    rt: &Arc<AccountRt>,
+    e: &Engine,
+    rt: &AccountRt,
     listed: &HashMap<String, Option<u64>>,
     started_rev: i64,
 ) -> Result<(), GmailError> {
@@ -715,7 +715,7 @@ async fn reconcile_cached(
 }
 
 /// `history.list` returned 404: the cursor is too old (SPEC Sync, full resync).
-pub async fn full_resync(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> {
+pub async fn full_resync(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
     log::info!("full resync for {}", rt.email);
     // 1. A fresh historyId first, so polling resumes at once.
     let profile = rt

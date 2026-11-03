@@ -141,8 +141,6 @@ pub struct Engine {
     shut_down: AtomicBool,
 }
 
-pub type EngineRef = Arc<Engine>;
-
 /// Builds the engine for the app window and starts it.
 pub fn start(
     app: &AppHandle,
@@ -182,7 +180,7 @@ impl Engine {
         data_dir: PathBuf,
         config: Config,
         store: Arc<dyn TokenStore>,
-    ) -> EngineRef {
+    ) -> Arc<Engine> {
         Arc::new(Engine {
             platform,
             writer,
@@ -428,7 +426,7 @@ impl Engine {
 }
 
 /// On launch: start every signed-in account, wake due snoozes, settle the outbox.
-fn launch(engine: &EngineRef) {
+fn launch(engine: &Arc<Engine>) {
     let accounts: Vec<(AccountId, String, bool)> = engine
         .reads
         .with(|c| {
@@ -462,7 +460,7 @@ fn launch(engine: &EngineRef) {
     engine.spawn("snooze", snooze::run(engine.clone()));
 }
 
-async fn dispatch(engine: EngineRef, mut effects: EffectReceiver) {
+async fn dispatch(engine: Arc<Engine>, mut effects: EffectReceiver) {
     use crate::writer::Effect;
     while let Some(tracked) = crate::clock::parked(effects.recv()).await {
         // Busy until this effect is handled; the tasks it starts count on their own.

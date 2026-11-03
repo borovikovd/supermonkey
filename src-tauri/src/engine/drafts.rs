@@ -15,7 +15,7 @@ use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
 
 use super::attachments::DownloadError;
 use super::ops::{Done, bad};
-use super::{AccountRt, EngineRef};
+use super::{AccountRt, Engine};
 use crate::db::{from_json, to_json};
 use crate::model::{AccountId, Addr, DraftAttachment, DraftId, DraftKind, MessageId};
 
@@ -39,7 +39,7 @@ pub struct DraftRow {
     pub needs_parts: bool,
 }
 
-pub fn load(e: &EngineRef, draft: &str) -> Option<DraftRow> {
+pub fn load(e: &Engine, draft: &str) -> Option<DraftRow> {
     e.reads
         .with(|c| {
             Ok(c.query_row(
@@ -84,7 +84,7 @@ fn mime_addr(a: &Addr) -> ub_mime::Addr {
 
 /// Downloads an attachment for a draft write. Offline and transient failures
 /// keep the write waiting; anything else rejects it.
-async fn download(e: &EngineRef, attachment: i64) -> Result<PathBuf, GmailError> {
+async fn download(e: &Engine, attachment: i64) -> Result<PathBuf, GmailError> {
     super::attachments::ensure(e, attachment)
         .await
         .map_err(|err| match err.downcast_ref::<DownloadError>() {
@@ -105,7 +105,7 @@ fn read_file(path: &Path) -> Result<Vec<u8>, GmailError> {
 
 /// Bytes of every attachment, downloading those not cached yet.
 async fn attachment_bytes(
-    e: &EngineRef,
+    e: &Engine,
     d: &DraftRow,
 ) -> Result<Vec<ub_mime::OutAttachment>, GmailError> {
     let mut out = Vec::new();
@@ -127,7 +127,7 @@ async fn attachment_bytes(
 /// Inline parts of the quoted message, for turning `data:` images in `html`
 /// back into `cid:`.
 async fn quoted_inline(
-    e: &EngineRef,
+    e: &Engine,
     d: &DraftRow,
     html: &str,
 ) -> Result<Vec<ub_mime::InlinePart>, GmailError> {
@@ -161,7 +161,7 @@ async fn quoted_inline(
 }
 
 /// Builds the draft's MIME with mail-builder (via ub-mime).
-pub async fn build_raw(e: &EngineRef, d: &DraftRow) -> Result<Vec<u8>, GmailError> {
+pub async fn build_raw(e: &Engine, d: &DraftRow) -> Result<Vec<u8>, GmailError> {
     let attachments = attachment_bytes(e, d).await?;
     let html = format!(
         "{}{}",
@@ -207,8 +207,8 @@ pub async fn build_raw(e: &EngineRef, d: &DraftRow) -> Result<Vec<u8>, GmailErro
 /// Writes the draft to Gmail with `drafts.create` or `drafts.update`.
 /// Returns the Gmail draft.
 pub async fn write(
-    e: &EngineRef,
-    rt: &Arc<AccountRt>,
+    e: &Engine,
+    rt: &AccountRt,
     d: &DraftRow,
 ) -> Result<ub_gmail::Draft, GmailError> {
     let raw = build_raw(e, d).await?;
@@ -233,8 +233,8 @@ pub async fn write(
 }
 
 async fn create_with_recovery(
-    e: &EngineRef,
-    rt: &Arc<AccountRt>,
+    e: &Engine,
+    rt: &AccountRt,
     d: &DraftRow,
     raw: &[u8],
 ) -> Result<ub_gmail::Draft, GmailError> {
@@ -269,8 +269,8 @@ async fn create_with_recovery(
 /// After a `drafts.create` with no clear answer: did sync already store Gmail
 /// ids, or does Gmail hold a draft with this local id? Extra copies are deleted.
 async fn recover_create(
-    e: &EngineRef,
-    rt: &Arc<AccountRt>,
+    e: &Engine,
+    rt: &AccountRt,
     local: &str,
 ) -> Result<Option<ub_gmail::Draft>, GmailError> {
     if let Some(d) = load(e, local)
@@ -334,7 +334,7 @@ async fn recover_create(
     Ok(keep)
 }
 
-async fn list_all(rt: &Arc<AccountRt>) -> Result<Vec<ub_gmail::Draft>, GmailError> {
+async fn list_all(rt: &AccountRt) -> Result<Vec<ub_gmail::Draft>, GmailError> {
     let mut out = Vec::new();
     let mut page: Option<String> = None;
     loop {
@@ -355,7 +355,7 @@ async fn list_all(rt: &Arc<AccountRt>) -> Result<Vec<ub_gmail::Draft>, GmailErro
 }
 
 /// Stores the Gmail ids an upsert returned.
-pub async fn store_ids(e: &EngineRef, local: &str, g: &ub_gmail::Draft) {
+pub async fn store_ids(e: &Engine, local: &str, g: &ub_gmail::Draft) {
     let (id, msg, thread) = (
         g.id.clone(),
         g.message.id.clone(),
@@ -382,8 +382,8 @@ pub async fn store_ids(e: &EngineRef, local: &str, g: &ub_gmail::Draft) {
 }
 
 pub async fn execute_op(
-    e: &EngineRef,
-    rt: &Arc<AccountRt>,
+    e: &Engine,
+    rt: &AccountRt,
     kind: &str,
     payload: &str,
 ) -> Result<Done, GmailError> {
@@ -450,7 +450,7 @@ pub async fn execute_op(
 
 /// Downloads a Gmail draft's attachments and inline parts before its first
 /// upsert (SPEC Addressing).
-async fn download_parts_now(e: &EngineRef, draft: &str) -> Result<(), GmailError> {
+async fn download_parts_now(e: &Engine, draft: &str) -> Result<(), GmailError> {
     let Some(DraftRow {
         attachments: mut atts,
         ..
@@ -480,7 +480,7 @@ async fn download_parts_now(e: &EngineRef, draft: &str) -> Result<(), GmailError
     Ok(())
 }
 
-pub async fn download_parts(e: EngineRef, draft: DraftId) {
+pub async fn download_parts(e: Arc<Engine>, draft: DraftId) {
     download_parts_now(&e, &draft)
         .await
         .log_err("download draft parts");
@@ -488,7 +488,7 @@ pub async fn download_parts(e: EngineRef, draft: DraftId) {
 
 /// A Gmail change skipped while a composer had the draft open, read when that
 /// composer closes without edits.
-pub async fn read_skipped(e: EngineRef, rt: Arc<AccountRt>, draft: DraftId) {
+pub async fn read_skipped(e: Arc<Engine>, rt: Arc<AccountRt>, draft: DraftId) {
     let Some(gid) = load(&e, &draft).and_then(|d| d.gmail_draft_id) else {
         return;
     };
@@ -548,7 +548,7 @@ fn drop_gone(
 }
 
 /// Reconciles local drafts with `drafts.list` (SPEC Drafts).
-pub async fn sync_list(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> {
+pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
     let gmail = list_all(rt).await?;
     let local: Vec<(String, Option<String>, Option<String>)> = e
         .reads
@@ -610,7 +610,7 @@ pub async fn sync_list(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailEr
 
 /// A composer has the draft open: mark the Gmail change for `read_skipped`
 /// instead of overwriting the text being edited.
-async fn defer_if_open(e: &EngineRef, draft: &str) -> bool {
+async fn defer_if_open(e: &Engine, draft: &str) -> bool {
     let draft = draft.to_string();
     e.writer
         .call(move |ctx| {
@@ -703,7 +703,7 @@ fn gmail_draft_rows(
 
 /// Creates or updates the local draft for a Gmail draft. Its kind is decided
 /// once, when it first appears: new, forward (`Fwd:`), or reply.
-pub async fn store_gmail_draft(e: &EngineRef, rt: &Arc<AccountRt>, g: ub_gmail::Draft) {
+pub async fn store_gmail_draft(e: &Engine, rt: &AccountRt, g: ub_gmail::Draft) {
     let m = super::ingest::parse(&g.message, true, &HashMap::new());
     let raw_html = g
         .message

@@ -11,7 +11,7 @@ use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
 use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
 
-use super::{AccountRt, EngineRef};
+use super::{AccountRt, Engine};
 use crate::mail::ModifyOp;
 use crate::model::AccountId;
 
@@ -31,7 +31,7 @@ struct LabelCreate {
     name: String,
 }
 
-fn next_op(e: &EngineRef, account: AccountId) -> Option<Op> {
+fn next_op(e: &Engine, account: AccountId) -> Option<Op> {
     e.reads
         .with(|c| {
             Ok(c.query_row(
@@ -59,7 +59,7 @@ pub enum Done {
     Retry(String),
 }
 
-pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
+pub async fn run(e: Arc<Engine>, rt: Arc<AccountRt>) {
     let mut attempt = 0u32;
     loop {
         if rt.is_stopped() {
@@ -128,7 +128,7 @@ fn landed(rt: &AccountRt, op: &Op) {
     }
 }
 
-async fn finish(e: &EngineRef, account: AccountId, op: i64) {
+async fn finish(e: &Engine, account: AccountId, op: i64) {
     e.writer
         .call(move |ctx| {
             ctx.tx.execute("DELETE FROM ops WHERE id = ?1", [op])?;
@@ -141,7 +141,7 @@ async fn finish(e: &EngineRef, account: AccountId, op: i64) {
 
 /// Gmail rejected the op: roll back its local effect, drop its undo entry,
 /// and leave a notice for the toast. Replay continues with the next op.
-async fn reject(e: &EngineRef, account: AccountId, op: &Op, status: u16, message: &str) {
+async fn reject(e: &Engine, account: AccountId, op: &Op, status: u16, message: &str) {
     let op = op.clone();
     let text = format!("Gmail rejected a change ({status}): {message}");
     e
@@ -207,7 +207,7 @@ fn drop_label_uses(
 }
 
 /// Local label id → Gmail label id. A label still waiting for its create has none yet.
-fn gmail_labels(e: &EngineRef, account: AccountId, local: &[String]) -> Vec<String> {
+fn gmail_labels(e: &Engine, account: AccountId, local: &[String]) -> Vec<String> {
     let map = e
         .reads
         .with(|c| crate::db::queries::label_gmail_ids(c, account))
@@ -218,7 +218,7 @@ fn gmail_labels(e: &EngineRef, account: AccountId, local: &[String]) -> Vec<Stri
         .collect()
 }
 
-async fn execute(e: &EngineRef, rt: &Arc<AccountRt>, op: &Op) -> Result<Done, GmailError> {
+async fn execute(e: &Engine, rt: &AccountRt, op: &Op) -> Result<Done, GmailError> {
     match op.kind.as_str() {
         "modify" => modify(e, rt, serde_json::from_str(&op.payload).map_err(bad)?).await,
         "label_create" => {
@@ -237,7 +237,7 @@ async fn execute(e: &EngineRef, rt: &Arc<AccountRt>, op: &Op) -> Result<Done, Gm
 
 /// `messages.batchModify` in chunks of 1000. A 404 narrows the op to the
 /// messages that still exist.
-async fn modify(e: &EngineRef, rt: &AccountRt, mut p: ModifyOp) -> Result<Done, GmailError> {
+async fn modify(e: &Engine, rt: &AccountRt, mut p: ModifyOp) -> Result<Done, GmailError> {
     if p.messages.is_empty() || (p.add.is_empty() && p.remove.is_empty()) {
         return Ok(Done::Finished);
     }

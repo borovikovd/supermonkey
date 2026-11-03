@@ -1,11 +1,9 @@
 //! Recipient autocomplete (SPEC Recipients and autocomplete).
 
-use std::sync::Arc;
-
 use rusqlite::{Connection, params};
 use ub_gmail::{Format, GmailError, Priority, ThreadListQuery, cost};
 
-use super::{AccountRt, EngineRef};
+use super::{AccountRt, Engine};
 use crate::model::{AccountId, Addr, ContactSuggestion};
 
 /// Up to `limit` suggestions, ranked: sent-to first (by sent count weighted
@@ -72,8 +70,8 @@ pub fn suggest(
 /// One page of the contacts backfill: the To, Cc, and Date headers of the last
 /// year of sent mail, at priority 6.
 pub async fn backfill_page(
-    e: &EngineRef,
-    rt: &Arc<AccountRt>,
+    e: &Engine,
+    rt: &AccountRt,
     page: Option<String>,
 ) -> Result<(), GmailError> {
     let q = ThreadListQuery {

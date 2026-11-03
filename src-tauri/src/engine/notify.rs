@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use rusqlite::params;
 
-use super::EngineRef;
+use super::Engine;
 use crate::db::queries;
 use crate::model::AccountId;
 use crate::notify::Notification;
@@ -103,7 +103,7 @@ pub fn from_poll(
     Ok(())
 }
 
-pub fn show(e: &EngineRef, n: &Notification) {
+pub fn show(e: &Engine, n: &Notification) {
     *e.last_notification.lock() = Some((n.clone(), crate::clock::now_ms()));
     e.platform.notify(n);
 }

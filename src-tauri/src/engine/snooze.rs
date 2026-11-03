@@ -1,8 +1,9 @@
 //! Snooze waking and the snooze rule (SPEC Snooze).
 
+use std::sync::Arc;
 use std::time::Duration;
 
-use super::EngineRef;
+use super::Engine;
 use super::ingest::PendingOps;
 use crate::model::{AccountId, ModifyAction, ModifyKind, SnoozeChange, ThreadId};
 use crate::writer::Ctx;
@@ -41,7 +42,7 @@ pub fn apply_rule(
 
 /// Wakes every due snooze: adds `INBOX` and clears `snooze_until` locally at
 /// once, and queues the label change.
-pub fn wake_due(e: &EngineRef) {
+pub fn wake_due(e: &Engine) {
     e.writer.sync(|ctx| {
         let due: Vec<(AccountId, ThreadId)> = {
             let mut stmt = ctx.tx.prepare(
@@ -71,7 +72,7 @@ pub fn wake_due(e: &EngineRef) {
 }
 
 /// Wakes snoozes as they come due while the app runs.
-pub async fn run(e: EngineRef) {
+pub async fn run(e: Arc<Engine>) {
     loop {
         let next: Option<i64> = e
             .reads

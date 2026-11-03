@@ -6,11 +6,12 @@
     reason = "Tauri commands receive owned arguments by design."
 )]
 
+use std::sync::Arc;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, State};
 
 use crate::api::{self, CmdResult};
-use crate::engine::EngineRef;
+use crate::engine::Engine;
 use crate::model::{
     AccountId, ChannelMessage, ContactSuggestion, DraftAttachment, DraftId, LaunchInfo, ListRow,
     MessageBody, MessageId, NumberedAction, SnoozeChoice,
@@ -20,7 +21,7 @@ use crate::model::{
 #[tauri::command]
 pub fn connect(
     app: AppHandle,
-    engine: State<'_, EngineRef>,
+    engine: State<'_, Arc<Engine>>,
     channel: Channel<ChannelMessage>,
 ) -> CmdResult<LaunchInfo> {
     engine.writer.set_channel(move |msg| {
@@ -35,13 +36,13 @@ pub fn connect(
 }
 
 #[tauri::command]
-pub fn submit(engine: State<'_, EngineRef>, actions: Vec<NumberedAction>) {
+pub fn submit(engine: State<'_, Arc<Engine>>, actions: Vec<NumberedAction>) {
     api::submit(&engine, actions);
 }
 
 #[tauri::command]
 pub fn fetch_rows(
-    engine: State<'_, EngineRef>,
+    engine: State<'_, Arc<Engine>>,
     drafts: bool,
     keys: Vec<String>,
 ) -> CmdResult<Vec<ListRow>> {
@@ -50,7 +51,7 @@ pub fn fetch_rows(
 
 #[tauri::command]
 pub fn get_bodies(
-    engine: State<'_, EngineRef>,
+    engine: State<'_, Arc<Engine>>,
     ids: Vec<MessageId>,
 ) -> CmdResult<Vec<MessageBody>> {
     api::get_bodies(&engine, &ids)
@@ -58,7 +59,7 @@ pub fn get_bodies(
 
 #[tauri::command]
 pub fn autocomplete(
-    engine: State<'_, EngineRef>,
+    engine: State<'_, Arc<Engine>>,
     account: AccountId,
     query: String,
 ) -> CmdResult<Vec<ContactSuggestion>> {
@@ -66,17 +67,17 @@ pub fn autocomplete(
 }
 
 #[tauri::command]
-pub async fn add_account(engine: State<'_, EngineRef>) -> CmdResult<AccountId> {
+pub async fn add_account(engine: State<'_, Arc<Engine>>) -> CmdResult<AccountId> {
     api::add_account(&engine).await
 }
 
 #[tauri::command]
-pub async fn sign_in_again(engine: State<'_, EngineRef>, account: AccountId) -> CmdResult<()> {
+pub async fn sign_in_again(engine: State<'_, Arc<Engine>>, account: AccountId) -> CmdResult<()> {
     api::sign_in_again(&engine, account).await
 }
 
 #[tauri::command]
-pub async fn open_attachment(engine: State<'_, EngineRef>, attachment: i64) -> CmdResult<()> {
+pub async fn open_attachment(engine: State<'_, Arc<Engine>>, attachment: i64) -> CmdResult<()> {
     api::open_attachment(&engine, attachment).await
 }
 

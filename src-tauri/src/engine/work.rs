@@ -12,7 +12,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use ub_gmail::{Format, GmailError, Outcome, Priority, ThreadListQuery, cost};
 
-use super::{AccountRt, EngineRef};
+use super::{AccountRt, Engine};
 use crate::clock::Kick;
 
 pub const WORKERS: usize = 4;
@@ -114,7 +114,7 @@ impl WorkQueue {
     }
 }
 
-pub async fn worker(e: EngineRef, rt: Arc<AccountRt>) {
+pub async fn worker(e: Arc<Engine>, rt: Arc<AccountRt>) {
     loop {
         if rt.work.closed.load(Ordering::Relaxed) || rt.is_stopped() {
             return;
@@ -159,12 +159,7 @@ fn prio(slot: Slot) -> Priority {
     Priority::new(slot.priority)
 }
 
-async fn run(
-    e: &EngineRef,
-    rt: &Arc<AccountRt>,
-    slot: Slot,
-    work: &Work,
-) -> Result<(), GmailError> {
+async fn run(e: &Engine, rt: &AccountRt, slot: Slot, work: &Work) -> Result<(), GmailError> {
     match work {
         Work::List {
             label,

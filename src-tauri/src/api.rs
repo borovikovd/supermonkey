@@ -1,11 +1,12 @@
 //! The command surface without Tauri: what the Tauri commands and the web
 //! bridge both run, so the browser-driven E2E suite exercises the same code.
 
-use crate::engine::EngineRef;
+use crate::engine::Engine;
 use crate::model::{
     AccountId, ContactSuggestion, DraftAttachment, DraftId, LaunchInfo, ListRow, MessageBody,
     MessageId, NumberedAction, SnoozeChoice,
 };
+use std::sync::Arc;
 
 pub type CmdResult<T> = Result<T, String>;
 
@@ -14,7 +15,7 @@ fn err(e: impl std::fmt::Display) -> String {
 }
 
 /// Where the page's action numbers continue.
-pub fn launch_info(e: &EngineRef) -> CmdResult<LaunchInfo> {
+pub fn launch_info(e: &Engine) -> CmdResult<LaunchInfo> {
     let last_action = e.reads.with(crate::db::queries::last_action).map_err(err)?;
     Ok(LaunchInfo {
         last_action,
@@ -23,26 +24,26 @@ pub fn launch_info(e: &EngineRef) -> CmdResult<LaunchInfo> {
 }
 
 /// Queues UI actions in number order. Returns as soon as they are queued.
-pub fn submit(e: &EngineRef, actions: Vec<NumberedAction>) {
+pub fn submit(e: &Engine, actions: Vec<NumberedAction>) {
     e.writer.actions(actions);
 }
 
 /// Rows outside the pushed window, read on a separate connection with their `rev`.
-pub fn fetch_rows(e: &EngineRef, drafts: bool, keys: &[String]) -> CmdResult<Vec<ListRow>> {
+pub fn fetch_rows(e: &Engine, drafts: bool, keys: &[String]) -> CmdResult<Vec<ListRow>> {
     e.reads
         .with(|c| crate::db::queries::rows_for_keys(c, drafts, keys))
         .map_err(err)
 }
 
 /// Sanitized bodies. A message without a stored body is left out.
-pub fn get_bodies(e: &EngineRef, ids: &[MessageId]) -> CmdResult<Vec<MessageBody>> {
+pub fn get_bodies(e: &Engine, ids: &[MessageId]) -> CmdResult<Vec<MessageBody>> {
     e.reads
         .with(|c| crate::db::queries::bodies(c, ids))
         .map_err(err)
 }
 
 pub fn autocomplete(
-    e: &EngineRef,
+    e: &Engine,
     account: AccountId,
     query: &str,
 ) -> CmdResult<Vec<ContactSuggestion>> {
@@ -52,18 +53,18 @@ pub fn autocomplete(
 }
 
 /// Runs Google sign-in in the browser and adds the account.
-pub async fn add_account(e: &EngineRef) -> CmdResult<AccountId> {
+pub async fn add_account(e: &Arc<Engine>) -> CmdResult<AccountId> {
     crate::engine::auth::add_account(e).await.map_err(err)
 }
 
-pub async fn sign_in_again(e: &EngineRef, account: AccountId) -> CmdResult<()> {
+pub async fn sign_in_again(e: &Arc<Engine>, account: AccountId) -> CmdResult<()> {
     crate::engine::auth::sign_in_again(e, account)
         .await
         .map_err(err)
 }
 
 /// Downloads an attachment if needed and opens it with the default app.
-pub async fn open_attachment(e: &EngineRef, attachment: i64) -> CmdResult<()> {
+pub async fn open_attachment(e: &Engine, attachment: i64) -> CmdResult<()> {
     crate::engine::attachments::open(e, attachment)
         .await
         .map_err(err)
@@ -71,7 +72,7 @@ pub async fn open_attachment(e: &EngineRef, attachment: i64) -> CmdResult<()> {
 
 /// Opens a link from a message in the default browser or mail app: the web
 /// build's stand-in for the opener plugin, which the app's webview calls itself.
-pub fn open_url(e: &EngineRef, url: &str) -> CmdResult<()> {
+pub fn open_url(e: &Engine, url: &str) -> CmdResult<()> {
     let parsed = reqwest::Url::parse(url).map_err(err)?;
     if !matches!(parsed.scheme(), "http" | "https" | "mailto") {
         return Err(format!("not a web or mail link: {}", parsed.scheme()));

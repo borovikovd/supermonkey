@@ -9,14 +9,14 @@ use rusqlite::params;
 use ub_gmail::{Format, Priority, ThreadListQuery, cost};
 
 use super::work::{self, Work};
-use super::{AccountRt, EngineRef};
+use super::{AccountRt, Engine};
 use crate::model::{AccountId, SubId, ThreadId};
 use crate::subs::Sub;
 use crate::writer::{Ctx, GmailListQuery};
 
 const PAGE: u32 = 15;
 
-pub fn cancel(e: &EngineRef, sub: &str) {
+pub fn cancel(e: &Engine, sub: &str) {
     let running = e.searches.lock().remove(sub);
     if let Some(h) = running {
         h.abort();
@@ -24,7 +24,7 @@ pub fn cancel(e: &EngineRef, sub: &str) {
 }
 
 pub fn start(
-    e: &EngineRef,
+    e: &Arc<Engine>,
     sub: SubId,
     account: AccountId,
     query: GmailListQuery,
@@ -47,7 +47,7 @@ pub fn start(
 /// Lists one page, fetches metadata for hits not cached at their historyId,
 /// and adds the hits to the subscription.
 async fn list_page(
-    e: EngineRef,
+    e: Arc<Engine>,
     rt: Arc<AccountRt>,
     sub: SubId,
     query: GmailListQuery,

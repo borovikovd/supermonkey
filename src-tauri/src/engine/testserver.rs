@@ -31,7 +31,7 @@ use ub_fake_gmail::{
 use ub_gmail::{KEYCHAIN_SERVICE, MemoryTokenStore, OAuthConfig, QuotaConfig, TokenStore};
 
 use super::webbridge::Bridge;
-use super::{Config, Engine, EngineRef, Platform};
+use super::{Config, Engine, Platform};
 use crate::clock::Manual;
 use crate::db::ReadPool;
 use crate::model::{AccountId, ThreadId};
@@ -135,7 +135,7 @@ enum Core {
         reads: ReadPool,
         effects: EffectReceiver,
     },
-    Running(EngineRef),
+    Running(Arc<Engine>),
     /// Quit or crashed; `start` relaunches it.
     Down,
 }
@@ -164,8 +164,6 @@ struct Server {
     dist: PathBuf,
     hits: Mutex<Vec<Hit>>,
 }
-
-type Shared = Arc<Server>;
 
 /// A budget that never makes a request wait, so big seeds sync in seconds.
 fn fast_quota() -> QuotaConfig {
@@ -241,7 +239,7 @@ pub async fn run(port: u16, dist: PathBuf, now_ms: i64) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn control(server: Shared) -> Router {
+fn control(server: Arc<Server>) -> Router {
     Router::new()
         .route("/__test/account", post(add_account))
         .route("/__test/user", post(add_user))
@@ -335,7 +333,7 @@ fn user(s: &Server, email: &str) -> Result<FakeUser, Fail> {
 
 impl Server {
     /// The running engine, if the core is up.
-    async fn engine(&self) -> Option<EngineRef> {
+    async fn engine(&self) -> Option<Arc<Engine>> {
         match &*self.core.lock().await {
             Core::Running(e) => Some(e.clone()),
             Core::Ready { .. } | Core::Down => None,
@@ -441,13 +439,13 @@ fn create_user(s: &Server, req: &UserReq) -> FakeUser {
 }
 
 /// A Gmail user that exists in the fake but not in the app (for Add account).
-async fn add_user(State(s): State<Shared>, Json(req): Json<UserReq>) -> Ctl {
+async fn add_user(State(s): State<Arc<Server>>, Json(req): Json<UserReq>) -> Ctl {
     create_user(&s, &req);
     Ok(done())
 }
 
 /// A Gmail user already signed in to the app (before `/__test/start`).
-async fn add_account(State(s): State<Shared>, Json(req): Json<UserReq>) -> Ctl {
+async fn add_account(State(s): State<Arc<Server>>, Json(req): Json<UserReq>) -> Ctl {
     let writer = match &*s.core.lock().await {
         Core::Ready { writer, .. } => writer.clone(),
         Core::Running(e) => e.writer.clone(),
@@ -470,7 +468,7 @@ struct QuotaReq {
 }
 
 /// The request budget for the next start: production's, or one that never waits.
-async fn quota(State(s): State<Shared>, Json(req): Json<QuotaReq>) -> Ctl {
+async fn quota(State(s): State<Arc<Server>>, Json(req): Json<QuotaReq>) -> Ctl {
     *s.quota.lock() = if req.production {
         QuotaConfig::default()
     } else {
@@ -483,7 +481,7 @@ async fn quota(State(s): State<Shared>, Json(req): Json<QuotaReq>) -> Ctl {
 
 /// Launches the engine: the seeded accounts start syncing. After a stop, the
 /// app relaunches on the same database.
-async fn start(State(s): State<Shared>) -> Ctl {
+async fn start(State(s): State<Arc<Server>>) -> Ctl {
     let mut core = s.core.lock().await;
     let (writer, reads, effects) = match std::mem::replace(&mut *core, Core::Down) {
         Core::Ready {
@@ -533,7 +531,7 @@ struct StopReq {
 }
 
 /// Quits or crashes the core. Fake Gmail and the clock live on; `start` relaunches.
-async fn stop(State(s): State<Shared>, Json(req): Json<StopReq>) -> Ctl {
+async fn stop(State(s): State<Arc<Server>>, Json(req): Json<StopReq>) -> Ctl {
     let mut core = s.core.lock().await;
     let engine = match std::mem::replace(&mut *core, Core::Down) {
         Core::Running(e) => e,
@@ -569,7 +567,7 @@ struct IdleReq {
 
 /// Waits until the core is idle. Returns where the page's channel should be
 /// and the sign-ins the core is running, for the page's half of `settle()`.
-async fn idle(State(s): State<Shared>, Query(q): Query<IdleReq>) -> Ctl {
+async fn idle(State(s): State<Arc<Server>>, Query(q): Query<IdleReq>) -> Ctl {
     s.settle_within(q.timeout_ms.map_or(SETTLE_LIMIT, Duration::from_millis))
         .await?;
     let (rev, ack) = s.bridge.last_sent();
@@ -669,7 +667,7 @@ fn yes() -> bool {
 }
 
 /// Puts a message in a mailbox, as if it arrived or was filed in Gmail web.
-async fn deliver(State(s): State<Shared>, Json(req): Json<DeliverReq>) -> Ctl {
+async fn deliver(State(s): State<Arc<Server>>, Json(req): Json<DeliverReq>) -> Ctl {
     let poll = req.poll;
     let added = deliver_one(&s, req)?;
     if poll {
@@ -684,7 +682,7 @@ fn added_json(m: &AddedMessage) -> Value {
 
 /// Many deliveries in one call, in order (whole seeds). An item's `after`
 /// names an earlier item whose thread it joins. Polls once at the end if any asks.
-async fn deliver_batch(State(s): State<Shared>, Json(list): Json<Vec<DeliverReq>>) -> Ctl {
+async fn deliver_batch(State(s): State<Arc<Server>>, Json(list): Json<Vec<DeliverReq>>) -> Ctl {
     let poll = list.iter().any(|d| d.poll);
     let mut added: Vec<AddedMessage> = Vec::with_capacity(list.len());
     for mut req in list {
@@ -764,7 +762,7 @@ fn message_view(m: &ub_fake_gmail::FakeMessage) -> MessageView {
 }
 
 /// The mailbox as Gmail sees it: messages, drafts, labels, and sendAs.
-async fn gmail_state(State(s): State<Shared>, Path(email): Path<String>) -> Ctl {
+async fn gmail_state(State(s): State<Arc<Server>>, Path(email): Path<String>) -> Ctl {
     let u = user(&s, &email)?;
     let messages: Vec<MessageView> = u.messages().iter().map(message_view).collect();
     let drafts: Vec<Value> = u
@@ -813,7 +811,7 @@ struct ModifyReq {
 
 /// A label change made outside the app (Gmail web, a filter).
 async fn gmail_modify(
-    State(s): State<Shared>,
+    State(s): State<Arc<Server>>,
     Path(email): Path<String>,
     Json(req): Json<ModifyReq>,
 ) -> Ctl {
@@ -839,7 +837,7 @@ struct IdReq {
 
 /// A message deleted outside the app.
 async fn gmail_delete(
-    State(s): State<Shared>,
+    State(s): State<Arc<Server>>,
     Path(email): Path<String>,
     Json(req): Json<IdReq>,
 ) -> Ctl {
@@ -856,7 +854,7 @@ async fn gmail_delete(
 
 /// A whole thread deleted outside the app.
 async fn gmail_delete_thread(
-    State(s): State<Shared>,
+    State(s): State<Arc<Server>>,
     Path(email): Path<String>,
     Json(req): Json<IdReq>,
 ) -> Ctl {
@@ -874,7 +872,7 @@ struct NameReq {
 
 /// A label created outside the app. Returns its Gmail id.
 async fn gmail_label(
-    State(s): State<Shared>,
+    State(s): State<Arc<Server>>,
     Path(email): Path<String>,
     Json(req): Json<NameReq>,
 ) -> Ctl {
@@ -896,7 +894,7 @@ struct SendAsReq {
 }
 
 async fn gmail_send_as(
-    State(s): State<Shared>,
+    State(s): State<Arc<Server>>,
     Path(email): Path<String>,
     Json(req): Json<SendAsReq>,
 ) -> Ctl {
@@ -965,7 +963,7 @@ fn draft_json(d: &AddedDraft) -> Json<Value> {
 
 /// A draft made in another client (Gmail web, a phone).
 async fn gmail_create_draft(
-    State(s): State<Shared>,
+    State(s): State<Arc<Server>>,
     Path(email): Path<String>,
     Json(req): Json<DraftReq>,
 ) -> Ctl {
@@ -980,7 +978,7 @@ async fn gmail_create_draft(
 
 /// A draft edited in another client.
 async fn gmail_update_draft(
-    State(s): State<Shared>,
+    State(s): State<Arc<Server>>,
     Path((email, id)): Path<(String, String)>,
     Json(req): Json<DraftReq>,
 ) -> Ctl {
@@ -997,7 +995,7 @@ async fn gmail_update_draft(
 
 /// A draft deleted in another client.
 async fn gmail_delete_draft(
-    State(s): State<Shared>,
+    State(s): State<Arc<Server>>,
     Path((email, id)): Path<(String, String)>,
     body: Option<Json<PollOpt>>,
 ) -> Ctl {
@@ -1012,7 +1010,7 @@ async fn gmail_delete_draft(
 
 /// A draft sent from another client (a phone).
 async fn gmail_send_draft(
-    State(s): State<Shared>,
+    State(s): State<Arc<Server>>,
     Path((email, id)): Path<(String, String)>,
     body: Option<Json<PollOpt>>,
 ) -> Ctl {
@@ -1030,13 +1028,13 @@ async fn gmail_send_draft(
 }
 
 /// The account's access tokens expire: its next Gmail call gets a 401.
-async fn gmail_expire_tokens(State(s): State<Shared>, Path(email): Path<String>) -> Ctl {
+async fn gmail_expire_tokens(State(s): State<Arc<Server>>, Path(email): Path<String>) -> Ctl {
     user(&s, &email)?.expire_access_tokens();
     Ok(done())
 }
 
 /// Gmail forgets the account's history: the next `history.list` answers 404.
-async fn gmail_expire_history(State(s): State<Shared>, Path(email): Path<String>) -> Ctl {
+async fn gmail_expire_history(State(s): State<Arc<Server>>, Path(email): Path<String>) -> Ctl {
     user(&s, &email)?.expire_history();
     Ok(done())
 }
@@ -1050,7 +1048,7 @@ struct InvalidGrantReq {
 }
 
 /// Google revokes (or restores) the account's refresh token.
-async fn invalid_grant(State(s): State<Shared>, Json(req): Json<InvalidGrantReq>) -> Ctl {
+async fn invalid_grant(State(s): State<Arc<Server>>, Json(req): Json<InvalidGrantReq>) -> Ctl {
     let u = user(&s, &req.email)?;
     u.set_invalid_grant(req.on);
     if req.on {
@@ -1070,7 +1068,7 @@ struct SignInReq {
 }
 
 /// How the next sign-in in the browser goes: as a user, abandoned, or denied.
-async fn next_sign_in(State(s): State<Shared>, Json(req): Json<SignInReq>) -> Ctl {
+async fn next_sign_in(State(s): State<Arc<Server>>, Json(req): Json<SignInReq>) -> Ctl {
     if req.deny {
         s.fake.deny_next_sign_in();
     }
@@ -1083,7 +1081,7 @@ async fn next_sign_in(State(s): State<Shared>, Json(req): Json<SignInReq>) -> Ct
 }
 
 /// The token store, as the Keychain would list it.
-async fn keychain(State(s): State<Shared>) -> Ctl {
+async fn keychain(State(s): State<Arc<Server>>) -> Ctl {
     let items: Vec<Value> = s
         .store
         .entries()
@@ -1096,7 +1094,7 @@ async fn keychain(State(s): State<Shared>) -> Ctl {
 }
 
 /// Tokens revoked at Google, oldest first.
-async fn revocations(State(s): State<Shared>) -> Ctl {
+async fn revocations(State(s): State<Arc<Server>>) -> Ctl {
     let list: Vec<Value> = s
         .fake
         .revocations()
@@ -1222,7 +1220,7 @@ struct FaultReq {
 
 /// Makes matching Gmail requests fail or wait (SPEC Gmail errors). Returns the
 /// fault's id, which `release` takes for a hold.
-async fn fault(State(s): State<Shared>, Json(req): Json<FaultReq>) -> Ctl {
+async fn fault(State(s): State<Arc<Server>>, Json(req): Json<FaultReq>) -> Ctl {
     let id = s.fake.inject(req.on.matcher(), req.fault.fault()?);
     Ok(Json(json!({ "id": id })))
 }
@@ -1246,7 +1244,7 @@ struct ReleaseReq {
 }
 
 /// Ends holds and lets the requests they parked go on.
-async fn release(State(s): State<Shared>, Json(req): Json<ReleaseReq>) -> Ctl {
+async fn release(State(s): State<Arc<Server>>, Json(req): Json<ReleaseReq>) -> Ctl {
     let which = match (req.id, req.api) {
         (Some(id), _) => Release::Hold(id),
         (None, Some(api)) => Release::Api(api),
@@ -1271,7 +1269,7 @@ async fn release(State(s): State<Shared>, Json(req): Json<ReleaseReq>) -> Ctl {
 
 /// Removes every fault and hold, then retries what is backing off, as a network
 /// change would. Requests already held stay held until released.
-async fn clear_faults(State(s): State<Shared>) -> Ctl {
+async fn clear_faults(State(s): State<Arc<Server>>) -> Ctl {
     s.fake.clear_faults();
     if let Some(e) = s.engine().await {
         e.kick_queues();
@@ -1286,7 +1284,7 @@ struct OnReq {
 }
 
 /// The network goes away (every Gmail request fails to connect) or comes back.
-async fn offline(State(s): State<Shared>, Json(req): Json<OnReq>) -> Ctl {
+async fn offline(State(s): State<Arc<Server>>, Json(req): Json<OnReq>) -> Ctl {
     s.fake.set_offline(req.on).await;
     if !req.on
         && let Some(e) = s.engine().await
@@ -1337,12 +1335,12 @@ fn request_json(r: &LoggedRequest) -> Value {
 }
 
 /// Every request the fake received, in arrival order.
-async fn requests(State(s): State<Shared>) -> Ctl {
+async fn requests(State(s): State<Arc<Server>>) -> Ctl {
     let list: Vec<Value> = s.fake.requests().iter().map(request_json).collect();
     Ok(Json(json!(list)))
 }
 
-async fn poll(State(s): State<Shared>) -> Ctl {
+async fn poll(State(s): State<Arc<Server>>) -> Ctl {
     s.kick_polls().await;
     Ok(done())
 }
@@ -1369,7 +1367,7 @@ struct ClockReq {
 }
 
 /// Moves app time and returns it once the core has settled.
-async fn clock(State(s): State<Shared>, Json(req): Json<ClockReq>) -> Ctl {
+async fn clock(State(s): State<Arc<Server>>, Json(req): Json<ClockReq>) -> Ctl {
     if let Some(ms) = req.jump_ms {
         s.clock.jump(ms);
     }
@@ -1395,7 +1393,7 @@ struct FocusReq {
 /// The app window gains or loses focus. Focus soon after a background
 /// notification counts as a click on it: the page gets `notification-open`, as
 /// the app's webview does.
-async fn focus(State(s): State<Shared>, Json(req): Json<FocusReq>) -> Ctl {
+async fn focus(State(s): State<Arc<Server>>, Json(req): Json<FocusReq>) -> Ctl {
     let Some(e) = s.engine().await else {
         return Err(Fail("the core is not running".into()));
     };
@@ -1419,7 +1417,7 @@ async fn focus(State(s): State<Shared>, Json(req): Json<FocusReq>) -> Ctl {
     })))
 }
 
-async fn platform(State(s): State<Shared>) -> Ctl {
+async fn platform(State(s): State<Arc<Server>>) -> Ctl {
     let (notifications, badge, opened_urls, opened_files, focus_requests) = {
         let r = s.platform.recorded.lock();
         (
@@ -1457,7 +1455,7 @@ async fn platform(State(s): State<Shared>) -> Ctl {
 }
 
 /// Forgets what the platform recorded so far (the badge stays as it is).
-async fn clear_recorded(State(s): State<Shared>) -> Ctl {
+async fn clear_recorded(State(s): State<Arc<Server>>) -> Ctl {
     let mut r = s.platform.recorded.lock();
     r.notifications.clear();
     r.opened_urls.clear();
@@ -1485,7 +1483,11 @@ fn hit(s: &Server, method: &Method, uri: &axum::http::Uri) {
 }
 
 /// The remote image host: any `/img/<name>` is a pixel, and every fetch is logged.
-async fn remote_image(State(s): State<Shared>, method: Method, uri: axum::http::Uri) -> Response {
+async fn remote_image(
+    State(s): State<Arc<Server>>,
+    method: Method,
+    uri: axum::http::Uri,
+) -> Response {
     hit(&s, &method, &uri);
     (
         [
@@ -1498,7 +1500,7 @@ async fn remote_image(State(s): State<Shared>, method: Method, uri: axum::http::
 }
 
 /// A sink for hostile destinations (`/sink/evil.test/...`): logs and answers blank.
-async fn sink(State(s): State<Shared>, method: Method, uri: axum::http::Uri) -> Response {
+async fn sink(State(s): State<Arc<Server>>, method: Method, uri: axum::http::Uri) -> Response {
     hit(&s, &method, &uri);
     (
         [
@@ -1510,7 +1512,7 @@ async fn sink(State(s): State<Shared>, method: Method, uri: axum::http::Uri) -> 
         .into_response()
 }
 
-async fn hits(State(s): State<Shared>) -> Ctl {
+async fn hits(State(s): State<Arc<Server>>) -> Ctl {
     Ok(Json(json!(s.hits.lock().clone())))
 }
 
@@ -1520,7 +1522,7 @@ struct ContainsReq {
 }
 
 /// Whether the database files hold `text` anywhere (SPEC Security: no tokens in SQLite).
-async fn db_contains(State(s): State<Shared>, Query(q): Query<ContainsReq>) -> Ctl {
+async fn db_contains(State(s): State<Arc<Server>>, Query(q): Query<ContainsReq>) -> Ctl {
     let needle = q.text.as_bytes();
     if needle.is_empty() {
         return Err(Fail("empty text".into()));
@@ -1538,7 +1540,7 @@ async fn db_contains(State(s): State<Shared>, Query(q): Query<ContainsReq>) -> C
 }
 
 /// Serves the built UI; unknown paths get `index.html`.
-async fn static_file(State(s): State<Shared>, uri: axum::http::Uri) -> Response {
+async fn static_file(State(s): State<Arc<Server>>, uri: axum::http::Uri) -> Response {
     let rel = uri.path().trim_start_matches('/');
     let safe = !rel.split('/').any(|seg| seg == "..");
     let mut path = s.dist.join(if rel.is_empty() || !safe {

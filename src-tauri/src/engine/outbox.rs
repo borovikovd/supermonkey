@@ -13,7 +13,7 @@ use std::time::Duration;
 use rusqlite::{OptionalExtension, params};
 use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
 
-use super::{AccountRt, EngineRef};
+use super::{AccountRt, Engine};
 use crate::model::AccountId;
 
 #[derive(Debug)]
@@ -25,7 +25,7 @@ struct Row {
     send_after: i64,
 }
 
-fn rows(e: &EngineRef, account: AccountId) -> Vec<Row> {
+fn rows(e: &Engine, account: AccountId) -> Vec<Row> {
     e.reads
         .with(|c| {
             let mut stmt = c.prepare(
@@ -45,14 +45,14 @@ fn rows(e: &EngineRef, account: AccountId) -> Vec<Row> {
         .unwrap_or_default()
 }
 
-pub fn on_launch(e: &EngineRef) {
+pub fn on_launch(e: &Engine) {
     e.writer.sync(|ctx| {
         crate::outbox::on_launch(ctx)?;
         crate::drafts::on_launch(ctx)
     });
 }
 
-pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
+pub async fn run(e: Arc<Engine>, rt: Arc<AccountRt>) {
     let mut attempt = 0u32;
     loop {
         if rt.is_stopped() {
@@ -96,7 +96,7 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
 }
 
 async fn set_state(
-    e: &EngineRef,
+    e: &Engine,
     account: AccountId,
     outbox: i64,
     state: &'static str,
@@ -144,7 +144,7 @@ fn touch_row_thread(
     Ok(())
 }
 
-async fn send(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row) -> Result<(), GmailError> {
+async fn send(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError> {
     let late = crate::clock::now_ms() > row.send_after + 5_000;
     // Undone meanwhile: the row is gone.
     if !set_state(e, rt.id, row.id, "sending", late).await {
@@ -172,7 +172,7 @@ async fn send(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row) -> Result<(), Gmail
     send_draft(e, rt, row, &draft.id).await
 }
 
-async fn record_gmail_draft(e: &EngineRef, outbox: i64, gid: &str) {
+async fn record_gmail_draft(e: &Engine, outbox: i64, gid: &str) {
     let gid = gid.to_string();
     e.writer
         .call(move |ctx| {
@@ -187,8 +187,8 @@ async fn record_gmail_draft(e: &EngineRef, outbox: i64, gid: &str) {
 }
 
 async fn send_draft(
-    e: &EngineRef,
-    rt: &Arc<AccountRt>,
+    e: &Engine,
+    rt: &AccountRt,
     row: &Row,
     gmail_draft: &str,
 ) -> Result<(), GmailError> {
@@ -232,7 +232,7 @@ async fn send_draft(
     }
 }
 
-fn undo_requested(e: &EngineRef, outbox: i64) -> bool {
+fn undo_requested(e: &Engine, outbox: i64) -> bool {
     e.reads
         .with(|c| {
             Ok(c.query_row(
@@ -247,7 +247,7 @@ fn undo_requested(e: &EngineRef, outbox: i64) -> bool {
 }
 
 /// A sending row with no clear answer: `drafts.get` 404 means it was sent.
-async fn settle(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row) -> Result<(), GmailError> {
+async fn settle(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError> {
     let gid: Option<String> = e
         .reads
         .with(|c| {
@@ -318,7 +318,7 @@ async fn settle(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row) -> Result<(), Gma
 
 /// Gmail accepted the send. Store the sent message at once, so the reply
 /// never leaves the thread while waiting for the next poll.
-async fn sent(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row, message: &str, gmail_thread: &str) {
+async fn sent(e: &Engine, rt: &AccountRt, row: &Row, message: &str, gmail_thread: &str) {
     let account = rt.id;
     let outbox = row.id;
     let draft = row.draft.clone();
@@ -376,12 +376,12 @@ async fn sent(e: &EngineRef, rt: &Arc<AccountRt>, row: &Row, message: &str, gmai
 }
 
 /// A held undo resolved as not sent: the draft goes back to a composer.
-async fn not_sent(e: &EngineRef, account: AccountId, row: &Row) {
+async fn not_sent(e: &Engine, account: AccountId, row: &Row) {
     notice_and_remove(e, account, row, "send_undone", "Send undone".into()).await;
 }
 
 /// Gmail rejected the message: a toast shows the error and the draft goes back to a composer.
-async fn fail(e: &EngineRef, account: AccountId, row: &Row, message: &str) {
+async fn fail(e: &Engine, account: AccountId, row: &Row, message: &str) {
     notice_and_remove(
         e,
         account,
@@ -393,7 +393,7 @@ async fn fail(e: &EngineRef, account: AccountId, row: &Row, message: &str) {
 }
 
 async fn notice_and_remove(
-    e: &EngineRef,
+    e: &Engine,
     account: AccountId,
     row: &Row,
     kind: &'static str,

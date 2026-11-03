@@ -22,7 +22,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::EngineRef;
+use super::Engine;
 use crate::api;
 use crate::model::ChannelMessage;
 
@@ -32,7 +32,7 @@ use crate::model::ChannelMessage;
 pub struct Bridge(Arc<Shared>);
 
 struct Shared {
-    engine: RwLock<Option<EngineRef>>,
+    engine: RwLock<Option<Arc<Engine>>>,
     /// One sender per open `/events` stream.
     events: Mutex<Vec<UnboundedSender<UiEvent>>>,
     /// `(rev, ack)` of the newest channel message sent to the page.
@@ -51,7 +51,7 @@ struct UiEvent {
 }
 
 impl Bridge {
-    pub fn new(engine: Option<EngineRef>) -> Bridge {
+    pub fn new(engine: Option<Arc<Engine>>) -> Bridge {
         Bridge(Arc::new(Shared {
             engine: RwLock::new(engine),
             events: Mutex::new(Vec::new()),
@@ -61,13 +61,13 @@ impl Bridge {
         }))
     }
 
-    pub fn engine(&self) -> Option<EngineRef> {
+    pub fn engine(&self) -> Option<Arc<Engine>> {
         self.0.engine.read().clone()
     }
 
     /// The engine to serve; `None` while the core is down, which also ends
     /// the open event streams.
-    pub fn set_engine(&self, engine: Option<EngineRef>) {
+    pub fn set_engine(&self, engine: Option<Arc<Engine>>) {
         if engine.is_none() {
             self.0.events.lock().clear();
         }
@@ -104,7 +104,7 @@ pub fn start(app: &AppHandle) {
     if !cfg!(debug_assertions) || std::env::var("UBERMENSCH_WEB_BRIDGE").as_deref() != Ok("1") {
         return;
     }
-    let engine = app.state::<EngineRef>().inner().clone();
+    let engine = app.state::<Arc<Engine>>().inner().clone();
     tauri::async_runtime::spawn(async move {
         match tokio::net::TcpListener::bind("127.0.0.1:1430").await {
             Ok(listener) => {
@@ -195,7 +195,7 @@ async fn invoke(
     })
 }
 
-async fn run(bridge: &Bridge, e: &EngineRef, cmd: &str, args: &Value) -> Result<Value, String> {
+async fn run(bridge: &Bridge, e: &Arc<Engine>, cmd: &str, args: &Value) -> Result<Value, String> {
     Ok(match cmd {
         // Unlike the Tauri command, events arrive on `/events` and no window is shown.
         "connect" => json!(api::launch_info(e)?),

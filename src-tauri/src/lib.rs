@@ -36,6 +36,7 @@ impl<T, E: std::fmt::Display> LogErr for Result<T, E> {
 }
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 
@@ -82,7 +83,7 @@ pub fn run() {
                 let _ = window.hide();
             }
             WindowEvent::Focused(focused) => {
-                let Some(engine) = window.app_handle().try_state::<engine::EngineRef>() else {
+                let Some(engine) = window.app_handle().try_state::<Arc<engine::Engine>>() else {
                     return;
                 };
                 if *focused {

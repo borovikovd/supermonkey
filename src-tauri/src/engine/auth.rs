@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use ub_gmail::{Gmail, OAuthTokens, Priority, cost};
 
-use super::EngineRef;
+use super::Engine;
 use crate::model::AccountId;
 
 /// A completed sign-in.
@@ -17,7 +17,7 @@ struct SignIn {
 
 impl SignIn {
     /// Keeps the refresh token in the token store for the next launch.
-    fn store_token(&self, e: &EngineRef) -> anyhow::Result<()> {
+    fn store_token(&self, e: &Engine) -> anyhow::Result<()> {
         e.store
             .store_refresh_token(&self.email, &self.refresh_token)
             .map_err(|err| anyhow::anyhow!("Keychain: {}", err.0))
@@ -26,7 +26,7 @@ impl SignIn {
 
 /// Starting a sign-in cancels the one before it: the user left it in the
 /// browser, and its loopback listener would otherwise wait forever.
-async fn sign_in(e: &EngineRef) -> anyhow::Result<SignIn> {
+async fn sign_in(e: &Engine) -> anyhow::Result<SignIn> {
     let (cancel, cancelled) = tokio::sync::oneshot::channel();
     let previous = e.sign_in_cancel.lock().replace(cancel);
     if let Some(previous) = previous {
@@ -39,7 +39,7 @@ async fn sign_in(e: &EngineRef) -> anyhow::Result<SignIn> {
     }
 }
 
-async fn sign_in_once(e: &EngineRef) -> anyhow::Result<SignIn> {
+async fn sign_in_once(e: &Engine) -> anyhow::Result<SignIn> {
     if e.config.oauth.client_id.is_empty() {
         anyhow::bail!(
             "This build has no Google OAuth client. Put google-oauth-client.json in the project and rebuild."
@@ -77,7 +77,7 @@ async fn sign_in_once(e: &EngineRef) -> anyhow::Result<SignIn> {
     })
 }
 
-pub async fn add_account(e: &EngineRef) -> anyhow::Result<AccountId> {
+pub async fn add_account(e: &Arc<Engine>) -> anyhow::Result<AccountId> {
     let signed_in = sign_in(e).await?;
     signed_in.store_token(e)?;
     let email = signed_in.email.clone();
@@ -90,7 +90,7 @@ pub async fn add_account(e: &EngineRef) -> anyhow::Result<AccountId> {
     Ok(id)
 }
 
-pub async fn sign_in_again(e: &EngineRef, account: AccountId) -> anyhow::Result<()> {
+pub async fn sign_in_again(e: &Arc<Engine>, account: AccountId) -> anyhow::Result<()> {
     let expected: String = e.reads.with(|c| {
         Ok(
             c.query_row("SELECT email FROM accounts WHERE id = ?1", [account], |r| {
@@ -120,7 +120,7 @@ pub async fn sign_in_again(e: &EngineRef, account: AccountId) -> anyhow::Result<
 }
 
 /// After Remove account: stop sync, revoke and delete the token, delete files.
-pub async fn forget(e: EngineRef, account: AccountId, email: String) {
+pub async fn forget(e: Arc<Engine>, account: AccountId, email: String) {
     e.stop_account(account);
     if let Ok(Some(token)) = e.store.load_refresh_token(&email) {
         ub_gmail::revoke(&e.config.oauth, &e.http, &token)
