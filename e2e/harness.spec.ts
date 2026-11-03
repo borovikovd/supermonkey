@@ -50,6 +50,21 @@ test("hold parks a request; settle does not wait for it; the log records it", as
   expect(p3?.labels).not.toContain("INBOX");
 });
 
+test("settle skips a held request with a second action queued behind it", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const hold = await gmail.hold("messages.batchModify");
+  await app.press("e");
+  await app.press("j", "e");
+  await app.settle();
+  expect((await gmail.requests("messages.batchModify")).map((r) => r.held)).toEqual([true]);
+  expect(await hold.release()).toBe(1);
+  await app.settle();
+  expect((await gmail.requests("messages.batchModify")).map((r) => r.held)).toEqual([false, false]);
+});
+
 test("a held request can be released with a fault", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   const hold = await gmail.hold("messages.batchModify");

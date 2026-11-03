@@ -350,9 +350,16 @@ impl Server {
     }
 
     /// Whether the core has nothing left to do. Requests parked by a hold are
-    /// waiting on the test, not on the core.
+    /// waiting on the test, not on the core. While one is parked, a kick whose
+    /// task wasn't waiting may belong to the task parked behind it, so it
+    /// counts as waiting on the test too.
     fn core_idle(&self) -> bool {
-        crate::clock::activity().values().sum::<usize>() <= self.fake.held()
+        let busy = crate::clock::activity();
+        let held = self.fake.held();
+        let deferred = busy.get(crate::clock::DEFERRED_KICK).copied().unwrap_or(0);
+        let total: usize = busy.values().sum();
+        let behind_holds = if held > 0 { deferred } else { 0 };
+        total.saturating_sub(behind_holds) <= held
     }
 
     /// Waits until [`Server::core_idle`], or fails with what is still busy.

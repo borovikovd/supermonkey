@@ -15,7 +15,7 @@
 
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -339,16 +339,27 @@ pub fn waiting_on_person() {
 }
 
 /// Wakes a task that waits in [`Kick::wait`]. Like `Notify::notify_one`, a
-/// kick with no waiter is kept for the next wait. Busy until a waiter takes it.
+/// kick with no waiter is kept for the next wait. Busy until a waiter takes it:
+/// as `kick` when a task was waiting, or as `kick-deferred` when its task was
+/// busy elsewhere and takes it at its next wait.
 #[derive(Default)]
 pub struct Kick {
     notify: Notify,
     pending: Mutex<Option<Busy>>,
+    waiting: AtomicUsize,
 }
+
+/// The label of a kick whose task was not waiting for it.
+pub const DEFERRED_KICK: &str = "kick-deferred";
 
 impl Kick {
     pub fn kick(&self) {
-        self.pending.lock().get_or_insert_with(|| Busy::new("kick"));
+        let label = if self.waiting.load(Ordering::SeqCst) > 0 {
+            "kick"
+        } else {
+            DEFERRED_KICK
+        };
+        self.pending.lock().get_or_insert_with(|| Busy::new(label));
         self.notify.notify_one();
     }
 
@@ -359,6 +370,8 @@ impl Kick {
 
     /// Waits for a kick, or for `timeout` of app time.
     pub async fn wait(&self, timeout: Duration) {
+        self.waiting.fetch_add(1, Ordering::SeqCst);
+        let _waiting = Waiting(&self.waiting);
         let _fired = parked(async {
             tokio::select! {
                 () = self.notify.notified() => None,
@@ -367,6 +380,15 @@ impl Kick {
         })
         .await;
         drop(self.pending.lock().take());
+    }
+}
+
+/// Counts a task in [`Kick::wait`] until the wait ends or is dropped.
+struct Waiting<'a>(&'a AtomicUsize);
+
+impl Drop for Waiting<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
