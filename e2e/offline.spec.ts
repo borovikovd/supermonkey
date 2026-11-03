@@ -361,6 +361,38 @@ test("OFF-04 a queued action wins on the messages it recorded, without hiding ne
   await expect(row).toHaveAttribute("data-unread");
 });
 
+test("OFF-04 a poll during the replay keeps the queued change on the messages it recorded", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const m1 = s.message("p1", 1);
+  await gmail.offline(true);
+  await highlight(app, "Person 1");
+  await app.press("e");
+  await expect(app.row("Person 1")).toHaveCount(0);
+  await app.settle();
+  // Another client stars m1, so the next history carries m1 with INBOX still on it.
+  await gmail.modify(A, m1.id, ["STARRED"], []);
+  // The archive stays queued: Gmail keeps answering 503.
+  await gmail.fault("messages.batchModify", { kind: "status", status: 503 });
+  const since = await lastSeq(app);
+
+  await gmail.offline(false);
+  await app.settle();
+  const after = (await gmail.requests()).filter((r) => r.seq > since);
+  expect(after.some((r) => r.api === "history.list" && r.answer === 200)).toBe(true);
+  expect(after.filter((r) => r.api === "messages.batchModify").map((r) => r.answer)).toContain(503);
+  await expect(app.row("Person 1")).toHaveCount(0);
+
+  await gmail.clearFaults();
+  await app.settle();
+  const g1 = (await gmail.gmail(A)).messages.find((m) => m.id === m1.id);
+  expect(g1?.labels).not.toContain("INBOX");
+  expect(g1?.labels).toContain("STARRED");
+  await expect(app.row("Person 1")).toHaveCount(0);
+});
+
 test("OFF-05 a rejection during replay rolls back that one action, and replay continues", async ({
   app,
   gmail,

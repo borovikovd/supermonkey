@@ -53,9 +53,10 @@ test("hold parks a request; settle does not wait for it; the log records it", as
 test("a held request can be released with a fault", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   const hold = await gmail.hold("messages.batchModify");
+  // Called before the request exists: it waits until the hold has parked it.
+  const released = hold.release({ kind: "status", status: 400, reason: "invalidArgument" });
   await app.press("j", "e");
-  await expect(app.row("Person 2")).toHaveCount(0);
-  await hold.release({ kind: "status", status: 400, reason: "invalidArgument" });
+  expect(await released).toBe(1);
   await app.settle();
   // A rejection rolls the action back and says so.
   await expect(app.row("Person 2")).toHaveCount(1);
@@ -92,6 +93,7 @@ test("polls run on app time; stepwise advance runs every retry", async ({ app, g
   await expect(app.row("Fresh")).toHaveCount(0);
   await app.advance(1_000);
   expect(await polls()).toBe(before + 1);
+  expect(await app.page.evaluate(() => Date.now())).toBe(seeds.ANCHOR + 45_000);
   await expect(app.row("Fresh")).toHaveCount(1);
 
   await gmail.fault("messages.batchModify", { kind: "status", status: 503 }, { times: 3 });
@@ -132,7 +134,10 @@ test("a quit closes the composer first; Gmail and the clock change while down", 
   await app.press("j", "j", "Enter");
   await app.reply();
   await app.type("Written before the quit");
+  const quitting = Date.now();
+  let quitMs = Infinity;
   await app.restart(async () => {
+    quitMs = Date.now() - quitting;
     await gmail.deliver({
       account: A,
       from: "Late <late@x.test>",
@@ -141,6 +146,8 @@ test("a quit closes the composer first; Gmail and the clock change while down", 
     });
     await app.advance(60_000);
   });
+  // The page answered quit-requested: the core did not wait out its 10 s fallback.
+  expect(quitMs).toBeLessThan(5_000);
   expect(await app.now()).toBe(seeds.ANCHOR + 60_000);
   await expect(app.row("While down")).toHaveCount(1);
   const drafts = (await gmail.gmail(A)).drafts;
