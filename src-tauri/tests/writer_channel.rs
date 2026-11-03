@@ -438,3 +438,76 @@ fn launch_numbers_continue_after_actions_still_queued() {
         "numbers the writer has queued"
     );
 }
+
+/// A commit that fails after the subscriptions computed their messages must
+/// not leave them believing those messages went out: a subscription whose
+/// first load was lost gets one with the next commit, instead of waiting for
+/// it forever.
+#[test]
+fn a_first_load_lost_to_a_failed_commit_is_sent_again() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.db");
+    fixture::generate(&path, &SIZE, &["a@example.com"]).unwrap();
+    let (etx, _erx) = tokio::sync::mpsc::unbounded_channel();
+    let writer = Writer::start(&path, etx).unwrap();
+    let firsts: Arc<Mutex<Vec<SubId>>> = Arc::default();
+    {
+        let firsts = Arc::clone(&firsts);
+        writer.set_channel(move |msg: ChannelMessage| {
+            for u in msg.updates {
+                if let SubUpdate::App {
+                    sub, first: true, ..
+                } = u
+                {
+                    firsts.lock().push(sub);
+                }
+            }
+        });
+    }
+    // Armed, the next action's commit fails: a deferred foreign key, broken
+    // as the action records its number, is only checked at COMMIT.
+    let armed = Arc::new(AtomicBool::new(false));
+    {
+        let armed = Arc::clone(&armed);
+        writer
+            .call_blocking(move |ctx| {
+                ctx.tx.create_scalar_function(
+                    "fail_commit",
+                    0,
+                    rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+                    move |_| Ok(armed.swap(false, Ordering::AcqRel)),
+                )?;
+                ctx.tx.execute_batch(
+                    "CREATE TEMP TABLE fk_parent (id INTEGER PRIMARY KEY);
+                     CREATE TEMP TABLE fk_child (
+                       parent INTEGER REFERENCES fk_parent (id) DEFERRABLE INITIALLY DEFERRED);
+                     CREATE TEMP TRIGGER fail_commit AFTER UPDATE ON meta
+                       WHEN NEW.key = 'last_action' AND fail_commit()
+                       BEGIN INSERT INTO fk_child VALUES (1); END;",
+                )?;
+                Ok(())
+            })
+            .unwrap();
+    }
+    armed.store(true, Ordering::Release);
+    let sub = SubId("app".into());
+    writer.actions(vec![NumberedAction {
+        n: 1,
+        action: Action::Subscribe {
+            sub: sub.clone(),
+            key: SubKey::App,
+        },
+    }]);
+    writer.call_blocking(|_| Ok(())).unwrap();
+    assert!(
+        !armed.load(Ordering::Acquire),
+        "the commit was made to fail"
+    );
+    assert_eq!(
+        *firsts.lock(),
+        vec![sub],
+        "one first load, after the failure"
+    );
+}

@@ -446,7 +446,7 @@ impl WriterState {
         let wrote = !touched.is_empty();
         let touched_app = touched.app;
         let ack = action.unwrap_or(self.ack).max(self.ack);
-        let subs = &mut self.subs;
+        let subs = &self.subs;
         let online = self.online;
         let committed = (move || -> anyhow::Result<_> {
             if let Some(n) = action {
@@ -455,15 +455,14 @@ impl WriterState {
             if wrote {
                 tx.execute("UPDATE meta SET value = ?1 WHERE key = 'rev'", [rev])?;
             }
-            let mut updates = subs.updates(&tx, &touched, online)?;
-            updates.extend(subs.take_first_loads(&tx, online)?);
+            let out = subs.outgoing(&tx, &touched, online)?;
             tx.commit()?;
-            Ok(updates)
+            Ok(out)
         })();
         for done in on_commit {
             done(committed.as_ref().map(|_| ()));
         }
-        let updates = committed?;
+        let updates = self.subs.sent(committed?);
         if wrote {
             self.rev = rev;
         }

@@ -36,6 +36,18 @@ pub struct Subs {
     pub map: HashMap<SubId, Sub>,
 }
 
+/// A commit's messages for the subscriptions, and what they record once it
+/// lands. Nothing is recorded before then, so a failed commit leaves each
+/// subscription as it was: a first load that never went out goes out later.
+#[derive(Default)]
+pub struct Outgoing {
+    updates: Vec<SubUpdate>,
+    /// The list ids each list subscription sent.
+    ids: Vec<(SubId, Vec<ListEntry>)>,
+    /// Subscriptions whose first load this is.
+    first: Vec<SubId>,
+}
+
 impl Subs {
     pub fn subscribe(&mut self, id: SubId, key: SubKey) {
         self.map.insert(
@@ -85,32 +97,53 @@ impl Subs {
             .collect()
     }
 
-    /// First loads for subscriptions that have not had one yet.
-    pub fn take_first_loads(
-        &mut self,
+    /// Patches for every open subscription the commit affects, then first
+    /// loads for those that have not had one, all from the commit's snapshot.
+    /// Apply the result with [`Subs::sent`] once the commit has landed.
+    pub fn outgoing(
+        &self,
         conn: &Connection,
+        t: &Touched,
         online: bool,
-    ) -> anyhow::Result<Vec<SubUpdate>> {
-        let mut out = Vec::new();
-        for (id, sub) in self.map.iter_mut().filter(|(_, s)| !s.first_sent) {
-            sub.first_sent = true;
-            out.push(first_load(conn, id, sub, online)?);
+    ) -> anyhow::Result<Outgoing> {
+        let mut out = Outgoing::default();
+        self.updates(conn, t, online, &mut out)?;
+        for (id, sub) in self.map.iter().filter(|(_, s)| !s.first_sent) {
+            out.first.push(id.clone());
+            out.updates
+                .push(first_load(conn, id, sub, online, &mut out.ids)?);
         }
         Ok(out)
     }
 
-    /// Patches for every open subscription the commit affects.
-    pub fn updates(
-        &mut self,
+    /// Records what a committed [`Outgoing`] sent and returns its messages.
+    pub fn sent(&mut self, out: Outgoing) -> Vec<SubUpdate> {
+        for (id, ids) in out.ids {
+            if let Some(sub) = self.map.get_mut(&id) {
+                sub.ids = ids;
+            }
+        }
+        for id in out.first {
+            if let Some(sub) = self.map.get_mut(&id) {
+                sub.first_sent = true;
+            }
+        }
+        out.updates
+    }
+
+    fn updates(
+        &self,
         conn: &Connection,
         t: &Touched,
         online: bool,
-    ) -> anyhow::Result<Vec<SubUpdate>> {
+        out: &mut Outgoing,
+    ) -> anyhow::Result<()> {
         if t.is_empty() {
-            return Ok(Vec::new());
+            return Ok(());
         }
-        let mut out = Vec::new();
-        for (id, sub) in self.map.iter_mut().filter(|(_, s)| s.first_sent) {
+        let out_ids = &mut out.ids;
+        let out = &mut out.updates;
+        for (id, sub) in self.map.iter().filter(|(_, s)| s.first_sent) {
             let forced = t.subs.contains(id);
             match &sub.key {
                 SubKey::App => {
@@ -142,13 +175,15 @@ impl Subs {
                     };
                     if hit || forced {
                         let ids = queries::list_ids(conn, *account, view)?;
-                        out.extend(list_patch(conn, id, sub, ids, t, drafts, forced)?);
+                        out.extend(list_patch(conn, id, sub, &ids, t, drafts, forced)?);
+                        out_ids.push((id.clone(), ids));
                     }
                 }
                 SubKey::Search { account, query } => {
                     if t.lists.contains(account) || forced {
                         let ids = search::ids(conn, *account, query, &sub.gmail_hits)?;
-                        out.extend(list_patch(conn, id, sub, ids, t, false, forced)?);
+                        out.extend(list_patch(conn, id, sub, &ids, t, false, forced)?);
+                        out_ids.push((id.clone(), ids));
                     }
                 }
                 SubKey::Conversation {
@@ -173,7 +208,7 @@ impl Subs {
                 }
             }
         }
-        Ok(out)
+        Ok(())
     }
 }
 
@@ -182,16 +217,14 @@ impl Subs {
 fn list_patch(
     conn: &Connection,
     id: &SubId,
-    sub: &mut Sub,
-    ids: Vec<ListEntry>,
+    sub: &Sub,
+    ids: &[ListEntry],
     t: &Touched,
     drafts: bool,
     forced: bool,
 ) -> anyhow::Result<Option<SubUpdate>> {
-    let (removed, moved) = diff::diff(&sub.ids, &ids);
-    sub.ids = ids;
-    let changed: Vec<&str> = sub
-        .ids
+    let (removed, moved) = diff::diff(&sub.ids, ids);
+    let changed: Vec<&str> = ids
         .iter()
         .filter(|e| {
             if drafts {
@@ -223,8 +256,9 @@ fn list_patch(
 fn first_load(
     conn: &Connection,
     id: &SubId,
-    sub: &mut Sub,
+    sub: &Sub,
     online: bool,
+    sent_ids: &mut Vec<(SubId, Vec<ListEntry>)>,
 ) -> anyhow::Result<SubUpdate> {
     Ok(match &sub.key {
         SubKey::App => SubUpdate::App {
@@ -241,11 +275,11 @@ fn first_load(
         SubKey::List { account, view } => {
             let drafts = *view == View::Drafts;
             let ids = queries::list_ids(conn, *account, view)?;
-            list_first(conn, id, sub, ids, drafts)?
+            list_first(conn, id, sub, ids, drafts, sent_ids)?
         }
         SubKey::Search { account, query } => {
             let ids = search::ids(conn, *account, query, &sub.gmail_hits)?;
-            list_first(conn, id, sub, ids, false)?
+            list_first(conn, id, sub, ids, false, sent_ids)?
         }
         SubKey::Conversation {
             thread, trash_mode, ..
@@ -265,9 +299,10 @@ fn first_load(
 fn list_first(
     conn: &Connection,
     id: &SubId,
-    sub: &mut Sub,
+    sub: &Sub,
     ids: Vec<ListEntry>,
     drafts: bool,
+    sent_ids: &mut Vec<(SubId, Vec<ListEntry>)>,
 ) -> anyhow::Result<SubUpdate> {
     let window: Vec<&str> = ids
         .iter()
@@ -275,7 +310,7 @@ fn list_first(
         .map(|e| e.key.as_str())
         .collect();
     let rows = queries::rows_for_keys(conn, drafts, &window)?;
-    sub.ids.clone_from(&ids);
+    sent_ids.push((id.clone(), ids.clone()));
     Ok(SubUpdate::List {
         sub: id.clone(),
         first: true,
