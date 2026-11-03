@@ -163,6 +163,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     attachments: [],
   });
   const [loaded, setLoaded] = useState(false);
+  /** The body the first load carried. */
+  const [loadedBody, setLoadedBody] = useState("");
   const [showCc, setShowCc] = useState(false);
   const [showBcc, setShowBcc] = useState(false);
   const [showSubject, setShowSubject] = useState(!inline);
@@ -248,6 +250,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   // The first load carries the filled fields (adjusted during render, once).
   if (state && !state.gone && !loaded) {
     setLoaded(true);
+    setLoadedBody(state.bodyHtml);
     // Anything typed before the load arrived wins over the loaded value.
     setFields((f) => ({
       from: f.from ?? state.from,
@@ -265,11 +268,12 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   useEffect(() => {
     latest.current = fields;
   }, [fields]);
-  // A resumed draft fills the editor.
-  const firstBody = loaded ? (state?.bodyHtml ?? "") : "";
+  // A resumed draft fills the editor, once: a later patch is the echo of a
+  // save, and text deleted since must not come back.
   useEffect(() => {
-    if (editor?.isEmpty && firstBody) editor.commands.setContent(firstBody, { emitUpdate: false });
-  }, [editor, firstBody]);
+    if (editor?.isEmpty && loadedBody)
+      editor.commands.setContent(loadedBody, { emitUpdate: false });
+  }, [editor, loadedBody]);
 
   // Register with the session so send, discard, and close carry the pending save.
   useEffect(() => {

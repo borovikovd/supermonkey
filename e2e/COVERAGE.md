@@ -2162,6 +2162,18 @@ _EG · §Addressing, §Gmail errors (`X-Ubermensch-Draft` on sync)_
   - Resuming it shows the quote as a separate block.
   - Gmail has one draft.
 
+#### DRF-10 · P1 · Text deleted while its save is on the way stays deleted
+
+_EG · §Actions (the mirror applies Rust's echo of a save)_
+
+- **Steps:**
+  1. Reply to `p3` and type "Hello". Park the page's submits and let the autosave fire (page clock `runFor(500)`).
+  2. Select all and delete. Release, and wait until the save's echo (body "Hello") is in the mirror.
+  3. Type "Bye", let the autosave fire, `settle()`.
+- **Expect:**
+  - After step 2, the editor stays empty.
+  - After step 3, the editor reads "Bye", and the Gmail draft has "Bye" and no "Hello".
+
 ### 5.16 `undo-send.spec.ts` (SND)
 
 Outbox state machine (§Send and undo):

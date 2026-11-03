@@ -439,3 +439,32 @@ test("DRF-09 the app's own drafts are read back after the account is re-added", 
   await expect(app.page.getByTitle("Show quoted text")).toBeVisible();
   expect((await gmail.gmail(A)).drafts).toHaveLength(1);
 });
+
+/** The open composer's body as Rust last sent it (the mirror's copy). A string: `__ub` is the app's hook. */
+const MIRROR_BODY = `Object.values(window.__ub.useMirror.getState().subs)
+  .find((s) => s.type === "composer")?.draft?.bodyHtml ?? null`;
+
+test("DRF-10 text deleted while its save is on the way stays deleted", async ({ app, gmail }) => {
+  const s = await seeds.standard(gmail, app);
+  await openThread(app, "Person 3");
+  await app.reply();
+  await app.type("Hello");
+  const release = await app.park("submit");
+  // The autosave fires; its submit is parked.
+  await app.page.clock.runFor(500);
+  await app.press("Meta+a", "Backspace");
+  await expect(app.editor).toHaveText("");
+  await release();
+  // The parked save's echo arrives with "Hello".
+  await expect.poll(() => app.page.evaluate<string | null>(MIRROR_BODY)).toContain("Hello");
+  await expect(app.editor).toHaveText("");
+
+  // An empty draft is not upserted, so a new word shows what Gmail keeps.
+  await app.type("Bye");
+  await app.page.clock.runFor(500);
+  await app.settle();
+  await expect(app.editor).toHaveText("Bye");
+  const [draft] = await draftsIn(gmail, s.thread("p3").threadId);
+  expect(bodyOf(draft)).toContain("Bye");
+  expect(bodyOf(draft)).not.toContain("Hello");
+});
