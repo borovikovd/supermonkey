@@ -152,7 +152,9 @@ export function applyChannel(
   keep: ReadonlySet<string> = new Set(),
 ): MirrorState {
   const subs = { ...s.subs };
-  const rows = { ...s.rows };
+  // Most messages carry no list rows: keep the row map as it is for them.
+  const lists = msg.updates.some((u) => u.type === "list");
+  const rows = lists ? { ...s.rows } : s.rows;
   const left: string[] = [];
   for (const u of msg.updates) {
     const sub = subs[u.sub];
@@ -186,12 +188,14 @@ export function applyChannel(
         break;
     }
   }
-  dropUnheldRows(rows, subs, s.removals, left, keep);
+  if (lists) dropUnheldRows(rows, subs, s.removals, left, keep);
   return {
     ...s,
     subs,
     rows,
-    pending: s.pending.filter((p) => p.n > msg.ack),
+    pending: s.pending.some((p) => p.n <= msg.ack)
+      ? s.pending.filter((p) => p.n > msg.ack)
+      : s.pending,
     ack: Math.max(s.ack, msg.ack),
     rev: Math.max(s.rev, msg.rev),
   };

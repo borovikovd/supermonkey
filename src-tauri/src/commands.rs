@@ -17,6 +17,9 @@ use crate::model::{
     LaunchInfo, ListRow, MessageBody, MessageId, NumberedAction, SnoozeChoice,
 };
 
+// Commands that read SQLite or files are `async`: a plain command runs on
+// the main thread, where a slow read would stall the window.
+
 /// The page's first call: where channel messages go, and where action numbers continue.
 #[tauri::command]
 pub fn connect(
@@ -40,7 +43,7 @@ pub fn submit(engine: State<'_, Arc<Engine>>, actions: Vec<NumberedAction>) {
     api::submit(&engine, actions);
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn fetch_rows(
     engine: State<'_, Arc<Engine>>,
     drafts: bool,
@@ -49,7 +52,7 @@ pub fn fetch_rows(
     api::fetch_rows(&engine, drafts, &keys)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_bodies(
     engine: State<'_, Arc<Engine>>,
     ids: Vec<MessageId>,
@@ -57,7 +60,7 @@ pub fn get_bodies(
     api::get_bodies(&engine, &ids)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn autocomplete(
     engine: State<'_, Arc<Engine>>,
     account: AccountId,
@@ -84,7 +87,7 @@ pub async fn open_attachment(
     api::open_attachment(&engine, attachment).await
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_attachment(
     draft: DraftId,
     filename: String,

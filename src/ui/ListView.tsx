@@ -109,6 +109,9 @@ function Empty({ inbox, loaded }: { inbox: boolean; loaded: boolean }) {
   );
 }
 
+/** Row keys asked for and not answered yet: scrolling never asks twice. */
+const fetching = new Set<string>();
+
 export function ListView() {
   const { cur } = useCurrent();
   const list = useCurrentList();
@@ -208,11 +211,17 @@ export function ListView() {
     const missing: string[] = [];
     for (let i = first; i <= last; i++) {
       const it = items[i];
-      if (it?.type === "row" && !rows[it.key]) missing.push(it.key);
+      if (it?.type === "row" && !rows[it.key] && !fetching.has(it.key)) missing.push(it.key);
     }
     if (missing.length === 0) return;
     const t = setTimeout(() => {
-      void fetchRows(isDrafts, missing).then((r) => useMirror.getState().putRows(r));
+      for (const k of missing) fetching.add(k);
+      fetchRows(isDrafts, missing)
+        .then((r) => useMirror.getState().putRows(r))
+        .catch((err: unknown) => console.warn("fetch list rows", err))
+        .finally(() => {
+          for (const k of missing) fetching.delete(k);
+        });
     }, 0);
     return () => clearTimeout(t);
   }, [virtual, items, rows, isDrafts]);

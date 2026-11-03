@@ -7,23 +7,33 @@ import type { MessageBody } from "../ipc/types";
 /** Bodies never change, so a loaded body is kept for the session. */
 const bodies = new Map<number, MessageBody>();
 const waiting = new Map<number, Promise<void>>();
+/** Ids asked for in this tick: frames that mount together share one call. */
+let batch: { ids: number[]; done: Promise<void> } | null = null;
 
-async function fetchBody(id: number): Promise<void> {
+async function fetchBodies(ids: number[]): Promise<void> {
+  // Let the other frames of this tick add their ids first.
+  await Promise.resolve();
+  batch = null;
   try {
-    for (const b of await getBodies([id])) bodies.set(b.id, b);
+    for (const b of await getBodies(ids)) bodies.set(b.id, b);
+  } catch (err) {
+    console.warn("load message bodies", ids, err);
   } finally {
-    waiting.delete(id);
+    for (const i of ids) waiting.delete(i);
   }
 }
 
 function loadBody(id: number): Promise<void> {
   if (bodies.has(id)) return Promise.resolve();
-  let p = waiting.get(id);
-  if (!p) {
-    p = fetchBody(id);
-    waiting.set(id, p);
+  const pending = waiting.get(id);
+  if (pending) return pending;
+  if (!batch) {
+    const ids: number[] = [];
+    batch = { ids, done: fetchBodies(ids) };
   }
-  return p;
+  batch.ids.push(id);
+  waiting.set(id, batch.done);
+  return batch.done;
 }
 
 const BASE_STYLE = `
