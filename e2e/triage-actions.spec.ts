@@ -283,7 +283,6 @@ test("TRI-04 ! moves to Spam", async ({ app, gmail }) => {
   await app.settle();
   expect(await has(gmail, s, "trashOld", "TRASH")).toBe(false);
   expect(await has(gmail, s, "trashOld", "SPAM")).toBe(true);
-  await app.settle();
   await expect(app.row("Old trash")).toHaveCount(0);
 });
 
