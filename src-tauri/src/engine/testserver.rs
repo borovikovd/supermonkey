@@ -53,7 +53,7 @@ struct Recorded {
 }
 
 /// How the next Google sign-in in the browser goes. Used once.
-#[derive(Clone, Default)]
+#[derive(Default)]
 enum SignIn {
     /// The fake signs in its first user.
     #[default]
@@ -141,7 +141,7 @@ enum Core {
 }
 
 /// A request to the remote image host or the `evil.test` sink.
-#[derive(Serialize, Clone)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Hit {
     method: String,
@@ -224,7 +224,7 @@ pub async fn run(port: u16, dist: PathBuf, now_ms: i64) -> anyhow::Result<()> {
         dist,
         hits: Mutex::new(Vec::new()),
     });
-    let app = super::webbridge::router(bridge).merge(control(server.clone()));
+    let app = super::webbridge::router(bridge).merge(control(server));
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     let addr = listener.local_addr()?;
     #[expect(
@@ -455,7 +455,7 @@ async fn add_account(State(s): State<Arc<Server>>, Json(req): Json<UserReq>) -> 
     s.store
         .store_refresh_token(&req.email, u.refresh_token())
         .map_err(|e| Fail(e.0))?;
-    let email = req.email.clone();
+    let email = req.email;
     let id = writer
         .call(move |ctx| crate::accounts::create(ctx, &email))
         .await?;
@@ -745,30 +745,31 @@ struct MessageView {
     raw: String,
 }
 
-fn message_view(m: &ub_fake_gmail::FakeMessage) -> MessageView {
+fn message_view(m: ub_fake_gmail::FakeMessage) -> MessageView {
     MessageView {
-        id: m.id.clone(),
-        thread_id: m.thread_id.clone(),
-        labels: m.label_ids.clone(),
+        id: m.id,
+        thread_id: m.thread_id,
+        labels: m.label_ids,
         date: m.internal_date,
-        snippet: m.snippet.clone(),
+        snippet: m.snippet,
         headers: m
             .headers
-            .iter()
-            .map(|(k, v)| (k.to_lowercase(), v.clone()))
+            .into_iter()
+            .map(|(k, v)| (k.to_lowercase(), v))
             .collect(),
-        raw: String::from_utf8_lossy(&m.raw).into_owned(),
+        raw: String::from_utf8(m.raw)
+            .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()),
     }
 }
 
 /// The mailbox as Gmail sees it: messages, drafts, labels, and sendAs.
 async fn gmail_state(State(s): State<Arc<Server>>, Path(email): Path<String>) -> Ctl {
     let u = user(&s, &email)?;
-    let messages: Vec<MessageView> = u.messages().iter().map(message_view).collect();
+    let messages: Vec<MessageView> = u.messages().into_iter().map(message_view).collect();
     let drafts: Vec<Value> = u
         .drafts()
-        .iter()
-        .map(|d| json!({ "id": d.id, "message": message_view(&d.message) }))
+        .into_iter()
+        .map(|d| json!({ "id": d.id, "message": message_view(d.message) }))
         .collect();
     let labels: Vec<Value> = u
         .labels()
@@ -1513,7 +1514,7 @@ async fn sink(State(s): State<Arc<Server>>, method: Method, uri: axum::http::Uri
 }
 
 async fn hits(State(s): State<Arc<Server>>) -> Ctl {
-    Ok(Json(json!(s.hits.lock().clone())))
+    Ok(Json(json!(&*s.hits.lock())))
 }
 
 #[derive(Deserialize)]
