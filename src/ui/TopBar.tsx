@@ -136,24 +136,27 @@ export function TopBar() {
   if (screen !== "list" && !searchOpen) {
     // Conversation and compose: back to the list, and previous / next conversation.
     return (
-      // Overlaid on the panel so the subject sits on the same row, as in Superhuman.
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-12 items-center gap-2 px-4 [&>button]:pointer-events-auto">
-        <IconButton
-          title="Back (Esc)"
-          onClick={() => (screen === "compose" ? closeComposerOnScreen() : press("Escape"))}
-        >
-          <ArrowLeft size={16} strokeWidth={1.5} />
-        </IconButton>
-        <div className="flex-1" />
+      // Overlaid on the panel so the subject sits on the same row; round floating
+      // buttons as in Superhuman.
+      <div className="pointer-events-none absolute top-0 left-0 z-10 flex h-12 items-center gap-2 px-4 [&>*]:pointer-events-auto">
+        <div className="flex h-8 items-center rounded-full bg-bg px-0.5 shadow-card">
+          <IconButton
+            round
+            title="Back (Esc)"
+            onClick={() => (screen === "compose" ? closeComposerOnScreen() : press("Escape"))}
+          >
+            <ArrowLeft size={16} strokeWidth={1.5} />
+          </IconButton>
+        </div>
         {screen === "conversation" && (
-          <>
-            <IconButton title="Previous conversation (K)" onClick={() => press("k")}>
+          <div className="flex h-8 items-center rounded-full bg-bg px-1 shadow-card">
+            <IconButton round title="Previous conversation (K)" onClick={() => press("k")}>
               <ChevronUp size={16} strokeWidth={1.5} />
             </IconButton>
-            <IconButton title="Next conversation (J)" onClick={() => press("j")}>
+            <IconButton round title="Next conversation (J)" onClick={() => press("j")}>
               <ChevronDown size={16} strokeWidth={1.5} />
             </IconButton>
-          </>
+          </div>
         )}
       </div>
     );
@@ -179,17 +182,19 @@ export function TopBar() {
 function IconButton({
   title,
   onClick,
+  round = false,
   children,
 }: {
   title: string;
   onClick: () => void;
+  round?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       title={title}
       onClick={onClick}
-      className="flex h-7 w-7 items-center justify-center rounded-control text-text-2 hover:bg-fill hover:text-text"
+      className={`flex h-7 w-7 items-center justify-center text-text-2 hover:bg-fill hover:text-text ${round ? "rounded-full" : "rounded-control"}`}
     >
       {children}
     </button>

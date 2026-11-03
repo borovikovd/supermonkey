@@ -572,4 +572,60 @@ test.describe("conversation", () => {
     await app.press("Escape");
     await expect(app.row("Person 5")).not.toHaveAttribute("data-unread");
   });
+
+  test("CONV-17 message headers name people as Superhuman does, and the selected message is a raised card", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    const header = () => app.selectedMessage.locator('button[aria-expanded="true"]');
+
+    // Others by first name (or the address's local part), then Me last.
+    await app.row("Offsite venue").click();
+    await expect(header()).toContainText("Carol Chen to dave, erin & Me");
+    await app.press("Escape");
+    // An alias of the account is Me too.
+    await app.row("Guild meetup").click();
+    await expect(header()).toContainText("Gus Grant to hal & Me");
+    await app.press("Escape");
+    // Mail only to this account names just the sender.
+    await app.row("Person 1").click();
+    await expect(header()).toContainText("Pia");
+    await expect(header()).not.toContainText(" to ");
+    await app.press("Escape");
+
+    // The account's own message is from Me; the collapsed one keeps the full name.
+    await app.row("Budget draft").click();
+    await expect(header()).toContainText("Me to Kim & lee");
+    const [kim, ana] = [app.messages.first(), app.messages.last()];
+    await expect(kim).toContainText("Kim Kato");
+    const raised = (l: typeof kim) => l.evaluate((el) => getComputedStyle(el).boxShadow !== "none");
+    const textLeft = () =>
+      ana.locator('button[aria-expanded="true"]').evaluate((el) => el.getBoundingClientRect().left);
+    expect(await raised(ana)).toBe(true);
+    expect(await raised(kim)).toBe(false);
+    const before = await textLeft();
+    await app.press("p");
+    await expect(kim).toHaveAttribute("aria-current", "true");
+    expect(await raised(kim)).toBe(true);
+    expect(await raised(ana)).toBe(false);
+    // Raising a message into a card never moves its text.
+    expect(await textLeft()).toBe(before);
+  });
+
+  test("CONV-18 the subject row's Done and Snooze buttons act like E and H", async ({
+    app,
+    gmail,
+  }) => {
+    const s = await seeds.standard(gmail, app);
+    await app.row("Person 1").click();
+    await expect(app.conversationTitle).toHaveText("Person 1");
+    await app.conversation.getByRole("button", { name: "Mark Done (E)" }).click();
+    await expect(app.conversationTitle).toHaveText("Person 2");
+    await app.settle();
+    expect(await labelsOf(app, A, s.message("p1", 1).id)).not.toContain("INBOX");
+
+    await app.conversation.getByRole("button", { name: "Snooze (H)" }).click();
+    await expect(app.page.getByRole("dialog", { name: /^Snooze until/ })).toBeVisible();
+  });
 });

@@ -13,6 +13,8 @@
   --color-text-3: #a3a09a;
   --color-accent: #714cb6;
   --color-accent-soft: #f7f5ff;
+  /* The selected message's edge: the accent at half strength, as Superhuman's is light. */
+  --color-accent-edge: #b8a5da;
   --color-link: #4198d2;
   --color-unread: #71c0ea;
   /* Not `hint`: that name is the 11px text size, and a color of the same name would win. */
@@ -34,8 +36,8 @@
   --text-row--line-height: 18px;
   --text-body: 15px;
   --text-body--line-height: 26px;
-  --text-subject: 18px;
-  --text-subject--line-height: 27px;
+  --text-subject: 24px;
+  --text-subject--line-height: 32px;
   --text-zero: 15px;
   --text-zero--line-height: 22px;
 
@@ -43,6 +45,8 @@
   --radius-sheet: 8px;
 
   --shadow-float: 0 12px 40px rgb(20 20 19 / 0.18), 0 2px 8px rgb(20 20 19 / 0.08);
+  /* The selected message, and the round header buttons of a conversation. */
+  --shadow-card: 0 1px 2px rgb(20 20 19 / 0.06), 0 4px 16px rgb(20 20 19 / 0.08);
 
   --spacing-row: 36px;
   --spacing-rail: 56px;

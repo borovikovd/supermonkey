@@ -95,8 +95,23 @@ written. Each keeps the spec's intent.
 - The window is an off-white canvas (`surface`) with the content in a white
   rounded panel; the rail sits on the canvas. The rail is 56px rather than
   40px so its icon pill and account badges have room.
-- In a conversation or composer the header is a back arrow and previous/next
-  arrows overlaid on the panel, with the subject on the same row.
+- In a conversation or composer the header is a round back button and a
+  round previous/next pill, white with a soft shadow, at the panel's top
+  left, with the subject on the same row. A narrow window moves the column
+  right so the buttons never cover the subject.
+- The conversation subject is 24/32 at regular weight (the spec says 18/27
+  at 600), as in Superhuman. Mark Done and Snooze icons sit at the right of
+  the subject row and do what `e` and `h` do.
+- The selected message is a white card with a soft shadow and a light
+  accent edge (`accent-edge`, the accent at half strength); the others sit
+  flat on the panel with no dividers. Every message spans the same width,
+  so selecting one never moves its text. The reply composer card lines up
+  with the message cards.
+- Message headers read like Superhuman's: "Carol Chen to Dave, Erin & Me".
+  Recipients go by first name, or by the address's local part when there
+  is no name. The account's own addresses, aliases included, are "Me", put
+  last, and mail to this account alone names only the sender. The time is
+  the list's short form; hovering shows the full date.
 - The composer is a floating card with a soft shadow (the spec reserves
   shadows for the palette, sheets, and toasts). Recipients show as blue
   names, Cc/Bcc sit behind a chevron on the To row, and the footer has Send

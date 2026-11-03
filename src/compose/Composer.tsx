@@ -487,7 +487,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       ref={root}
       // A floating card, as Superhuman draws its composer.
       className={`selectable flex flex-col rounded-[10px] bg-bg px-10 pt-4 pb-3 shadow-[0_6px_28px_rgb(20_20_19/0.09),0_0_0_1px_rgb(20_20_19/0.05)] ${
-        inline ? "mt-6 min-h-[220px]" : "min-h-[440px]"
+        inline ? "-mx-10 mt-6 min-h-[220px]" : "min-h-[440px]"
       } ${blurred ? "opacity-95" : ""}`}
       onFocusCapture={() => useChrome.getState().set({ composeBlurred: false })}
     >

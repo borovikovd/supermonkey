@@ -29,11 +29,13 @@ function loadBody(id: number): Promise<void> {
 const BASE_STYLE = `
 html,body{margin:0;padding:0;background:transparent}
 body{font:15px/26px -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;color:#141413;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased}
+body>:first-child{margin-top:0}
+body>:last-child{margin-bottom:0}
 img{max-width:100%;height:auto}
 table{max-width:100%}
 a{color:#4198D2}
 blockquote{margin:0 0 0 8px;padding-left:12px;border-left:2px solid #EDEBE5;color:#73716D}
-.ub-toggle{display:inline-block;margin:4px 0;color:#A3A09A;font-size:15px;line-height:15px;letter-spacing:2px;cursor:pointer;user-select:none}.ub-toggle:hover{color:#73716D}
+.ub-toggle{display:block;width:fit-content;margin:4px 0;color:#A3A09A;font-size:15px;line-height:15px;letter-spacing:2px;cursor:pointer;user-select:none}.ub-toggle:hover{color:#73716D}
 .ub-quote{display:none}
 .ub-quote.ub-open{display:block}
 a.ub-link-focus{outline:2px solid #714CB6;outline-offset:2px;border-radius:2px}

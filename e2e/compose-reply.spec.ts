@@ -376,7 +376,7 @@ test("REP-04 a sent reply stays on the thread and carries Gmail's quote", async 
 
   // The reply is the latest message, and no Sending row is left.
   await expect(app.messages).toHaveCount(2);
-  await expect(app.messages.last()).toContainText("Ana Ames");
+  await expect(app.messages.last()).toContainText("Me to Carol");
   await expect(app.conversation.getByText("Sending", { exact: true })).toHaveCount(0);
 });
 
@@ -789,7 +789,7 @@ test("REP-10 closing and sending the reply composer keep the conversation open",
   await app.settle();
   await expect(sending).toHaveCount(0);
   await expect(app.messages).toHaveCount(2);
-  await expect(app.messages.last()).toContainText("Ana Ames");
+  await expect(app.messages.last()).toContainText("Me to Rae");
 });
 
 test("REP-11 a draft read from Gmail is split at its gmail_quote", async ({ app, gmail }) => {
