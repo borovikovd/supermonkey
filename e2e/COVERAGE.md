@@ -2174,6 +2174,18 @@ _EG · §Actions (the mirror applies Rust's echo of a save)_
   - After step 2, the editor stays empty.
   - After step 3, the editor reads "Bye", and the Gmail draft has "Bye" and no "Hello".
 
+#### DRF-11 · P1 · Typing before a reply's first load keeps its filled fields
+
+_EG · §Actions ("the body is editable at once, and later saves carry the full compose state")_
+
+- **Steps:**
+  1. Open `addr`. Park the page's submit that carries the composer's subscribe, press `r`, type "Early words", and let the autosave fire (page clock `runFor(500)`).
+  2. Release, let the autosave fire, `settle()`.
+  3. `Esc` `Esc`, `settle()`. Park the subscribe again, press `r` (it resumes the draft), type "More words", `Esc` `Esc`. Release, `settle()`.
+- **Expect:**
+  - After step 2, To shows Carol, the editor reads "Early words", and the Gmail draft has To Carol, Subject "Re: Offsite venue", and "Early words".
+  - After step 3, the same Gmail draft still has To Carol and reads "Early words" then "More words".
+
 ### 5.16 `undo-send.spec.ts` (SND)
 
 Outbox state machine (§Send and undo):

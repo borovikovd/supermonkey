@@ -5,8 +5,15 @@
 import { toast } from "sonner";
 
 import { markReadOnOpenWhenLoaded, openThread } from "../commands";
-import { act, forgetSub, subscribe } from "../ipc/bridge";
-import type { Addr, ConversationData, DraftFields, DraftKind, SubKey } from "../ipc/types";
+import { act, forgetSub, subIdFor, subscribe } from "../ipc/bridge";
+import type {
+  Addr,
+  ConversationData,
+  DraftFields,
+  DraftKind,
+  DraftState,
+  SubKey,
+} from "../ipc/types";
 import { conversationRef } from "../keyboard/refs";
 import { useChrome, type Screen } from "../store/chrome";
 import { useMirror } from "../store/mirror";
@@ -36,6 +43,35 @@ export const openComposer: {
 };
 
 const composerKey = (draft: string): SubKey => ({ type: "composer", draft });
+
+/** The composer's draft as its subscription last brought it; null before its first load. */
+export function loadedDraft(draft: string): DraftState | null {
+  for (const sub of Object.values(useMirror.getState().subs)) {
+    if (sub.type === "composer" && sub.key.draft === draft) return sub.draft;
+  }
+  return null;
+}
+
+/**
+ * Null when the composer on screen can be saved whole now; else resolves
+ * once its first load is in and its files are attached, to whether all of
+ * them were.
+ */
+function whenReady(draft: string): Promise<boolean> | null {
+  const uploads = openComposer.draft === draft ? openComposer.uploads() : null;
+  const loaded = () => subIdFor(composerKey(draft)) === undefined || loadedDraft(draft) !== null;
+  const load = loaded()
+    ? null
+    : new Promise<void>((resolve) => {
+        const unsub = useMirror.subscribe(() => {
+          if (!loaded()) return;
+          unsub();
+          resolve();
+        });
+      });
+  if (!uploads && !load) return null;
+  return Promise.all([load, uploads]).then(([, ok]) => ok ?? true);
+}
 
 /** Screens a `c` composer returns to, per draft. */
 const returnTo = new Map<string, Screen>();
@@ -212,25 +248,25 @@ function resumeDraftById(draft: string, thread: number | null) {
 export function closeComposerOnScreen() {
   const draft = draftOnScreen();
   if (!draft) return;
-  const mine = openComposer.draft === draft;
   // This composer's own hook: the close may run after it has left the screen.
-  const pending = mine ? openComposer.pending : () => null;
-  const uploads = mine ? openComposer.uploads() : null;
+  const pending = openComposer.draft === draft ? openComposer.pending : () => null;
+  const wait = whenReady(draft);
   const close = () => {
     const fields = pending();
     if (fields) act({ type: "saveDraft", draft, save: { type: "update", fields } });
     act({ type: "closeComposer", draft });
+    forgetSub(composerKey(draft));
   };
-  leave(draft);
-  // A file still attaching is not in the draft yet. Closing now could discard
-  // the draft as untouched and lose the file, so the close waits for it.
-  if (uploads) void uploads.then(close);
+  // Off screen at once. The close itself waits for the first load and for
+  // files still attaching, or it could discard the draft as untouched.
+  leave(draft, false);
+  if (wait) void wait.then(close);
   else close();
 }
 
-/** Drops the composer's subscription and takes it off screen. */
-function leave(draft: string) {
-  forgetSub(composerKey(draft));
+/** Takes the composer off screen and, unless told not to, drops its subscription. */
+function leave(draft: string, forget = true) {
+  if (forget) forgetSub(composerKey(draft));
   const c = useChrome.getState();
   if (c.inline?.draft === draft) c.set({ inline: null, composeBlurred: false });
   const cur = c.current();
@@ -246,11 +282,12 @@ function leave(draft: string) {
 export function sendOnScreen() {
   const draft = draftOnScreen();
   if (!draft) return;
-  // A file still attaching is not in the draft yet: send once it is, and not
-  // at all if it fails. The composer stays on screen meanwhile.
-  const uploads = openComposer.draft === draft ? openComposer.uploads() : null;
-  if (uploads) {
-    void uploads.then((ok) => {
+  // Before the first load or while a file is still attaching, the draft is
+  // not complete: send once it is, and not at all if a file fails. The
+  // composer stays on screen meanwhile.
+  const wait = whenReady(draft);
+  if (wait) {
+    void wait.then((ok) => {
       if (draftOnScreen() !== draft) return;
       if (ok) sendOnScreen();
       else toast.error("Not sent: a file could not be attached");

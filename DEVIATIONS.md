@@ -130,3 +130,7 @@ the spec's wording:
   composer stays. Closing meanwhile takes the composer off screen at once and
   sends the close once the file is in the draft, so it is never discarded as
   untouched.
+- **Edits made before a composer's first load** are kept and saved once the
+  load is in: fields typed meanwhile win, files join the loaded ones, and a
+  body typed before a resumed draft's body follows it. Send waits for the
+  load; close leaves the screen at once and sends the close after it.

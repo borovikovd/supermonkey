@@ -15,7 +15,13 @@ import type { Addr, DraftAttachment, DraftFields } from "../ipc/types";
 import { useChrome } from "../store/chrome";
 import { useAppState, useDraft } from "../store/hooks";
 import { RecipientField, formatAddr, isValidEmail, type RecipientHandle } from "./RecipientField";
-import { closeComposerOnScreen, discardOnScreen, openComposer, sendOnScreen } from "./start";
+import {
+  closeComposerOnScreen,
+  discardOnScreen,
+  loadedDraft,
+  openComposer,
+  sendOnScreen,
+} from "./start";
 
 const SAVE_DELAY = 500;
 
@@ -71,6 +77,24 @@ async function readFile(file: File): Promise<string> {
 }
 
 const commitField = (h: RecipientHandle | null, v: Addr[]) => (h ? h.commit() : v);
+
+/**
+ * The fields once the first load is in. Anything typed before it wins over
+ * the loaded value; a body typed before a resumed draft's body follows it, and
+ * files attached meanwhile join the loaded ones.
+ */
+function withLoaded(typed: DraftFields, loaded: DraftFields): DraftFields {
+  const ids = new Set(loaded.attachments.map((a) => a.id));
+  return {
+    from: typed.from ?? loaded.from,
+    to: typed.to.length > 0 ? typed.to : loaded.to,
+    cc: typed.cc.length > 0 ? typed.cc : loaded.cc,
+    bcc: typed.bcc.length > 0 ? typed.bcc : loaded.bcc,
+    subject: typed.subject || loaded.subject,
+    bodyHtml: loaded.bodyHtml + typed.bodyHtml,
+    attachments: [...loaded.attachments, ...typed.attachments.filter((a) => !ids.has(a.id))],
+  };
+}
 
 function AttachmentList({
   attachments,
@@ -170,6 +194,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   const [showSubject, setShowSubject] = useState(!inline);
   const [link, setLink] = useState<string | null>(null);
   const dirty = useRef(false);
+  /** The first load is in `fields`; saves wait for it, or they would blank Rust's filled fields. */
+  const loadedRef = useRef(false);
   const latest = useRef(fields);
   /** Cancels the scheduled save. */
   const timer = useRef<(() => void) | null>(null);
@@ -192,6 +218,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   // them as dependencies.
   const scheduleSave = useCallback(() => {
     dirty.current = true;
+    if (!loadedRef.current) return;
     timer.current?.();
     timer.current = later(() => {
       timer.current = null;
@@ -251,16 +278,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   if (state && !state.gone && !loaded) {
     setLoaded(true);
     setLoadedBody(state.bodyHtml);
-    // Anything typed before the load arrived wins over the loaded value.
-    setFields((f) => ({
-      from: f.from ?? state.from,
-      to: f.to.length > 0 ? f.to : state.to,
-      cc: f.cc.length > 0 ? f.cc : state.cc,
-      bcc: f.bcc.length > 0 ? f.bcc : state.bcc,
-      subject: f.subject || state.subject,
-      bodyHtml: f.bodyHtml || state.bodyHtml,
-      attachments: state.attachments,
-    }));
+    setFields((f) => withLoaded(f, state));
     if (state.cc.length > 0) setShowCc(true);
     if (state.bcc.length > 0) setShowBcc(true);
     if (state.kind === "new") setShowSubject(true);
@@ -268,11 +286,19 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   useEffect(() => {
     latest.current = fields;
   }, [fields]);
-  // A resumed draft fills the editor, once: a later patch is the echo of a
-  // save, and text deleted since must not come back.
+  // Edits made before the load are saved now, merged with it.
   useEffect(() => {
-    if (editor?.isEmpty && loadedBody)
-      editor.commands.setContent(loadedBody, { emitUpdate: false });
+    if (!loaded || loadedRef.current) return;
+    loadedRef.current = true;
+    if (dirty.current) scheduleSave();
+  }, [loaded, scheduleSave]);
+  // A resumed draft fills the editor, once: a later patch is the echo of a
+  // save, and text deleted since must not come back. Text typed before the
+  // load follows the loaded body.
+  useEffect(() => {
+    if (!editor || !loadedBody) return;
+    if (editor.isEmpty) editor.commands.setContent(loadedBody, { emitUpdate: false });
+    else editor.commands.insertContentAt(0, loadedBody);
   }, [editor, loadedBody]);
 
   // Register with the session so send, discard, and close carry the pending save.
@@ -284,10 +310,19 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       const cc = commitField(ccRef.current, latest.current.cc);
       const bcc = commitField(bccRef.current, latest.current.bcc);
       if (!dirty.current) return null;
+      const typed = { ...latest.current, to, cc, bcc };
+      // Before the composer has rendered its first load, merge it here; with
+      // no load yet there is nothing safe to save (send and close wait for it).
+      let save: DraftFields = typed;
+      if (!loadedRef.current) {
+        const first = loadedDraft(draft);
+        if (!first || first.gone) return null;
+        save = withLoaded(typed, first);
+      }
       timer.current?.();
       timer.current = null;
       dirty.current = false;
-      return { ...latest.current, to, cc, bcc };
+      return save;
     };
     openComposer.pending = () => takePending.current();
     openComposer.invalid = () =>

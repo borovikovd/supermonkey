@@ -468,3 +468,45 @@ test("DRF-10 text deleted while its save is on the way stays deleted", async ({ 
   expect(bodyOf(draft)).toContain("Bye");
   expect(bodyOf(draft)).not.toContain("Hello");
 });
+
+test("DRF-11 typing before a reply's first load keeps its filled fields", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await openThread(app, "Offsite venue");
+  // The composer's subscribe is parked, so its first load waits.
+  const release = await app.park("submit", (body) => body.includes('"type":"composer"'));
+  await app.press("r");
+  await expect(app.editor).toBeFocused();
+  await app.type("Early words");
+  await app.page.clock.runFor(500);
+  await release();
+  await expect(app.chips("To")).toHaveCount(1);
+  await app.page.clock.runFor(500);
+  await app.settle();
+
+  await expect(app.chips("To")).toHaveAttribute("data-chip", "carol@corp.test");
+  await expect(app.editor).toHaveText("Early words");
+  const [draft] = await draftsIn(gmail, s.thread("addr").threadId);
+  expect(draft?.message.headers.to).toContain("carol@corp.test");
+  expect(draft?.message.headers.subject).toBe("Re: Offsite venue");
+  expect(bodyOf(draft)).toContain("Early words");
+
+  // Resumed with its load parked, then closed at once: the text typed
+  // meanwhile follows the saved body.
+  await app.press("Escape", "Escape");
+  await app.settle();
+  const again = await app.park("submit", (body) => body.includes('"type":"composer"'));
+  await app.press("r");
+  await expect(app.editor).toBeFocused();
+  await app.type("More words");
+  await app.press("Escape", "Escape");
+  await expect(app.editor).toHaveCount(0);
+  await again();
+  await app.settle();
+  const [kept] = await draftsIn(gmail, s.thread("addr").threadId);
+  expect(kept?.id).toBe(draft?.id);
+  expect(kept?.message.headers.to).toContain("carol@corp.test");
+  expect(bodyOf(kept)).toMatch(/Early words[\s\S]*More words/);
+});
