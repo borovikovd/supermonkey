@@ -704,3 +704,33 @@ test("ACC-12 re-adding an account while its removal is still revoking keeps the 
   await app.press("Control+2");
   await expect(app.row("After")).toHaveCount(1);
 });
+
+test("ACC-13 adding an account that is already signed in replays its queue once", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  // The archive is on its way to Gmail when the account is added again.
+  const modify = await gmail.hold("messages.batchModify");
+  await expect(app.highlighted).toContainText("Person 1");
+  await app.press("e");
+  await expect
+    .poll(async () => (await gmail.requests("messages.batchModify")).some((r) => r.held))
+    .toBe(true);
+  const lists = (await gmail.requests("threads.list", { account: A })).length;
+  await gmail.nextSignIn({ email: A });
+  await command(app, "Add account");
+  // The new runtime is running once it lists Inbox again.
+  await expect
+    .poll(async () => (await gmail.requests("threads.list", { account: A })).length)
+    .toBeGreaterThan(lists);
+
+  await modify.release();
+  await app.settle();
+  expect(await labelsOf(gmail, A, s.latest("p1").id)).not.toContain("INBOX");
+  expect(
+    await gmail.requests("messages.batchModify", { account: A }),
+    "the queued archive went out once",
+  ).toHaveLength(1);
+  await expect(app.row("Person 1")).toHaveCount(0);
+});

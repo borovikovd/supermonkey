@@ -108,7 +108,7 @@ impl WorkQueue {
 
     /// Wakes every waiting worker so it sees the account stopped.
     pub fn close(&self) {
-        self.kick.kick_all();
+        self.kick.close();
     }
 }
 
@@ -144,7 +144,7 @@ pub async fn worker(e: Arc<Engine>, rt: Arc<AccountRt>) {
                         _ => {
                             let d = ub_gmail::backoff(attempt, err.retry_after());
                             attempt += 1;
-                            crate::clock::sleep(d).await;
+                            rt.stopping.wait(d).await;
                         }
                     }
                     // Stopped while waiting: the retry would use a grant that

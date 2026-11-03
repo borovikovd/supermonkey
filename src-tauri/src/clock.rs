@@ -349,6 +349,8 @@ pub struct Kick {
     notify: Notify,
     pending: Mutex<Option<Busy>>,
     waiting: AtomicUsize,
+    /// Set by [`Kick::close`]: every wait from then on returns at once.
+    closed: AtomicBool,
 }
 
 /// The label of a kick whose task was not waiting for it.
@@ -365,8 +367,16 @@ impl Kick {
         self.notify.notify_one();
     }
 
-    /// Wakes every waiter now and keeps nothing for later (a loop shutting down).
+    /// Wakes every waiter now and keeps nothing for later.
     pub fn kick_all(&self) {
+        self.notify.notify_waiters();
+    }
+
+    /// Wakes every waiter, and makes every later wait return at once: the
+    /// loop that waits here is shutting down. A waiter between its last check
+    /// and its wait still wakes, which `kick_all` alone does not promise.
+    pub fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
         self.notify.notify_waiters();
     }
 
@@ -375,8 +385,15 @@ impl Kick {
         self.waiting.fetch_add(1, Ordering::SeqCst);
         let _waiting = Waiting(&self.waiting);
         let _fired = parked(async {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            // Registered before the check, so a close in between still wakes it.
+            notified.as_mut().enable();
+            if self.closed.load(Ordering::SeqCst) {
+                return None;
+            }
             tokio::select! {
-                () = self.notify.notified() => None,
+                () = notified => None,
                 fired = timer(timeout) => fired,
             }
         })
@@ -430,6 +447,23 @@ mod tests {
         task.await.unwrap();
         assert_eq!(busy("test-kick"), 0);
         assert_eq!(busy("kick"), 0, "a taken kick stays busy");
+    }
+
+    #[tokio::test]
+    async fn a_closed_kick_wakes_its_waiter_and_every_later_wait() {
+        let kick = Arc::new(Kick::default());
+        let k = Arc::clone(&kick);
+        let waiter = tokio::spawn(async move { k.wait(Duration::from_secs(3600)).await });
+        until("the waiter waits", || {
+            kick.waiting.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        kick.close();
+        waiter.await.unwrap();
+        // A loop that checked before the close and waits after it: no hour-long wait.
+        tokio::time::timeout(Duration::from_secs(5), kick.wait(Duration::from_secs(3600)))
+            .await
+            .expect("a wait after close returns at once");
     }
 
     fn manual(wall: Millis) -> Manual {

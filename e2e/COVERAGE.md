@@ -279,7 +279,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 
 | File                       | Prefix | Scope                                                                                        | Main seeds                               | Harness beyond H1–H3        | Cases   | P1      | P2     | P3    |
 | -------------------------- | ------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | ------- | ------- | ------ | ----- |
-| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 12      | 8       | 4      | 0     |
+| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 13      | 9       | 4      | 0     |
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 7       | 4       | 3      | 0     |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 5       | 3       | 2      | 0     |
 | `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 14      | 2       | 11     | 1     |
@@ -486,6 +486,14 @@ _EG · §Accounts, §Settings (Remove account)_
 - **Expect:**
   - B is back. `revocations()` lists only B's old token, and `keychain()` holds a new B token.
   - After `expireAccessTokens(B)`, new mail for B still syncs and B shows no Sign in again marker: the new grant was not revoked.
+
+#### ACC-13 · P1 · Adding an account that is already signed in replays its queue once
+
+_EG · §Accounts, §Offline (replay)_
+
+- **Seed:** `standard`.
+- **Steps:** `hold("messages.batchModify")`. `e` on `p1`, and wait until the request is held. `nextSignIn({ email: A })` and run **Add account**; wait until A lists Inbox again (the new runtime runs). Release, then `settle()`.
+- **Expect:** `p1` is archived in Gmail with exactly one `batchModify`: the new runtime's queue waits for the old one to finish the op it had in flight.
 
 ### 5.2 `inbox-navigation.spec.ts` (NAV)
 
@@ -3009,7 +3017,7 @@ Also kept, because they test logic the E2E suite can't observe:
 
 - `crates/ub-gmail/tests/scheduler.rs`: priorities, concurrency, quota, and back-off.
 - `crates/ub-gmail/tests/oauth.rs`: the `state` check, token caching and early refresh, one refresh shared by concurrent 401s, and secrets kept out of debug output.
-- `src-tauri/src/clock.rs`: the activity tracking `settle()` relies on.
+- `src-tauri/src/clock.rs`: the activity tracking `settle()` relies on, and that closing a `Kick` (an account stopping) wakes a loop even between its last check and its wait.
 - `src-tauri/src/db/mod.rs`: older databases get `AUTOINCREMENT` on `notices` and `outbox` without losing rows.
 
 Everything else was deleted, because a case here covers it: the contact ranking (RCP-02), the MIME build and Gmail payload tests (ATT-04, CONV), the address, encoding, quote and HTML helpers, the list diff (UIC-01), the mirror's Vitest tests (UIC, UND), `ub-gmail/tests/{api,outcomes}.rs` (ERR), and `src-tauri/tests/{sync_fake,compose_fake,splits}.rs` (SYN, SND, DRF, SPL).

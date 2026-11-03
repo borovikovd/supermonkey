@@ -95,6 +95,8 @@ pub struct AccountRt {
     /// Wakes fetch workers waiting for the network. Kept apart from
     /// `poll_kick`, which wakes one waiter and must reach the sync loop.
     pub online_kick: Kick,
+    /// Never kicked; closed on stop, so back-off waits end then.
+    pub stopping: Kick,
     pub stopped: AtomicBool,
     pub work: work::WorkQueue,
     /// When retrying started, for the quiet sync status after 30 s.
@@ -110,10 +112,43 @@ impl AccountRt {
         self.stopped.load(Ordering::Relaxed)
     }
 
-    /// Ends the account's loops and workers at their next check.
+    /// Ends the account's loops and workers now: every wait returns, and
+    /// each loop sees it stopped at its next check.
     fn stop(&self) {
-        self.stopped.store(true, Ordering::Relaxed);
+        self.stopped.store(true, Ordering::SeqCst);
+        for kick in [
+            &self.ops_kick,
+            &self.outbox_kick,
+            &self.poll_kick,
+            &self.online_kick,
+            &self.stopping,
+        ] {
+            kick.close();
+        }
         self.work.close();
+    }
+}
+
+/// One per account id for the app's lifetime. Each loop holds its lane while
+/// it runs, so a runtime that replaces another (signed in again, or added
+/// again) starts its loops only once the old ones have ended: never the same
+/// queued op twice, or two polls at once.
+#[derive(Default)]
+pub struct Lanes {
+    sync: Arc<tokio::sync::Mutex<()>>,
+    ops: Arc<tokio::sync::Mutex<()>>,
+    outbox: Arc<tokio::sync::Mutex<()>>,
+}
+
+/// `run`, once it holds `lane`.
+fn in_lane(
+    lane: &Arc<tokio::sync::Mutex<()>>,
+    run: impl Future<Output = ()> + Send + 'static,
+) -> impl Future<Output = ()> + Send + 'static {
+    let lane = Arc::clone(lane);
+    async move {
+        let _lane = lane.lock_owned().await;
+        run.await;
     }
 }
 
@@ -139,6 +174,7 @@ pub struct Engine {
     /// Cancels the sign-in waiting in the browser, if any. A new sign-in
     /// replaces one the user abandoned.
     pub sign_in_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
+    lanes: Mutex<HashMap<AccountId, Arc<Lanes>>>,
     /// Held (shared) by each removed account's clean-up. A sign-in waits for
     /// them first: a revoke landing after it would kill the new grant too.
     pub forgetting: Arc<tokio::sync::RwLock<()>>,
@@ -203,6 +239,7 @@ impl Engine {
             unfocused_since: AtomicI64::new(0),
             snooze_kick: Kick::default(),
             sign_in_cancel: Mutex::new(None),
+            lanes: Mutex::new(HashMap::new()),
             forgetting: Arc::default(),
             tasks: Mutex::new(Vec::new()),
             shut_down: AtomicBool::new(false),
@@ -388,6 +425,7 @@ impl Engine {
             outbox_kick: Kick::default(),
             poll_kick: Kick::default(),
             online_kick: Kick::default(),
+            stopping: Kick::default(),
             stopped: AtomicBool::new(false),
             work: work::WorkQueue::default(),
             retrying_since: AtomicI64::new(0),
@@ -398,9 +436,13 @@ impl Engine {
         if let Some(old) = replaced {
             old.stop();
         }
-        self.spawn("sync", sync::run(Arc::clone(self), Arc::clone(&rt)));
-        self.spawn("ops", ops::run(Arc::clone(self), Arc::clone(&rt)));
-        self.spawn("outbox", outbox::run(Arc::clone(self), Arc::clone(&rt)));
+        let lanes = Arc::clone(self.lanes.lock().entry(id).or_default());
+        let (e, r) = (Arc::clone(self), Arc::clone(&rt));
+        self.spawn("sync", in_lane(&lanes.sync, sync::run(e, r)));
+        let (e, r) = (Arc::clone(self), Arc::clone(&rt));
+        self.spawn("ops", in_lane(&lanes.ops, ops::run(e, r)));
+        let (e, r) = (Arc::clone(self), Arc::clone(&rt));
+        self.spawn("outbox", in_lane(&lanes.outbox, outbox::run(e, r)));
         for _ in 0..work::WORKERS {
             self.spawn("worker", work::worker(Arc::clone(self), Arc::clone(&rt)));
         }
@@ -412,10 +454,6 @@ impl Engine {
             return;
         };
         rt.stop();
-        rt.ops_kick.kick_all();
-        rt.outbox_kick.kick_all();
-        rt.poll_kick.kick_all();
-        rt.online_kick.kick_all();
     }
 
     /// The window gained focus: poll every account, and treat focus that comes
