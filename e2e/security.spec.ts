@@ -94,11 +94,8 @@ test.describe("security", () => {
         handlers: all.flatMap((el) =>
           el.getAttributeNames().filter((n) => n.toLowerCase().startsWith("on")),
         ),
-        // The sanitizer keeps CSS `url(javascript:…)` in `style`; WebKit never runs it.
         jsUrls: all.flatMap((el) =>
-          el
-            .getAttributeNames()
-            .filter((n) => n !== "style" && /javascript:/i.test(el.getAttribute(n) ?? "")),
+          el.getAttributeNames().filter((n) => /javascript:/i.test(el.getAttribute(n) ?? "")),
         ),
         forbidden: Array.from(doc.querySelectorAll("form, iframe, base")).map((el) => el.tagName),
         refresh: all.filter(

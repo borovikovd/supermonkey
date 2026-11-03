@@ -808,11 +808,11 @@ export async function security(gmail: Control, app: App, opts: SeedOptions = {})
       to: [A],
       html:
         "<p>Hostile content.</p>" +
-        "<script>top.__pwned = 1</script>" +
-        '<img src="x" onerror="top.__pwned = 2">' +
+        "<script>top.__pwned = 1; alert('script')</script>" +
+        '<img src="x" onerror="top.__pwned = 2; alert(\'onerror\')">' +
         '<svg onload="parent.__pwned = 3"><circle r="1"></circle></svg>' +
         '<body onload="top.__pwned = 4">' +
-        '<a href="javascript:top.__pwned = 5">Run me</a>' +
+        "<a href=\"javascript:top.__pwned = 5; alert('href')\">Run me</a>" +
         '<form action="http://evil.test/form" method="post"><input name="q" value="1"><button type="submit">Submit</button></form>' +
         '<iframe src="http://evil.test/frame"></iframe>' +
         '<meta http-equiv="refresh" content="0;url=http://evil.test/refresh">' +

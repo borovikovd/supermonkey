@@ -70,6 +70,8 @@ fn hostile_html_is_defused() {
         "style=\"background-image:url(https://cdn.example.com/bg.png)\"",
         "<font face=\"Georgia\" color=\"#123456\" size=\"2\">KEEP_FONT</font>",
         "DATA_HTML_LINK",
+        "<div style=\"color: red; background: url()\">KEEP_CSS_TEXT</div>",
+        ".x { background: url() } .y { background: url() }",
     ] {
         assert!(clean.contains(kept), "{kept:?} missing:\n{clean}");
     }

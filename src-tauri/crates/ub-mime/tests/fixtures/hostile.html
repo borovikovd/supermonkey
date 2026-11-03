@@ -38,6 +38,8 @@
   <td colspan="1" style="background-image:url(https://cdn.example.com/bg.png)"><font face="Georgia" color="#123456" size="2">KEEP_FONT</font></td></tr>
 </table>
 <div style="width: expression(alert('EXPR'))">legacy</div>
+<div style="color: red; background: URL( 'Java Script:alert(1)' )">KEEP_CSS_TEXT</div>
+<style>.x { background: url("javascript:alert(2)") } .y { background: url(javascript:top.x=1) }</style>
 <!-- COMMENT_SECRET -->
 </body>
 </html>

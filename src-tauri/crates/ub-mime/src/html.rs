@@ -79,6 +79,30 @@ static SANITIZER: LazyLock<ammonia::Builder<'static>> = LazyLock::new(|| {
     b
 });
 
+/// A CSS `url(…)`, quoted or not.
+static CSS_URL: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?i)url\(\s*('[^']*'|"[^"]*"|[^)'"]*)\s*\)"#).expect("valid regex")
+});
+
+/// Empties CSS `url(…)` values with a script scheme, in `style` attributes and
+/// `<style>` blocks, which ammonia passes through. Whitespace and CSS escapes
+/// are dropped before the scheme is read.
+fn defuse_css_urls(html: &str) -> Cow<'_, str> {
+    CSS_URL.replace_all(html, |c: &Captures<'_>| {
+        let inner: String = c[1]
+            .trim_matches(|ch| ch == '\'' || ch == '"')
+            .chars()
+            .filter(|ch| !ch.is_whitespace() && *ch != '\\')
+            .collect::<String>()
+            .to_ascii_lowercase();
+        if inner.starts_with("javascript:") || inner.starts_with("vbscript:") {
+            "url()".to_string()
+        } else {
+            c[0].to_string()
+        }
+    })
+}
+
 static CID_REF: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)\bcid:([^"'\s)>]+)"#).expect("valid regex"));
 
@@ -88,7 +112,7 @@ static CID_REF: LazyLock<Regex> =
 /// to the mapped `data:` URI. Then cleans with ammonia: `style`, `class`, `id` and table/layout
 /// attributes and `<style>` blocks survive, as do `data:image/*` URLs on `<img src>` and
 /// `background`. Scripts, event handlers, forms and their controls, iframes, objects, embeds,
-/// `<meta>`, SVG/MathML and `javascript:` URLs are removed. Links get `rel="noopener noreferrer"`.
+/// `<meta>`, SVG/MathML and `javascript:` URLs are removed, including in CSS `url(…)`. Links get `rel="noopener noreferrer"`.
 pub fn sanitize_html(html: &str, cid_data: &HashMap<String, String>) -> String {
     let rewritten = if cid_data.is_empty() {
         Cow::Borrowed(html)
@@ -103,7 +127,8 @@ pub fn sanitize_html(html: &str, cid_data: &HashMap<String, String>) -> String {
             }
         })
     };
-    SANITIZER.clean(&rewritten).to_string()
+    let clean = SANITIZER.clean(&rewritten).to_string();
+    defuse_css_urls(&clean).into_owned()
 }
 
 /// Comments, `<!DOCTYPE>`/`<![CDATA[` declarations, and `<?xml ?>` processing instructions.
