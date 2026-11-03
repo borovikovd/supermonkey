@@ -1027,9 +1027,9 @@ mod tests {
         assert_eq!(strict_err("AND a"), "AND needs a term on both sides");
         assert_eq!(strict_err("from:"), "from: needs a value");
         assert_eq!(strict_err("a ()"), "Empty parentheses");
-        // The first problem by position wins.
-        let err = parse_strict("a OR (b").unwrap_err();
-        assert_eq!((err.message.as_str(), err.offset), ("Missing )", 5));
+        // The first problem by position wins, though the parser finds the dangling OR first.
+        let err = parse_strict("(a OR").unwrap_err();
+        assert_eq!((err.message.as_str(), err.offset), ("Missing )", 0));
     }
 
     #[test]

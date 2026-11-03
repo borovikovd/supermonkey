@@ -95,15 +95,55 @@ struct Rebuilt {
     failures: Vec<String>,
 }
 
+/// Applies a patch as the UI mirror does (`applyListPatch` in
+/// `src/store/mirror-core.ts`), written out here rather than borrowed from the
+/// core so a bug shared by the core's diff and its own apply can't cancel out.
 fn apply(list: &[ListEntry], removed: &[String], moved: &[ListMove]) -> Vec<ListEntry> {
-    ubermensch_lib::subs::diff::apply(list, removed, moved)
+    let mut out: Vec<ListEntry> = list
+        .iter()
+        .filter(|e| !removed.contains(&e.key) && !moved.iter().any(|m| m.key == e.key))
+        .cloned()
+        .collect();
+    for m in moved {
+        let at = match &m.after {
+            None => 0,
+            Some(after) => out
+                .iter()
+                .position(|e| &e.key == after)
+                .map_or(out.len(), |p| p + 1),
+        };
+        out.insert(
+            at,
+            ListEntry {
+                key: m.key.clone(),
+                split: m.split,
+            },
+        );
+    }
+    out
 }
 
+/// Every open list that differs from a fresh first load.
+fn stale_lists(
+    conn: &rusqlite::Connection,
+    lists: &HashMap<String, Vec<ListEntry>>,
+    views: &HashMap<String, View>,
+) -> Vec<String> {
+    lists
+        .iter()
+        .filter_map(|(sub, list)| {
+            let v = views.get(sub)?;
+            (queries::list_ids(conn, 1, v).unwrap() != *list).then(|| format!("{sub} {v:?}"))
+        })
+        .collect()
+}
+
+/// Replays `ops` and returns the lists rebuilt from patches, by subscription id.
 #[expect(
     clippy::too_many_lines,
     reason = "The property harness: set up, replay ops, check."
 )]
-fn run(ops: Vec<Op>) -> Result<(), TestCaseError> {
+fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("t.db");
     fixture::generate(&path, &SIZE, &["a@example.com"]).unwrap();
@@ -139,16 +179,9 @@ fn run(ops: Vec<Op>) -> Result<(), TestCaseError> {
                 }
             }
             // Compare every open list with a fresh first load at this rev.
-            let conn = reader.lock().unwrap();
-            let views = views.lock().unwrap();
-            for (sub, list) in st.lists.clone() {
-                if let Some(v) = views.get(&sub) {
-                    let fresh = queries::list_ids(&conn, 1, v).unwrap();
-                    if fresh != list {
-                        st.failures
-                            .push(format!("rev {}: {sub} {v:?} differs", msg.rev));
-                    }
-                }
+            let diverged = stale_lists(&reader.lock().unwrap(), &st.lists, &views.lock().unwrap());
+            for s in diverged {
+                st.failures.push(format!("rev {}: {s} differs", msg.rev));
             }
         });
     }
@@ -246,7 +279,11 @@ fn run(ops: Vec<Op>) -> Result<(), TestCaseError> {
     writer.call_blocking(|_| Ok(())).unwrap();
     let st = state.lock().unwrap();
     prop_assert!(st.failures.is_empty(), "{:?}", st.failures);
-    Ok(())
+    // A change whose patch never came shows only here, after the last message.
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let diverged = stale_lists(&conn, &st.lists, &views.lock().unwrap());
+    prop_assert!(diverged.is_empty(), "after the last message: {diverged:?}");
+    Ok(st.lists.clone())
 }
 
 proptest! {
@@ -255,4 +292,27 @@ proptest! {
     fn rebuilt_lists_match_fresh_loads(ops in proptest::collection::vec(op(), 1..40)) {
         run(ops)?;
     }
+}
+
+/// The property holds trivially if actions never reach the lists. The fixture
+/// puts its first 25 threads in Inbox; Done on all 40 empties it, and undo
+/// brings the 25 back, all through patches to the open subscription.
+#[test]
+fn done_and_undo_reach_an_open_inbox_through_patches() {
+    let all: Vec<usize> = (0..40).collect();
+    let opened = run(vec![Op::Subscribe(0, View::Inbox)]).unwrap();
+    assert_eq!(opened["s1"].len(), 25);
+    let done = run(vec![
+        Op::Subscribe(0, View::Inbox),
+        Op::Modify(ModifyKind::Done, all.clone()),
+    ])
+    .unwrap();
+    assert_eq!(done["s1"].len(), 0);
+    let undone = run(vec![
+        Op::Subscribe(0, View::Inbox),
+        Op::Modify(ModifyKind::Done, all),
+        Op::Undo,
+    ])
+    .unwrap();
+    assert_eq!(undone["s1"].len(), 25);
 }

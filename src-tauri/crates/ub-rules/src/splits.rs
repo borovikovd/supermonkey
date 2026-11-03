@@ -70,7 +70,12 @@ mod tests {
         assert!(is_person_to_person(&["category_personal"], false));
         assert!(!is_person_to_person(&["INBOX"], true));
         assert!(!is_person_to_person(&["CATEGORY_PERSONAL"], true));
-        for c in NON_PERSONAL_CATEGORIES {
+        for c in [
+            "CATEGORY_PROMOTIONS",
+            "CATEGORY_SOCIAL",
+            "CATEGORY_UPDATES",
+            "CATEGORY_FORUMS",
+        ] {
             assert!(!is_person_to_person(&["INBOX", c], false), "{c}");
             assert!(
                 !is_person_to_person(&["CATEGORY_PERSONAL", c], false),
