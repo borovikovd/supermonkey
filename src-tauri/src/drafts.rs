@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::db::{from_json, queries, to_json};
@@ -40,9 +40,8 @@ struct Target {
     html: String,
 }
 
-fn target(ctx: &Ctx<'_>, id: MessageId) -> anyhow::Result<Option<Target>> {
-    Ok(ctx
-        .tx
+fn target(conn: &Connection, id: MessageId) -> anyhow::Result<Option<Target>> {
+    Ok(conn
         .query_row(
             "SELECT from_name, from_email, to_json, cc_json, reply_to_json, subject, internal_date, message_id_hdr,
                     references_hdr, coalesce(body_html, ''), coalesce(quote_html, ''), snippet, has_body
@@ -100,8 +99,8 @@ pub fn tz_offset_minutes() -> i32 {
     chrono::Local::now().offset().local_minus_utc() / 60
 }
 
-fn send_as(ctx: &Ctx<'_>, account: AccountId) -> anyhow::Result<(Vec<SendAs>, Addr)> {
-    let (email, name, json): (String, String, String) = ctx.tx.query_row(
+fn send_as(conn: &Connection, account: AccountId) -> anyhow::Result<(Vec<SendAs>, Addr)> {
+    let (email, name, json): (String, String, String) = conn.query_row(
         "SELECT email, display_name, send_as FROM accounts WHERE id = ?1",
         [account],
         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -132,10 +131,11 @@ fn same(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
 }
 
-fn dedup(list: Vec<Addr>, skip: &HashSet<String>) -> Vec<Addr> {
-    let mut seen = skip.clone();
+/// The addresses whose email is not yet in `seen`, first occurrence kept.
+fn dedup<'a>(list: impl IntoIterator<Item = &'a Addr>, mut seen: HashSet<String>) -> Vec<Addr> {
     list.into_iter()
         .filter(|a| seen.insert(a.email.to_lowercase()))
+        .cloned()
         .collect()
 }
 
@@ -161,7 +161,7 @@ fn reply_addressing(
     if mine.contains(&t.from.email.to_lowercase()) {
         // Replying to my own message: send from its From, to its To.
         let cc = if reply_all {
-            dedup(t.cc.clone(), mine)
+            dedup(&t.cc, mine.clone())
         } else {
             vec![]
         };
@@ -180,9 +180,9 @@ fn reply_addressing(
         t.reply_to.clone()
     };
     let cc = if reply_all {
-        let mut skip = mine.clone();
-        skip.extend(to.iter().map(|a| a.email.to_lowercase()));
-        dedup(t.to.iter().chain(&t.cc).cloned().collect(), &skip)
+        let mut seen = mine.clone();
+        seen.extend(to.iter().map(|a| a.email.to_lowercase()));
+        dedup(t.to.iter().chain(&t.cc), seen)
     } else {
         vec![]
     };
@@ -192,10 +192,10 @@ fn reply_addressing(
 /// A message's attachments as draft attachments: a forward carries its
 /// target's, and a draft read from Gmail carries its own.
 pub fn message_attachments(
-    ctx: &Ctx<'_>,
+    conn: &Connection,
     message: MessageId,
 ) -> anyhow::Result<Vec<DraftAttachment>> {
-    let mut stmt = ctx.tx.prepare_cached(
+    let mut stmt = conn.prepare_cached(
         "SELECT id, filename, mime_type, size, local_path FROM attachments WHERE message_id = ?1 AND inline = 0",
     )?;
     let rows = stmt.query_map([message], |r| {
@@ -214,13 +214,13 @@ pub fn message_attachments(
 
 /// Fills a fresh composer by the rules in SPEC Addressing.
 fn create(ctx: &mut Ctx<'_>, d: &NewDraft<'_>) -> anyhow::Result<()> {
-    let (send_as_list, default_from) = send_as(ctx, d.account)?;
+    let (send_as_list, default_from) = send_as(ctx.tx, d.account)?;
     let mine = queries::my_addresses(ctx.tx, d.account)?;
     let target = match d.target {
-        Some(t) => target(ctx, t)?,
+        Some(t) => target(ctx.tx, t)?,
         None => None,
     };
-    let mut from = default_from.clone();
+    let mut from = default_from;
     let mut to = Vec::new();
     let mut cc = Vec::new();
     let mut subject = String::new();
@@ -245,8 +245,7 @@ fn create(ctx: &mut Ctx<'_>, d: &NewDraft<'_>) -> anyhow::Result<()> {
                     &quote_source(t),
                     tz_offset_minutes(),
                 ));
-                (from, to, cc) =
-                    reply_addressing(t, &send_as_list, default_from, &mine, d.reply_all);
+                (from, to, cc) = reply_addressing(t, &send_as_list, from, &mine, d.reply_all);
             }
             DraftKind::Forward => {
                 subject = ub_mime::forward_subject(&t.subject);
@@ -254,17 +253,17 @@ fn create(ctx: &mut Ctx<'_>, d: &NewDraft<'_>) -> anyhow::Result<()> {
                     &quote_source(t),
                     tz_offset_minutes(),
                 ));
-                attachments = message_attachments(ctx, t.id)?;
+                attachments = message_attachments(ctx.tx, t.id)?;
             }
             DraftKind::New => {}
         }
     }
     let defaults = Defaults {
-        from: Some(from.clone()),
-        to: to.clone(),
-        cc: cc.clone(),
+        from: Some(from),
+        to,
+        cc,
         bcc: vec![],
-        subject: subject.clone(),
+        subject,
         body_html: String::new(),
         attachments: attachments.iter().map(|a| a.id.clone()).collect(),
     };
@@ -281,10 +280,10 @@ fn create(ctx: &mut Ctx<'_>, d: &NewDraft<'_>) -> anyhow::Result<()> {
             d.thread,
             d.target,
             d.started_on_latest,
-            to_json(&Some(from)),
-            to_json(&to),
-            to_json(&cc),
-            subject,
+            to_json(&defaults.from),
+            to_json(&defaults.to),
+            to_json(&defaults.cc),
+            defaults.subject,
             quote,
             to_json(&attachments),
             to_json(&defaults),
@@ -301,11 +300,10 @@ fn create(ctx: &mut Ctx<'_>, d: &NewDraft<'_>) -> anyhow::Result<()> {
 }
 
 pub fn account_of(
-    ctx: &Ctx<'_>,
+    conn: &Connection,
     draft: &str,
 ) -> anyhow::Result<Option<(AccountId, Option<ThreadId>)>> {
-    Ok(ctx
-        .tx
+    Ok(conn
         .query_row(
             "SELECT account_id, thread_id FROM drafts WHERE id = ?1",
             [draft],
@@ -334,8 +332,8 @@ pub fn queue_upsert(ctx: &mut Ctx<'_>, account: AccountId, draft: &str) -> anyho
     Ok(())
 }
 
-fn in_outbox(ctx: &Ctx<'_>, draft: &str) -> rusqlite::Result<bool> {
-    ctx.tx.query_row(
+fn in_outbox(conn: &Connection, draft: &str) -> rusqlite::Result<bool> {
+    conn.query_row(
         "SELECT EXISTS (SELECT 1 FROM outbox WHERE draft_id = ?1)",
         [draft],
         |r| r.get(0),
@@ -344,7 +342,7 @@ fn in_outbox(ctx: &Ctx<'_>, draft: &str) -> rusqlite::Result<bool> {
 
 pub fn save(ctx: &mut Ctx<'_>, draft: &str, save: DraftSave) -> anyhow::Result<()> {
     // A save that arrives after its draft was sent or discarded is dropped.
-    if in_outbox(ctx, draft)? {
+    if in_outbox(ctx.tx, draft)? {
         return Ok(());
     }
     match save {
@@ -356,7 +354,7 @@ pub fn save(ctx: &mut Ctx<'_>, draft: &str, save: DraftSave) -> anyhow::Result<(
             target,
             started_on_latest,
         } => {
-            if account_of(ctx, draft)?.is_some() {
+            if account_of(ctx.tx, draft)?.is_some() {
                 return Ok(());
             }
             create(
@@ -373,7 +371,7 @@ pub fn save(ctx: &mut Ctx<'_>, draft: &str, save: DraftSave) -> anyhow::Result<(
             )
         }
         DraftSave::Update { mut fields } => {
-            let Some((account, thread)) = account_of(ctx, draft)? else {
+            let Some((account, thread)) = account_of(ctx.tx, draft)? else {
                 return Ok(());
             };
             // The composer holds attachments as first loaded; a local copy
@@ -416,7 +414,7 @@ pub fn save(ctx: &mut Ctx<'_>, draft: &str, save: DraftSave) -> anyhow::Result<(
             if let Some(t) = thread {
                 ctx.touch_thread(account, t)?;
             }
-            if !is_untouched(ctx, draft)? {
+            if !is_untouched(ctx.tx, draft)? {
                 queue_upsert(ctx, account, draft)?;
             }
             Ok(())
@@ -438,9 +436,8 @@ struct StoredFields {
 
 /// Untouched: subject, body, and attachments as the composer started them,
 /// and recipients and From the defaults.
-pub fn is_untouched(ctx: &Ctx<'_>, draft: &str) -> anyhow::Result<bool> {
-    let row = ctx
-        .tx
+pub fn is_untouched(conn: &Connection, draft: &str) -> anyhow::Result<bool> {
+    let row = conn
         .query_row(
             "SELECT from_json, to_json, cc_json, bcc_json, subject, body_html, attachments_json, defaults_json
              FROM drafts WHERE id = ?1",
@@ -496,10 +493,10 @@ pub fn close(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
     let Some((account, fresh, pending_read)) = row else {
         return Ok(());
     };
-    if in_outbox(ctx, draft)? {
+    if in_outbox(ctx.tx, draft)? {
         return Ok(());
     }
-    let untouched = is_untouched(ctx, draft)?;
+    let untouched = is_untouched(ctx.tx, draft)?;
     if fresh && untouched {
         return discard(ctx, draft);
     }
@@ -571,11 +568,11 @@ pub fn discard(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
 
 /// Where a draft's added files are kept until sent or discarded.
 pub fn draft_dir(draft: &str) -> std::path::PathBuf {
-    let base = DRAFT_FILES
-        .get()
-        .cloned()
-        .unwrap_or_else(std::env::temp_dir);
-    base.join(draft.replace(['/', '.'], "_"))
+    let name = draft.replace(['/', '.'], "_");
+    match DRAFT_FILES.get() {
+        Some(base) => base.join(name),
+        None => std::env::temp_dir().join(name),
+    }
 }
 
 pub static DRAFT_FILES: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();

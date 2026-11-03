@@ -3,7 +3,7 @@
 
 use crate::engine::Engine;
 use crate::model::{
-    AccountId, ContactSuggestion, DraftAttachment, DraftId, LaunchInfo, ListRow, MessageBody,
+    AccountId, AttachmentId, ContactSuggestion, DraftAttachment, LaunchInfo, ListRow, MessageBody,
     MessageId, NumberedAction, SnoozeChoice,
 };
 use std::sync::Arc;
@@ -64,7 +64,7 @@ pub async fn sign_in_again(e: &Arc<Engine>, account: AccountId) -> CmdResult<()>
 }
 
 /// Downloads an attachment if needed and opens it with the default app.
-pub async fn open_attachment(e: &Engine, attachment: i64) -> CmdResult<()> {
+pub async fn open_attachment(e: &Engine, attachment: AttachmentId) -> CmdResult<()> {
     crate::engine::attachments::open(e, attachment)
         .await
         .map_err(err)
@@ -83,7 +83,7 @@ pub fn open_url(e: &Engine, url: &str) -> CmdResult<()> {
 
 /// Copies a file the user picked into the draft's folder (SPEC Compose: attachments).
 pub fn add_attachment(
-    draft: &DraftId,
+    draft: &str,
     filename: &str,
     mime_type: &str,
     data: &str,

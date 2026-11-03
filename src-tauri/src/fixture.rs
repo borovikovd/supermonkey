@@ -222,9 +222,9 @@ pub fn generate(path: &Path, size: &Size, accounts: &[&str]) -> anyhow::Result<(
             for m in 0..count {
                 let from_me = m % 2 == 1 && rng.random_bool(0.7);
                 let (fname, femail) = if from_me {
-                    (name.clone(), email.to_string())
+                    (name.as_str(), *email)
                 } else {
-                    (sender_name.clone(), sender_email.clone())
+                    (sender_name.as_str(), sender_email.as_str())
                 };
                 let to = if from_me {
                     vec![Addr {
@@ -288,7 +288,7 @@ pub fn generate(path: &Path, size: &Size, accounts: &[&str]) -> anyhow::Result<(
                 let mid = ctx.tx.last_insert_rowid();
                 ctx.tx.execute(
                     "INSERT INTO messages_fts (rowid, from_text, to_text, cc_text, subject, body) VALUES (?1, ?2, ?3, '', ?4, ?5)",
-                    params![mid, format!("{fname} {femail}"), to.iter().map(|a| a.email.clone()).collect::<Vec<_>>().join(" "), msg_subject, text],
+                    params![mid, format!("{fname} {femail}"), to.iter().map(|a| a.email.as_str()).collect::<Vec<_>>().join(" "), msg_subject, text],
                 )?;
             }
         }

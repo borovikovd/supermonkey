@@ -20,12 +20,14 @@ use crate::model::{
 };
 use crate::subs::Subs;
 
-pub type SyncFn = Box<dyn FnOnce(&mut Ctx<'_>) -> anyhow::Result<()> + Send>;
+type SyncFn = Box<dyn FnOnce(&mut Ctx<'_>) -> anyhow::Result<()> + Send>;
+/// Where channel messages go: the webview's channel.
+type ChannelSink = Box<dyn Fn(ChannelMessage) + Send>;
 
 enum Job {
     Actions(Vec<NumberedAction>),
     Sync(SyncFn),
-    Channel(Box<dyn Fn(ChannelMessage) + Send>),
+    Channel(ChannelSink),
     SetOnline(bool),
     /// Stop after the UI jobs queued before it; acknowledged once the database is closed.
     Stop(tokio::sync::oneshot::Sender<()>),
@@ -316,7 +318,7 @@ struct WriterState {
     rev: i64,
     ack: i64,
     subs: Subs,
-    channel: Option<Box<dyn Fn(ChannelMessage) + Send>>,
+    channel: Option<ChannelSink>,
     effects: EffectSender,
     online: bool,
 }
@@ -369,10 +371,10 @@ impl WriterState {
                 Job::SetOnline(online) => {
                     if self.online != online {
                         self.online = online;
-                        self.apply_sync(Box::new(|ctx| {
+                        self.apply_sync(|ctx| {
                             ctx.touch_app();
                             Ok(())
-                        }));
+                        });
                     }
                 }
             }
@@ -396,7 +398,7 @@ impl WriterState {
         }
     }
 
-    fn apply_sync(&mut self, f: SyncFn) {
+    fn apply_sync(&mut self, f: impl FnOnce(&mut Ctx<'_>) -> anyhow::Result<()>) {
         if let Err(e) = self.transact(None, f) {
             log::warn!("sync job failed: {e:#}");
         }

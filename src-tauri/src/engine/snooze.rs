@@ -55,7 +55,7 @@ pub fn wake_due(e: &Engine) {
             crate::mail::modify(
                 ctx,
                 0,
-                &ModifyAction {
+                ModifyAction {
                     account,
                     kind: ModifyKind::ReturnToInbox,
                     threads: vec![thread],

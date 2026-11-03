@@ -349,7 +349,7 @@ async fn sent(e: &Engine, rt: &AccountRt, row: &Row, msg: String, gmail_thread: 
             }
             ctx.touch_outbox(account, outbox)?;
             touch_row_thread(ctx, account, outbox)?;
-            crate::drafts::account_of(ctx, &draft)?;
+            crate::drafts::account_of(ctx.tx, &draft)?;
             Ok(())
         })
         .await

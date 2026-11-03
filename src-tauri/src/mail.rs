@@ -80,12 +80,16 @@ fn label_change(
 }
 
 /// The thread's snooze time after an action. Archive, trash, and spam also clear a snooze.
-fn snooze_after(m: &ModifyAction, before: Option<i64>) -> Option<i64> {
-    match &m.snooze {
+fn snooze_after(
+    snooze: Option<&SnoozeChange>,
+    kind: ModifyKind,
+    before: Option<Millis>,
+) -> Option<Millis> {
+    match snooze {
         Some(SnoozeChange::Set(at)) => Some(*at),
         Some(SnoozeChange::Clear) => None,
         None if matches!(
-            m.kind,
+            kind,
             ModifyKind::Done | ModifyKind::Trash | ModifyKind::Spam
         ) =>
         {
@@ -95,14 +99,9 @@ fn snooze_after(m: &ModifyAction, before: Option<i64>) -> Option<i64> {
     }
 }
 
-pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: &ModifyAction) -> anyhow::Result<()> {
-    let add: BTreeSet<String> = m.add.iter().cloned().collect();
-    let remove: BTreeSet<String> = m
-        .remove
-        .iter()
-        .filter(|&l| !add.contains(l))
-        .cloned()
-        .collect();
+pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: ModifyAction) -> anyhow::Result<()> {
+    let add: BTreeSet<String> = m.add.into_iter().collect();
+    let remove: BTreeSet<String> = m.remove.into_iter().filter(|l| !add.contains(l)).collect();
     // Mark unread changes the latest message only, so it can't share an op
     // with labels meant for every message.
     let unread = add.contains("UNREAD");
@@ -136,7 +135,7 @@ pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: &ModifyAction) -> anyhow::Result<()>
             thread,
             changes: Vec::new(),
             snooze_before,
-            snooze_after: snooze_after(m, snooze_before),
+            snooze_after: snooze_after(m.snooze.as_ref(), m.kind, snooze_before),
         };
         for msg in msgs.iter().filter(|x| !x.is_draft) {
             // Every message is part of the op (a queued action applies to the

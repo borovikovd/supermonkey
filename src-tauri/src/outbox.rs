@@ -3,7 +3,7 @@
 //! Send does not call Gmail. The draft goes into the outbox as waiting with
 //! `send_after` ten seconds ahead; the engine's outbox runner sends it.
 
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::db::from_json;
 use crate::model::{AccountId, Addr, DraftId, MessageId, OutboxId, OutboxState, ThreadId};
@@ -100,9 +100,8 @@ struct OutboxRef {
     sent_message: Option<String>,
 }
 
-fn row(ctx: &Ctx<'_>, outbox: i64) -> anyhow::Result<Option<OutboxRef>> {
-    Ok(ctx
-        .tx
+fn row(conn: &Connection, outbox: OutboxId) -> anyhow::Result<Option<OutboxRef>> {
+    Ok(conn
         .query_row(
             "SELECT account_id, draft_id, thread_id, state, sent_message_id FROM outbox WHERE id = ?1",
             [outbox],
@@ -120,8 +119,8 @@ fn row(ctx: &Ctx<'_>, outbox: i64) -> anyhow::Result<Option<OutboxRef>> {
 }
 
 /// Closing a send toast tells Rust; once sent, its entry leaves the history.
-pub fn close_toast(ctx: &mut Ctx<'_>, outbox: i64) -> anyhow::Result<()> {
-    let Some(OutboxRef { account, state, .. }) = row(ctx, outbox)? else {
+pub fn close_toast(ctx: &mut Ctx<'_>, outbox: OutboxId) -> anyhow::Result<()> {
+    let Some(OutboxRef { account, state, .. }) = row(ctx.tx, outbox)? else {
         return Ok(());
     };
     ctx.tx
@@ -142,7 +141,7 @@ pub fn undo_send(ctx: &mut Ctx<'_>, account: AccountId, outbox: OutboxId) -> any
         thread,
         state,
         sent_message: sent_id,
-    }) = row(ctx, outbox)?
+    }) = row(ctx.tx, outbox)?
     else {
         anyhow::bail!("outbox row {outbox} is gone");
     };

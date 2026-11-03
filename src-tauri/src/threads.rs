@@ -169,7 +169,7 @@ pub fn refresh(ctx: &mut Ctx<'_>, thread: ThreadId) -> anyhow::Result<()> {
     let subject = msgs
         .iter()
         .find(|m| !m.is_draft && !m.subject.is_empty())
-        .map_or_else(|| latest.subject.clone(), |m| m.subject.clone());
+        .map_or(latest.subject.as_str(), |m| m.subject.as_str());
     let in_inbox = labels.contains("INBOX");
     let live_count = msgs.iter().filter(|m| m.live()).count();
     let non_draft = msgs.iter().filter(|m| !m.is_draft).count();

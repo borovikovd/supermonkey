@@ -747,7 +747,7 @@ pub async fn store_gmail_draft(e: &Engine, rt: &AccountRt, g: ub_gmail::Draft) {
                 crate::threads::messages(ctx.tx, thread)?.into_iter().filter(|x| !x.is_draft).collect();
             let (target, started_on_latest) = gmail_draft_target(ctx, thread, &others, &m)?;
             let atts = match msg_row {
-                Some(row) => crate::drafts::message_attachments(ctx, row)?,
+                Some(row) => crate::drafts::message_attachments(ctx.tx, row)?,
                 None => vec![],
             };
             if let Some(local) = existing {

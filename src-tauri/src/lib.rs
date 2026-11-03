@@ -87,7 +87,7 @@ pub fn run() {
                     return;
                 };
                 if *focused {
-                    if let Some(n) = engine.inner().on_focus() {
+                    if let Some(n) = engine.on_focus() {
                         let _ = window.app_handle().emit(
                             "notification-open",
                             serde_json::json!({ "account": n.account, "thread": n.thread }),

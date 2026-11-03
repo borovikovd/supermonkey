@@ -4,7 +4,6 @@
 pub mod queries;
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use parking_lot::Mutex;
 use rusqlite::{Connection, OpenFlags, OptionalExtension as _};
@@ -74,17 +73,16 @@ fn open_reader(path: &Path) -> anyhow::Result<Connection> {
 }
 
 /// A few read-only connections, handed out round-robin.
-#[derive(Clone)]
 pub struct ReadPool {
     path: PathBuf,
-    conns: Arc<Vec<Mutex<Option<Connection>>>>,
+    conns: Box<[Mutex<Option<Connection>>]>,
 }
 
 impl ReadPool {
     pub fn new(path: &Path, size: usize) -> ReadPool {
         ReadPool {
             path: path.to_path_buf(),
-            conns: Arc::new((0..size).map(|_| Mutex::new(None)).collect()),
+            conns: (0..size).map(|_| Mutex::new(None)).collect(),
         }
     }
 

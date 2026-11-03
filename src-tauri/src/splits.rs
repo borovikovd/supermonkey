@@ -242,7 +242,7 @@ pub fn save(
     ctx: &mut Ctx<'_>,
     account: AccountId,
     splits: &[SplitInfo],
-    deleted: Vec<SplitId>,
+    deleted: &[SplitId],
 ) -> anyhow::Result<()> {
     for id in deleted {
         // Important and Other cannot be deleted.

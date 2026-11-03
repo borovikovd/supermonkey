@@ -166,7 +166,7 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
     {
         let state = state.clone();
         let views = views.clone();
-        let reader = Mutex::new(rusqlite::Connection::open(&path).unwrap());
+        let reader = rusqlite::Connection::open(&path).unwrap();
         writer.set_channel(move |msg: ChannelMessage| {
             let mut st = state.lock().unwrap();
             for u in &msg.updates {
@@ -190,7 +190,7 @@ fn run(ops: Vec<Op>) -> Result<HashMap<String, Vec<ListEntry>>, TestCaseError> {
                 }
             }
             // Compare every open list with a fresh first load at this rev.
-            let diverged = stale_lists(&reader.lock().unwrap(), &st.lists, &views.lock().unwrap());
+            let diverged = stale_lists(&reader, &st.lists, &views.lock().unwrap());
             for s in diverged {
                 st.failures.push(format!("rev {}: {s} differs", msg.rev));
             }

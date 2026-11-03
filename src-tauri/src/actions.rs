@@ -1,6 +1,6 @@
 //! Applies one numbered UI action inside a writer transaction.
 
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::model::{AccountId, Action, SubId, SubKey, View};
 use crate::writer::{Ctx, Effect, GmailListQuery};
@@ -14,9 +14,7 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
             for draft in ctx.subs.open_drafts() {
                 crate::drafts::close(ctx, &draft)?;
             }
-            let ids: Vec<SubId> = ctx.subs.map.keys().cloned().collect();
-            for id in ids {
-                ctx.subs.unsubscribe(&id);
+            for id in std::mem::take(&mut ctx.subs.map).into_keys() {
                 ctx.effect(Effect::CancelSub(id));
             }
             Ok(())
@@ -27,7 +25,7 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
             ctx.effect(Effect::CancelSub(sub));
             Ok(())
         }
-        Action::Modify(m) => crate::mail::modify(ctx, n, &m),
+        Action::Modify(m) => crate::mail::modify(ctx, n, m),
         Action::Undo { account, entry } => crate::undo::undo(ctx, n, account, entry),
         Action::CreateLabel {
             account,
@@ -37,7 +35,7 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
         } => {
             crate::labels::create(ctx, n, account, &id, &name)?;
             if let Some(m) = apply {
-                crate::mail::modify(ctx, n, &m)?;
+                crate::mail::modify(ctx, n, m)?;
             }
             Ok(())
         }
@@ -104,7 +102,7 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
             account,
             splits,
             deleted,
-        } => crate::splits::save(ctx, account, &splits, deleted),
+        } => crate::splits::save(ctx, account, &splits, &deleted),
         Action::RemoveAccount { account } => crate::accounts::remove(ctx, account),
         Action::MoreResults { sub } => {
             // The token is taken: asking again while this page loads does
@@ -115,8 +113,7 @@ pub fn apply(ctx: &mut Ctx<'_>, n: i64, action: Action) -> anyhow::Result<()> {
             let Some(token) = s.next_page.take() else {
                 return Ok(());
             };
-            let key = s.key.clone();
-            if let Some((account, query)) = gmail_query(ctx, &key) {
+            if let Some((account, query)) = gmail_query(ctx.tx, &s.key) {
                 ctx.effect(Effect::GmailList {
                     sub,
                     account,
@@ -143,7 +140,7 @@ fn close_composer_sub(ctx: &mut Ctx<'_>, draft: &str) {
 
 /// The Gmail listing a subscription needs while online: Search, and the
 /// Label, Trash, and Spam views (SPEC Views).
-fn gmail_query(ctx: &Ctx<'_>, key: &SubKey) -> Option<(AccountId, GmailListQuery)> {
+fn gmail_query(tx: &Connection, key: &SubKey) -> Option<(AccountId, GmailListQuery)> {
     match key {
         SubKey::Search { account, query } if !query.trim().is_empty() => Some((
             *account,
@@ -151,13 +148,12 @@ fn gmail_query(ctx: &Ctx<'_>, key: &SubKey) -> Option<(AccountId, GmailListQuery
         )),
         SubKey::List { account, view } => {
             let (label, spam_trash) = match view {
-                View::Trash => ("TRASH".to_string(), true),
-                View::Spam => ("SPAM".to_string(), true),
-                View::Label { label } => (label.clone(), false),
+                View::Trash => ("TRASH", true),
+                View::Spam => ("SPAM", true),
+                View::Label { label } => (label.as_str(), false),
                 _ => return None,
             };
-            let gmail_id: String = ctx
-                .tx
+            let gmail_id: String = tx
                 .query_row(
                     "SELECT gmail_id FROM labels WHERE account_id = ?1 AND id = ?2",
                     params![account, label],
@@ -210,7 +206,7 @@ fn subscribe(ctx: &mut Ctx<'_>, sub: SubId, key: SubKey) -> anyhow::Result<()> {
         }
         _ => {}
     }
-    let gmail = gmail_query(ctx, &key);
+    let gmail = gmail_query(ctx.tx, &key);
     ctx.subs.subscribe(sub.clone(), key);
     if let Some((account, query)) = gmail {
         if let Some(s) = ctx.subs.map.get_mut(&sub) {

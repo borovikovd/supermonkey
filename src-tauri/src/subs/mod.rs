@@ -112,7 +112,7 @@ impl Subs {
         let mut out = Vec::new();
         for (id, sub) in self.map.iter_mut().filter(|(_, s)| s.first_sent) {
             let forced = t.subs.contains(id);
-            match sub.key.clone() {
+            match &sub.key {
                 SubKey::App => {
                     if t.app || forced {
                         out.push(SubUpdate::App {
@@ -123,8 +123,8 @@ impl Subs {
                     }
                 }
                 SubKey::Account { account } => {
-                    if (t.summaries.contains(&account) || forced)
-                        && let Some(summary) = queries::account_summary(conn, account)?
+                    if (t.summaries.contains(account) || forced)
+                        && let Some(summary) = queries::account_summary(conn, *account)?
                     {
                         out.push(SubUpdate::Account {
                             sub: id.clone(),
@@ -134,40 +134,40 @@ impl Subs {
                     }
                 }
                 SubKey::List { account, view } => {
-                    let drafts = view == View::Drafts;
+                    let drafts = *view == View::Drafts;
                     let hit = if drafts {
-                        t.draft_lists.contains(&account)
+                        t.draft_lists.contains(account)
                     } else {
-                        t.lists.contains(&account)
+                        t.lists.contains(account)
                     };
                     if hit || forced {
-                        let ids = queries::list_ids(conn, account, &view)?;
+                        let ids = queries::list_ids(conn, *account, view)?;
                         out.extend(list_patch(conn, id, sub, ids, t, drafts, forced)?);
                     }
                 }
                 SubKey::Search { account, query } => {
-                    if t.lists.contains(&account) || forced {
-                        let ids = search::ids(conn, account, &query, &sub.gmail_hits)?;
+                    if t.lists.contains(account) || forced {
+                        let ids = search::ids(conn, *account, query, &sub.gmail_hits)?;
                         out.extend(list_patch(conn, id, sub, ids, t, false, forced)?);
                     }
                 }
                 SubKey::Conversation {
                     thread, trash_mode, ..
                 } => {
-                    if t.threads.contains(&thread) || forced {
+                    if t.threads.contains(thread) || forced {
                         out.push(SubUpdate::Conversation {
                             sub: id.clone(),
                             first: false,
-                            data: queries::conversation(conn, thread, trash_mode)?,
+                            data: queries::conversation(conn, *thread, *trash_mode)?,
                         });
                     }
                 }
                 SubKey::Composer { draft } => {
-                    if t.drafts.contains(&draft) || forced {
+                    if t.drafts.contains(draft) || forced {
                         out.push(SubUpdate::Composer {
                             sub: id.clone(),
                             first: false,
-                            draft: queries::draft_state(conn, &draft)?,
+                            draft: queries::draft_state(conn, draft)?,
                         });
                     }
                 }
@@ -189,7 +189,9 @@ fn list_patch(
     forced: bool,
 ) -> anyhow::Result<Option<SubUpdate>> {
     let (removed, moved) = diff::diff(&sub.ids, &ids);
-    let changed: Vec<String> = ids
+    sub.ids = ids;
+    let changed: Vec<&str> = sub
+        .ids
         .iter()
         .filter(|e| {
             if drafts {
@@ -200,9 +202,8 @@ fn list_patch(
                     .is_ok_and(|n: ThreadId| t.threads.contains(&n))
             }
         })
-        .map(|e| e.key.clone())
+        .map(|e| e.key.as_str())
         .collect();
-    sub.ids = ids;
     if !forced && removed.is_empty() && moved.is_empty() && changed.is_empty() {
         return Ok(None);
     }
@@ -225,7 +226,7 @@ fn first_load(
     sub: &mut Sub,
     online: bool,
 ) -> anyhow::Result<SubUpdate> {
-    Ok(match sub.key.clone() {
+    Ok(match &sub.key {
         SubKey::App => SubUpdate::App {
             sub: id.to_string(),
             first: true,
@@ -234,15 +235,16 @@ fn first_load(
         SubKey::Account { account } => SubUpdate::Account {
             sub: id.to_string(),
             first: true,
-            summary: queries::account_summary(conn, account)?
-                .unwrap_or_else(|| empty_summary(account)),
+            summary: queries::account_summary(conn, *account)?
+                .unwrap_or_else(|| empty_summary(*account)),
         },
         SubKey::List { account, view } => {
-            let ids = queries::list_ids(conn, account, &view)?;
-            list_first(conn, id, sub, ids, view == View::Drafts)?
+            let drafts = *view == View::Drafts;
+            let ids = queries::list_ids(conn, *account, view)?;
+            list_first(conn, id, sub, ids, drafts)?
         }
         SubKey::Search { account, query } => {
-            let ids = search::ids(conn, account, &query, &sub.gmail_hits)?;
+            let ids = search::ids(conn, *account, query, &sub.gmail_hits)?;
             list_first(conn, id, sub, ids, false)?
         }
         SubKey::Conversation {
@@ -250,12 +252,12 @@ fn first_load(
         } => SubUpdate::Conversation {
             sub: id.to_string(),
             first: true,
-            data: queries::conversation(conn, thread, trash_mode)?,
+            data: queries::conversation(conn, *thread, *trash_mode)?,
         },
         SubKey::Composer { draft } => SubUpdate::Composer {
             sub: id.to_string(),
             first: true,
-            draft: queries::draft_state(conn, &draft)?,
+            draft: queries::draft_state(conn, draft)?,
         },
     })
 }
@@ -267,10 +269,10 @@ fn list_first(
     ids: Vec<ListEntry>,
     drafts: bool,
 ) -> anyhow::Result<SubUpdate> {
-    let window: Vec<String> = ids
+    let window: Vec<&str> = ids
         .iter()
         .take(FIRST_WINDOW)
-        .map(|e| e.key.clone())
+        .map(|e| e.key.as_str())
         .collect();
     let rows = queries::rows_for_keys(conn, drafts, &window)?;
     sub.ids.clone_from(&ids);

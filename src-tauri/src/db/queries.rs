@@ -141,7 +141,7 @@ pub fn thread_rows(conn: &Connection, ids: &[ThreadId]) -> anyhow::Result<Vec<Li
 }
 
 /// Rows for draft ids (the Drafts list).
-pub fn draft_rows(conn: &Connection, ids: &[String]) -> anyhow::Result<Vec<ListRow>> {
+pub fn draft_rows(conn: &Connection, ids: &[impl AsRef<str>]) -> anyhow::Result<Vec<ListRow>> {
     let mut out = Vec::with_capacity(ids.len());
     let mut stmt = conn.prepare_cached(
         "SELECT d.id, d.thread_id, d.to_json, d.subject, d.body_html, d.updated_at, d.rev, d.attachments_json
@@ -149,7 +149,7 @@ pub fn draft_rows(conn: &Connection, ids: &[String]) -> anyhow::Result<Vec<ListR
     )?;
     for id in ids {
         let row = stmt
-            .query_row([id], |r| {
+            .query_row([id.as_ref()], |r| {
                 let to: Vec<Addr> = from_json(&r.get::<_, String>(2)?);
                 let body: String = r.get(4)?;
                 let atts: Vec<DraftAttachment> = from_json(&r.get::<_, String>(7)?);
@@ -206,12 +206,15 @@ pub fn snippet_of_html(html: &str) -> String {
 pub fn rows_for_keys(
     conn: &Connection,
     view_is_drafts: bool,
-    keys: &[String],
+    keys: &[impl AsRef<str>],
 ) -> anyhow::Result<Vec<ListRow>> {
     if view_is_drafts {
         draft_rows(conn, keys)
     } else {
-        let ids: Vec<i64> = keys.iter().filter_map(|k| k.parse().ok()).collect();
+        let ids: Vec<ThreadId> = keys
+            .iter()
+            .filter_map(|k| k.as_ref().parse().ok())
+            .collect();
         thread_rows(conn, &ids)
     }
 }
