@@ -34,11 +34,6 @@ async function sentWithSubject(
   return m;
 }
 
-/** A recipient field by its exact name (`app.field("Cc")` also matches Bcc). */
-function field(app: App, label: "To" | "Cc" | "Bcc") {
-  return app.page.getByRole("combobox", { name: label, exact: true });
-}
-
 /** Addresses of the chips in a field. */
 async function chipAddresses(app: App, label: "To" | "Cc" | "Bcc"): Promise<string[]> {
   return app.chips(label).evaluateAll((els) => els.map((el) => el.getAttribute("data-chip") ?? ""));
@@ -69,7 +64,11 @@ async function subjectAndBody(app: App, subject: string, body: string): Promise<
   await app.type(body);
 }
 
-/** Sends the composer on screen once its autosave has run (see NEW-02 for the bug this avoids). */
+/**
+ * Sends the composer on screen once its autosave has run, and lets the outbox
+ * send it. Right after a chip is typed, the suggestion list can still be open,
+ * and it takes Cmd+Enter as Enter.
+ */
 async function sendSaved(app: App): Promise<void> {
   await app.settle();
   await app.press("Meta+Enter");
@@ -86,7 +85,7 @@ test("RCP-01 autocomplete: at most six suggestions, keyboard choice, Esc stays i
 }) => {
   await seeds.contacts(gmail, app);
   await app.compose();
-  const to = field(app, "To");
+  const to = app.field("To");
 
   // Eight contacts match "mar"; six show, each with name, address, and the match in bold.
   await app.type("mar");
@@ -142,7 +141,7 @@ test("RCP-02 ranking and exclusions come from synced mail", async ({ app, gmail 
   expect(log.some((r) => r.params.format === "metadata")).toBe(true);
 
   await app.compose();
-  const to = field(app, "To");
+  const to = app.field("To");
   await app.type("s");
   await app.settle();
   // Sent tier (Sam, then Sara, whose only sent mail is 200 days old, so only the
@@ -182,7 +181,7 @@ test("RCP-02 ranking and exclusions come from synced mail", async ({ app, gmail 
 test("RCP-03 ways to turn typed text into a chip", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   await app.compose();
-  const to = field(app, "To");
+  const to = app.field("To");
   // Addresses with no contacts, so no suggestion list opens.
   const chipAfter = async (typed: string, then: () => Promise<void>) => {
     await app.type(typed);
@@ -274,7 +273,7 @@ test("RCP-05 an invalid chip blocks send until it is fixed", async ({ app, gmail
 
   // Fixed: the message sends.
   await app.press("Meta+Shift+o");
-  await expect(field(app, "To")).toBeFocused();
+  await expect(app.field("To")).toBeFocused();
   await app.press("Backspace", "Backspace");
   await expect(app.chips("To")).toHaveCount(0);
   await app.type("kim@kite.test,");
@@ -290,8 +289,8 @@ test("RCP-06 Tab moves between fields unless the suggestion list is open", async
 }) => {
   await seeds.contacts(gmail, app);
   await app.compose();
-  const to = field(app, "To");
-  const cc = field(app, "Cc");
+  const to = app.field("To");
+  const cc = app.field("Cc");
 
   // With the list open, Tab accepts the suggestion instead of moving. (First,
   // while To has never lost focus: its blur handler closes the list 120 ms later.)
@@ -303,7 +302,6 @@ test("RCP-06 Tab moves between fields unless the suggestion list is open", async
   await expect(to).toBeFocused();
 
   // To → Subject → body, and back.
-  await expect(to).toBeFocused();
   await app.press("Tab");
   await expect(app.subject).toBeFocused();
   await app.press("Tab");
@@ -339,13 +337,13 @@ test("RCP-07 Cc and Bcc stay hidden until used", async ({ app, gmail }) => {
 
   // A new message has no Cc or Bcc row; Cmd+Shift+C shows Cc.
   await app.compose();
-  await expect(field(app, "Cc")).toHaveCount(0);
-  await expect(field(app, "Bcc")).toHaveCount(0);
+  await expect(app.field("Cc")).toHaveCount(0);
+  await expect(app.field("Bcc")).toHaveCount(0);
   await app.press("Meta+Shift+c");
-  await expect(field(app, "Cc")).toBeVisible();
-  await expect(field(app, "Bcc")).toHaveCount(0);
+  await expect(app.field("Cc")).toBeVisible();
+  await expect(app.field("Bcc")).toHaveCount(0);
   // Focus moves to Cc a frame later; an Esc before that would be undone by it.
-  await expect(field(app, "Cc")).toBeFocused();
+  await expect(app.field("Cc")).toBeFocused();
   await app.press("Escape", "Escape");
   await expect(app.editor).toHaveCount(0);
 
@@ -354,7 +352,7 @@ test("RCP-07 Cc and Bcc stay hidden until used", async ({ app, gmail }) => {
   await expect(app.conversationTitle).toHaveText("Offsite venue");
   await app.settle();
   await app.reply("Enter");
-  await expect(field(app, "Cc")).toBeVisible();
+  await expect(app.field("Cc")).toBeVisible();
   expect(await chipAddresses(app, "Cc")).toEqual(["dave@corp.test", "erin@corp.test"]);
   await app.press("Escape", "Escape", "Escape");
   await expect(app.conversationTitle).toHaveCount(0);
@@ -363,7 +361,7 @@ test("RCP-07 Cc and Bcc stay hidden until used", async ({ app, gmail }) => {
   await app.compose();
   await app.type("kim@kite.test,");
   await app.press("Meta+Shift+b");
-  await expect(field(app, "Bcc")).toBeFocused();
+  await expect(app.field("Bcc")).toBeFocused();
   await app.type("bea@hidden.test,");
   expect(await chipAddresses(app, "Bcc")).toEqual(["bea@hidden.test"]);
   await subjectAndBody(app, "Blind copy", "Hello");

@@ -67,9 +67,12 @@ async function highlight(app: App, subject: string): Promise<void> {
   await down(40);
 }
 
-/** Sends the composer on screen once its autosave has run, and lets the outbox send it. */
+/**
+ * Sends the composer on screen once its autosave has run, and lets the outbox
+ * send it. Right after a chip is typed, the suggestion list can still be open,
+ * and it takes Cmd+Enter as Enter.
+ */
 async function send(app: App): Promise<void> {
-  // Settle first: text typed within the save delay is lost on send (a known bug, NEW-02).
   await app.settle();
   await app.press("Meta+Enter");
   await expect(app.editor).toHaveCount(0);

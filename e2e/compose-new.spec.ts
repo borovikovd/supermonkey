@@ -126,16 +126,14 @@ async function closeComposer(app: App): Promise<void> {
   await app.settle();
 }
 
-/** Sends the composer on screen once its autosave has run (see NEW-02 for the bug this avoids). */
+/**
+ * Sends the composer on screen once its autosave has run. Right after a chip is
+ * typed, the suggestion list can still be open, and it takes Cmd+Enter as Enter.
+ */
 async function sendSaved(app: App): Promise<void> {
   await app.settle();
   await app.press("Meta+Enter");
   await expect(app.editor).toHaveCount(0);
-}
-
-/** A recipient field by its exact name (`app.field("Cc")` also matches Bcc). */
-function field(app: App, label: "To" | "Cc" | "Bcc") {
-  return app.page.getByRole("combobox", { name: label, exact: true });
 }
 
 /** The From button (shown only with more than one sendAs address). */
@@ -316,7 +314,7 @@ test("NEW-03 TipTap shortcuts that clash with the compose table are replaced", a
 
   // Cmd+Shift+B: the Bcc field, not a blockquote.
   await app.press("Meta+Shift+b");
-  await expect(field(app, "Bcc")).toBeFocused();
+  await expect(app.field("Bcc")).toBeFocused();
   await expect(app.editor.locator("blockquote")).toHaveCount(0);
 
   // Cmd+Shift+S: Subject, not strikethrough.
@@ -356,9 +354,9 @@ test("NEW-04 compose field shortcuts work whether the editor is focused or blurr
   await app.type("Body");
 
   const rows: [string, () => Promise<void>][] = [
-    ["Meta+Shift+o", () => expect(field(app, "To")).toBeFocused()],
-    ["Meta+Shift+c", () => expect(field(app, "Cc")).toBeFocused()],
-    ["Meta+Shift+b", () => expect(field(app, "Bcc")).toBeFocused()],
+    ["Meta+Shift+o", () => expect(app.field("To")).toBeFocused()],
+    ["Meta+Shift+c", () => expect(app.field("Cc")).toBeFocused()],
+    ["Meta+Shift+b", () => expect(app.field("Bcc")).toBeFocused()],
     [
       "Meta+Shift+f",
       async () => {
