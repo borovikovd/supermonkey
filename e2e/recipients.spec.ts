@@ -4,7 +4,7 @@ import type { App } from "./app.ts";
 import type { Control, GmailMessage } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
-import { A } from "./seeds.ts";
+import { A, PERSONS } from "./seeds.ts";
 
 // ------------------------------------------------------------------ helpers
 
@@ -146,14 +146,20 @@ test("RCP-02 ranking and exclusions come from synced mail", async ({ app, gmail 
   await app.type("s");
   await app.settle();
   // Sent tier (Sam, then Sara, whose only sent mail is 200 days old, so only the
-  // backfill finds her), then received only, then co-recipient only. List-only,
-  // no-reply, spam, draft-only, and own addresses never show.
+  // backfill finds her), then received only, then co-recipient only. List-only
+  // (Sly), no-reply, spam, and draft-only addresses never show.
   expect(await suggested(app)).toEqual([
     "sam@x.test",
     "sara@x.test",
     "sue@recv.test",
     "sid@cc.test",
   ]);
+
+  // The account's own alias, a co-recipient on "To the alias", never shows.
+  await to.fill("");
+  await app.type("ames");
+  await app.settle();
+  expect(await suggested(app)).toEqual([]);
 
   // Matched at the start of the domain; never from the middle of the local part.
   await to.fill("");
@@ -363,6 +369,19 @@ test("RCP-07 Cc and Bcc stay hidden until used", async ({ app, gmail }) => {
 
 test("RCP-08 new mail updates the suggestions", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
+  // Quin Quill gets two more messages, so as received-only contacts Quin (three)
+  // outranks Quinn (one) until Ana sends to Quinn.
+  const fromQuin = (n: number) =>
+    gmail.deliver({
+      account: A,
+      from: PERSONS[1] ?? "",
+      to: [A],
+      subject: `Quin again ${n}`,
+      text: "More from Quin.",
+      poll: false,
+    });
+  await fromQuin(1);
+  await fromQuin(2);
   await gmail.deliver({
     account: A,
     from: "Quinn Q <quinn@q.test>",
@@ -372,15 +391,12 @@ test("RCP-08 new mail updates the suggestions", async ({ app, gmail }) => {
   });
   await app.settle();
 
-  // Quinn is suggested; like Quin Quill, Quinn is received-only.
   await app.compose();
   await app.type("qui");
   await app.settle();
-  expect(await suggested(app)).toEqual(
-    expect.arrayContaining(["quinn@q.test", "quin@people.test"]),
-  );
+  expect(await suggested(app)).toEqual(["quin@people.test", "quinn@q.test"]);
 
-  // After a send to Quinn, Quinn ranks above received-only contacts.
+  // After a send to Quinn, Quinn is in the sent tier, above received-only Quin.
   const quinn = app.suggestions().filter({ hasText: "quinn@q.test" });
   await quinn.dispatchEvent("mousedown");
   expect(await chipAddresses(app, "To")).toEqual(["quinn@q.test"]);
@@ -391,7 +407,5 @@ test("RCP-08 new mail updates the suggestions", async ({ app, gmail }) => {
   await app.compose();
   await app.type("qui");
   await app.settle();
-  const order = await suggested(app);
-  expect(order[0]).toBe("quinn@q.test");
-  expect(order).toContain("quin@people.test");
+  expect(await suggested(app)).toEqual(["quinn@q.test", "quin@people.test"]);
 });

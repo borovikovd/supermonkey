@@ -117,6 +117,9 @@ test("REP-01 r opens the reply composer under the thread, ready to type", async 
   app,
   gmail,
 }) => {
+  // Short enough that the thread does not fit: the composer opens below the fold
+  // unless the view scrolls to it.
+  await app.page.setViewportSize({ width: 1280, height: 500 });
   await seeds.standard(gmail, app);
   await open(app, "Q4 plan");
   await app.reply("r");
@@ -126,11 +129,14 @@ test("REP-01 r opens the reply composer under the thread, ready to type", async 
     "xpath=ancestor::div[.//button[normalize-space(.)='Send']][1]",
   );
   await expect(app.editor).toHaveText("Thanks");
-  await expect(composer).toBeInViewport({ ratio: 1 });
+  // Scrolled into view, it can sit a fraction of a pixel short: scroll offsets are
+  // whole pixels and the card's height is not.
+  await expect(composer).toBeInViewport({ ratio: 0.99 });
   // Below m12, the last message.
   const last = await app.messages.last().boundingBox();
   const box = await composer.boundingBox();
-  expect(box?.y ?? 0).toBeGreaterThanOrEqual((last?.y ?? 0) + (last?.height ?? 0));
+  if (!last || !box) throw new Error("m12 or the composer has no box");
+  expect(box.y).toBeGreaterThanOrEqual(last.y + last.height);
   // The selection bar is on m12, the target.
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
   await expect(app.selectedMessage).toHaveCount(1);
@@ -389,10 +395,11 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   // Every draft shows as a collapsed stub below the last message.
   await expect(stubs(app)).toHaveCount(2);
   const lastBox = await m12.boundingBox();
+  if (!lastBox) throw new Error("m12 has no box");
   const tops = await stubs(app).evaluateAll((els) =>
     els.map((el) => el.getBoundingClientRect().top),
   );
-  for (const top of tops) expect(top).toBeGreaterThan(lastBox?.y ?? 0);
+  for (const top of tops) expect(top).toBeGreaterThanOrEqual(lastBox.y + lastBox.height);
 
   // R1 and F1 | m12, f | F1 is resumed.
   await app.reply("f");

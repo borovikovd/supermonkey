@@ -602,7 +602,18 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await closeComposer(app);
   await expectLeft("resumed, untouched", 1);
 
-  // A draft reopened by undo send, closed untouched, is kept (DEVIATIONS).
+  // Still kept when edited back to how its composer started: a resumed draft is
+  // never discarded as untouched, even when its fields equal the defaults.
+  await open(app, "Person 1");
+  await app.reply("r");
+  await expect(app.editor).toHaveText("Typed body");
+  await app.press("Meta+a", "Backspace");
+  await expect(app.editor).toHaveText("");
+  await closeComposer(app);
+  await expectLeft("resumed, edited back to the defaults", 1);
+
+  // A draft reopened by undo send is kept (DEVIATIONS), even when its text is
+  // then deleted back to how `r` started it.
   await open(app, "Person 4");
   await app.reply("r");
   await app.type("Undo me");
@@ -610,6 +621,8 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await app.toast("Sending…").getByRole("button", { name: "Undo" }).click();
   await expect(app.editor).toHaveText("Undo me");
   await app.settle();
+  await app.press("Meta+a", "Backspace");
+  await expect(app.editor).toHaveText("");
   await closeComposer(app);
   kept++;
   await expectLeft("reopened by undo send, untouched", 1);
