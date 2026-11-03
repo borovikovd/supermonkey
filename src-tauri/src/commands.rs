@@ -13,8 +13,8 @@ use tauri::{AppHandle, Manager, State};
 use crate::api::{self, CmdResult};
 use crate::engine::Engine;
 use crate::model::{
-    AccountId, ChannelMessage, ContactSuggestion, DraftAttachment, DraftId, LaunchInfo, ListRow,
-    MessageBody, MessageId, NumberedAction, SnoozeChoice,
+    AccountId, AttachmentId, ChannelMessage, ContactSuggestion, DraftAttachment, DraftId,
+    LaunchInfo, ListRow, MessageBody, MessageId, NumberedAction, SnoozeChoice,
 };
 
 /// The page's first call: where channel messages go, and where action numbers continue.
@@ -77,7 +77,10 @@ pub async fn sign_in_again(engine: State<'_, Arc<Engine>>, account: AccountId) -
 }
 
 #[tauri::command]
-pub async fn open_attachment(engine: State<'_, Arc<Engine>>, attachment: i64) -> CmdResult<()> {
+pub async fn open_attachment(
+    engine: State<'_, Arc<Engine>>,
+    attachment: AttachmentId,
+) -> CmdResult<()> {
     api::open_attachment(&engine, attachment).await
 }
 

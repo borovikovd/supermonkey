@@ -22,16 +22,18 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use tokio::sync::Notify;
 
+use crate::model::Millis;
+
 // ------------------------------------------------------------------ time
 
 static MANUAL: OnceLock<Manual> = OnceLock::new();
 
 /// App time in Unix milliseconds.
-pub fn now_ms() -> i64 {
+pub fn now_ms() -> Millis {
     MANUAL.get().map_or_else(system_ms, Manual::now)
 }
 
-fn system_ms() -> i64 {
+fn system_ms() -> Millis {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
@@ -69,7 +71,7 @@ pub struct Manual {
 
 struct ManualState {
     /// App time, Unix ms.
-    wall: i64,
+    wall: Millis,
     /// Elapsed time for sleeps, ms.
     mono: u64,
     next_id: u64,
@@ -87,7 +89,7 @@ struct Sleeper {
 impl Manual {
     /// Installs the manual clock at `wall_ms`, before anything reads the time.
     /// Fails if a clock is already installed.
-    pub fn install(wall_ms: i64) -> anyhow::Result<&'static Manual> {
+    pub fn install(wall_ms: Millis) -> anyhow::Result<&'static Manual> {
         let clock = Manual {
             state: Mutex::new(ManualState {
                 wall: wall_ms,
@@ -104,7 +106,7 @@ impl Manual {
             .ok_or_else(|| anyhow::anyhow!("manual clock missing"))
     }
 
-    fn now(&self) -> i64 {
+    fn now(&self) -> Millis {
         self.state.lock().wall
     }
 
@@ -430,7 +432,7 @@ mod tests {
         assert_eq!(busy("kick"), 0, "a taken kick stays busy");
     }
 
-    fn manual(wall: i64) -> Manual {
+    fn manual(wall: Millis) -> Manual {
         Manual {
             state: Mutex::new(ManualState {
                 wall,

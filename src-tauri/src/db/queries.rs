@@ -10,9 +10,9 @@ use super::from_json;
 use crate::model::{
     AccountId, AccountInfo, AccountSummary, Addr, AppState, AttachmentInfo, ConversationData,
     DraftAttachment, DraftKind, DraftState, DraftSummary, GlobalSettings, LabelInfo, ListEntry,
-    ListRow, MessageBody, MessageId, MessageSummary, Notice, NoticeKind, OutboxRow, OutboxState,
-    PinInfo, PinKind, SendAs, SplitInfo, SplitKind, SyncStatus, ThreadId, UndoEntryInfo, UndoKind,
-    View,
+    ListRow, MessageBody, MessageId, MessageSummary, Millis, Notice, NoticeKind, OutboxRow,
+    OutboxState, PinInfo, PinKind, SendAs, SplitInfo, SplitKind, SyncStatus, ThreadId,
+    UndoEntryInfo, UndoKind, View,
 };
 
 pub const HUES: [&str; 6] = [
@@ -63,7 +63,7 @@ pub fn list_ids(
     let mut stmt = conn.prepare_cached(sql)?;
     let map = |r: &rusqlite::Row<'_>| {
         Ok(ListEntry {
-            key: r.get::<_, i64>(0)?.to_string(),
+            key: r.get::<_, ThreadId>(0)?.to_string(),
             split: r.get(1)?,
         })
     };
@@ -101,7 +101,7 @@ const THREAD_ROW_COLS: &str =
      (SELECT group_concat(label_id, char(31)) FROM thread_labels WHERE thread_id = t.id)";
 
 fn thread_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ListRow> {
-    let id: i64 = r.get(0)?;
+    let id: ThreadId = r.get(0)?;
     let labels: Option<String> = r.get(13)?;
     Ok(ListRow {
         key: id.to_string(),
@@ -313,9 +313,9 @@ pub fn conversation(
             [thread],
             |r| {
                 Ok((
-                    r.get::<_, i64>(0)?,
+                    r.get::<_, AccountId>(0)?,
                     r.get::<_, String>(1)?,
-                    r.get::<_, Option<i64>>(2)?,
+                    r.get::<_, Option<Millis>>(2)?,
                     r.get::<_, i64>(3)?,
                 ))
             },

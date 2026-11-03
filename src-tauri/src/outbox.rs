@@ -6,7 +6,7 @@
 use rusqlite::{OptionalExtension, params};
 
 use crate::db::from_json;
-use crate::model::{AccountId, Addr, MessageId, OutboxState, ThreadId};
+use crate::model::{AccountId, Addr, DraftId, MessageId, OutboxId, OutboxState, ThreadId};
 use crate::writer::{Ctx, Effect};
 
 /// The undo window. Fixed at ten seconds, as in Superhuman; tests shorten it.
@@ -94,7 +94,7 @@ struct SendSource {
 /// An outbox row as undo and toasts need it.
 struct OutboxRef {
     account: AccountId,
-    draft: String,
+    draft: DraftId,
     thread: Option<ThreadId>,
     state: OutboxState,
     sent_message: Option<String>,
@@ -135,7 +135,7 @@ pub fn close_toast(ctx: &mut Ctx<'_>, outbox: i64) -> anyhow::Result<()> {
 
 /// Undo on a send: waiting cancels it and the composer reopens; sending is
 /// held until the send resolves; sent trashes only that sent message.
-pub fn undo_send(ctx: &mut Ctx<'_>, account: AccountId, outbox: i64) -> anyhow::Result<()> {
+pub fn undo_send(ctx: &mut Ctx<'_>, account: AccountId, outbox: OutboxId) -> anyhow::Result<()> {
     let Some(OutboxRef {
         account: acc,
         draft,
@@ -218,7 +218,7 @@ pub fn trash_sent(ctx: &mut Ctx<'_>, account: AccountId, gmail_id: &str) -> anyh
 
 /// Removes sent rows whose toast is gone and whose message is on its thread.
 pub fn cleanup(ctx: &mut Ctx<'_>, account: AccountId) -> anyhow::Result<()> {
-    let done: Vec<(i64, String)> = {
+    let done: Vec<(OutboxId, DraftId)> = {
         let mut stmt = ctx.tx.prepare(
             "SELECT o.id, o.draft_id FROM outbox o WHERE o.account_id = ?1 AND o.state = 'sent' AND o.toast_closed = 1
                AND (o.thread_id IS NULL OR EXISTS (SELECT 1 FROM messages m WHERE m.account_id = o.account_id
@@ -253,7 +253,7 @@ pub fn on_launch(ctx: &mut Ctx<'_>) -> anyhow::Result<()> {
         "UPDATE outbox SET delayed = 1 WHERE state != 'sent' AND send_after < ?1",
         [ctx.now],
     )?;
-    let accounts: Vec<i64> = {
+    let accounts: Vec<AccountId> = {
         let mut stmt = ctx.tx.prepare("SELECT id FROM accounts")?;
         stmt.query_map([], |r| r.get(0))?
             .collect::<Result<_, _>>()?

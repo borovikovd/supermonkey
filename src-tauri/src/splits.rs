@@ -72,7 +72,7 @@ pub fn route(
     let pin = |kind: PinKind, value: &str| -> anyhow::Result<Option<SplitId>> {
         Ok(conn
             .prepare_cached("SELECT split_id FROM split_overrides WHERE account_id = ?1 AND kind = ?2 AND value = ?3")?
-            .query_row(params![account, kind.as_str(), value], |r| r.get::<_, i64>(0))
+            .query_row(params![account, kind.as_str(), value], |r| r.get::<_, SplitId>(0))
             .optional()?
             .filter(|&id| enabled(id)))
     };

@@ -2,7 +2,7 @@
 
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::model::{AccountId, ListEntry, ThreadId};
+use crate::model::{AccountId, ListEntry, Millis, ThreadId};
 use crate::threads::RuleMsg;
 
 /// Most local matches a search list holds.
@@ -15,7 +15,7 @@ pub fn ids(
     gmail_hits: &[ThreadId],
 ) -> anyhow::Result<Vec<ListEntry>> {
     let q = ub_rules::Query::parse(query);
-    let mut matched: Vec<(i64, ThreadId)> = Vec::new();
+    let mut matched: Vec<(Millis, ThreadId)> = Vec::new();
     if q.has_local_terms() {
         let fts = q.to_fts5();
         // FTS expresses the whole query: one indexed lookup.
@@ -62,7 +62,7 @@ pub fn ids(
                 .query_row(
                     "SELECT sort_time FROM threads WHERE id = ?1 AND account_id = ?2 AND has_live = 1",
                     rusqlite::params![t, account],
-                    |r| r.get::<_, i64>(0),
+                    |r| r.get::<_, Millis>(0),
                 )
                 .optional()?
         {
@@ -87,7 +87,7 @@ pub fn thread_matches(
     account: AccountId,
     thread: ThreadId,
     q: &ub_rules::Query,
-) -> anyhow::Result<Option<i64>> {
+) -> anyhow::Result<Option<Millis>> {
     let msgs = crate::threads::messages(conn, thread)?;
     if !msgs.iter().any(crate::threads::Msg::live) {
         return Ok(None);

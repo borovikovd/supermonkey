@@ -15,7 +15,8 @@ use rusqlite::{Connection, Transaction, params};
 
 use crate::clock::{Busy, Tracked};
 use crate::model::{
-    AccountId, ChannelMessage, DraftId, MessageId, NumberedAction, SubId, ThreadId,
+    AccountId, ChannelMessage, DraftId, MessageId, Millis, NumberedAction, OutboxId, SubId,
+    ThreadId,
 };
 use crate::subs::Subs;
 
@@ -123,7 +124,7 @@ pub struct Ctx<'a> {
     pub tx: &'a Transaction<'a>,
     /// The `rev` this transaction stamps.
     pub rev: i64,
-    pub now: i64,
+    pub now: Millis,
     pub touched: Touched,
     pub effects: Vec<Effect>,
     pub subs: &'a mut Subs,
@@ -166,7 +167,7 @@ impl Ctx<'_> {
         Ok(())
     }
 
-    pub fn touch_outbox(&mut self, account: AccountId, outbox: i64) -> rusqlite::Result<()> {
+    pub fn touch_outbox(&mut self, account: AccountId, outbox: OutboxId) -> rusqlite::Result<()> {
         self.tx.execute(
             "UPDATE outbox SET rev = ?1 WHERE id = ?2",
             params![self.rev, outbox],

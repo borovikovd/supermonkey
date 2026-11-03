@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::db::{from_json, queries, to_json};
 use crate::model::{
-    AccountId, Addr, DraftAttachment, DraftKind, DraftSave, MessageId, SendAs, ThreadId,
+    AccountId, Addr, AttachmentId, DraftAttachment, DraftId, DraftKind, DraftSave, MessageId,
+    Millis, SendAs, ThreadId,
 };
 use crate::writer::{Ctx, Effect};
 
@@ -33,7 +34,7 @@ struct Target {
     cc: Vec<Addr>,
     reply_to: Vec<Addr>,
     subject: String,
-    date: i64,
+    date: Millis,
     message_id: Option<String>,
     references: String,
     html: String,
@@ -198,7 +199,7 @@ pub fn message_attachments(
         "SELECT id, filename, mime_type, size, local_path FROM attachments WHERE message_id = ?1 AND inline = 0",
     )?;
     let rows = stmt.query_map([message], |r| {
-        let id: i64 = r.get(0)?;
+        let id: AttachmentId = r.get(0)?;
         Ok(DraftAttachment {
             id: format!("src-{id}"),
             filename: r.get(1)?,
@@ -551,7 +552,7 @@ pub fn discard(ctx: &mut Ctx<'_>, draft: &str) -> anyhow::Result<()> {
         )?;
     }
     // Remove local Gmail copies of the draft message.
-    let draft_msgs: Vec<i64> = {
+    let draft_msgs: Vec<MessageId> = {
         let mut stmt = ctx.tx.prepare(
             "SELECT id FROM messages WHERE account_id = ?1 AND ub_draft_id = ?2 AND is_draft = 1",
         )?;
@@ -582,7 +583,7 @@ pub static DRAFT_FILES: std::sync::OnceLock<std::path::PathBuf> = std::sync::Onc
 /// On launch: apply the untouched rule to drafts whose started-fresh flag is
 /// still set (e.g. after a crash).
 pub fn on_launch(ctx: &mut Ctx<'_>) -> anyhow::Result<()> {
-    let fresh: Vec<String> = {
+    let fresh: Vec<DraftId> = {
         let mut stmt = ctx
             .tx
             .prepare("SELECT id FROM drafts WHERE started_fresh = 1")?;

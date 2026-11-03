@@ -7,14 +7,14 @@ use std::collections::{BTreeSet, HashSet};
 use rusqlite::{OptionalExtension, params};
 
 use crate::db::{from_json, queries};
-use crate::model::{AccountId, Addr, MessageId, ThreadId};
+use crate::model::{AccountId, Addr, MessageId, Millis, ThreadId};
 use crate::writer::Ctx;
 
 #[derive(Debug, Clone)]
 pub struct Msg {
     pub id: MessageId,
     pub gmail_id: String,
-    pub date: i64,
+    pub date: Millis,
     pub from_name: String,
     pub from_email: String,
     pub to: Vec<Addr>,

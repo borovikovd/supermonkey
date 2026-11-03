@@ -11,6 +11,10 @@ pub type AccountId = i64;
 pub type ThreadId = i64;
 pub type MessageId = i64;
 pub type SplitId = i64;
+pub type OutboxId = i64;
+pub type UndoEntryId = i64;
+pub type NoticeId = i64;
+pub type AttachmentId = i64;
 pub type DraftId = String;
 pub type SubId = String;
 /// Milliseconds since the Unix epoch.
@@ -141,7 +145,7 @@ pub struct ListMove {
 #[ts(export)]
 pub struct AttachmentInfo {
     #[ts(type = "number")]
-    pub id: i64,
+    pub id: AttachmentId,
     pub filename: String,
     pub mime_type: String,
     #[ts(type = "number")]
@@ -232,7 +236,7 @@ pub struct DraftAttachment {
     pub path: Option<String>,
     /// Source attachment row when carried from a forwarded message or a Gmail draft.
     #[ts(type = "number | null")]
-    pub source: Option<i64>,
+    pub source: Option<AttachmentId>,
 }
 
 /// A collapsed draft shown under a thread.
@@ -275,7 +279,7 @@ impl OutboxState {
 #[ts(export)]
 pub struct OutboxRow {
     #[ts(type = "number")]
-    pub id: i64,
+    pub id: OutboxId,
     #[ts(type = "number")]
     pub account: AccountId,
     pub draft: DraftId,
@@ -294,7 +298,7 @@ pub struct OutboxRow {
     pub subject: String,
     /// The undo entry for this send, if it is still in the history.
     #[ts(type = "number | null")]
-    pub undo_entry: Option<i64>,
+    pub undo_entry: Option<UndoEntryId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
@@ -459,13 +463,13 @@ pub struct AccountInfo {
 #[ts(export)]
 pub struct UndoEntryInfo {
     #[ts(type = "number")]
-    pub id: i64,
+    pub id: UndoEntryId,
     pub kind: UndoKind,
     pub label: String,
     #[ts(type = "number[]")]
     pub threads: Vec<ThreadId>,
     #[ts(type = "number | null")]
-    pub outbox: Option<i64>,
+    pub outbox: Option<OutboxId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -519,7 +523,7 @@ impl NoticeKind {
 #[ts(export)]
 pub struct Notice {
     #[ts(type = "number")]
-    pub id: i64,
+    pub id: NoticeId,
     pub kind: NoticeKind,
     pub message: String,
     pub draft: Option<DraftId>,
@@ -731,7 +735,7 @@ pub enum Action {
         #[ts(type = "number")]
         account: AccountId,
         #[ts(type = "number")]
-        entry: i64,
+        entry: UndoEntryId,
     },
     /// Create a label (with a UI-made local id) and optionally apply it in the same action.
     CreateLabel {
@@ -757,11 +761,11 @@ pub enum Action {
     /// The user closed a send toast.
     CloseToast {
         #[ts(type = "number")]
-        outbox: i64,
+        outbox: OutboxId,
     },
     AckNotice {
         #[ts(type = "number")]
-        notice: i64,
+        notice: NoticeId,
     },
     SetSetting {
         #[ts(type = "number | null")]

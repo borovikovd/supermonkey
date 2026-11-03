@@ -10,7 +10,9 @@ use std::collections::BTreeSet;
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use crate::model::{AccountId, MessageId, ModifyAction, ModifyKind, SnoozeChange, ThreadId};
+use crate::model::{
+    AccountId, MessageId, Millis, ModifyAction, ModifyKind, SnoozeChange, ThreadId,
+};
 use crate::threads;
 use crate::writer::Ctx;
 
@@ -26,8 +28,8 @@ pub struct MsgChange {
 pub struct ThreadChange {
     pub thread: ThreadId,
     pub changes: Vec<MsgChange>,
-    pub snooze_before: Option<i64>,
-    pub snooze_after: Option<i64>,
+    pub snooze_before: Option<Millis>,
+    pub snooze_after: Option<Millis>,
 }
 
 /// Gmail op payload for `messages.batchModify`. Label ids are local ids.
@@ -117,7 +119,7 @@ pub fn modify(ctx: &mut Ctx<'_>, n: i64, m: &ModifyAction) -> anyhow::Result<()>
             .query_row(
                 "SELECT account_id, snooze_until FROM threads WHERE id = ?1",
                 [thread],
-                |r| Ok((r.get::<_, i64>(0)?, r.get::<_, Option<i64>>(1)?)),
+                |r| Ok((r.get::<_, AccountId>(0)?, r.get::<_, Option<Millis>>(1)?)),
             )
             .optional()?
         else {
@@ -213,7 +215,7 @@ pub fn revert(
             .query_row(
                 "SELECT snooze_until FROM threads WHERE id = ?1",
                 [tc.thread],
-                |r| r.get::<_, Option<i64>>(0),
+                |r| r.get::<_, Option<Millis>>(0),
             )
             .optional()?
         else {

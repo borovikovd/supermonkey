@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::model::{ListEntry, ListMove};
+use crate::model::{ListEntry, ListMove, SplitId};
 
 pub fn diff(old: &[ListEntry], new: &[ListEntry]) -> (Vec<String>, Vec<ListMove>) {
     let new_pos: HashMap<&str, usize> = new
@@ -15,7 +15,7 @@ pub fn diff(old: &[ListEntry], new: &[ListEntry]) -> (Vec<String>, Vec<ListMove>
         .enumerate()
         .map(|(i, e)| (e.key.as_str(), i))
         .collect();
-    let old_split: HashMap<&str, Option<i64>> =
+    let old_split: HashMap<&str, Option<SplitId>> =
         old.iter().map(|e| (e.key.as_str(), e.split)).collect();
 
     let removed: Vec<String> = old

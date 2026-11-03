@@ -195,7 +195,9 @@ fn list_patch(
             if drafts {
                 t.drafts.contains(&e.key)
             } else {
-                e.key.parse().is_ok_and(|n: i64| t.threads.contains(&n))
+                e.key
+                    .parse()
+                    .is_ok_and(|n: ThreadId| t.threads.contains(&n))
             }
         })
         .map(|e| e.key.clone())
