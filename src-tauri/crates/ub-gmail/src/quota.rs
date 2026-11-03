@@ -209,6 +209,8 @@ struct Waiter {
     priority: Priority,
     cost: u32,
     granted: bool,
+    /// The `background_spent` entry its grant added, if background.
+    spent: Option<(Instant, u32)>,
     notify: Arc<Notify>,
 }
 
@@ -267,12 +269,24 @@ impl AccountState {
         }
     }
 
-    fn start(&mut self, priority: Priority, cost: u32) {
+    /// Takes a slot and the units. Returns the background spending recorded.
+    fn start(&mut self, priority: Priority, cost: u32) -> Option<(Instant, u32)> {
         self.bucket.take(cost);
-        if priority.is_background() {
-            self.background_spent.push_back((Instant::now(), cost));
-        }
         self.in_flight += 1;
+        let spent = priority.is_background().then(|| (Instant::now(), cost));
+        self.background_spent.extend(spent);
+        spent
+    }
+
+    /// Undoes [`AccountState::start`] for a request that never ran.
+    fn cancel(&mut self, cost: u32, spent: Option<(Instant, u32)>) {
+        self.in_flight -= 1;
+        self.bucket.give_back(cost);
+        if let Some(entry) = spent
+            && let Some(i) = self.background_spent.iter().rposition(|e| *e == entry)
+        {
+            self.background_spent.remove(i);
+        }
     }
 }
 
@@ -303,7 +317,7 @@ impl State {
             let account = account_state(&mut self.accounts, &waiter.account, cfg);
             match account.check(cfg, waiter.priority, waiter.cost) {
                 Admit::Now => {
-                    account.start(waiter.priority, waiter.cost);
+                    waiter.spent = account.start(waiter.priority, waiter.cost);
                     waiter.granted = true;
                     waiter.notify.notify_one();
                 }
@@ -392,6 +406,7 @@ impl AccountScheduler {
                     priority,
                     cost,
                     granted: false,
+                    spent: None,
                     notify: Arc::clone(&notify),
                 },
             );
@@ -456,7 +471,7 @@ impl AccountScheduler {
 }
 
 /// Removes a waiter whose `acquire` future was dropped. If it had just been granted, its
-/// slot and units go back.
+/// slot, units, and background spending go back.
 struct Queued<'a> {
     inner: &'a Inner,
     id: u64,
@@ -473,8 +488,7 @@ impl Drop for Queued<'_> {
             && waiter.granted
             && let Some(account) = state.accounts.get_mut(&waiter.account)
         {
-            account.in_flight -= 1;
-            account.bucket.give_back(waiter.cost);
+            account.cancel(waiter.cost, waiter.spent);
         }
         state.pump(&self.inner.cfg);
     }

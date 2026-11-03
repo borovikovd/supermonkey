@@ -167,6 +167,35 @@ async fn background_spending_is_capped_per_minute() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_background_request_dropped_once_granted_gives_back_its_minute_budget() {
+    let scheduler = Scheduler::new(QuotaConfig {
+        max_in_flight: 1,
+        background_per_minute: 100,
+        ..QuotaConfig::default()
+    });
+    let account = scheduler.account(A);
+    let holder = account.acquire(Priority::P2, 1).await;
+    let queued = tokio::spawn({
+        let account = account.clone();
+        async move { drop(account.acquire(Priority::P5, 100).await) }
+    });
+    settle().await;
+    assert_eq!(account.queued(), 1);
+    // The slot frees and the waiter is granted, but it is cancelled before it runs.
+    drop(holder);
+    queued.abort();
+    settle().await;
+    assert_eq!(account.in_flight(), 0);
+
+    let start = Instant::now();
+    drop(account.acquire(Priority::P5, 100).await);
+    assert!(
+        Instant::now() - start < Duration::from_secs(1),
+        "the cancelled request still counted against the background cap"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn dropping_a_queued_or_running_request_frees_its_place() {
     let scheduler = Scheduler::new(QuotaConfig {
         max_in_flight: 1,
