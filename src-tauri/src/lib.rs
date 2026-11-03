@@ -151,6 +151,11 @@ pub fn stderr_logger_init() -> Result<(), log::SetLoggerError> {
     struct Stderr;
     impl log::Log for Stderr {
         fn enabled(&self, m: &log::Metadata<'_>) -> bool {
+            // The sanitizer's HTML parser warns about every malformed table in
+            // mail ("foster parenting not implemented"); ammonia still cleans it.
+            if m.target().starts_with("html5ever") {
+                return m.level() <= log::Level::Error;
+            }
             m.level() <= log::Level::Info || m.target().starts_with("ubermensch")
         }
         #[expect(

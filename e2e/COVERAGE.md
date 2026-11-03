@@ -3293,6 +3293,7 @@ Also kept, because they test logic the E2E suite can't observe:
 - `crates/ub-gmail/tests/scheduler.rs`: priorities, concurrency, quota, and back-off.
 - `crates/ub-gmail/tests/oauth.rs`: the `state` check, token caching and early refresh, one refresh shared by concurrent 401s, and secrets kept out of debug output.
 - `src-tauri/src/clock.rs`: the activity tracking `settle()` relies on, and that closing a `Kick` (an account stopping) wakes a loop even between its last check and its wait.
+- `src-tauri/tests/logging.rs`: the stderr logger drops the HTML parser's warnings and keeps ours (logs are not visible to the E2E suite).
 - `src-tauri/src/db/mod.rs`: older databases get `AUTOINCREMENT` on `notices`, `outbox`, and `ops` without losing rows or the `ops` index.
 
 Everything else was deleted, because a case here covers it: the contact ranking (RCP-02), the MIME build and Gmail payload tests (ATT-04, CONV), the address, encoding, quote and HTML helpers, the list diff (UIC-01), the mirror's Vitest tests (UIC, UND), `ub-gmail/tests/{api,outcomes}.rs` (ERR), and `src-tauri/tests/{sync_fake,compose_fake,splits}.rs` (SYN, SND, DRF, SPL).
