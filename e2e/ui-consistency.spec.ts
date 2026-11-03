@@ -165,3 +165,31 @@ test("UIC-02 a reload keeps queued actions and keeps action numbers going", asyn
   await app.settle();
   expect(await inInbox("p1")).toBe(true);
 });
+
+test("UIC-03 an action whose submit fails is sent again", async ({ app, gmail }) => {
+  const s = await seeds.standard(gmail, app);
+  const inInbox = async (key: string) =>
+    (await gmail.gmail(A)).messages
+      .filter((m) => m.threadId === s.thread(key).threadId)
+      .some((m) => m.labels.includes("INBOX"));
+  await expect(app.highlighted).toContainText("Person 1");
+  // The first submit fails before it reaches the core; later ones go through.
+  let failed = 0;
+  const submit = /\/invoke\/submit$/;
+  await app.page.route(submit, async (route) => {
+    if (failed > 0) return route.continue();
+    failed++;
+    return route.fulfill({ status: 500, json: "the bridge is down" });
+  });
+
+  await app.press("e");
+  await expect(app.row("Person 1")).toHaveCount(0);
+  await expect.poll(() => failed).toBe(1);
+  await app.settle();
+  await app.page.unroute(submit);
+
+  expect(await inInbox("p1"), "the archive reached Gmail").toBe(false);
+  await expect(app.row("Person 1")).toHaveCount(0);
+  await app.reload();
+  await expect(app.row("Person 1")).toHaveCount(0);
+});

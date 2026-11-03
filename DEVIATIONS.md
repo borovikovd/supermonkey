@@ -34,6 +34,11 @@ written. Each keeps the spec's intent.
 ## UI
 
 - Search treats `AND`/`OR` case-insensitively for local matching.
+- **A failed submit is sent again.** When the invoke carrying actions fails
+  (the core did not answer or rejected the batch), the UI keeps those actions
+  ahead of newer ones and sends them again after 100 ms, doubling to at most
+  5 s while it keeps failing. Rust drops numbers at or below its `ack`, so a
+  batch that did arrive is not applied twice.
 
 ## Sync (step 2)
 

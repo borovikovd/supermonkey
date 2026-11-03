@@ -79,6 +79,9 @@ let buffer: NumberedAction[] = [];
 let inFlight = false;
 export let launch: LaunchInfo = { lastAction: 0, debug: false };
 
+/** The wait before resending a failed submit; doubles while submits keep failing. */
+let retryMs = 0;
+
 async function flush(): Promise<void> {
   if (inFlight || buffer.length === 0) return;
   inFlight = true;
@@ -86,6 +89,14 @@ async function flush(): Promise<void> {
   buffer = [];
   try {
     await invoke("submit", { actions });
+    retryMs = 0;
+  } catch (e) {
+    // Resending is safe: Rust drops numbers at or below its ack.
+    const ns = actions.map((a) => a.n);
+    console.warn(`submit of actions ${ns.join(", ")} failed; sending again`, e);
+    buffer = [...actions, ...buffer];
+    retryMs = Math.min(Math.max(retryMs * 2, 100), 5000);
+    await new Promise((resolve) => setTimeout(resolve, retryMs));
   } finally {
     inFlight = false;
     void flush();
