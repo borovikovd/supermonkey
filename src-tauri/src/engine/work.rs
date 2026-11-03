@@ -6,7 +6,6 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
@@ -75,7 +74,6 @@ pub enum Work {
 pub struct WorkQueue {
     inner: Mutex<Inner>,
     kick: Kick,
-    closed: AtomicBool,
 }
 
 #[derive(Default)]
@@ -108,15 +106,15 @@ impl WorkQueue {
         Some((slot, work))
     }
 
+    /// Wakes every waiting worker so it sees the account stopped.
     pub fn close(&self) {
-        self.closed.store(true, Ordering::Relaxed);
         self.kick.kick_all();
     }
 }
 
 pub async fn worker(e: Arc<Engine>, rt: Arc<AccountRt>) {
     loop {
-        if rt.work.closed.load(Ordering::Relaxed) || rt.is_stopped() {
+        if rt.is_stopped() {
             return;
         }
         let Some((slot, work)) = rt.work.pop() else {
