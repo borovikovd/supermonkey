@@ -107,7 +107,7 @@ test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app,
   await app.press("Escape", "Escape");
   await goDrafts(app);
 
-  // A forward draft opens its thread with the forward composer.
+  // A forward draft opens its thread in the same reply composer (SPEC Reading).
   await highlight(app, "Fwd: Contract");
   await app.press("Enter");
   await expect(app.conversationTitle).toContainText("Contract");
