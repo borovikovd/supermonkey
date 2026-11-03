@@ -3,8 +3,10 @@
 //! Parsing and sanitizing happen before a job reaches the writer thread:
 //! `parse` runs on the async side, `store_thread` runs inside a writer job.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use rusqlite::{OptionalExtension, params};
 
 use crate::db::{from_json, queries, to_json};
@@ -161,14 +163,21 @@ pub fn local_labels(
 pub struct PendingOps(Vec<crate::mail::ModifyOp>);
 
 impl PendingOps {
-    pub fn load(conn: &rusqlite::Connection, account: AccountId) -> anyhow::Result<PendingOps> {
+    /// The queued ops, after `landed`: those that reached Gmail while the
+    /// answer being written was in flight.
+    pub fn load(
+        conn: &rusqlite::Connection,
+        account: AccountId,
+        landed: Vec<crate::mail::ModifyOp>,
+    ) -> anyhow::Result<PendingOps> {
         let mut stmt = conn.prepare_cached(
             "SELECT payload FROM ops WHERE account_id = ?1 AND kind = 'modify' ORDER BY id",
         )?;
-        let ops = stmt
-            .query_map([account], |r| r.get::<_, String>(0))?
-            .filter_map(|p| p.ok().and_then(|p| serde_json::from_str(&p).ok()))
-            .collect();
+        let mut ops = landed;
+        ops.extend(
+            stmt.query_map([account], |r| r.get::<_, String>(0))?
+                .filter_map(|p| p.ok().and_then(|p| serde_json::from_str(&p).ok())),
+        );
         Ok(PendingOps(ops))
     }
 
@@ -190,6 +199,79 @@ impl PendingOps {
                     labels.push(a.clone());
                 }
             }
+        }
+    }
+}
+
+/// Modify ops that left the queue while a Gmail read was in flight. Its
+/// answer may predate them, so they are re-applied on top of it like queued
+/// ops; otherwise it would undo them locally (a woken snooze losing INBOX).
+#[derive(Default)]
+pub struct Landed(Mutex<LandedLog>);
+
+#[derive(Default)]
+struct LandedLog {
+    next: u64,
+    ops: VecDeque<(u64, crate::mail::ModifyOp)>,
+    /// Reads in flight: how many started at each point of the log.
+    reads: BTreeMap<u64, usize>,
+}
+
+impl Landed {
+    /// Starts a read whose answer will be written. Take it before the request.
+    pub fn read(self: &Arc<Self>) -> Read {
+        let mut log = self.0.lock();
+        let at = log.next;
+        *log.reads.entry(at).or_default() += 1;
+        Read {
+            landed: self.clone(),
+            at,
+        }
+    }
+
+    /// An op reached Gmail. Call before its queue row goes.
+    pub fn push(&self, op: crate::mail::ModifyOp) {
+        let mut log = self.0.lock();
+        if log.reads.is_empty() {
+            return;
+        }
+        let seq = log.next;
+        log.next += 1;
+        log.ops.push_back((seq, op));
+    }
+}
+
+/// A read in flight; see [`Landed`].
+pub struct Read {
+    landed: Arc<Landed>,
+    at: u64,
+}
+
+impl Read {
+    /// The ops that landed since the read started, oldest first.
+    pub fn landed(&self) -> Vec<crate::mail::ModifyOp> {
+        let log = self.landed.0.lock();
+        log.ops
+            .iter()
+            .filter(|(seq, _)| *seq >= self.at)
+            .map(|(_, op)| op.clone())
+            .collect()
+    }
+}
+
+impl Drop for Read {
+    fn drop(&mut self) {
+        let mut log = self.landed.0.lock();
+        if let Some(n) = log.reads.get_mut(&self.at) {
+            *n -= 1;
+            if *n == 0 {
+                log.reads.remove(&self.at);
+            }
+        }
+        // Keep only what a read still in flight can need.
+        let oldest = log.reads.keys().next().copied().unwrap_or(u64::MAX);
+        while log.ops.front().is_some_and(|(seq, _)| *seq < oldest) {
+            log.ops.pop_front();
         }
     }
 }

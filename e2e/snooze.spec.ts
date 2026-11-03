@@ -270,10 +270,6 @@ test("SNZ-04 snoozed threads wake on time, on launch, and after sleep, even offl
       obs.disconnect();
     }).observe(document, { childList: true, subtree: true });
   });
-  // History polls wait until the wake has reached Gmail: a history answer
-  // read before the wake's +INBOX but written after its op left the queue
-  // undoes the wake locally (a separate race, reported, not this case).
-  const history = await gmail.hold("history.list");
   await app.restart(async () => {
     await app.advanceTo(dates.at("2026-11-02T21:00"));
     expect(await gmailInbox(gmail, p4), "no INBOX while the app is down").toBe(false);
@@ -284,7 +280,6 @@ test("SNZ-04 snoozed threads wake on time, on launch, and after sleep, even offl
   expect(firstRows, "the first painted Inbox has p4").toContain(p4Key);
   // Gmail gets INBOX once the queued wake runs.
   await expect.poll(() => gmailInbox(gmail, p4)).toBe(true);
-  await history.release();
   await expect(app.row("Person 4")).toHaveCount(1);
   await expectNotIn(app, "h", "Person 4");
   await app.settle();

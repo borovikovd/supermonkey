@@ -260,7 +260,7 @@ The API is documented where it lives: `e2e/control.ts` (the `gmail` fixture), `e
 - **Time** is frozen until moved. `app.advance(ms)` settles first (so what the user did happens before time moves), then fires every timer due by the new time once, at that time, in the core and the browser. Use `{ stepwise: true }` to fire timers one by one at their own times, so a back-off runs every retry it would in the span. `app.advanceTo(dates.at("2026-11-02T18:00"))` moves to a wall time. `app.sleep(ms)` moves the wall clock only (the Mac asleep); `app.sleepAndWake(ms)` then lets the next poll notice the gap. The browser's `Date` always equals app time; UI timers (toast dismissal, autosave, prefetch) still run in real time.
 - **The Gmail search waits for 300 ms of app time**, so a search needs `app.advance(300)` before Gmail results arrive.
 - **`settle()`** waits for the core (requests held by a hold excepted), the writer, and the page (invokes, buffered actions, a scheduled autosave or prefetch, the latest channel message). Call it before negative assertions and before reading Gmail.
-- **Holds:** `const h = await gmail.hold("messages.batchModify")`, act, assert, then `await h.release()` or `h.release({ kind: "status", status: 400 })`. `release` first waits until the hold has parked a request, so it cannot overtake it.
+- **Holds:** `const h = await gmail.hold("messages.batchModify")`, act, assert, then `await h.release()` or `h.release({ kind: "status", status: 400 })`. `release` first waits until the hold has parked a request, so it cannot overtake it. `gmail.holdAnswer(api)` does the work at once and parks only the answer, so the app gets a stale reply (OFF-07).
 - **Faults** take a method name or a `Match` (account, query parameters, `nth`, `times`; unlimited by default). Outcomes: `drop`, `noResponse`, `status`, `statusAfterApply`, `delay`, `omitThreads`. `clearFaults()` and `offline(false)` retry what is backing off at once, as a network change would.
 - **Changes by another client** (`modify`, `deleteMessage`, `deleteThread`, `label`, `sendAs`, `createDraft`, `updateDraft`, `deleteDraft`, `sendDraft`) do not poll; call `gmail.poll()` (or pass `{ poll: true }`). `deliver` polls unless `poll: false`.
 - **The request log:** `gmail.requests("messages.batchModify", { account: A })` gives, in order, the method name, account, `params` (repeated keys joined by commas), JSON `body`, app time `at`, `held`, `answer` (status, `dropped`, or `noResponse`), `origin`, and `userAgent`.
@@ -2323,6 +2323,19 @@ _EG · §Offline, §Archive, trash, star, read_
   - m2 still has `INBOX`.
 - **Expect, local:** after the history sync, `p1` is in Inbox (because of m2), starred, and unread, which matches Gmail.
 
+#### OFF-07 · P1 · A Gmail answer read before an action landed does not undo it
+
+_EG · §Offline, §Sync_
+
+- **Steps:**
+  1. `holdAnswer("history.list")`, then `modify m1 +STARRED` from another client with `poll: true`. The history is read now (m1 with `INBOX`) and its answer parked.
+  2. `e` on `p1`, then `settle()`: the archive lands in Gmail and leaves the queue.
+  3. Release the history answer, then `settle()`.
+- **Expect:**
+  - Gmail's m1 had no `INBOX` before the release.
+  - `p1` stays out of Inbox, and is in Done, starred.
+- **Why:** the stale answer arrives after the action left the queue, so re-applying only queued actions lets it undo the archive. This was the snooze-at-launch bug: a wake's `+INBOX` undone by the first poll.
+
 #### OFF-05 · P1 · A rejection during replay rolls back that one action, and replay continues
 
 _ST · §Offline, §Gmail errors_
@@ -2807,6 +2820,9 @@ _EG · §UI state (Actions: "Rows the user just acted on never flash back during
   - No archived row id is ever added back to the DOM.
   - The final list equals Gmail's Inbox.
   - The highlight is on the row after the last archived one.
+- **Second partition (the ack boundary):** park the page's submits with `page.route` and let them through one at a time. `e` on `p1`, then `e` on `p2`. Let the first submit go: the core applies and acks it while the second waits.
+  - `p2` stays out of the list while the page has seen the ack for `p1` but the core has not yet applied `p2`.
+  - After both go through, `p2` was never added back.
 
 #### UIC-02 · P2 · A reload keeps queued actions and keeps action numbers going
 
@@ -2864,7 +2880,7 @@ _EG · §UI state (Actions: "a webview reload does not reuse numbers of actions 
 | Snooze                      | SNZ-01 to SNZ-07, SYN-04, TRI-08                                                                                                                                            |
 | Settings                    | SET-01, SET-02, ACC-07, NOT-04, UND-03                                                                                                                                      |
 | Search                      | SRC-01 to SRC-07                                                                                                                                                            |
-| Offline                     | OFF-01 to OFF-06, LAB-04, DRF-05, DRF-06, SRC-05                                                                                                                            |
+| Offline                     | OFF-01 to OFF-07, LAB-04, DRF-05, DRF-06, SRC-05                                                                                                                            |
 | Notifications               | NOT-01 to NOT-06, CONV-09, SYN-04                                                                                                                                           |
 | Sync                        | SYN-01 to SYN-07, LAB-07, VIEW-05                                                                                                                                           |
 | Gmail errors                | ERR-01 to ERR-09, ACC-08, SND-05 to SND-08, LAB-05, DRF-04, OFF-05                                                                                                          |

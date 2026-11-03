@@ -1205,6 +1205,7 @@ impl FaultSpec {
             }
             "delay" => Fault::Delay(Duration::from_millis(self.delay_ms.unwrap_or(1000))),
             "hold" => Fault::Hold,
+            "holdAnswer" => Fault::HoldAnswer,
             "omitThreads" => Fault::OmitThreads(self.threads),
             other => return Err(Fail(format!("unknown fault kind {other}"))),
         })

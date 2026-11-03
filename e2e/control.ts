@@ -383,7 +383,7 @@ export class Control {
    */
   async fault(
     on: ApiMethod | Match,
-    fault: Outcome | { kind: "hold" },
+    fault: Outcome | { kind: "hold" } | { kind: "holdAnswer" },
     opts: Omit<Match, "api"> = {},
   ): Promise<number> {
     const match = typeof on === "string" ? { api: on } : on;
@@ -405,6 +405,16 @@ export class Control {
       id,
       release: (outcome, wait = {}) => this.release({ id, min: wait.min ?? 1 }, outcome),
     };
+  }
+
+  /**
+   * Does the work of every matching request at once, then parks its answer
+   * until released: the app gets a reply that is stale by then. A release
+   * outcome does not apply.
+   */
+  async holdAnswer(on: ApiMethod | Match, opts: Omit<Match, "api"> = {}): Promise<Hold> {
+    const id = await this.fault(on, { kind: "holdAnswer" }, opts);
+    return { id, release: (_, wait = {}) => this.release({ id, min: wait.min ?? 1 }) };
   }
 
   /**

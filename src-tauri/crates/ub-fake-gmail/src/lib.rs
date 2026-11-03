@@ -24,8 +24,11 @@
 //! has not read yet, so it is server-wide: [`FakeGmail::set_offline`].
 //!
 //! [`Fault::Hold`] parks matching requests until [`FakeGmail::release`], so a test can look at
-//! the client while a request is in flight. Every request is logged ([`FakeGmail::requests`])
-//! with its Gmail method name, account, body, and answer.
+//! the client while a request is in flight. [`Fault::HoldAnswer`] does the work first and parks
+//! only the answer, so the client gets a reply that is stale by the time it arrives.
+//!
+//! Every request is logged ([`FakeGmail::requests`]) with its Gmail method name, account,
+//! body, and answer.
 
 #![expect(
     clippy::unwrap_used,
@@ -378,6 +381,9 @@ pub enum Fault {
     Delay(Duration),
     /// Park the request until [`FakeGmail::release`] lets it go.
     Hold,
+    /// Do the request's work now, then park the answer until [`FakeGmail::release`]:
+    /// the client hears what Gmail had before anything that lands in between.
+    HoldAnswer,
     /// Do the request's work, then answer with this error: done, but the client hears otherwise.
     StatusAfterApply { status: u16, reason: String },
     /// Handle the request, then leave these thread ids out of a `threads.list` page.
@@ -621,7 +627,8 @@ impl FakeGmail {
     pub fn release(&self, which: &Release, then: Option<&Fault>) -> usize {
         let is_hold = |id: u64, api: Option<&str>| which.covers(id, api);
         self.shared.faults.lock().unwrap().retain(|e| {
-            !(matches!(e.fault, Fault::Hold) && is_hold(e.id, e.matcher.api.as_deref()))
+            !(matches!(e.fault, Fault::Hold | Fault::HoldAnswer)
+                && is_hold(e.id, e.matcher.api.as_deref()))
         });
         let released: Vec<Held> = {
             let mut held = self.shared.held.lock().unwrap();
@@ -1094,12 +1101,22 @@ async fn handle(
     };
     let _in_flight = InFlight::new(&shared.in_flight);
     let mut fault = shared.fault_for(&info);
-    if let Some((hold, Fault::Hold)) = fault {
-        fault = shared.hold(seq, hold, info).await.map(|f| (hold, f));
+    let mut hold_answer = None;
+    match fault {
+        Some((hold, Fault::Hold)) => {
+            fault = shared.hold(seq, hold, info).await.map(|f| (hold, f));
+        }
+        Some((hold, Fault::HoldAnswer)) => {
+            hold_answer = Some((hold, info));
+            fault = None;
+        }
+        _ => {}
     }
     let req = hyper::Request::from_parts(parts, Body::from(body));
     let response = match fault.map(|(_, f)| f) {
-        None | Some(Fault::Hold) => router.oneshot(req).await.unwrap_or_else(|e| match e {}),
+        None | Some(Fault::Hold | Fault::HoldAnswer) => {
+            router.oneshot(req).await.unwrap_or_else(|e| match e {})
+        }
         Some(Fault::Delay(wait)) => {
             tokio::time::sleep(wait).await;
             router.oneshot(req).await.unwrap_or_else(|e| match e {})
@@ -1130,6 +1147,10 @@ async fn handle(
             return std::future::pending().await;
         }
     };
+    if let Some((hold, info)) = hold_answer {
+        // The release's outcome does not apply: the work is already done.
+        let _ = shared.hold(seq, hold, info).await;
+    }
     shared.answered(seq, Answer::Status(response.status().as_u16()));
     Ok(response)
 }

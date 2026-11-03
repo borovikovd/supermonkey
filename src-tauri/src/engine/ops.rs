@@ -75,6 +75,7 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
         match result {
             Ok(Done::Finished) => {
                 attempt = 0;
+                landed(&rt, &op);
                 finish(&e, rt.id, op.id).await;
             }
             Ok(Done::Retry(payload)) => {
@@ -103,6 +104,7 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
                 // 404 on what an action names: it was deleted elsewhere; drop it.
                 Outcome::NotFound => {
                     attempt = 0;
+                    landed(&rt, &op);
                     finish(&e, rt.id, op.id).await;
                 }
                 _ => {
@@ -112,6 +114,17 @@ pub async fn run(e: EngineRef, rt: Arc<AccountRt>) {
                 }
             },
         }
+    }
+}
+
+/// Records a modify op that left the queue, for reads still in flight.
+fn landed(rt: &AccountRt, op: &Op) {
+    if op.kind != "modify" {
+        return;
+    }
+    match serde_json::from_str::<ModifyOp>(&op.payload) {
+        Ok(p) => rt.landed.push(p),
+        Err(err) => log::warn!("landed op {}: {err}", op.id),
     }
 }
 

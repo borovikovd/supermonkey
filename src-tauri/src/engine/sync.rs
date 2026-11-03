@@ -349,12 +349,13 @@ pub async fn fetch_thread(
 ) -> Result<Option<ThreadId>, GmailError> {
     let account = rt.id;
     let gid = gmail_thread.to_string();
+    let read = rt.landed.read();
     match get_thread(rt, gmail_thread, format, prio).await {
         Ok((history, msgs)) => {
             let stored = e
                 .writer
                 .call(move |ctx| {
-                    let pending = PendingOps::load(ctx.tx, account)?;
+                    let pending = PendingOps::load(ctx.tx, account, read.landed())?;
                     let t =
                         ingest::store_thread(ctx, account, &gid, history, &msgs, true, &pending)?;
                     super::snooze::apply_rule(ctx, &[t], &pending)?;
@@ -503,8 +504,9 @@ fn apply_history(
     fetched: &[(String, Option<u64>, Vec<Incoming>)],
     latest: u64,
     focused: bool,
+    read: &ingest::Read,
 ) -> anyhow::Result<()> {
-    let pending = PendingOps::load(ctx.tx, account)?;
+    let pending = PendingOps::load(ctx.tx, account, read.landed())?;
     let refetched: HashSet<&str> = fetched.iter().map(|(gid, ..)| gid.as_str()).collect();
     let mut touched: Vec<ThreadId> = Vec::new();
     for gid in &batch.deleted {
@@ -570,6 +572,7 @@ pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> 
         .and_then(|h| h.parse().ok());
     let Some(start) = start else { return Ok(()) };
 
+    let read = rt.landed.read();
     let Some((records, latest)) = list_history_since(rt, start).await? else {
         // The cursor is too old.
         return full_resync(e, rt).await;
@@ -622,7 +625,7 @@ pub async fn poll(e: &EngineRef, rt: &Arc<AccountRt>) -> Result<(), GmailError> 
                 .unfocused_since
                 .load(std::sync::atomic::Ordering::Relaxed)
                 == 0;
-            apply_history(ctx, account, &batch, &fetched, latest, focused)
+            apply_history(ctx, account, &batch, &fetched, latest, focused, &read)
         })
         .await;
     match applied {

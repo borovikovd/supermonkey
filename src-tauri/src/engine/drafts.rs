@@ -724,7 +724,8 @@ pub async fn store_gmail_draft(e: &EngineRef, rt: &Arc<AccountRt>, g: ub_gmail::
         .writer
         .call(move |ctx| {
             // The thread and message rows for the draft (and its siblings).
-            let pending = super::ingest::PendingOps::load(ctx.tx, account)?;
+            // Actions don't change a draft's labels, so no read to guard.
+            let pending = super::ingest::PendingOps::load(ctx.tx, account, Vec::new())?;
             let thread = super::ingest::store_thread(ctx, account, &m.gmail_thread_id, None, std::slice::from_ref(&m), false, &pending)?;
             let (msg_row, existing) = gmail_draft_rows(ctx, account, &m, &gmail_draft)?;
             let others: Vec<crate::threads::Msg> =

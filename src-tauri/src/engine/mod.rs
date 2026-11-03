@@ -99,6 +99,7 @@ pub struct AccountRt {
     pub work: work::WorkQueue,
     /// When retrying started, for the quiet sync status after 30 s.
     pub retrying_since: AtomicI64,
+    pub landed: Arc<ingest::Landed>,
 }
 
 impl AccountRt {
@@ -372,6 +373,7 @@ impl Engine {
             stopped: AtomicBool::new(false),
             work: work::WorkQueue::default(),
             retrying_since: AtomicI64::new(0),
+            landed: Arc::default(),
         });
         let replaced = self.accounts.lock().insert(id, rt.clone());
         if let Some(old) = replaced {

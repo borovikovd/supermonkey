@@ -393,6 +393,35 @@ test("OFF-04 a poll during the replay keeps the queued change on the messages it
   await expect(app.row("Person 1")).toHaveCount(0);
 });
 
+test("OFF-07 a Gmail answer read before an action landed does not undo it", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const m1 = s.message("p1", 1);
+  // The next history is read at once (m1 starred, INBOX still on it) but
+  // reaches the app only after the archive below has landed in Gmail.
+  const history = await gmail.holdAnswer("history.list");
+  await gmail.modify(A, m1.id, ["STARRED"], [], { poll: true });
+  await expect
+    .poll(async () => (await gmail.requests("history.list")).some((r) => r.held))
+    .toBe(true);
+
+  await highlight(app, "Person 1");
+  await app.press("e");
+  await app.settle();
+  const before = (await gmail.gmail(A)).messages.find((m) => m.id === m1.id);
+  expect(before?.labels, "the archive reached Gmail first").not.toContain("INBOX");
+
+  await history.release();
+  await app.settle();
+  await expect(app.row("Person 1")).toHaveCount(0);
+  await app.page.getByRole("navigation").getByRole("button", { name: /^Done/ }).click();
+  const row = app.row("Person 1");
+  await expect(row).toHaveCount(1);
+  await expect(row, "the star from the stale answer is kept").toHaveAttribute("data-starred");
+});
+
 test("OFF-05 a rejection during replay rolls back that one action, and replay continues", async ({
   app,
   gmail,
