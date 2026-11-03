@@ -1,6 +1,6 @@
 // Send and undo (COVERAGE 5.16, SPEC §Send and undo, §Undo): the outbox
 // state machine, held undo, rejection, no clear answer, and restart.
-import type { Locator } from "@playwright/test";
+import type { Locator, Route } from "@playwright/test";
 
 import type { App } from "./app.ts";
 import type { ApiMethod, Control, GmailMessage, Outcome } from "./control.ts";
@@ -727,4 +727,41 @@ test("SND-16 a send toast closed before the send went out takes its undo entry w
   const after = (await gmail.gmail(A)).messages.find((m) => m.id === sent[0]?.id);
   expect(after?.labels).not.toContain("TRASH");
   expect(await p6Labels()).toContain("INBOX");
+});
+
+test("SND-17 an Undo that reaches the core only after the send went out opens no composer", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await sendReply(app, "Person 3", "undone too late");
+  await app.press("Escape");
+  await app.settle();
+  const toast = sendToast(app, "Person 3");
+  await expect(toast).toContainText("Sending…");
+
+  // The Undo leaves the page while the row is waiting, but its invoke is slow.
+  const parked: Route[] = [];
+  await app.page.route("**/invoke/submit", async (route) => {
+    if (parked.length === 0) parked.push(route);
+    else await route.continue();
+  });
+  await undoOn(toast).click();
+  await expect.poll(() => parked.length).toBe(1);
+
+  // Meanwhile the send goes out. (`app.advance` would wait for the invoke.)
+  const send = await gmail.hold("drafts.send");
+  await gmail.advanceServerClock(DELAY);
+  await send.release();
+  await expect(toast).toContainText("Sent");
+
+  // The Undo arrives: the row is sent, so it trashes the message. No
+  // composer opens on the draft the send used up.
+  await parked[0]?.continue();
+  await app.settle();
+  await app.page.unroute("**/invoke/submit");
+  const [sent] = await sentIn(gmail, s.thread("p3").threadId);
+  expect(sent?.labels).toContain("TRASH");
+  await expect(app.editor).toHaveCount(0);
+  await expect(app.conversationTitle).toHaveCount(0);
 });

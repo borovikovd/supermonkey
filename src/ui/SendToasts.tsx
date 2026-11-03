@@ -89,13 +89,18 @@ export function SendToasts() {
       }
     }
     for (const [id, target] of reopenWhenGone) {
-      if (!live.has(id)) {
-        reopenWhenGone.delete(id);
-        toast.dismiss(`send-${id}`);
-        reopenDraft(target.account, target.draft, target.thread);
+      const row = outbox.find((r) => r.id === id);
+      if (row) {
+        target.waiting = row.state === "waiting" && !row.undoRequested;
+        continue;
       }
+      reopenWhenGone.delete(id);
+      toast.dismiss(`send-${id}`);
+      // A held undo that resolved as not sent comes back through its notice.
+      const noticed = notices.some(({ notice: n }) => isSendNotice(n) && n.draft === target.draft);
+      if (target.waiting && !noticed) reopenDraft(target.account, target.draft, target.thread);
     }
-  }, [outbox]);
+  }, [outbox, notices]);
 
   // A rejected send, or a held undo that resolved as not sent, puts the draft
   // back in a composer, unless the user is typing in one.

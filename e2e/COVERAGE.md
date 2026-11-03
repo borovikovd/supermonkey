@@ -2479,6 +2479,17 @@ _EG · §Undo ("Once a send is sent and its toast is gone, its entry leaves the 
   4. Press `z`, then `settle()`.
 - **Expect:** the message was sent once and has no `TRASH`. `z` undid the `e`: `p6` is back in Inbox.
 
+#### SND-17 · P1 · An Undo that reaches the core only after the send went out opens no composer
+
+_EG · §Send and undo ("For Undo on a waiting send, the composer opens once the channel message whose `ack` covers the undo shows the outbox row gone")_
+
+- **Steps:**
+  1. Reply to `p3`, send, close the conversation, `settle()`.
+  2. Park the page's next `submit` invoke (`page.route`), then click the toast's **Undo** while it says Sending…: the page saw the row waiting.
+  3. `hold(drafts.send)`, move the core's clock 10 s, release the send: the toast says Sent.
+  4. Let the parked invoke go, then `settle()`.
+- **Expect:** the undo trashed the sent message (`TRASH` in Gmail). No composer opens and the conversation stays closed: the draft was used up by the send.
+
 ### 5.17 `offline.spec.ts` (OFF)
 
 #### OFF-01 · P1 · Airplane mode: read, search, autocomplete, and act; it all lands when the network returns
