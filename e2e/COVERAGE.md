@@ -261,6 +261,7 @@ The API is documented where it lives: `e2e/control.ts` (the `gmail` fixture), `e
 - **The Gmail search waits for 300 ms of app time**, so a search needs `app.advance(300)` before Gmail results arrive.
 - **`settle()`** waits for the core (requests held by a hold excepted), the writer, and the page (invokes, buffered actions, a scheduled autosave or prefetch, the latest channel message). Call it before negative assertions and before reading Gmail.
 - **Holds:** `const h = await gmail.hold("messages.batchModify")`, act, assert, then `await h.release()` or `h.release({ kind: "status", status: 400 })`. `release` first waits until the hold has parked a request, so it cannot overtake it. `gmail.holdAnswer(api)` does the work at once and parks only the answer, so the app gets a stale reply (OFF-07).
+- **Parking the page's own invokes:** `const release = await app.park("add_attachment")` holds the page's `/invoke/<cmd>` requests (optionally only those whose JSON body passes a filter) until `await release()`. Use it for races between the UI and its own core calls; `settle()` waits on a parked invoke, so release first.
 - **Faults** take a method name or a `Match` (account, query parameters, `nth`, `times`; unlimited by default). Outcomes: `drop`, `noResponse`, `status`, `statusAfterApply`, `delay`, `omitThreads`. `clearFaults()` and `offline(false)` retry what is backing off at once, as a network change would.
 - **Changes by another client** (`modify`, `deleteMessage`, `deleteThread`, `label`, `sendAs`, `createDraft`, `updateDraft`, `deleteDraft`, `sendDraft`) do not poll; call `gmail.poll()` (or pass `{ poll: true }`). `deliver` polls unless `poll: false`.
 - **The request log:** `gmail.requests("messages.batchModify", { account: A })` gives, in order, the method name, account, `params` (repeated keys joined by commas), JSON `body`, app time `at`, `held`, `answer` (status, `dropped`, or `noResponse`), `origin`, and `userAgent`.
@@ -2027,6 +2028,28 @@ _DT · §Drafts_
 | a forward of `fwd`                | `multipart/mixed`   | [`multipart/related` [`multipart/alternative`, `image/png` with a Content-ID], `application/pdf`]. The HTML refers to the image by `cid:`. |
 
 - **Also:** a subject of "Grüße – 日本" arrives decoded and identical in Gmail.
+
+#### ATT-05 · P1 · A send while a file is still attaching carries the file
+
+_EG · §Compose, DEVIATIONS (a file still attaching)_
+
+- **Steps:**
+  1. Press `c`, add Kim, a subject, and a body.
+  2. Park the page's `add_attachment` invoke. Choose `report.pdf`, then press `Cmd+Enter`.
+  3. Release, `settle()`, `advance(10_000)`, `settle()`.
+- **Expect:** the sent message carries `report.pdf` with the original bytes.
+
+#### ATT-06 · P1 · Closing a fresh composer while a file is attaching keeps the draft
+
+_EG · §Keyboard (untouched rule), DEVIATIONS (a file still attaching)_
+
+- **Steps:**
+  1. Press `c`. Park the page's `add_attachment` invoke and choose `notes.txt`.
+  2. Press `Esc` `Esc`.
+  3. Release, `settle()`.
+- **Expect:**
+  - After step 2, the composer is gone.
+  - Gmail has one draft, carrying `notes.txt`. The draft was not discarded as untouched.
 
 ### 5.15 `drafts.spec.ts` (DRF)
 

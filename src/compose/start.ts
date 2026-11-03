@@ -23,6 +23,8 @@ export const openComposer: {
   focus: () => void;
   setFrom: (from: Addr) => void;
   attach: () => void;
+  /** Files still being attached: resolves to whether all of them were; null when none are. */
+  uploads: () => Promise<boolean> | null;
 } = {
   draft: null,
   pending: () => null,
@@ -30,15 +32,10 @@ export const openComposer: {
   focus: () => {},
   setFrom: () => {},
   attach: () => {},
+  uploads: () => null,
 };
 
 const composerKey = (draft: string): SubKey => ({ type: "composer", draft });
-
-function flushSave(draft: string) {
-  if (openComposer.draft !== draft) return;
-  const fields = openComposer.pending();
-  if (fields) act({ type: "saveDraft", draft, save: { type: "update", fields } });
-}
 
 /** Screens a `c` composer returns to, per draft. */
 const returnTo = new Map<string, Screen>();
@@ -215,9 +212,20 @@ function resumeDraftById(draft: string, thread: number | null) {
 export function closeComposerOnScreen() {
   const draft = draftOnScreen();
   if (!draft) return;
-  flushSave(draft);
-  act({ type: "closeComposer", draft });
+  const mine = openComposer.draft === draft;
+  // This composer's own hook: the close may run after it has left the screen.
+  const pending = mine ? openComposer.pending : () => null;
+  const uploads = mine ? openComposer.uploads() : null;
+  const close = () => {
+    const fields = pending();
+    if (fields) act({ type: "saveDraft", draft, save: { type: "update", fields } });
+    act({ type: "closeComposer", draft });
+  };
   leave(draft);
+  // A file still attaching is not in the draft yet. Closing now could discard
+  // the draft as untouched and lose the file, so the close waits for it.
+  if (uploads) void uploads.then(close);
+  else close();
 }
 
 /** Drops the composer's subscription and takes it off screen. */
@@ -238,6 +246,17 @@ function leave(draft: string) {
 export function sendOnScreen() {
   const draft = draftOnScreen();
   if (!draft) return;
+  // A file still attaching is not in the draft yet: send once it is, and not
+  // at all if it fails. The composer stays on screen meanwhile.
+  const uploads = openComposer.draft === draft ? openComposer.uploads() : null;
+  if (uploads) {
+    void uploads.then((ok) => {
+      if (draftOnScreen() !== draft) return;
+      if (ok) sendOnScreen();
+      else toast.error("Not sent: a file could not be attached");
+    });
+    return;
+  }
   // Taking the pending save ends it, so it is saved here, before any refusal.
   // It also turns typed text into chips, which the checks below must see.
   const fields = openComposer.draft === draft ? openComposer.pending() : null;

@@ -203,4 +203,36 @@ test.describe("attachments", () => {
       "multipart/mixed[multipart/related[multipart/alternative[text/plain,text/html]],application/pdf]",
     );
   });
+  test("ATT-05 a send while a file is still attaching carries the file", async ({ app, gmail }) => {
+    await seeds.standard(gmail, app);
+    await newMessage(app, "Sent mid-upload", "The file is on its way.");
+    const release = await app.park("add_attachment");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.reportPdf]);
+    await app.press("Meta+Enter");
+    await release();
+    await app.settle();
+    await app.advance(10_000);
+    await app.settle();
+    const out = filesOf(await sentWithSubject(gmail, "Sent mid-upload"));
+    expect(Object.keys(out)).toEqual(["report.pdf"]);
+    expect(out["report.pdf"]?.bytes.equals(files.reportPdf.buffer)).toBe(true);
+  });
+
+  test("ATT-06 closing a fresh composer while a file is attaching keeps the draft", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    await app.compose();
+    const release = await app.park("add_attachment");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await app.press("Escape", "Escape");
+    await expect(app.page.getByRole("heading", { name: "New Message" })).toHaveCount(0);
+    await release();
+    await app.settle();
+    const drafts = (await gmail.gmail(A)).drafts;
+    expect(drafts).toHaveLength(1);
+    const kept = filesOf(parseMime(drafts[0]?.message.raw ?? ""));
+    expect(Object.keys(kept)).toEqual(["notes.txt"]);
+  });
 });

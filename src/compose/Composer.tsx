@@ -74,13 +74,25 @@ const commitField = (h: RecipientHandle | null, v: Addr[]) => (h ? h.commit() : 
 
 function AttachmentList({
   attachments,
+  attaching,
   onRemove,
 }: {
   attachments: DraftAttachment[];
+  attaching: { key: number; name: string }[];
   onRemove: (id: string) => void;
 }) {
   return (
     <div className="mt-3 flex flex-wrap gap-2">
+      {attaching.map((a) => (
+        <span
+          key={`attaching-${a.key}`}
+          aria-busy="true"
+          className="flex items-center gap-1.5 rounded-control border border-dashed border-border-2 px-2 py-1 text-row text-text-3"
+        >
+          <Paperclip size={12} strokeWidth={1.5} />
+          <span className="max-w-[220px] truncate">{a.name}</span>
+        </span>
+      ))}
       {attachments.map((a) => (
         <span
           key={a.id}
@@ -168,6 +180,11 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   const subjectRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const linkRef = useRef<HTMLInputElement>(null);
+  /** Files picked but not yet attached, shown as chips meanwhile. */
+  const [attaching, setAttaching] = useState<{ key: number; name: string }[]>([]);
+  const attachSeq = useRef(0);
+  /** Picks still attaching: each resolves to whether all its files were attached. */
+  const uploads = useRef(new Set<Promise<boolean>>());
 
   // useCallback stays: the effects below register these as handlers and list
   // them as dependencies.
@@ -276,6 +293,10 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     openComposer.focus = () => editor?.commands.focus("end");
     openComposer.setFrom = (from) => update({ from });
     openComposer.attach = attach;
+    openComposer.uploads = () =>
+      uploads.current.size === 0
+        ? null
+        : Promise.all(uploads.current).then((all) => all.every(Boolean));
     return () => {
       if (openComposer.draft === draft) openComposer.draft = null;
     };
@@ -368,20 +389,31 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     return () => window.removeEventListener("keydown", onKey);
   }, [draft, editor, attach, link]);
 
-  const onFiles = async (files: FileList | null) => {
-    if (!files) return;
-    const results = await Promise.all(
-      Array.from(files).map(async (f): Promise<DraftAttachment | null> => {
-        try {
-          return await addAttachment(draft, f.name, f.type, await readFile(f));
-        } catch (err) {
-          toast.error(`Couldn't attach ${f.name}: ${String(err)}`);
-          return null;
-        }
-      }),
-    );
-    const added = results.filter((a): a is DraftAttachment => a !== null);
-    update({ attachments: [...latest.current.attachments, ...added] });
+  const onFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const picked = Array.from(files).map((file) => ({ file, key: ++attachSeq.current }));
+    setAttaching((a) => [...a, ...picked.map((p) => ({ key: p.key, name: p.file.name }))]);
+    const store = async (): Promise<boolean> => {
+      const results = await Promise.all(
+        picked.map(async ({ file: f }): Promise<DraftAttachment | null> => {
+          try {
+            return await addAttachment(draft, f.name, f.type, await readFile(f));
+          } catch (err) {
+            toast.error(`Couldn't attach ${f.name}: ${String(err)}`);
+            return null;
+          }
+        }),
+      );
+      const added = results.filter((a): a is DraftAttachment => a !== null);
+      // Send and close wait for this, so they find the files in the fields.
+      if (added.length > 0) update({ attachments: [...latest.current.attachments, ...added] });
+      uploads.current.delete(done);
+      const keys = new Set(picked.map((p) => p.key));
+      setAttaching((a) => a.filter((x) => !keys.has(x.key)));
+      return added.length === results.length;
+    };
+    const done = store();
+    uploads.current.add(done);
   };
 
   const account = state?.account ?? chromeAccount ?? 0;
@@ -499,9 +531,10 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
         )}
       </div>
       {state?.quoteHtml && <QuoteBlock html={state.quoteHtml} />}
-      {fields.attachments.length > 0 && (
+      {fields.attachments.length + attaching.length > 0 && (
         <AttachmentList
           attachments={fields.attachments}
+          attaching={attaching}
           onRemove={(id) =>
             update({ attachments: latest.current.attachments.filter((x) => x.id !== id) })
           }
@@ -509,13 +542,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       )}
       {/* Empty room in the card goes below the quote, as in Superhuman. */}
       <div className="flex-1" />
-      <input
-        ref={fileRef}
-        type="file"
-        multiple
-        hidden
-        onChange={(e) => void onFiles(e.target.files)}
-      />
+      <input ref={fileRef} type="file" multiple hidden onChange={(e) => onFiles(e.target.files)} />
       <Footer blurred={blurred} onAttach={attach} />
     </div>
   );

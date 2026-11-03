@@ -125,3 +125,8 @@ the spec's wording:
   quota bucket are per account, so requests of different accounts never wait
   on each other. The scheduler still orders waiters by the account on screen,
   but that order has no effect anyone can observe.
+- **A file still attaching** shows as a dashed chip. `Cmd+Enter` meanwhile
+  waits for it and then sends; if it fails to attach, nothing is sent and the
+  composer stays. Closing meanwhile takes the composer off screen at once and
+  sends the close once the file is in the draft, so it is never discarded as
+  untouched.

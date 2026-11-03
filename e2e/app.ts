@@ -2,7 +2,7 @@
 // role- and label-based locators; add helpers here rather than repeating
 // selectors across specs.
 
-import { expect, type Locator, type Page } from "@playwright/test";
+import { expect, type Locator, type Page, type Route } from "@playwright/test";
 
 import type { Control, GmailState } from "./control.ts";
 import type { FileFixture } from "./files.ts";
@@ -259,6 +259,29 @@ export class App {
     }, focused);
     const r = await this.gmail.focus(focused);
     return r?.openThread ?? null;
+  }
+
+  /**
+   * Parks the page's `/invoke/<cmd>` requests whose JSON body passes `which`
+   * (all by default) until the returned release, which sends them on in
+   * order and lets later ones through.
+   */
+  async park(
+    cmd: string,
+    which: (body: string) => boolean = () => true,
+  ): Promise<() => Promise<void>> {
+    const parked: Route[] = [];
+    let open = false;
+    const url = new RegExp(`/invoke/${cmd}$`);
+    await this.page.route(url, async (route) => {
+      if (open || !which(route.request().postData() ?? "")) await route.continue();
+      else parked.push(route);
+    });
+    return async () => {
+      open = true;
+      await parked.reduce((prev, r) => prev.then(() => r.continue()), Promise.resolve());
+      await this.page.unroute(url);
+    };
   }
 
   /** Presses keys in order, e.g. `press("g", "i")` or `press("Meta+k")`. */
