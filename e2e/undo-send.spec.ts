@@ -765,3 +765,34 @@ test("SND-17 an Undo that reaches the core only after the send went out opens no
   await expect(app.editor).toHaveCount(0);
   await expect(app.conversationTitle).toHaveCount(0);
 });
+
+test("SND-18 a send while the draft's first upsert is in flight goes out once and leaves no draft", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const p3 = s.thread("p3").threadId;
+  const create = await gmail.hold("drafts.create", { nth: 1 });
+  await openThread(app, "Person 3");
+  await app.reply();
+  await app.type("sent while saving");
+  await expect
+    .poll(async () => (await gmail.requests("drafts.create")).some((r) => r.held))
+    .toBe(true);
+  await app.press("Meta+Enter");
+  await expect(app.editor).toHaveCount(0);
+  // The send's time comes while the autosave's create is still in flight.
+  await passSendAfter(app);
+  await create.release();
+  await app.settle();
+  await expect(sendToast(app, "Person 3")).toContainText("Sent");
+  // The toast closes, and a poll reconciles drafts.
+  await app.advance(5_000);
+  await gmail.poll();
+  await app.settle();
+
+  expect(await sentBody(gmail, p3)).toContain("sent while saving");
+  expect((await gmail.gmail(A)).drafts).toEqual([]);
+  await app.press("Escape", "g", "d");
+  await expect(app.row("Person 3")).toHaveCount(0);
+});

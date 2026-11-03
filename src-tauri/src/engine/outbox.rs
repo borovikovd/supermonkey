@@ -180,6 +180,11 @@ fn touch_row_thread(
 }
 
 async fn send(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError> {
+    // An upsert of the draft is still in flight: it kicks the outbox once it
+    // has landed, and this pass writes after it.
+    let Some(_writing) = e.draft_writes.begin(&row.draft) else {
+        return Ok(());
+    };
     let late = crate::clock::now_ms() > row.send_after + 5_000;
     // Undone meanwhile (the row is gone), or already taken.
     if !start_sending(e, rt.id, row.id, late).await {

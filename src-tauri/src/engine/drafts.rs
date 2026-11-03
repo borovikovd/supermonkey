@@ -455,31 +455,21 @@ pub async fn execute_op(
             let Ok(local) = DraftId::deserialize(&v["draft"]) else {
                 return Ok(Done::Finished);
             };
-            let Some(d) = load(e, &local) else {
-                return Ok(Done::Finished);
+            let Some(writing) = e.draft_writes.begin(&local) else {
+                // The outbox is writing it, and sends the final version itself.
+                return if in_outbox(e, &local) {
+                    Ok(Done::Finished)
+                } else {
+                    Err(GmailError::new(Outcome::NoResponse))
+                };
             };
-            let in_outbox = e
-                .reads
-                .with(|c| {
-                    Ok(c.query_row(
-                        "SELECT EXISTS (SELECT 1 FROM outbox WHERE draft_id = ?1)",
-                        [&local],
-                        |r| r.get(0),
-                    )?)
-                })
-                .unwrap_or(false);
-            if in_outbox {
-                return Ok(Done::Finished);
+            let r = upsert(e, rt, &local).await;
+            drop(writing);
+            // Sent meanwhile: the outbox waited for this write to end.
+            if in_outbox(e, &local) {
+                rt.outbox_kick.kick();
             }
-            if d.needs_parts {
-                download_parts_now(e, &local).await?;
-            }
-            let Some(d) = load(e, &local) else {
-                return Ok(Done::Finished);
-            };
-            let g = write(e, rt, &d).await?;
-            store_ids(e, &local, &g, Some(rt.id)).await;
-            Ok(Done::Finished)
+            r
         }
         "draft_delete" => {
             let gid = v["gmail_draft"].as_str().unwrap_or_default();
@@ -509,6 +499,65 @@ pub async fn execute_op(
             Ok(Done::Finished)
         }
         other => Err(bad(format!("unknown op {other}"))),
+    }
+}
+
+/// Writes the draft's latest state to Gmail, unless the outbox has taken it.
+async fn upsert(e: &Engine, rt: &AccountRt, local: &DraftId) -> Result<Done, GmailError> {
+    if in_outbox(e, local) {
+        return Ok(Done::Finished);
+    }
+    let Some(d) = load(e, local) else {
+        return Ok(Done::Finished);
+    };
+    if d.needs_parts {
+        download_parts_now(e, local).await?;
+    }
+    let Some(d) = load(e, local) else {
+        return Ok(Done::Finished);
+    };
+    let g = write(e, rt, &d).await?;
+    store_ids(e, local, &g, Some(rt.id)).await;
+    Ok(Done::Finished)
+}
+
+fn in_outbox(e: &Engine, draft: &DraftId) -> bool {
+    e.reads
+        .with(|c| Ok(crate::drafts::in_outbox(c, draft)?))
+        .inspect_err(|err| log::warn!("read outbox for draft {draft}: {err:#}"))
+        .unwrap_or(false)
+}
+
+/// Drafts being written to Gmail now, by an upsert or by the outbox. Two writes
+/// of one draft never overlap: an upsert still in flight when the send's time
+/// comes would otherwise land after the outbox's write, as an extra Gmail draft
+/// or as an older version under the one being sent.
+#[derive(Default)]
+pub struct DraftWrites(parking_lot::Mutex<HashSet<DraftId>>);
+
+impl DraftWrites {
+    /// Starts writing `draft`, or `None` while another write of it runs.
+    pub fn begin(self: &Arc<Self>, draft: &DraftId) -> Option<DraftWrite> {
+        self.0.lock().insert(draft.clone()).then(|| DraftWrite {
+            writes: Arc::clone(self),
+            draft: draft.clone(),
+        })
+    }
+
+    pub fn busy(&self, draft: &DraftId) -> bool {
+        self.0.lock().contains(draft)
+    }
+}
+
+/// A write in progress; it ends when dropped.
+pub struct DraftWrite {
+    writes: Arc<DraftWrites>,
+    draft: DraftId,
+}
+
+impl Drop for DraftWrite {
+    fn drop(&mut self) {
+        self.writes.0.lock().remove(&self.draft);
     }
 }
 

@@ -180,6 +180,8 @@ pub struct Engine {
     /// Held (shared) by each removed account's clean-up. A sign-in waits for
     /// them first: a revoke landing after it would kill the new grant too.
     pub forgetting: Arc<tokio::sync::RwLock<()>>,
+    /// Drafts being written to Gmail right now.
+    pub draft_writes: Arc<drafts::DraftWrites>,
     /// Every task the engine started, so [`Engine::shutdown`] can stop them.
     tasks: Mutex<Vec<AbortHandle>>,
     shut_down: AtomicBool,
@@ -244,6 +246,7 @@ impl Engine {
             sign_in_cancel: Mutex::new(None),
             lanes: Mutex::new(HashMap::new()),
             forgetting: Arc::default(),
+            draft_writes: Arc::default(),
             tasks: Mutex::new(Vec::new()),
             shut_down: AtomicBool::new(false),
         })

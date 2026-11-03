@@ -2514,6 +2514,19 @@ _EG · §Send and undo ("For Undo on a waiting send, the composer opens once the
   4. Let the parked invoke go, then `settle()`.
 - **Expect:** the undo trashed the sent message (`TRASH` in Gmail). No composer opens and the conversation stays closed: the draft was used up by the send.
 
+#### SND-18 · P1 · A send while the draft's first upsert is in flight goes out once and leaves no draft
+
+_EG · §Drafts ("Send cancels any queued upsert for that draft, because the outbox writes the final version itself"), §Gmail errors (`drafts.create` is unsafe to repeat)_
+
+- **Steps:**
+  1. `hold(drafts.create)` on the first create only. In `p3`, press `r` and type; wait until the autosave's create is parked.
+  2. Send. Move past `send_after` while the create is still parked.
+  3. Release the create, `settle()`.
+  4. `advance(5_000)` so the toast closes, `poll()`, `settle()`.
+- **Expect:**
+  - After step 3, the toast says Sent.
+  - Exactly one message was sent, with the text. Gmail has no draft left, and Drafts has no row for it: the outbox wrote the draft only after the create landed, so no second Gmail draft carrying the local id was left to come back.
+
 ### 5.17 `offline.spec.ts` (OFF)
 
 #### OFF-01 · P1 · Airplane mode: read, search, autocomplete, and act; it all lands when the network returns
