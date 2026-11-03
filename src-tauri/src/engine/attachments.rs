@@ -83,10 +83,18 @@ pub async fn ensure(e: &Engine, attachment: AttachmentId) -> anyhow::Result<Path
         )
         .await
         .map_err(|err| DownloadError::Gmail(err.outcome))?;
+    // Removed meanwhile: its folder is gone, and must stay gone.
+    if rt.is_stopped() {
+        return Err(DownloadError::NoAccount.into());
+    }
     let dir = account_dir(e, account).join(&gmail_msg);
     std::fs::create_dir_all(&dir)?;
     let path = dir.join(safe_name(&filename));
-    std::fs::write(&path, &bytes)?;
+    // Written aside, then renamed: two downloads of the same attachment at
+    // once never leave a half-written file at the path.
+    let part = dir.join(format!(".{attachment}-{}.part", uuid::Uuid::new_v4()));
+    std::fs::write(&part, &bytes)?;
+    std::fs::rename(&part, &path)?;
     let p = path.to_string_lossy().into_owned();
     e.writer
         .call(move |ctx| {
