@@ -3,7 +3,8 @@
 //! When `send_after` passes, the row becomes sending and Rust downloads any
 //! missing parts, builds the MIME, writes the Gmail draft, and calls
 //! `drafts.send`. Gmail unreachable before `drafts.send` puts the row back to
-//! waiting. No clear answer from `drafts.send` keeps it sending until
+//! waiting, or, with an undo held on it, resolves it as not sent. No clear
+//! answer from `drafts.send` keeps it sending until
 //! `drafts.get` settles it: 404 means sent.
 
 use crate::LogErr as _;
@@ -95,27 +96,18 @@ pub async fn run(e: Arc<Engine>, rt: Arc<AccountRt>) {
     }
 }
 
-/// Moves a row between waiting and sending. Only a waiting row starts
-/// sending, so a row undone meanwhile, or taken by another runner, is left
-/// alone. Starting clears the row's Gmail draft id: until this pass has
-/// written the final version, the Gmail draft may hold an older autosave, and
-/// `settle` must not send that.
-async fn set_state(
-    e: &Engine,
-    account: AccountId,
-    outbox: OutboxId,
-    state: &'static str,
-    delayed: bool,
-) -> bool {
-    let sql = if state == "sending" {
-        "UPDATE outbox SET state = ?2, delayed = delayed OR ?3, gmail_draft_id = NULL
-         WHERE id = ?1 AND state = 'waiting'"
-    } else {
-        "UPDATE outbox SET state = ?2, delayed = delayed OR ?3 WHERE id = ?1 AND state != 'sent'"
-    };
+/// Waiting becomes sending. Only a waiting row starts, so a row undone
+/// meanwhile, or taken by another runner, is left alone. Starting clears the
+/// row's Gmail draft id: until this pass has written the final version, the
+/// Gmail draft may hold an older autosave, and `settle` must not send that.
+async fn start_sending(e: &Engine, account: AccountId, outbox: OutboxId, delayed: bool) -> bool {
     e.writer
         .call(move |ctx| {
-            let n = ctx.tx.execute(sql, params![outbox, state, delayed])?;
+            let n = ctx.tx.execute(
+                "UPDATE outbox SET state = 'sending', delayed = delayed OR ?2, gmail_draft_id = NULL
+                 WHERE id = ?1 AND state = 'waiting'",
+                params![outbox, delayed],
+            )?;
             if n > 0 {
                 ctx.touch_outbox(account, outbox)?;
                 touch_row_thread(ctx, account, outbox)?;
@@ -123,8 +115,43 @@ async fn set_state(
             Ok(n > 0)
         })
         .await
-        .inspect_err(|err| log::warn!("set outbox {outbox} {state}: {err:#}"))
+        .inspect_err(|err| log::warn!("start sending outbox {outbox}: {err:#}"))
         .unwrap_or(false)
+}
+
+/// Gmail never got the send. The row waits to retry, shown as delayed. If an
+/// undo was held on it, the send has resolved as not sent: the draft comes
+/// back now instead of after the next online pass.
+async fn back_to_waiting(e: &Engine, account: AccountId, row: &Row) {
+    let outbox = row.id;
+    let draft = row.draft.clone();
+    e.writer
+        .call(move |ctx| {
+            let held: Option<bool> = ctx
+                .tx
+                .query_row(
+                    "SELECT undo_requested FROM outbox WHERE id = ?1 AND state = 'sending'",
+                    [outbox],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            match held {
+                None => Ok(()),
+                Some(true) => {
+                    remove_with_notice(ctx, account, outbox, &draft, "send_undone", "Send undone")
+                }
+                Some(false) => {
+                    ctx.tx.execute(
+                        "UPDATE outbox SET state = 'waiting', delayed = 1 WHERE id = ?1",
+                        [outbox],
+                    )?;
+                    ctx.touch_outbox(account, outbox)?;
+                    touch_row_thread(ctx, account, outbox)
+                }
+            }
+        })
+        .await
+        .log_err("back_to_waiting");
 }
 
 fn touch_row_thread(
@@ -155,7 +182,7 @@ fn touch_row_thread(
 async fn send(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError> {
     let late = crate::clock::now_ms() > row.send_after + 5_000;
     // Undone meanwhile (the row is gone), or already taken.
-    if !set_state(e, rt.id, row.id, "sending", late).await {
+    if !start_sending(e, rt.id, row.id, late).await {
         return Ok(());
     }
     let Some(d) = super::drafts::load(e, &row.draft) else {
@@ -169,7 +196,7 @@ async fn send(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError> {
                 fail(e, rt.id, row, message).await;
                 Ok(())
             } else {
-                set_state(e, rt.id, row.id, "waiting", true).await;
+                back_to_waiting(e, rt.id, row).await;
                 Err(err)
             };
         }
@@ -222,7 +249,7 @@ async fn send_draft(
     match &err.outcome {
         // The request never left: back to waiting.
         Outcome::Offline => {
-            set_state(e, rt.id, row.id, "waiting", true).await;
+            back_to_waiting(e, rt.id, row).await;
             Err(err)
         }
         // The draft is gone: the row stays sending and the next pass settles it.
@@ -268,7 +295,7 @@ async fn settle(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError>
         .flatten();
     let Some(gid) = gid else {
         // Never reached Gmail: the next pass sends it from the start.
-        set_state(e, rt.id, row.id, "waiting", true).await;
+        back_to_waiting(e, rt.id, row).await;
         rt.outbox_kick.kick();
         return Ok(());
     };
@@ -407,33 +434,41 @@ async fn notice_and_remove(
     let outbox = row.id;
     let draft = row.draft.clone();
     e.writer
-        .call(move |ctx| {
-            touch_row_thread(ctx, account, outbox)?;
-            crate::undo::drop_send_entry(ctx, account, outbox)?;
-            ctx.tx
-                .execute("DELETE FROM outbox WHERE id = ?1", [outbox])?;
-            ctx.tx.execute(
-                "UPDATE drafts SET started_fresh = 0, defaults_json = NULL WHERE id = ?1",
-                [&draft],
-            )?;
-            let thread: Option<ThreadId> = ctx
-                .tx
-                .query_row(
-                    "SELECT thread_id FROM drafts WHERE id = ?1",
-                    [&draft],
-                    |r| r.get(0),
-                )
-                .optional()?
-                .flatten();
-            ctx.tx.execute(
-                "INSERT INTO notices (account_id, kind, message, draft_id, thread_id, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![account, kind, message, draft, thread, ctx.now],
-            )?;
-            ctx.touch_draft(account, &draft)?;
-            ctx.touch_summary(account);
-            Ok(())
-        })
+        .call(move |ctx| remove_with_notice(ctx, account, outbox, &draft, kind, &message))
         .await
         .log_err("notice_and_remove");
+}
+
+/// Removes the row and leaves a notice that puts the draft back in a composer.
+fn remove_with_notice(
+    ctx: &mut crate::writer::Ctx<'_>,
+    account: AccountId,
+    outbox: OutboxId,
+    draft: &DraftId,
+    kind: &str,
+    message: &str,
+) -> anyhow::Result<()> {
+    touch_row_thread(ctx, account, outbox)?;
+    crate::undo::drop_send_entry(ctx, account, outbox)?;
+    ctx.tx
+        .execute("DELETE FROM outbox WHERE id = ?1", [outbox])?;
+    ctx.tx.execute(
+        "UPDATE drafts SET started_fresh = 0, defaults_json = NULL WHERE id = ?1",
+        [draft],
+    )?;
+    let thread: Option<ThreadId> = ctx
+        .tx
+        .query_row("SELECT thread_id FROM drafts WHERE id = ?1", [draft], |r| {
+            r.get(0)
+        })
+        .optional()?
+        .flatten();
+    ctx.tx.execute(
+        "INSERT INTO notices (account_id, kind, message, draft_id, thread_id, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![account, kind, message, draft, thread, ctx.now],
+    )?;
+    ctx.touch_draft(account, draft)?;
+    ctx.touch_summary(account);
+    Ok(())
 }

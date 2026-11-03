@@ -2280,7 +2280,7 @@ Outbox state machine (§Send and undo):
 waiting --send_after passes--> sending --drafts.send accepted--> sent --toast closes--> (entry leaves history)
 waiting --Undo--> cancelled: composer reopens
 waiting --Gmail unreachable at send_after--> waiting, shown as "Email delayed"
-sending --Gmail unreachable before drafts.send--> waiting
+sending --Gmail unreachable before drafts.send--> waiting | with an undo held--> notice, composer reopens
 sending --no clear answer--> sending --drafts.get: 404--> sent | draft exists--> drafts.send again
 sending --Undo--> held --resolves sent--> sent message trashed | resolves not sent--> notice, composer reopens
 sending --rejected--> toast, composer reopens
@@ -2454,6 +2454,19 @@ _EG · §Send and undo ("A sending row with no answer at quit is settled by `dra
   2. `hold(drafts.update)`, then `advance(10_000)`: the row is sending and its write is parked.
   3. `crash()`; while down, release the parked write as `drop`. Relaunch, `settle()`.
 - **Expect:** exactly one sent message, with "one two": the relaunch does not send the older Gmail draft it finds. No Gmail draft is left.
+
+#### SND-15 · P1 · A held undo resolves at once when the send could not reach Gmail
+
+_ST · §Send and undo ("If Gmail cannot be reached before `drafts.send` is called, the row goes back to waiting"; a held undo that resolves as not sent puts the draft back in a composer)_
+
+- **Steps:**
+  1. Reply to `p3`, `settle()`, send, and close the conversation.
+  2. `hold(drafts.update)`, then `advance(10_000)`: the row is sending and its write is parked.
+  3. Click **Undo**: the toast says "Undoing…".
+  4. Release the write with a 503, then `settle()` without moving time.
+- **Expect:**
+  - `p3` reopens with the reply composer holding the text, and the send toast is gone.
+  - After `advance(60_000)`, `drafts.send` was never called and nothing was sent.
 
 ### 5.17 `offline.spec.ts` (OFF)
 

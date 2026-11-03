@@ -642,3 +642,28 @@ test("SND-14 a crash while the send writes the draft still sends the final versi
   expect(await sentBody(gmail, s.thread("p3").threadId)).toContain("one two");
   expect((await gmail.gmail(A)).drafts).toEqual([]);
 });
+
+test("SND-15 a held undo resolves at once when the send could not reach Gmail", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await sendReply(app, "Person 3", "held, never written");
+  await app.press("Escape");
+  // The row is sending, and its write of the Gmail draft is in flight.
+  const write = await gmail.hold("drafts.update");
+  await app.advance(DELAY);
+  const toast = sendToast(app, "Person 3");
+  await undoOn(toast).click();
+  await expect(toast).toContainText("Undoing…");
+  // The write fails, so Gmail never got the send: it resolved as not sent.
+  await write.release({ kind: "status", status: 503 });
+  await app.settle();
+  await expect(app.conversationTitle).toContainText("Person 3");
+  await expect(app.editor).toContainText("held, never written");
+  await expect(toast).toHaveCount(0);
+  await app.advance(60_000, { stepwise: true });
+  await app.settle();
+  expect(await gmail.requests("drafts.send")).toEqual([]);
+  expect(await sentIn(gmail, s.thread("p3").threadId)).toEqual([]);
+});
