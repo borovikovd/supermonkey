@@ -3,6 +3,7 @@
 use crate::LogErr as _;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use rusqlite::{OptionalExtension, params};
@@ -78,7 +79,7 @@ pub async fn run(e: Arc<Engine>, rt: Arc<AccountRt>) {
         if polls.is_multiple_of(20) {
             refresh_send_as(&e, &rt).await.log_err("refresh_send_as");
         }
-        let online = e.online.load(std::sync::atomic::Ordering::Relaxed);
+        let online = e.online.load(Ordering::Relaxed);
         rt.poll_kick.wait(if online { POLL } else { RETRY }).await;
         // A long gap in app time means the Mac slept: wake due snoozes before the
         // list shows. (Timers stand still while it sleeps; the wall clock does not.)
@@ -196,6 +197,8 @@ pub async fn refresh_send_as(e: &Engine, rt: &AccountRt) -> Result<(), GmailErro
 }
 
 pub async fn refresh_labels(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
+    let mapped = Arc::clone(&rt.labels_mapped);
+    let mapped_before = mapped.load(Ordering::SeqCst);
     let labels = rt
         .sched
         .run(Priority::P3, cost::LABELS_LIST, rt.gmail.list_labels())
@@ -219,7 +222,13 @@ pub async fn refresh_labels(e: &Engine, rt: &AccountRt) -> Result<(), GmailError
                     )?;
                 }
             }
-            // Labels deleted on Gmail go too; locally created ones still waiting stay.
+            // Labels deleted on Gmail go too; locally created ones still waiting
+            // stay. A label created here since the list was read is missing from
+            // it, so then nothing goes until the next refresh.
+            if mapped.load(Ordering::SeqCst) != mapped_before {
+                ctx.touch_summary(account);
+                return Ok(());
+            }
             let local: Vec<(String, Option<String>)> = {
                 let mut stmt = ctx.tx.prepare("SELECT id, gmail_id FROM labels WHERE account_id = ?1")?;
                 stmt.query_map([account], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -635,10 +644,7 @@ pub async fn poll(e: &Arc<Engine>, rt: &AccountRt) -> Result<(), GmailError> {
         .writer
         .call(move |ctx| {
             // Read at apply time: whether the window shows the open thread now.
-            let focused = eng
-                .unfocused_since
-                .load(std::sync::atomic::Ordering::Relaxed)
-                == 0;
+            let focused = eng.unfocused_since.load(Ordering::Relaxed) == 0;
             apply_history(ctx, account, &batch, &fetched, latest, focused, &read)
         })
         .await;

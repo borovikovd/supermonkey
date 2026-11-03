@@ -5,6 +5,7 @@
 
 use crate::LogErr as _;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use rusqlite::{OptionalExtension, params};
@@ -224,8 +225,14 @@ async fn execute(e: &Engine, rt: &AccountRt, op: &Op) -> Result<Done, GmailError
             let p: LabelCreate = serde_json::from_str(&op.payload).map_err(bad)?;
             let gmail_id = create_label(rt, &p.name).await?;
             let account = rt.id;
+            let mapped = Arc::clone(&rt.labels_mapped);
             e.writer
-                .call(move |ctx| map_label(ctx, account, &p.id, &gmail_id))
+                .call(move |ctx| {
+                    map_label(ctx, account, &p.id, &gmail_id)?;
+                    // In the same writer job, so a refresh written after it sees the count.
+                    mapped.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                })
                 .await
                 .log_err("map created label");
             Ok(Done::Finished)

@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
@@ -100,6 +100,9 @@ pub struct AccountRt {
     /// When retrying started, for the quiet sync status after 30 s.
     pub retrying_since: AtomicI64,
     pub landed: Arc<ingest::Landed>,
+    /// Counts labels created here that got their Gmail id, so a label list
+    /// read before one landed does not delete it.
+    pub labels_mapped: Arc<AtomicU64>,
 }
 
 impl AccountRt {
@@ -367,6 +370,7 @@ impl Engine {
             work: work::WorkQueue::default(),
             retrying_since: AtomicI64::new(0),
             landed: Arc::default(),
+            labels_mapped: Arc::default(),
         });
         let replaced = self.accounts.lock().insert(id, Arc::clone(&rt));
         if let Some(old) = replaced {

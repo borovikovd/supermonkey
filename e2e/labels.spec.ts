@@ -337,3 +337,39 @@ test("LAB-07 a label first seen in history is picked up", async ({ app, gmail })
   await expect(app.palette).toBeVisible();
   await expect(picker(app).filter({ hasText: "Legal" })).toHaveText("✓ Legal");
 });
+
+test("LAB-08 a label list read before a create landed does not delete the new label", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  // A focus refresh reads the labels now; its answer comes late.
+  const list = await gmail.holdAnswer("labels.list", { times: 1 });
+  await app.focus(false);
+  await app.focus(true);
+  await expect
+    .poll(async () => (await gmail.requests("labels.list")).some((r) => r.held))
+    .toBe(true);
+  await highlight(app, "Person 1");
+  await createLabel(app, "Fresh L");
+  await app.settle();
+  const id = (await labelsNamed(gmail, "Fresh L"))[0]?.id ?? "missing";
+
+  await list.release();
+  await app.settle();
+  await app.press("g", "l");
+  await expect(
+    app.palette.getByRole("option", { name: "Fresh L", exact: true }),
+    "the new label is kept",
+  ).toHaveCount(1);
+  await app.press("Escape");
+  await expect(app.palette).toHaveCount(0);
+  await goLabel(app, "Fresh L");
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await app.press("g", "i");
+  await highlight(app, "Person 2");
+  await pickLabel(app, "Fresh L");
+  await app.settle();
+  expect(await has(gmail, s, "p2", id)).toBe(true);
+  expect(await labelsNamed(gmail, "Fresh L")).toHaveLength(1);
+});

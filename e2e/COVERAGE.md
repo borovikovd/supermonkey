@@ -285,7 +285,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 14      | 2       | 11     | 1     |
 | `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 11      | 7       | 4      | 0     |
 | `undo.spec.ts`             | UND    | the `z` stack, partial revert, per-account history, persistence                              | `standard`                               | H15                         | 8       | 4       | 3      | 1     |
-| `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 7       | 2       | 5      | 0     |
+| `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 8       | 2       | 6      | 0     |
 | `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 7       | 3       | 3      | 1     |
 | `splits.spec.ts`           | SPL    | routing, `Tab`, pins, own reply, custom splits, starters, hiding, cap                        | `standard`, `splits`, `bulk`, `bulk1000` | H10, H12, H15               | 10      | 6       | 3      | 1     |
 | `snooze.spec.ts`           | SNZ    | picker, snooze, wake triggers, clearing rules, history echo, undo                            | `standard`                               | H13, H14, H15               | 7       | 6       | 0      | 1     |
@@ -1155,6 +1155,15 @@ _EG · §Sync ("Refresh `labels.list` … whenever history names a label id the 
 - **Expect:**
   - `g` `l` lists Legal, and its view shows `p2`.
   - The `l` picker on `p2` shows Legal with a ✓.
+
+#### LAB-08 · P2 · A label list read before a create landed does not delete the new label
+
+_EG · §Sync (labels refresh), §Labels_
+
+- **Steps:** `holdAnswer` on the next `labels.list`, then `focus(false)` and `focus(true)` so a refresh reads the labels. Create "Fresh L" on `p1` from the `l` picker and `settle()`. Then release the list.
+- **Expect:**
+  - `g` `l` still lists Fresh L, and its view shows `p1`.
+  - Applying Fresh L to `p2` reaches Gmail with the label's Gmail id. Gmail has one Fresh L.
 
 ### 5.8 `search.spec.ts` (SRC)
 
