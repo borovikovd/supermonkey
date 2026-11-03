@@ -667,3 +667,64 @@ test("SND-15 a held undo resolves at once when the send could not reach Gmail", 
   expect(await gmail.requests("drafts.send")).toEqual([]);
   expect(await sentIn(gmail, s.thread("p3").threadId)).toEqual([]);
 });
+
+/** Swipes a toast down and away, as a person closes one. */
+async function swipeAway(app: App, toast: Locator): Promise<void> {
+  const box = await toast.boundingBox();
+  if (!box) throw new Error("the toast is not on screen");
+  const { mouse } = app.page;
+  // Its top left corner: clear of the Undo button, and on screen while the
+  // toast is still sliding in.
+  const x = box.x + 12;
+  const y = box.y + 12;
+  await mouse.move(x, y);
+  await mouse.down();
+  await expect(toast).toHaveAttribute("data-swiping", "true");
+  // The first move picks the direction; the toast follows once it has rendered.
+  let dy = 4;
+  await mouse.move(x, y + dy);
+  await expect
+    .poll(async () => {
+      dy += 20;
+      await mouse.move(x, y + dy);
+      return toast.getAttribute("data-swiped");
+    })
+    .toBe("true");
+  await mouse.up();
+}
+
+test("SND-16 a send toast closed before the send went out takes its undo entry with it once sent", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const p6Labels = async () =>
+    (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p6", 1).id)?.labels ?? [];
+  // An older entry: once the send's entry leaves the history, `z` reaches it.
+  await highlight(app, "Person 6");
+  await app.press("e");
+  await app.settle();
+  expect(await p6Labels()).not.toContain("INBOX");
+
+  await sendNew(app, "Closed early", "Body of a send whose toast was closed");
+  const toast = sendToast(app, "Closed early");
+  await expect(toast).toContainText("Sending…");
+  await swipeAway(app, toast);
+  await expect(toast).toHaveCount(0);
+  // The sent message is not stored at once, so the outbox row stays.
+  await gmail.fault("threads.get", { kind: "status", status: 503 });
+  await app.advance(DELAY);
+  await app.settle();
+  await gmail.clearFaults();
+  const sent = (await gmail.gmail(A)).messages.filter(
+    (m) => m.labels.includes("SENT") && m.headers.subject === "Closed early",
+  );
+  expect(sent).toHaveLength(1);
+
+  // A stray `z` never trashes delivered mail; it undoes the entry before.
+  await app.press("z");
+  await app.settle();
+  const after = (await gmail.gmail(A)).messages.find((m) => m.id === sent[0]?.id);
+  expect(after?.labels).not.toContain("TRASH");
+  expect(await p6Labels()).toContain("INBOX");
+});

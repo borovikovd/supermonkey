@@ -2468,6 +2468,17 @@ _ST · §Send and undo ("If Gmail cannot be reached before `drafts.send` is call
   - `p3` reopens with the reply composer holding the text, and the send toast is gone.
   - After `advance(60_000)`, `drafts.send` was never called and nothing was sent.
 
+#### SND-16 · P1 · A send toast closed before the send went out takes its undo entry with it once sent
+
+_EG · §Undo ("Once a send is sent and its toast is gone, its entry leaves the undo history … A stray `z` later never trashes delivered mail")_
+
+- **Steps:**
+  1. `e` on `p6` (an older entry). Press `c`, address Kim, and send.
+  2. Swipe the Sending toast away while the send waits.
+  3. `fault(threads.get, 503)`, so the sent message is not stored at once and the outbox row stays. `advance(10_000)`, `settle()`, `clearFaults()`.
+  4. Press `z`, then `settle()`.
+- **Expect:** the message was sent once and has no `TRASH`. `z` undid the `e`: `p6` is back in Inbox.
+
 ### 5.17 `offline.spec.ts` (OFF)
 
 #### OFF-01 · P1 · Airplane mode: read, search, autocomplete, and act; it all lands when the network returns

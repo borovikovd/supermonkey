@@ -373,13 +373,18 @@ async fn sent(e: &Engine, rt: &AccountRt, row: &Row, msg: String, gmail_thread: 
             for m in copies {
                 super::ingest::delete_message(ctx, m)?;
             }
-            let held: bool = ctx
-                .tx
-                .query_row("SELECT undo_requested FROM outbox WHERE id = ?1", [outbox], |r| r.get(0))?;
+            let (held, toast_closed): (bool, bool) = ctx.tx.query_row(
+                "SELECT undo_requested, toast_closed FROM outbox WHERE id = ?1",
+                [outbox],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
             if held && !msg.is_empty() {
                 // A held undo on a send that went out: trash that message.
                 crate::outbox::trash_sent(ctx, account, &msg)?;
                 ctx.tx.execute("UPDATE outbox SET toast_closed = 1 WHERE id = ?1", [outbox])?;
+                crate::undo::drop_send_entry(ctx, account, outbox)?;
+            } else if toast_closed {
+                // Sent, and its toast is already gone: a stray `z` must not trash it.
                 crate::undo::drop_send_entry(ctx, account, outbox)?;
             }
             ctx.touch_outbox(account, outbox)?;

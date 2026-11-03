@@ -225,6 +225,7 @@ pub fn cleanup(ctx: &mut Ctx<'_>, account: AccountId) -> anyhow::Result<()> {
             .collect::<Result<_, _>>()?
     };
     for (id, draft) in done {
+        crate::undo::drop_send_entry(ctx, account, id)?;
         ctx.tx.execute("DELETE FROM outbox WHERE id = ?1", [id])?;
         ctx.tx
             .execute("DELETE FROM drafts WHERE id = ?1", [&draft])?;
