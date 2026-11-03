@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 use crate::error::{self, GmailError, Outcome, ReadResponse};
-use crate::oauth::TokenSource;
+use crate::oauth::OAuthTokens;
 use crate::types::{
     Draft, Format, Label, ListDraftsResponse, ListHistoryResponse, ListThreadsResponse, Message,
     MessagePartBody, Profile, SendAs, Thread,
@@ -58,30 +58,19 @@ pub struct ThreadListQuery {
 #[derive(Clone)]
 pub struct Gmail {
     base_url: String,
-    account_email: String,
     http: reqwest::Client,
-    tokens: Arc<dyn TokenSource>,
+    tokens: Arc<OAuthTokens>,
 }
 
 impl Gmail {
-    /// A client for `account_email` against `base_url` ([`GMAIL_BASE_URL`] or the fake's).
-    pub fn new(
-        base_url: impl Into<String>,
-        account_email: impl Into<String>,
-        http: reqwest::Client,
-        tokens: Arc<dyn TokenSource>,
-    ) -> Self {
+    /// A client for the account `tokens` belong to, against `base_url` ([`GMAIL_BASE_URL`]
+    /// or the fake's).
+    pub fn new(base_url: &str, http: reqwest::Client, tokens: Arc<OAuthTokens>) -> Self {
         Gmail {
-            base_url: base_url.into().trim_end_matches('/').to_owned(),
-            account_email: account_email.into(),
+            base_url: base_url.trim_end_matches('/').to_owned(),
             http,
             tokens,
         }
-    }
-
-    /// The account this client acts for.
-    pub fn account_email(&self) -> &str {
-        &self.account_email
     }
 
     /// `users.getProfile`. Cost 1.

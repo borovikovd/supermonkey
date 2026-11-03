@@ -9,9 +9,10 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
 use std::time::Duration;
 
+use parking_lot::{Mutex, MutexGuard};
 use tokio::sync::Notify;
 use tokio::time::Instant;
 
@@ -189,13 +190,13 @@ struct Inner {
 
 impl Inner {
     fn lock(&self) -> MutexGuard<'_, State> {
-        self.state.lock().expect("lock poisoned")
+        self.state.lock()
     }
 }
 
 #[derive(Default)]
 struct State {
-    accounts: HashMap<String, AccountState>,
+    accounts: HashMap<Arc<str>, AccountState>,
     waiters: HashMap<u64, Waiter>,
     next_id: u64,
     on_screen: Option<String>,
@@ -204,7 +205,7 @@ struct State {
 }
 
 struct Waiter {
-    account: String,
+    account: Arc<str>,
     priority: Priority,
     cost: u32,
     granted: bool,
@@ -285,7 +286,7 @@ impl State {
             .waiters
             .iter()
             .filter(|(_, w)| !w.granted)
-            .map(|(&id, w)| (w.priority, Some(w.account.as_str()) != on_screen, id))
+            .map(|(&id, w)| (w.priority, Some(&*w.account) != on_screen, id))
             .collect();
         order.sort_unstable();
 
@@ -296,10 +297,7 @@ impl State {
             if blocked.contains(&waiter.account) {
                 continue;
             }
-            let account = self
-                .accounts
-                .entry(waiter.account.clone())
-                .or_insert_with(|| AccountState::new(cfg));
+            let account = account_state(&mut self.accounts, &waiter.account, cfg);
             match account.check(cfg, waiter.priority, waiter.cost) {
                 Admit::Now => {
                     account.start(waiter.priority, waiter.cost);
@@ -322,6 +320,17 @@ impl State {
     }
 }
 
+/// The account's state, created on first use.
+fn account_state<'a>(
+    accounts: &'a mut HashMap<Arc<str>, AccountState>,
+    account: &Arc<str>,
+    cfg: &QuotaConfig,
+) -> &'a mut AccountState {
+    accounts
+        .entry(Arc::clone(account))
+        .or_insert_with(|| AccountState::new(cfg))
+}
+
 impl Scheduler {
     /// A scheduler with the given per-account limits.
     pub fn new(cfg: QuotaConfig) -> Self {
@@ -334,7 +343,7 @@ impl Scheduler {
     }
 
     /// The handle for one account's requests.
-    pub fn account(&self, email: impl Into<String>) -> AccountScheduler {
+    pub fn account(&self, email: impl Into<Arc<str>>) -> AccountScheduler {
         AccountScheduler {
             inner: self.inner.clone(),
             account: email.into(),
@@ -353,7 +362,7 @@ impl Scheduler {
 #[derive(Clone)]
 pub struct AccountScheduler {
     inner: Arc<Inner>,
-    account: String,
+    account: Arc<str>,
 }
 
 impl AccountScheduler {
@@ -421,11 +430,7 @@ impl AccountScheduler {
     /// Units in this account's bucket now.
     pub fn bucket_level(&self) -> f64 {
         let mut state = self.inner.lock();
-        let cfg = &self.inner.cfg;
-        state
-            .accounts
-            .entry(self.account.clone())
-            .or_insert_with(|| AccountState::new(cfg))
+        account_state(&mut state.accounts, &self.account, &self.inner.cfg)
             .bucket
             .level()
     }
@@ -475,7 +480,7 @@ impl Drop for Queued<'_> {
 /// A running request's slot. Dropping it lets the next request start.
 pub struct Permit {
     inner: Arc<Inner>,
-    account: String,
+    account: Arc<str>,
 }
 
 impl Drop for Permit {

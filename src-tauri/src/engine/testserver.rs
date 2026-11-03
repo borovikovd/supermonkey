@@ -28,7 +28,9 @@ use ub_fake_gmail::{
     AddedDraft, AddedMessage, Answer, FakeGmail, FakeUser, Fault, LoggedRequest, Matcher,
     NewAttachment, NewMessage, Release,
 };
-use ub_gmail::{KEYCHAIN_SERVICE, MemoryTokenStore, OAuthConfig, QuotaConfig, TokenStore};
+use ub_gmail::{
+    KEYCHAIN_SERVICE, MemoryTokenStore, OAuthConfig, QuotaConfig, RefreshToken, TokenStore,
+};
 
 use super::webbridge::Bridge;
 use super::{Config, Engine, Platform};
@@ -453,7 +455,7 @@ async fn add_account(State(s): State<Arc<Server>>, Json(req): Json<UserReq>) -> 
     };
     let u = create_user(&s, &req);
     s.store
-        .store_refresh_token(&req.email, u.refresh_token())
+        .store_refresh_token(&req.email, &RefreshToken(u.refresh_token().to_owned()))
         .map_err(|e| Fail(e.0))?;
     let email = req.email;
     let id = writer
@@ -1088,7 +1090,7 @@ async fn keychain(State(s): State<Arc<Server>>) -> Ctl {
         .entries()
         .into_iter()
         .map(|(account, token)| {
-            json!({ "service": KEYCHAIN_SERVICE, "account": account, "token": token })
+            json!({ "service": KEYCHAIN_SERVICE, "account": account, "token": token.0 })
         })
         .collect();
     Ok(Json(json!(items)))

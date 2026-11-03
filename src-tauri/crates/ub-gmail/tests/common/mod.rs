@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use ub_fake_gmail::{FakeGmail, FakeUser};
-use ub_gmail::{Gmail, OAuthConfig, OAuthTokens, default_http_client};
+use ub_gmail::{Gmail, OAuthConfig, OAuthTokens, RefreshToken, default_http_client};
 
 pub const ME: &str = "me@example.com";
 
@@ -34,9 +34,9 @@ pub fn client_for(fake: &FakeGmail, user: &FakeUser) -> Gmail {
     let tokens = Arc::new(OAuthTokens::new(
         oauth_config(fake),
         http.clone(),
-        user.refresh_token(),
+        RefreshToken(user.refresh_token().to_owned()),
     ));
-    Gmail::new(fake.base_url(), user.email(), http, tokens)
+    Gmail::new(&fake.base_url(), http, tokens)
 }
 
 /// A minimal RFC 822 draft carrying the app's local draft id header.

@@ -5351,6 +5351,7 @@ dependencies = [
  "base64 0.22.1",
  "keyring",
  "oauth2",
+ "parking_lot",
  "rand 0.9.5",
  "reqwest",
  "serde",

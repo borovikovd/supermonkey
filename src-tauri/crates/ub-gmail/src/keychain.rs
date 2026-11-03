@@ -2,7 +2,10 @@
 //! `ubermensch` and the email address as the account; tests use [`MemoryTokenStore`].
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+
+use parking_lot::Mutex;
+
+use crate::oauth::RefreshToken;
 
 /// The Keychain service name.
 pub const KEYCHAIN_SERVICE: &str = "ubermensch";
@@ -15,9 +18,10 @@ pub struct TokenStoreError(pub String);
 /// Where refresh tokens live, keyed by account email.
 pub trait TokenStore: Send + Sync {
     /// Saves or replaces the account's refresh token.
-    fn store_refresh_token(&self, email: &str, token: &str) -> Result<(), TokenStoreError>;
+    fn store_refresh_token(&self, email: &str, token: &RefreshToken)
+    -> Result<(), TokenStoreError>;
     /// The account's refresh token, or `None` if there is none.
-    fn load_refresh_token(&self, email: &str) -> Result<Option<String>, TokenStoreError>;
+    fn load_refresh_token(&self, email: &str) -> Result<Option<RefreshToken>, TokenStoreError>;
     /// Deletes the account's refresh token. Deleting a missing one is not an error.
     fn delete_refresh_token(&self, email: &str) -> Result<(), TokenStoreError>;
 }
@@ -37,15 +41,19 @@ fn store_error(e: &keyring::Error) -> TokenStoreError {
 }
 
 impl TokenStore for Keychain {
-    fn store_refresh_token(&self, email: &str, token: &str) -> Result<(), TokenStoreError> {
+    fn store_refresh_token(
+        &self,
+        email: &str,
+        token: &RefreshToken,
+    ) -> Result<(), TokenStoreError> {
         Self::entry(email)?
-            .set_password(token)
+            .set_password(&token.0)
             .map_err(|e| store_error(&e))
     }
 
-    fn load_refresh_token(&self, email: &str) -> Result<Option<String>, TokenStoreError> {
+    fn load_refresh_token(&self, email: &str) -> Result<Option<RefreshToken>, TokenStoreError> {
         match Self::entry(email)?.get_password() {
-            Ok(token) => Ok(Some(token)),
+            Ok(token) => Ok(Some(RefreshToken(token))),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(store_error(&e)),
         }
@@ -62,44 +70,39 @@ impl TokenStore for Keychain {
 /// An in-memory store for tests.
 #[derive(Debug, Default)]
 pub struct MemoryTokenStore {
-    tokens: Mutex<HashMap<String, String>>,
+    tokens: Mutex<HashMap<String, RefreshToken>>,
 }
 
 impl MemoryTokenStore {
     /// Every stored account with its token, by account.
-    pub fn entries(&self) -> Vec<(String, String)> {
-        let mut entries: Vec<(String, String)> = self
+    pub fn entries(&self) -> Vec<(String, RefreshToken)> {
+        let mut entries: Vec<(String, RefreshToken)> = self
             .tokens
             .lock()
-            .expect("lock poisoned")
             .iter()
             .map(|(email, token)| (email.clone(), token.clone()))
             .collect();
-        entries.sort();
+        entries.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
         entries
     }
 }
 
 impl TokenStore for MemoryTokenStore {
-    fn store_refresh_token(&self, email: &str, token: &str) -> Result<(), TokenStoreError> {
-        self.tokens
-            .lock()
-            .expect("lock poisoned")
-            .insert(email.into(), token.into());
+    fn store_refresh_token(
+        &self,
+        email: &str,
+        token: &RefreshToken,
+    ) -> Result<(), TokenStoreError> {
+        self.tokens.lock().insert(email.into(), token.clone());
         Ok(())
     }
 
-    fn load_refresh_token(&self, email: &str) -> Result<Option<String>, TokenStoreError> {
-        Ok(self
-            .tokens
-            .lock()
-            .expect("lock poisoned")
-            .get(email)
-            .cloned())
+    fn load_refresh_token(&self, email: &str) -> Result<Option<RefreshToken>, TokenStoreError> {
+        Ok(self.tokens.lock().get(email).cloned())
     }
 
     fn delete_refresh_token(&self, email: &str) -> Result<(), TokenStoreError> {
-        self.tokens.lock().expect("lock poisoned").remove(email);
+        self.tokens.lock().remove(email);
         Ok(())
     }
 }

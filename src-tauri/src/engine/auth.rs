@@ -3,7 +3,7 @@
 use crate::LogErr as _;
 use std::sync::Arc;
 
-use ub_gmail::{Gmail, OAuthTokens, Priority, cost};
+use ub_gmail::{Gmail, OAuthTokens, Priority, RefreshToken, cost};
 
 use super::Engine;
 use crate::model::AccountId;
@@ -12,7 +12,7 @@ use crate::model::AccountId;
 struct SignIn {
     email: String,
     tokens: Arc<OAuthTokens>,
-    refresh_token: String,
+    refresh_token: RefreshToken,
 }
 
 impl SignIn {
@@ -50,19 +50,14 @@ async fn sign_in_once(e: &Engine) -> anyhow::Result<SignIn> {
     })
     .await
     .map_err(|err| anyhow::anyhow!("Sign-in failed: {:?}", err.outcome))?;
-    let refresh_token = auth.refresh_token.0;
+    let refresh_token = auth.refresh_token;
     let tokens = Arc::new(OAuthTokens::with_access_token(
         e.config.oauth.clone(),
         e.http.clone(),
         refresh_token.clone(),
         auth.access_token,
     ));
-    let gmail = Gmail::new(
-        e.config.gmail_base.clone(),
-        "",
-        e.http.clone(),
-        tokens.clone(),
-    );
+    let gmail = Gmail::new(&e.config.gmail_base, e.http.clone(), tokens.clone());
     let profile = e
         .scheduler
         .account("sign-in")
@@ -122,7 +117,7 @@ pub async fn sign_in_again(e: &Arc<Engine>, account: AccountId) -> anyhow::Resul
 pub async fn forget(e: Arc<Engine>, account: AccountId, email: String) {
     e.stop_account(account);
     if let Ok(Some(token)) = e.store.load_refresh_token(&email) {
-        ub_gmail::revoke(&e.config.oauth, &e.http, &token)
+        ub_gmail::revoke(&e.config.oauth, &e.http, &token.0)
             .await
             .log_err("revoke token");
     }

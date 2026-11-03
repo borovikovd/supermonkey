@@ -5,9 +5,7 @@
 //! calls are plain form posts over reqwest so their errors classify like Gmail calls.
 
 use std::fmt;
-use std::future::Future;
 use std::net::Ipv4Addr;
-use std::pin::Pin;
 use std::time::{Duration, Instant};
 
 use oauth2::basic::BasicClient;
@@ -178,11 +176,11 @@ pub async fn authorize(
 pub async fn refresh(
     cfg: &OAuthConfig,
     http: &reqwest::Client,
-    refresh_token: &str,
+    refresh_token: &RefreshToken,
 ) -> Result<AccessToken, GmailError> {
     let form = [
         ("grant_type", "refresh_token"),
-        ("refresh_token", refresh_token),
+        ("refresh_token", refresh_token.0.as_str()),
         ("client_id", cfg.client_id.as_str()),
         ("client_secret", cfg.client_secret.as_str()),
     ];
@@ -348,39 +346,23 @@ async fn respond(stream: &mut TcpStream, status: &str, body: &str) {
     let _ = stream.shutdown().await;
 }
 
-/// A boxed future, so [`TokenSource`] can be used as a trait object.
-pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-
-/// Hands the Gmail client its bearer tokens.
-pub trait TokenSource: Send + Sync {
-    /// A token that is valid for at least a little while.
-    fn access_token(&self) -> BoxFuture<'_, Result<String, GmailError>>;
-
-    /// Called after Gmail answered 401 to `rejected`. Returns a fresh token, refreshing unless
-    /// another caller already replaced `rejected`.
-    fn refresh_after_401<'a>(
-        &'a self,
-        rejected: &'a str,
-    ) -> BoxFuture<'a, Result<String, GmailError>>;
-}
-
-/// The production [`TokenSource`]: caches the access token in memory and refreshes it with
-/// the account's refresh token shortly before it expires or after a 401. Concurrent callers
-/// share one refresh.
+/// Hands the Gmail client its bearer tokens: caches the access token in memory and
+/// refreshes it with the account's refresh token shortly before it expires or after a 401.
+/// Concurrent callers share one refresh.
 pub struct OAuthTokens {
     cfg: OAuthConfig,
     http: reqwest::Client,
-    refresh_token: String,
+    refresh_token: RefreshToken,
     cached: Mutex<Option<AccessToken>>,
 }
 
 impl OAuthTokens {
     /// A source with no cached access token yet.
-    pub fn new(cfg: OAuthConfig, http: reqwest::Client, refresh_token: impl Into<String>) -> Self {
+    pub fn new(cfg: OAuthConfig, http: reqwest::Client, refresh_token: RefreshToken) -> Self {
         OAuthTokens {
             cfg,
             http,
-            refresh_token: refresh_token.into(),
+            refresh_token,
             cached: Mutex::new(None),
         }
     }
@@ -389,7 +371,7 @@ impl OAuthTokens {
     pub fn with_access_token(
         cfg: OAuthConfig,
         http: reqwest::Client,
-        refresh_token: impl Into<String>,
+        refresh_token: RefreshToken,
         access_token: AccessToken,
     ) -> Self {
         OAuthTokens {
@@ -398,35 +380,29 @@ impl OAuthTokens {
         }
     }
 
+    /// A token that is valid for at least a little while.
+    pub async fn access_token(&self) -> Result<String, GmailError> {
+        let mut cached = self.cached.lock().await;
+        match cached.as_ref() {
+            Some(token) if !token.expires_soon() => Ok(token.token.clone()),
+            _ => self.refresh_into(&mut cached).await,
+        }
+    }
+
+    /// Called after Gmail answered 401 to `rejected`. Returns a fresh token, refreshing unless
+    /// another caller already replaced `rejected`.
+    pub async fn refresh_after_401(&self, rejected: &str) -> Result<String, GmailError> {
+        let mut cached = self.cached.lock().await;
+        match cached.as_ref() {
+            Some(token) if token.token != rejected && !token.expires_soon() => {
+                Ok(token.token.clone())
+            }
+            _ => self.refresh_into(&mut cached).await,
+        }
+    }
+
     async fn refresh_into(&self, cached: &mut Option<AccessToken>) -> Result<String, GmailError> {
         let token = refresh(&self.cfg, &self.http, &self.refresh_token).await?;
         Ok(cached.insert(token).token.clone())
-    }
-}
-
-impl TokenSource for OAuthTokens {
-    fn access_token(&self) -> BoxFuture<'_, Result<String, GmailError>> {
-        Box::pin(async move {
-            let mut cached = self.cached.lock().await;
-            match cached.as_ref() {
-                Some(token) if !token.expires_soon() => Ok(token.token.clone()),
-                _ => self.refresh_into(&mut cached).await,
-            }
-        })
-    }
-
-    fn refresh_after_401<'a>(
-        &'a self,
-        rejected: &'a str,
-    ) -> BoxFuture<'a, Result<String, GmailError>> {
-        Box::pin(async move {
-            let mut cached = self.cached.lock().await;
-            match cached.as_ref() {
-                Some(token) if token.token != rejected && !token.expires_soon() => {
-                    Ok(token.token.clone())
-                }
-                _ => self.refresh_into(&mut cached).await,
-            }
-        })
     }
 }

@@ -6,7 +6,7 @@ use crate::LogErr as _;
 use std::sync::{Arc, OnceLock};
 
 use ub_fake_gmail::{FakeGmail, FakeUser, NewAttachment, NewMessage};
-use ub_gmail::{MemoryTokenStore, OAuthConfig, QuotaConfig, TokenStore};
+use ub_gmail::{MemoryTokenStore, OAuthConfig, QuotaConfig, RefreshToken, TokenStore};
 
 use super::Config;
 use crate::writer::Writer;
@@ -165,7 +165,7 @@ pub fn setup(writer: &Writer) -> Option<(Config, Arc<dyn TokenStore>)> {
         u.set_display_name(email.split('@').next().unwrap_or(email));
         seed(&u, email);
         store
-            .store_refresh_token(email, u.refresh_token())
+            .store_refresh_token(email, &RefreshToken(u.refresh_token().to_owned()))
             .log_err("demo token");
         let created = writer.call_blocking(move |ctx| {
             let known: bool = ctx.tx.query_row(

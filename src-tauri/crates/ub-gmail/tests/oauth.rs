@@ -44,7 +44,11 @@ async fn token_source_caches_and_refreshes_before_expiry() {
     let fake = FakeGmail::start();
     let user = fake.add_user(ME);
     let http = default_http_client();
-    let tokens = OAuthTokens::new(oauth_config(&fake), http.clone(), user.refresh_token());
+    let tokens = OAuthTokens::new(
+        oauth_config(&fake),
+        http.clone(),
+        RefreshToken(user.refresh_token().to_owned()),
+    );
 
     let a = tokens.access_token().await.unwrap();
     let b = tokens.access_token().await.unwrap();

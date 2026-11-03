@@ -351,17 +351,12 @@ impl Engine {
         self: &Arc<Self>,
         id: AccountId,
         email: String,
-        tokens: Arc<dyn ub_gmail::TokenSource>,
+        tokens: Arc<ub_gmail::OAuthTokens>,
     ) {
-        let gmail = Gmail::new(
-            self.config.gmail_base.clone(),
-            email.clone(),
-            self.http.clone(),
-            tokens,
-        );
+        let gmail = Gmail::new(&self.config.gmail_base, self.http.clone(), tokens);
         let rt = Arc::new(AccountRt {
             id,
-            sched: self.scheduler.account(email.clone()),
+            sched: self.scheduler.account(email.as_str()),
             email,
             gmail,
             ops_kick: Kick::default(),
