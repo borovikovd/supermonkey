@@ -25,6 +25,12 @@ async function sentWithSubject(gmail: Control, subject: string): Promise<MimePar
   return first.mime;
 }
 
+/** The Subject header as written, folded lines joined, nothing decoded. */
+function rawSubject(raw: string): string {
+  const [head = ""] = raw.split(/\r?\n\r?\n/, 1);
+  return /^subject:(.*)$/im.exec(head.replace(/\r?\n[ \t]+/g, " "))?.[1]?.trim() ?? "";
+}
+
 /** Files by name, with their decoded bytes and content type. */
 function filesOf(mime: MimePart): Record<string, { type: string; bytes: Buffer }> {
   return Object.fromEntries(
@@ -183,9 +189,13 @@ test.describe("attachments", () => {
     expect(png?.contentId).toBeTruthy();
     expect(htmlOf(tree)).toContain(`cid:${png?.contentId ?? "missing"}`);
 
-    // Encoded headers arrive decoded and identical.
+    // Encoded headers: RFC 2047 words on the wire, decoded and identical in Gmail.
     const plain = await sentWithSubject(gmail, plainSubject);
     expect(plain.headers.subject).toBe(plainSubject);
+    const wire = (await sent(gmail)).find((m) => m.mime.headers.subject === plainSubject);
+    expect(rawSubject(wire?.message.raw ?? "")).toMatch(
+      /^[\x20-\x7e]*=\?utf-8\?[bq]\?[\x20-\x7e]*$/i,
+    );
 
     // New messages, without and with an attachment.
     expect(shape(plain)).toBe("multipart/related[multipart/alternative[text/plain,text/html]]");

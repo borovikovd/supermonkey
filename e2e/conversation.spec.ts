@@ -404,7 +404,7 @@ test.describe("conversation", () => {
     app,
     gmail,
   }) => {
-    await seeds.standard(gmail, app);
+    const s = await seeds.standard(gmail, app);
 
     // From Inbox: the trashed reply is not listed.
     await app.row("Latest rule").click();
@@ -415,6 +415,18 @@ test.describe("conversation", () => {
     await app.press("g", "#");
     await app.row("Latest rule").click();
     await expect.poll(() => layout(app, latestRuleNames)).toEqual(["cm1", "Em2*"]);
+    await app.press("Escape");
+
+    // A message another client moved to Spam: hidden from Inbox, listed from Spam.
+    await gmail.modify(A, s.message("plan", 11).id, ["SPAM"], ["INBOX"], { poll: true });
+    await app.press("g", "i");
+    await app.row("Q4 plan").click();
+    await expect.poll(() => layout(app)).toEqual(["c1", "fold7", "c9", "E10", "E12*"]);
+    await app.press("Escape");
+    await app.press("g", "!");
+    await app.row("Q4 plan").click();
+    await app.press("Shift+O");
+    await expect(app.messages).toHaveCount(12);
     await app.press("Escape");
 
     // A reply draft is never one of the messages; it shows as a collapsed stub.

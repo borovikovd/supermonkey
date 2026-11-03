@@ -94,6 +94,12 @@ test.describe("security", () => {
         handlers: all.flatMap((el) =>
           el.getAttributeNames().filter((n) => n.toLowerCase().startsWith("on")),
         ),
+        // The sanitizer keeps CSS `url(javascript:…)` in `style`; WebKit never runs it.
+        jsUrls: all.flatMap((el) =>
+          el
+            .getAttributeNames()
+            .filter((n) => n !== "style" && /javascript:/i.test(el.getAttribute(n) ?? "")),
+        ),
         forbidden: Array.from(doc.querySelectorAll("form, iframe, base")).map((el) => el.tagName),
         refresh: all.filter(
           (el) =>
@@ -106,6 +112,7 @@ test.describe("security", () => {
     expect(dom?.csp).toContain("script-src 'none'");
     expect(dom?.scripts).toBe(0);
     expect(dom?.handlers).toEqual([]);
+    expect(dom?.jsUrls).toEqual([]);
     expect(dom?.forbidden).toEqual([]);
     expect(dom?.refresh).toBe(0);
   });
@@ -161,6 +168,11 @@ test.describe("security", () => {
   test("SEC-03 links never navigate the app window", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
     const url = app.page.url();
+    // The message frame must not follow a link either (SPEC Reading: clicks are caught).
+    const framesLoaded: string[] = [];
+    app.page.on("framenavigated", (f) => {
+      if (f !== app.page.mainFrame() && !f.url().startsWith("about:")) framesLoaded.push(f.url());
+    });
     await app.row("Links").click();
     const body = app.messageBody(0);
     const opened = async () => (await gmail.platform()).openedUrls;
@@ -189,8 +201,11 @@ test.describe("security", () => {
         "https://example.org/top",
         "https://example.org/a",
       ]);
+    await app.settle();
     expect(app.page.url()).toBe(url);
     expect(app.popups).toEqual([]);
+    expect(framesLoaded).toEqual([]);
+    await expect(body.getByRole("link", { name: "Link B" })).toBeVisible();
   });
 
   test("SEC-04 the webview holds no Gmail credentials", async ({ app, gmail }) => {

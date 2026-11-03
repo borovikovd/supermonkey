@@ -353,5 +353,16 @@ test.describe("notifications", () => {
     await app.settle();
     await expect(app.row("Person 1")).toBeVisible();
     await expect(app.row("Late for Ben")).toHaveCount(0);
+
+    // A notification shown while the window had focus is not clicked by a later refocus.
+    await gmail.clearRecorded();
+    const seen = await gmail.deliver(fresh(B, "Shown in front", { poll: true }));
+    await app.settle();
+    expect((await notes(gmail)).map((x) => x.thread)).toEqual([seen.threadId]);
+    await app.advance(1_000);
+    await app.focus(false);
+    expect(await app.focus(true)).toBeNull();
+    await app.settle();
+    await expect(app.row("Person 1")).toBeVisible();
   });
 });
