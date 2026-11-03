@@ -353,7 +353,7 @@ fn normalize_label(name: &str) -> String {
 }
 
 fn is_system_label_id(value: &str) -> bool {
-    let upper = value.to_ascii_uppercase();
+    let upper = value.trim().to_ascii_uppercase();
     upper.starts_with("CATEGORY_") || SYSTEM_LABEL_IDS.contains(&upper.as_str())
 }
 
@@ -1112,6 +1112,10 @@ mod tests {
         assert!(m("label:inbox", Mode::Rule));
         assert!(m("label:CATEGORY_UPDATES", Mode::Rule));
         assert!(m("label:category_updates", Mode::Rule));
+        // Spaces around a quoted value don't matter, for system ids as for names.
+        assert!(m("label:\" inbox \"", Mode::Rule));
+        assert!(m("label:\"category_updates \"", Mode::Rule));
+        assert!(m("label:\" clients \"", Mode::Rule));
         assert!(!m("label:CATEGORY_PROMOTIONS", Mode::Rule));
         assert!(!m("label:starred", Mode::Rule));
         // User label ids are not names.
