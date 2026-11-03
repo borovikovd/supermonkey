@@ -76,8 +76,6 @@ async function readFile(file: File): Promise<string> {
   return btoa(binary);
 }
 
-const commitField = (h: RecipientHandle | null, v: Addr[]) => (h ? h.commit() : v);
-
 /**
  * The fields once the first load is in. Anything typed before it wins over
  * the loaded value; a body typed before a resumed draft's body follows it, and
@@ -200,7 +198,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   /** Cancels the scheduled save. */
   const timer = useRef<(() => void) | null>(null);
   /** This composer's pending save (openComposer.pending belongs to whichever composer is open). */
-  const takePending = useRef<() => DraftFields | null>(() => null);
+  const takePending = useRef<(finish: boolean) => DraftFields | null>(() => null);
   const root = useRef<HTMLDivElement>(null);
   const toRef = useRef<RecipientHandle>(null);
   const ccRef = useRef<RecipientHandle>(null);
@@ -222,7 +220,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     timer.current?.();
     timer.current = later(() => {
       timer.current = null;
-      const pending = takePending.current();
+      const pending = takePending.current(false);
       if (pending) act({ type: "saveDraft", draft, save: { type: "update", fields: pending } });
     }, SAVE_DELAY);
   }, [draft]);
@@ -304,11 +302,13 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   // Register with the session so send, discard, and close carry the pending save.
   useEffect(() => {
     openComposer.draft = draft;
-    takePending.current = () => {
-      // Text typed in a field but not yet a chip becomes one, and counts as an edit.
-      const to = commitField(toRef.current, latest.current.to);
-      const cc = commitField(ccRef.current, latest.current.cc);
-      const bcc = commitField(bccRef.current, latest.current.bcc);
+    takePending.current = (finish) => {
+      // On send or close, text typed in a field but not yet a chip becomes one,
+      // and counts as an edit. The autosave leaves an address being typed alone.
+      const commit = (h: RecipientHandle | null, v: Addr[]) => (finish && h ? h.commit() : v);
+      const to = commit(toRef.current, latest.current.to);
+      const cc = commit(ccRef.current, latest.current.cc);
+      const bcc = commit(bccRef.current, latest.current.bcc);
       if (!dirty.current) return null;
       const typed = { ...latest.current, to, cc, bcc };
       // Before the composer has rendered its first load, merge it here; with
@@ -324,7 +324,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       dirty.current = false;
       return save;
     };
-    openComposer.pending = () => takePending.current();
+    openComposer.pending = () => takePending.current(true);
     openComposer.invalid = () =>
       [...latest.current.to, ...latest.current.cc, ...latest.current.bcc]
         .filter((a) => !isValidEmail(a.email))

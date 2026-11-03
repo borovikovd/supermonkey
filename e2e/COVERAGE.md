@@ -1999,6 +1999,15 @@ _EG · §Recipients_
   - After step 2, no suggestion list is open.
   - After step 3, To holds only the "sam" chip.
 
+#### RCP-10 · P2 · The autosave leaves an address being typed alone
+
+_EG · §Recipients, §Drafts (autosave)_
+
+- **Steps:**
+  1. Press `c`, type "kim@kite.test,", then "lee@ki".
+  2. Let the autosave the chip scheduled fire (page clock `runFor(500)`), `settle()`.
+- **Expect:** To still holds only Kim's chip, and its input still reads "lee@ki" with focus. Only send and close turn typed text into a chip.
+
 ### 5.14 `attachments.spec.ts` (ATT)
 
 #### ATT-01 · P1 · Attach files and send them

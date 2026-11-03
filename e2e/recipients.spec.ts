@@ -430,3 +430,17 @@ test("RCP-09 suggestions that answer after a chip is made stay closed", async ({
   await app.settle();
   expect(await chipAddresses(app, "To")).toEqual(["sam"]);
 });
+
+test("RCP-10 the autosave leaves an address being typed alone", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  await app.compose();
+  await app.type("kim@kite.test,");
+  await expect(app.chips("To")).toHaveCount(1);
+  await app.type("lee@ki");
+  // The autosave the chip scheduled fires while the next address is half typed.
+  await app.page.clock.runFor(500);
+  await app.settle();
+  expect(await chipAddresses(app, "To")).toEqual(["kim@kite.test"]);
+  await expect(app.field("To")).toHaveValue("lee@ki");
+  await expect(app.field("To")).toBeFocused();
+});
