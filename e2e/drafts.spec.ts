@@ -185,7 +185,11 @@ test("DRF-13 a draft reconcile on a stale list keeps a draft written meanwhile",
   const s = await seeds.standard(gmail, app);
   // Another client's draft makes the next poll reconcile drafts; the list's
   // answer is taken now and arrives late.
-  await gmail.createDraft(A, { subject: "From the web", to: ["kim@kite.test"], html: "<p>web</p>" });
+  await gmail.createDraft(A, {
+    subject: "From the web",
+    to: ["kim@kite.test"],
+    html: "<p>web</p>",
+  });
   const list = await gmail.holdAnswer("drafts.list");
   await gmail.poll();
   await app.settle();
