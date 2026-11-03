@@ -531,4 +531,27 @@ test.describe("conversation", () => {
       )
       .toEqual(["fits"]);
   });
+
+  test("CONV-15 a conversation left before it loaded is not marked read", async ({
+    app,
+    gmail,
+  }) => {
+    const s = await seeds.standard(gmail, app);
+    // Page timers wait for the test, so nothing prefetches Person 5 on the way.
+    await app.page.clock.pauseAt(await app.now());
+    await app.press("j", "j", "j", "j");
+    await expect(app.highlighted).toContainText("Person 5");
+    await expect(app.row("Person 5")).toHaveAttribute("data-unread");
+    // Opened and left before its data arrives; the list prefetches it after.
+    const release = await app.park("submit");
+    await app.press("Enter", "Escape");
+    await expect(app.list).toBeVisible();
+    await release();
+    await app.page.clock.resume();
+    await app.page.clock.setFixedTime(await app.now());
+    await app.settle();
+    await expect(app.highlighted).toContainText("Person 5");
+    await expect(app.row("Person 5")).toHaveAttribute("data-unread");
+    expect(await labelsOf(app, A, s.message("p5", 1).id)).toContain("UNREAD");
+  });
 });

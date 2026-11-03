@@ -251,11 +251,22 @@ export function markReadOnOpenWhenLoaded(thread: number) {
     markReadOnOpen(thread);
     return;
   }
-  const unsub = useMirror.subscribe(() => {
-    if (loaded()) {
-      unsub();
-      markReadOnOpen(thread);
-    }
+  // Only while it stays open: data that arrives later, say from the prefetch
+  // after the user left, was never on screen.
+  const onScreen = () => {
+    const screen = useChrome.getState().current()?.screen;
+    return screen?.kind === "conversation" && screen.thread === thread;
+  };
+  const stop = () => {
+    unsubMirror();
+    unsubChrome();
+  };
+  const unsubMirror = useMirror.subscribe(() => {
+    if (!loaded()) return;
+    stop();
+    markReadOnOpen(thread);
   });
-  setTimeout(unsub, 10_000);
+  const unsubChrome = useChrome.subscribe(() => {
+    if (!onScreen()) stop();
+  });
 }

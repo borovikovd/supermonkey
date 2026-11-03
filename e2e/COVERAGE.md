@@ -843,6 +843,14 @@ _EP · §Reading_
   - Each iframe's height is at least its document's `scrollHeight`.
   - No iframe scrolls internally. The conversation container is the only scroller.
 
+#### CONV-15 · P2 · A conversation left before it loaded is not marked read
+
+_EG · §Reading (read on open)_
+
+- **Seed:** `standard`.
+- **Steps:** pause page timers, move the highlight to `p5` (unread, not prefetched). Park the page's submits, press `Enter` then `Esc`. Release, resume timers (the list now prefetches `p5`), `settle()`.
+- **Expect:** `p5` is still unread in the list and in Gmail.
+
 ### 5.5 `triage-actions.spec.ts` (TRI)
 
 Action table. It comes from §Archive, trash, star, read and from the removal table in §UI state (Actions). The Gmail change applies to the thread's **non-draft** messages at the time of the action.
