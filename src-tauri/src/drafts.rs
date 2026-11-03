@@ -166,11 +166,13 @@ fn reply_addressing(
         };
         return (t.from.clone(), t.to.clone(), cc);
     }
-    // From the sendAs address the message was sent to, else the default.
-    let from = send_as
-        .iter()
-        .find(|s| t.to.iter().chain(&t.cc).any(|a| same(&a.email, &s.email)))
-        .map_or(default_from, send_as_addr);
+    // From the sendAs address the message was sent to, else the default. With
+    // two of them, To wins over Cc, and within a field the first one (Q3).
+    let from =
+        t.to.iter()
+            .chain(&t.cc)
+            .find_map(|a| send_as.iter().find(|s| same(&a.email, &s.email)))
+            .map_or(default_from, send_as_addr);
     let to = if t.reply_to.is_empty() {
         vec![t.from.clone()]
     } else {

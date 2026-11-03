@@ -67,11 +67,7 @@ async function highlight(app: App, subject: string): Promise<void> {
   await down(40);
 }
 
-/**
- * Sends the composer on screen once its autosave has run, and lets the outbox
- * send it. Right after a chip is typed, the suggestion list can still be open,
- * and it takes Cmd+Enter as Enter.
- */
+/** Sends the composer on screen once its autosave has run, and lets the outbox send it. */
 async function send(app: App): Promise<void> {
   await app.settle();
   await app.press("Meta+Enter");
@@ -307,6 +303,38 @@ test("REP-03 reply all leaves the To address off Cc", async ({ app, gmail }) => 
   await app.reply("Enter");
   expect(await chipAddresses(app, "To")).toEqual(["gus@guild.test"]);
   expect(await chipAddresses(app, "Cc")).toEqual(["hal@guild.test"]);
+});
+
+test("REP-03 sent to two of the account's addresses: To wins over Cc, then the first (Q3)", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  // The default address is listed first in sendAs, so a sendAs-order pick
+  // would answer both from ana@acme.test.
+  await gmail.deliver({
+    account: A,
+    from: "Gus Grant <gus@guild.test>",
+    to: [A_ALIAS],
+    cc: [A],
+    subject: "Alias in To",
+    text: "To the alias, Cc the main address.",
+  });
+  await gmail.deliver({
+    account: A,
+    from: "Gus Grant <gus@guild.test>",
+    to: [A_ALIAS, A],
+    subject: "Alias first",
+    text: "Both in To, the alias first.",
+  });
+  await app.settle();
+  await inOrder(["Alias in To", "Alias first"], async (subject) => {
+    await open(app, subject);
+    await app.reply("r");
+    await expect(fromButton(app), subject).toContainText(A_ALIAS);
+    await closeComposer(app);
+    await app.press("Escape");
+  });
 });
 
 test("REP-04 a sent reply stays on the thread and carries Gmail's quote", async ({

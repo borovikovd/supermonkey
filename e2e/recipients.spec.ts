@@ -64,11 +64,7 @@ async function subjectAndBody(app: App, subject: string, body: string): Promise<
   await app.type(body);
 }
 
-/**
- * Sends the composer on screen once its autosave has run, and lets the outbox
- * send it. Right after a chip is typed, the suggestion list can still be open,
- * and it takes Cmd+Enter as Enter.
- */
+/** Sends the composer on screen once its autosave has run, and lets the outbox send it. */
 async function sendSaved(app: App): Promise<void> {
   await app.settle();
   await app.press("Meta+Enter");

@@ -201,7 +201,8 @@ export function RecipientField({
               setActive((a) => Math.max(a - 1, 0));
               return;
             }
-            if (e.key === "Enter" || e.key === "Tab") {
+            // Cmd+Enter is send, list or not; send turns the typed text into a chip.
+            if ((e.key === "Enter" && !e.metaKey) || e.key === "Tab") {
               e.preventDefault();
               e.stopPropagation();
               const pick = suggestions[active];

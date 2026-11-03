@@ -126,10 +126,7 @@ async function closeComposer(app: App): Promise<void> {
   await app.settle();
 }
 
-/**
- * Sends the composer on screen once its autosave has run. Right after a chip is
- * typed, the suggestion list can still be open, and it takes Cmd+Enter as Enter.
- */
+/** Sends the composer on screen once its autosave has run. */
 async function sendSaved(app: App): Promise<void> {
   await app.settle();
   await app.press("Meta+Enter");
@@ -635,6 +632,18 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await expect(app.editor).toHaveText("");
   await closeComposer(app);
   kept++;
+  await expectLeft("reopened by undo send, edited back", 1);
+
+  // Sent untouched, before any autosave wrote it to Gmail, then undone: kept
+  // on Gmail too.
+  await open(app, "Person 6");
+  await app.reply("r");
+  await sendSaved(app);
+  await app.toast("Sending…").getByRole("button", { name: "Undo" }).click();
+  await expect(app.editor).toHaveCount(1);
+  await app.settle();
+  await closeComposer(app);
+  kept++;
   await expectLeft("reopened by undo send, untouched", 1);
 });
 
@@ -682,8 +691,7 @@ test("NEW-09 sending with no recipients never loses the draft; text still in To 
   await app.type("Hello");
   await app.settle();
   await app.press("Meta+Enter");
-  // The editor's and the window's Cmd+Enter handlers both refuse, so the toast can show twice.
-  await expect(app.toast("Add a recipient").first()).toBeVisible();
+  await expect(app.toast("Add a recipient")).toHaveCount(1);
   await expect(newMessage(app)).toBeVisible();
   await expect(app.toast("Sending…")).toHaveCount(0);
   await app.advance(10_000);
@@ -701,6 +709,27 @@ test("NEW-09 sending with no recipients never loses the draft; text still in To 
   await app.settle();
   const m = await sentWithSubject(gmail, A, "Nobody yet");
   expect(emails(m.headers.to)).toContain("pat@p.test");
+});
+
+test("NEW-09 Cmd+Enter with the suggestion list open sends to the typed address", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await app.compose();
+  await focusSubject(app);
+  await app.type("Picked by send");
+  await focusBody(app);
+  await app.type("Hello Kim");
+  await app.press("Meta+Shift+o");
+  await app.type("kim@kite.test");
+  await expect(app.suggestions()).toHaveCount(1);
+  await app.press("Meta+Enter");
+  await expect(newMessage(app)).toHaveCount(0);
+  await app.advance(10_000);
+  await app.settle();
+  const m = await sentWithSubject(gmail, A, "Picked by send");
+  expect(emails(m.headers.to)).toEqual(["kim@kite.test"]);
 });
 
 test("NEW-10 From picker and the sending account", async ({ app, gmail }) => {

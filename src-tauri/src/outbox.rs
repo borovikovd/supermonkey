@@ -151,11 +151,14 @@ pub fn undo_send(ctx: &mut Ctx<'_>, account: AccountId, outbox: i64) -> anyhow::
         OutboxState::Waiting => {
             ctx.tx
                 .execute("DELETE FROM outbox WHERE id = ?1", [outbox])?;
-            // A draft reopened by undo is never discarded as untouched.
+            // A draft reopened by undo is never discarded as untouched, and
+            // it is kept on Gmail too: a send made before any autosave never
+            // wrote it there.
             ctx.tx.execute(
                 "UPDATE drafts SET started_fresh = 0, defaults_json = NULL WHERE id = ?1",
                 [&draft],
             )?;
+            crate::drafts::queue_upsert(ctx, account, &draft)?;
             ctx.touch_draft(account, &draft)?;
         }
         OutboxState::Sending => {
