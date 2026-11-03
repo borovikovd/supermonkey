@@ -3,27 +3,40 @@
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
-import type { Control, GmailState } from "./control.ts";
+import type { Control } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A, B } from "./seeds.ts";
 
-/** Subjects of a mailbox's Inbox threads by the §Views rule. */
-function inboxSubjects(state: GmailState): string[] {
-  return [...inboxThreads(state).values()].toSorted();
-}
+/** A's Inbox in the `standard` mail (COVERAGE §2), sorted. */
+const A_INBOX = [
+  "Alias note",
+  "Big sale",
+  "Budget draft",
+  "Contract",
+  "Digest: daily",
+  "Digest: week 43",
+  "Digest: week 44",
+  "Fold check",
+  "Forum thread",
+  "Guild meetup",
+  "Latest rule",
+  "Links",
+  "New follower",
+  "Offsite venue",
+  "Person 1",
+  "Person 2",
+  "Person 3",
+  "Person 4",
+  "Person 5",
+  "Person 6",
+  "Q4 plan",
+  "Ticket #42",
+  "Your receipt",
+].toSorted();
 
-/** A mailbox's Inbox threads by the §Views rule: thread id to its first subject. */
-function inboxThreads(state: GmailState): Map<string, string> {
-  const threads = new Map<string, string>();
-  for (const m of state.messages) {
-    const live = !m.labels.includes("TRASH") && !m.labels.includes("SPAM");
-    if (live && m.labels.includes("INBOX") && !threads.has(m.threadId)) {
-      threads.set(m.threadId, (m.headers.subject ?? "").replace(/^Re: /, ""));
-    }
-  }
-  return threads;
-}
+/** Senders of B's Inbox rows when B is added after A: b1 to b4, and `collide`. */
+const B_INBOX_SENDERS = ["Bea Blue", "Bo Brown", "Bill Black", "Bree Bell", "Cole Lide"];
 
 /** The labels of a message in Gmail. */
 async function labelsOf(gmail: Control, email: string, id: string): Promise<string[]> {
@@ -107,10 +120,8 @@ test("ACC-01 first run adds the first account; token goes to the Keychain", asyn
   await app.settle();
 
   // A's Inbox shows the same threads as Gmail's INBOX.
-  const expected = inboxSubjects(await gmail.gmail(A));
-  expect(expected.length).toBeGreaterThan(0);
-  await expect(app.rows).toHaveCount(expected.length);
-  expect((await app.subjects()).toSorted()).toEqual(expected);
+  await expect(app.rows).toHaveCount(A_INBOX.length);
+  expect((await app.subjects()).toSorted()).toEqual(A_INBOX);
 
   const keychain = await gmail.keychain();
   expect(keychain.map(({ service, account }) => ({ service, account }))).toEqual([
@@ -154,26 +165,19 @@ test("ACC-02 add a second account from the palette; switch with Ctrl+1 and Ctrl+
   expect(await hue(A)).toBe("rgb(113, 76, 182)");
   expect(await hue(B)).toBe("rgb(214, 71, 138)");
 
-  const bInbox = inboxSubjects(await gmail.gmail(B));
-  const aInbox = inboxSubjects(await gmail.gmail(A));
   await app.press("Control+2");
-  await expect(app.rows).toHaveCount(bInbox.length);
-  // The seed's `collide` joins b1's thread on B (see ACC-10), so B is checked by sender.
-  await Promise.all(
-    ["Bea Blue", "Bo Brown", "Bill Black", "Bree Bell"].map((sender) =>
-      expect(app.row(sender)).toHaveCount(1),
-    ),
-  );
+  await expect(app.rows).toHaveCount(B_INBOX_SENDERS.length);
+  await Promise.all(B_INBOX_SENDERS.map((sender) => expect(app.row(sender)).toHaveCount(1)));
   await expect(app.row("Person 1")).toHaveCount(0);
   await app.press("Control+1");
-  await expect(app.rows).toHaveCount(aInbox.length);
-  expect((await app.subjects()).toSorted()).toEqual(aInbox);
+  await expect(app.rows).toHaveCount(A_INBOX.length);
+  expect((await app.subjects()).toSorted()).toEqual(A_INBOX);
 
   // Out of range: nothing happens.
   await app.press("Control+3");
   await app.settle();
-  await expect(app.rows).toHaveCount(aInbox.length);
-  expect((await app.subjects()).toSorted()).toEqual(aInbox);
+  await expect(app.rows).toHaveCount(A_INBOX.length);
+  expect((await app.subjects()).toSorted()).toEqual(A_INBOX);
 });
 
 test("ACC-03 switching closes overlays and returns each account to its own place", async ({
@@ -444,13 +448,12 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   await app.settle();
   expect(await avatarOrder(app)).toEqual([B, A]);
   await app.press("Control+2");
-  const aInbox = inboxSubjects(await gmail.gmail(A));
-  await expect(app.rows).toHaveCount(aInbox.length);
-  expect((await app.subjects()).toSorted()).toEqual(aInbox);
+  await expect(app.rows).toHaveCount(A_INBOX.length);
+  expect((await app.subjects()).toSorted()).toEqual(A_INBOX);
   const modifies = (await gmail.requests("messages.batchModify", { account: A })).length;
   await app.press("z");
   await app.settle();
-  await expect(app.rows).toHaveCount(aInbox.length);
+  await expect(app.rows).toHaveCount(A_INBOX.length);
   expect(await gmail.requests("messages.batchModify", { account: A })).toHaveLength(modifies);
 
   // a: remove B while A is on screen; nothing is queued.
@@ -463,7 +466,7 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   await app.settle();
   expect((await gmail.keychain()).map((k) => k.account)).toEqual([A]);
   expect(await gmail.revocations()).toContainEqual({ account: B, token: tokens[B] });
-  await expect(app.rows).toHaveCount(aInbox.length);
+  await expect(app.rows).toHaveCount(A_INBOX.length);
   await expect(app.account(A)).toBeVisible();
 
   // c: removing the last account shows the first-run screen.
@@ -561,10 +564,15 @@ test("ACC-09 a failed sign-in adds nothing", async ({ app, gmail }) => {
   await expect(app.page.getByRole("navigation")).toHaveCount(0);
   expect(await gmail.keychain()).toEqual([]);
 
+  // Abandoned in the browser: the attempt waits, and nothing is added.
   await gmail.nextSignIn({ abandon: true });
   await app.firstRunButton.click();
-  await expect(app.firstRunButton).toBeEnabled();
+  await expect(app.page.getByText(/Waiting for Google in your browser/)).toBeVisible();
+  await app.settle();
+  await expect(app.page.getByRole("navigation")).toHaveCount(0);
+  expect(await gmail.keychain()).toEqual([]);
 
+  // A click while it waits starts over, and that attempt succeeds.
   await gmail.nextSignIn({ email: A });
   await app.firstRunButton.click();
   await expect(app.account(A)).toBeVisible();

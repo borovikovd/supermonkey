@@ -29,20 +29,13 @@ async function inOrder<T>(items: T[], step: (item: T, i: number) => Promise<void
   );
 }
 
-/** A row's time as the list shows it today. */
-const timeOfDay = (ms: number) =>
-  new Date(ms).toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: seeds.TZ,
-  });
-
-/** The computed font weight of a row's sender. */
-const senderWeight = (row: Locator) =>
-  row.evaluate((el) => {
-    const sender = el.children[2];
-    return sender ? Number(getComputedStyle(sender).fontWeight) : 0;
-  });
+/** The computed font weight of the row's cell that shows `sender`. */
+const senderWeight = (row: Locator, sender: string) =>
+  row.evaluate((el, name) => {
+    const cell = Array.from(el.children).find((c) => c.textContent?.startsWith(name));
+    if (!cell) throw new Error(`no ${name} in the row`);
+    return Number(getComputedStyle(cell).fontWeight);
+  }, sender);
 
 /** Presses `key` `n` times, one after another. */
 async function repeat(app: App, key: string, n: number): Promise<void> {
@@ -120,12 +113,13 @@ test("NAV-01 inbox rows show sender, subject — snippet, time, and an unread ma
   const p1 = app.row("Person 1");
   await expect(p1).toContainText("Pia Park");
   await expect(p1).toContainText("Person 1 — Hello from Pia.");
-  await expect(p1).toContainText(timeOfDay(seeds.dates.minutesAgo(10)));
+  // The clock is 10:00 AM: p1 came 10 minutes ago, plan's m12 two hours ago.
+  await expect(p1).toContainText(/\b9:50\sAM\b/);
   // plan's latest message is m12, from Dave.
   const plan = app.row("Q4 plan");
   await expect(plan).toContainText("Dave Diaz");
   await expect(plan).toContainText("Q4 plan — Plan message 12.");
-  await expect(plan).toContainText(timeOfDay(seeds.dates.hoursAgo(2)));
+  await expect(plan).toContainText(/\b8:00\sAM\b/);
   expect(s.thread("plan").messages).toHaveLength(12);
   // The time is right-aligned: its right edge meets the row's (less the padding).
   const edges = await p1.evaluate((row) => {
@@ -153,7 +147,7 @@ test("NAV-01 inbox rows show sender, subject — snippet, time, and an unread ma
   await Promise.all(unreadRows.map((row) => expect(row).toHaveAttribute("data-unread")));
   const read = app.row("Person 2");
   await expect(read).not.toHaveAttribute("data-unread");
-  expect(await senderWeight(p1)).toBeGreaterThan(await senderWeight(read));
+  expect(await senderWeight(p1, "Pia Park")).toBeGreaterThan(await senderWeight(read, "Quin"));
 
   // First visit: the top row is highlighted.
   await expect(app.highlighted).toHaveCount(1);
