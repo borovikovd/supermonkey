@@ -7,6 +7,7 @@ import { goTo } from "./commands";
 import { closeComposerOnScreen } from "./compose/start";
 import { connect, inTauri, onEvent, pendingWork, quitNow, subscribe } from "./ipc/bridge";
 import { onKeyDown } from "./keyboard/keys";
+import { trackFocus } from "./keyboard/nav";
 import { appHooks } from "./keyboard/refs";
 import { useChrome } from "./store/chrome";
 import { accountSummary, appState } from "./store/mirror-core";
@@ -28,8 +29,10 @@ appHooks.splitIdOf = (kind) => {
   return summary?.splits.find((s) => s.kind === kind && s.enabled)?.id ?? null;
 };
 appHooks.openPalette = (mode) => useChrome.getState().set({ palette: mode });
+appHooks.closeComposer = closeComposerOnScreen;
 
 window.addEventListener("keydown", onKeyDown);
+trackFocus();
 
 // App renders once the app state, subscribed after connecting, arrives.
 void connect().then(() => subscribe({ type: "app" }));

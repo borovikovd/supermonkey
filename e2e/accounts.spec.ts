@@ -180,10 +180,6 @@ test("ACC-03 switching closes overlays and returns each account to its own place
   app,
   gmail,
 }) => {
-  test.fail(
-    true,
-    "BUG: a switch that closes search leaves that account's view on the search, so it does not return to its last view (src/store/chrome.ts:102 clears `search` but not `perAccount.where`)",
-  );
   const s = await seeds.standard(gmail, app);
   // Two more starred threads on A, so Starred has a second row.
   await gmail.modify(A, s.latest("p2").id, ["STARRED"], []);
@@ -565,10 +561,6 @@ test("ACC-09 a failed sign-in adds nothing", async ({ app, gmail }) => {
   await expect(app.page.getByRole("navigation")).toHaveCount(0);
   expect(await gmail.keychain()).toEqual([]);
 
-  test.fail(
-    true,
-    "BUG: an abandoned sign-in never resolves add_account, so FirstRun keeps the button disabled (src/ui/FirstRun.tsx:17, crates/ub-gmail/src/oauth.rs:126)",
-  );
   await gmail.nextSignIn({ abandon: true });
   await app.firstRunButton.click();
   await expect(app.firstRunButton).toBeEnabled();

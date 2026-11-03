@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 
 import { act, signInAgain } from "../ipc/bridge";
+import { reportSignIn } from "./signIn";
 import type { AccountInfo, SplitInfo } from "../ipc/types";
 import { useChrome } from "../store/chrome";
 import { useAppState, useCurrent, useSummary } from "../store/hooks";
@@ -177,7 +178,7 @@ function AccountBlock({ a }: { a: AccountInfo }) {
         {a.needsSignin && (
           <button
             className="rounded-control bg-accent px-2 py-1 text-row text-white"
-            onClick={() => void signInAgain(a.id)}
+            onClick={() => reportSignIn(signInAgain(a.id))}
           >
             Sign in again
           </button>

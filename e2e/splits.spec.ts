@@ -558,10 +558,6 @@ test("SPL-08 empty splits hide themselves, except after g i / g o", async ({ app
 });
 
 test("SPL-09 counts cap at 999+", async ({ app, gmail }) => {
-  test.fail(
-    true,
-    "BUG: Other is created with hide_when_empty off (src-tauri/src/splits.rs:138), so an empty Other still shows its name",
-  );
   test.slow();
   await seeds.bulk1000(gmail, app);
   await expect(app.splitTitles().first()).toHaveText("Important");
@@ -583,10 +579,6 @@ test("SPL-09 counts cap at 999+", async ({ app, gmail }) => {
 });
 
 test("SPL-10 clicking a split name scrolls to its section", async ({ app, gmail }) => {
-  test.fail(
-    true,
-    "BUG: the split-name click scrolls a [data-split] header found with querySelector (src/ui/TopBar.tsx:103), which is absent when the virtualized list has not rendered it",
-  );
   await seeds.bulk(gmail, app);
   expect(await app.splitHeader()).toBe("Important 40 · Other 20");
   await app.splitTitles().filter({ hasText: "Other" }).click();

@@ -236,10 +236,6 @@ test("NEW-02 compose and send a formatted message, including the last keystrokes
   app,
   gmail,
 }) => {
-  test.fail(
-    true,
-    "BUG: text typed within 500 ms before Cmd+Enter is not sent: sendOnScreen calls openComposer.pending() for the recipient check (src/compose/start.ts:244), which clears `dirty`, so flushSave (start.ts:254) finds nothing to save",
-  );
   await seeds.standard(gmail, app);
   await app.compose();
   await app.type("kim@kite.test,");
@@ -653,10 +649,6 @@ test("NEW-09 sending with no recipients never loses the draft; text still in To 
   app,
   gmail,
 }) => {
-  test.fail(
-    true,
-    "BUG: an address typed in To but not yet a chip is dropped on Cmd+Enter when the draft has no unsaved edit: openComposer.pending() returns null when not dirty (src/compose/Composer.tsx:258), so commitField never runs: with no chips the send is refused with 'Add a recipient', otherwise it goes out without the typed address (src/compose/start.ts:244-254)",
-  );
   await seeds.standard(gmail, app);
 
   // Empty To, no chips: refused with a toast (Q26); the draft stays.
@@ -761,10 +753,6 @@ test("NEW-12 opening another composer first closes the current one, as a second 
   app,
   gmail,
 }) => {
-  test.fail(
-    true,
-    "BUG: a rail click does not close the open composer as a second Esc would: goTo (src/commands.ts:221-226) only sets `inline: null` / the list screen, with no closeComposer action, so an untouched fresh draft is never discarded and a touched one's pending save rides on a timer that the next composer's openComposer.pending (src/compose/Composer.tsx:175-178) can swallow",
-  );
   test.slow();
   const s = await seeds.drafts(gmail, app);
   const drafts = async () => gmailDrafts(gmail, A);

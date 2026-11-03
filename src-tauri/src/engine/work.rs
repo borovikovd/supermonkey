@@ -141,7 +141,7 @@ pub async fn worker(e: EngineRef, rt: Arc<AccountRt>) {
                         Outcome::InvalidGrant => return,
                         Outcome::Offline => {
                             // Wait for the network, then retry.
-                            rt.poll_kick.wait(Duration::from_secs(10)).await;
+                            rt.online_kick.wait(Duration::from_secs(10)).await;
                         }
                         _ => {
                             let d = ub_gmail::backoff(attempt, err.retry_after());

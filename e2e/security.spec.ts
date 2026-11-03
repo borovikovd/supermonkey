@@ -159,10 +159,6 @@ test.describe("security", () => {
   });
 
   test("SEC-03 links never navigate the app window", async ({ app, gmail }) => {
-    test.fail(
-      true,
-      "BUG: links in a message do nothing; MessageFrame's click handler checks `instanceof Element` against the parent's realm, which fails for nodes in the iframe (src/ui/MessageFrame.tsx:98)",
-    );
     await seeds.standard(gmail, app);
     const url = app.page.url();
     await app.row("Links").click();

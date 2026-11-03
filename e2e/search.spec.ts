@@ -98,10 +98,6 @@ test("SRC-01 / shows local results at once; focus moves to results; Esc restores
   app,
   gmail,
 }) => {
-  test.fail(
-    true,
-    "BUG: Esc on the results does not close search (src/keyboard/keys.ts:84 escape() has no search case), and closing search drops the restored view's highlight (src/ui/TopBar.tsx:17 calls goTo, which sets highlight null at src/commands.ts:224)",
-  );
   await seeds.standard(gmail, app);
   // Star p1 and p2 so Starred has two rows, then hold Gmail search forever.
   await app.press("s", "j", "s");

@@ -94,8 +94,10 @@ export function MessageFrame({
       doc.addEventListener("keydown", (e) => onKey(e));
       doc.addEventListener("mousedown", () => onSelect(id));
       doc.addEventListener("click", (e) => {
+        // Nodes in the frame belong to the frame's realm, not the app window's.
         const t = e.target;
-        if (!(t instanceof Element)) return;
+        const view = doc.defaultView;
+        if (!view || !(t instanceof view.Element)) return;
         if (t.closest("[data-ub-toggle]")) {
           doc.querySelector(".ub-quote")?.classList.toggle("ub-open");
           requestAnimationFrame(fit);

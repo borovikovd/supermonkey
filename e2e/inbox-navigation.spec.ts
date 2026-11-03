@@ -189,10 +189,6 @@ test("NAV-02 j keeps the highlighted row inside the scroll viewport (bulk)", asy
   app,
   gmail,
 }) => {
-  test.fail(
-    true,
-    "BUG: entering a split, the list scrolls to its header with align auto, which leaves the first row below the viewport (src/ui/ListView.tsx:181)",
-  );
   await seeds.bulk(gmail, app);
   await expect(app.highlighted).toContainText("Bulk 01");
   const steps = Array.from({ length: 45 }, (_, i) => i + 1);
@@ -345,10 +341,6 @@ test("NAV-07 the highlight moves when a poll removes the highlighted row", async
   app,
   gmail,
 }) => {
-  test.fail(
-    true,
-    "BUG: a patch that removes the highlighted row leaves the highlight on the gone id; only user actions move it (src/commands.ts:92, moveAfterRemoval runs only from modify())",
-  );
   const s = await seeds.standard(gmail, app);
   const leaveInbox = async (key: string) => {
     await gmail.modify(A, s.latest(key).id, [], ["INBOX"], { poll: true });

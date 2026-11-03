@@ -1,21 +1,14 @@
 import { ArrowLeft, ChevronDown, ChevronUp, Search } from "lucide-react";
 import { useEffect, useRef } from "react";
 
-import { goTo } from "../commands";
+import { closeSearch } from "../commands";
 import { closeComposerOnScreen } from "../compose/start";
+import { visibleSplits } from "../keyboard/nav";
 import { appHooks } from "../keyboard/refs";
-import { useChrome, viewTitle, type Where } from "../store/chrome";
+import { useChrome, viewTitle } from "../store/chrome";
 import { useAppState, useCurrent, useSummary } from "../store/hooks";
 import { useCurrentList, useSplitCounts } from "./current-list";
 import { countLabel } from "./format";
-
-/** Closes search and restores the view it replaced. */
-function closeSearch() {
-  const c = useChrome.getState();
-  const before: Where = c.beforeSearch ?? { kind: "view", view: { kind: "inbox" } };
-  c.set({ search: null, beforeSearch: null });
-  goTo(before);
-}
 
 /** Sends a key to the shortcut handler, so buttons and keys share one path. */
 function press(key: string) {
@@ -33,7 +26,10 @@ function SearchField() {
       if (!c.search)
         c.set({
           search: { open: true, query: "", focus: "field" },
-          beforeSearch: c.current()?.where ?? null,
+          beforeSearch: (() => {
+            const cur = c.current();
+            return cur ? { where: cur.where, highlight: cur.highlight } : null;
+          })(),
         });
       else c.set({ search: { ...c.search, focus: "field" } });
       requestAnimationFrame(() => ref.current?.focus());
@@ -63,7 +59,7 @@ function SearchField() {
               screen: { kind: "list" },
             });
           } else if (c.beforeSearch) {
-            c.patchCurrent({ where: c.beforeSearch, highlight: null });
+            c.patchCurrent(c.beforeSearch);
           }
         }}
         onKeyDown={(e) => {
@@ -99,9 +95,16 @@ function SplitTitles() {
           <button
             aria-current={s.id === highlightSplit || undefined}
             className={s.id === highlightSplit ? "font-semibold text-text" : "text-text-2"}
-            onClick={() =>
-              document.querySelector(`[data-split="${s.id}"]`)?.scrollIntoView({ block: "start" })
-            }
+            // Like Tab, the highlight moves to the split's first row; the list
+            // scrolls its header to the top (through the virtual list, which
+            // may not have rendered it).
+            onClick={() => {
+              const first = visibleSplits().find((v) => v.split === s.id)?.first;
+              const c = useChrome.getState();
+              if (!first || c.current()?.highlight === first) return;
+              appHooks.headerToTop();
+              c.patchCurrent({ highlight: first });
+            }}
           >
             {s.name}
           </button>

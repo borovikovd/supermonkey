@@ -6,6 +6,7 @@ import { undoSend } from "./compose/undo-send";
 import { act, subIdFor } from "./ipc/bridge";
 import type { ModifyAction, ModifyKind, SubKey, View } from "./ipc/types";
 import { useChrome, type Where } from "./store/chrome";
+import { appHooks } from "./keyboard/refs";
 import { listKey } from "./store/hooks";
 import {
   accountSummary,
@@ -218,9 +219,22 @@ export function markReadOnOpen(thread: number) {
   modify("read", [], ["UNREAD"], { threads: [thread], undoable: false });
 }
 
+/** Closes search and restores the view and highlight it replaced (Q12). */
+export function closeSearch() {
+  const c = useChrome.getState();
+  const before = c.beforeSearch ?? {
+    where: { kind: "view", view: { kind: "inbox" } },
+    highlight: null,
+  };
+  c.set({ search: null, beforeSearch: null, selection: [], inline: null });
+  c.patchCurrent({ ...before, screen: { kind: "list" } });
+}
+
 export function goTo(where: Where) {
   const c = useChrome.getState();
   if (c.account === null) return;
+  // Leaving the screen closes its composer as a second Esc would.
+  appHooks.closeComposer();
   c.patchCurrent({ where, highlight: null, screen: { kind: "list" } });
   c.set({ selection: [], inline: null, search: where.kind === "search" ? c.search : null });
 }

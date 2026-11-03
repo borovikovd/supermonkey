@@ -6,6 +6,7 @@ import { markReadOnOpenWhenLoaded, openThread } from "../commands";
 import { startReply } from "../compose/start";
 import { act, fetchRows } from "../ipc/bridge";
 import type { ListRow } from "../ipc/types";
+import { appHooks } from "../keyboard/refs";
 import { useChrome } from "../store/chrome";
 import { useCurrent } from "../store/hooks";
 import { useMirror } from "../store/mirror";
@@ -171,15 +172,28 @@ export function ListView() {
     }
   }, [highlight, list.ids, cur?.screen.kind]);
 
+  // A click on a split name asks for its header at the top.
+  const headerToTop = useRef(false);
+  useEffect(() => {
+    appHooks.headerToTop = () => {
+      headerToTop.current = true;
+    };
+  }, []);
+
   // Keep the highlight in view.
   useEffect(() => {
     if (highlight === null) return;
     const i = items.findIndex((it) => it.type === "row" && it.key === highlight);
-    if (i >= 0) {
-      // Show the split header too when the highlight is its first row.
-      const prev = items[i - 1];
-      v.scrollToIndex(prev?.type === "header" ? i - 1 : i, { align: "auto" });
-    }
+    if (i < 0) return;
+    const toTop = headerToTop.current;
+    headerToTop.current = false;
+    // Show the split header too when the highlight is its first row. Only a
+    // header above the viewport needs scrolling to: scrolling down to the row
+    // brings the header just above it into view anyway.
+    const header = items[i - 1]?.type === "header" ? v.measurementsCache[i - 1] : undefined;
+    if (header && (toTop || header.start < (v.scrollOffset ?? 0)))
+      v.scrollToIndex(i - 1, { align: "start" });
+    else v.scrollToIndex(i, { align: "auto" });
   }, [highlight, items, v]);
 
   // Rows outside the pushed window are fetched ahead of scrolling.

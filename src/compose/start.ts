@@ -119,11 +119,15 @@ function whenLoaded(thread: number, run: (data: ConversationData) => void) {
     run(now);
     return;
   }
+  // Several mirror updates can queue frames before one finds the data; only
+  // the first may run, or each would start its own draft.
+  let done = false;
   const unsub = useMirror.subscribe(() => {
     // conversationRef updates in an effect after the mirror changes.
     requestAnimationFrame(() => {
       const d = ready();
-      if (d) {
+      if (d && !done) {
+        done = true;
         unsub();
         run(d);
       }
@@ -234,6 +238,10 @@ function leave(draft: string) {
 export function sendOnScreen() {
   const draft = draftOnScreen();
   if (!draft) return;
+  // Taking the pending save ends it, so it is saved here, before any refusal.
+  // It also turns typed text into chips, which the checks below must see.
+  const fields = openComposer.draft === draft ? openComposer.pending() : null;
+  if (fields) act({ type: "saveDraft", draft, save: { type: "update", fields } });
   const invalid = openComposer.draft === draft ? openComposer.invalid() : [];
   if (invalid.length > 0) {
     toast.error(
@@ -241,7 +249,6 @@ export function sendOnScreen() {
     );
     return;
   }
-  const fields = openComposer.draft === draft ? openComposer.pending() : null;
   const draftState = Object.values(useMirror.getState().subs).find(
     (s) => s.type === "composer" && s.key.type === "composer" && s.key.draft === draft,
   );
@@ -251,7 +258,6 @@ export function sendOnScreen() {
     toast.error("Add a recipient");
     return;
   }
-  flushSave(draft);
   act({ type: "sendDraft", draft });
   leave(draft);
 }

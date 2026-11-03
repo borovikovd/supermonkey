@@ -14,10 +14,16 @@ export const appHooks: {
   openPalette: (mode: PaletteMode) => void;
   focusSearch: () => void;
   linkKey: (e: KeyboardEvent) => boolean;
+  /** The next highlight move shows its split header at the top of the list. */
+  headerToTop: () => void;
+  /** Closes the composer on screen as a second Esc would (set by main, to avoid an import cycle). */
+  closeComposer: () => void;
 } = {
   switchAccount: () => {},
   splitIdOf: () => null,
   openPalette: () => {},
   focusSearch: () => {},
   linkKey: () => false,
+  closeComposer: () => {},
+  headerToTop: () => {},
 };

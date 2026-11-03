@@ -10,6 +10,7 @@ import { onKeyDown } from "../keyboard/keys";
 import { appHooks, conversationRef } from "../keyboard/refs";
 import { useChrome } from "../store/chrome";
 import { useAppState, useConversation, useSubscription } from "../store/hooks";
+import { blocks } from "./folds";
 import { formatTime } from "./format";
 import { MessageFrame } from "./MessageFrame";
 
@@ -41,37 +42,6 @@ const toggle = (id: number) => {
   else ex.add(id);
   c.set({ expanded: [...ex], selectedMessage: id });
 };
-
-type Block = { type: "message"; m: MessageSummary } | { type: "fold"; ids: number[] };
-
-/**
- * Collapsed runs of more than four fold the ones between the first and last
- * into one `N older messages` line (SPEC Reading).
- */
-function blocks(messages: MessageSummary[], expanded: Set<number>, unfolded: Set<number>): Block[] {
-  const out: Block[] = [];
-  let run: MessageSummary[] = [];
-  const flush = () => {
-    const head = run[0];
-    const tail = run.at(-1);
-    if (run.length > 4 && head && tail && !run.some((m) => unfolded.has(m.id))) {
-      out.push({ type: "message", m: head });
-      out.push({ type: "fold", ids: run.slice(1, -1).map((m) => m.id) });
-      out.push({ type: "message", m: tail });
-    } else {
-      for (const m of run) out.push({ type: "message", m });
-    }
-    run = [];
-  };
-  for (const m of messages) {
-    if (expanded.has(m.id)) {
-      flush();
-      out.push({ type: "message", m });
-    } else run.push(m);
-  }
-  flush();
-  return out;
-}
 
 /** Tab cycles links in expanded messages; Enter opens; Esc clears. */
 function linkKey(e: KeyboardEvent): boolean {

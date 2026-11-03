@@ -3,6 +3,7 @@
 
 import {
   applyLabel,
+  closeSearch,
   closeThread,
   goTo,
   markDone,
@@ -76,10 +77,13 @@ function handleG(key: string): boolean {
   return false;
 }
 
+/** Ends a `g` prefix that no second key followed. */
+let gTimer: ReturnType<typeof setTimeout> | undefined;
+
 /**
  * Esc closes the innermost thing: a focused link, then the conversation, then
- * the selection. onKeyDown closes an open sheet first; the palette, search, and
- * compose handle their own Esc.
+ * the selection, then search results. onKeyDown closes an open sheet first;
+ * the palette, the search field, and compose handle their own Esc.
  */
 function escape() {
   const c = useChrome.getState();
@@ -91,7 +95,11 @@ function escape() {
     closeThread();
     return;
   }
-  if (c.selection.length > 0) c.set({ selection: [] });
+  if (c.selection.length > 0) {
+    c.set({ selection: [] });
+    return;
+  }
+  if (c.search) closeSearch();
 }
 
 export function onKeyDown(e: KeyboardEvent) {
@@ -249,7 +257,9 @@ export function onKeyDown(e: KeyboardEvent) {
       break;
     case "g":
       c.set({ gPending: true });
-      setTimeout(() => useChrome.getState().set({ gPending: false }), 1500);
+      // A new `g` restarts the wait; an older timer must not end its prefix.
+      clearTimeout(gTimer);
+      gTimer = setTimeout(() => useChrome.getState().set({ gPending: false }), 1500);
       break;
     case "?":
       c.set({ sheet: "shortcuts" });

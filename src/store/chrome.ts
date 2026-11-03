@@ -38,8 +38,8 @@ type ChromeState = {
   palette: PaletteMode | null;
   sheet: Sheet;
   search: { open: boolean; query: string; focus: "field" | "results" } | null;
-  /** The previous where, restored when search closes. */
-  beforeSearch: Where | null;
+  /** The view and highlight search replaced, restored when it closes. */
+  beforeSearch: { where: Where; highlight: string | null } | null;
   /** The reply composer inside the open conversation. */
   inline: { draft: string; thread: number } | null;
   /** Selected message in the open conversation. */
@@ -91,16 +91,25 @@ export const useChrome = create<ChromeState & ChromeActions>((set, get) => ({
   forcedSplit: null,
   set: (patch) => set(patch),
   setAccount: (account) =>
-    set((s) => ({
-      account,
-      perAccount:
-        account !== null && !s.perAccount[account]
-          ? { ...s.perAccount, [account]: defaultChrome() }
-          : s.perAccount,
-      selection: [],
-      palette: null,
-      search: null,
-    })),
+    set((s) => {
+      let perAccount = s.perAccount;
+      // A switch that closes search leaves the old account on the view search replaced.
+      const left = s.account === null ? undefined : perAccount[s.account];
+      if (s.account !== null && left && s.search && s.beforeSearch) {
+        perAccount = { ...perAccount, [s.account]: { ...left, ...s.beforeSearch } };
+      }
+      if (account !== null && !perAccount[account]) {
+        perAccount = { ...perAccount, [account]: defaultChrome() };
+      }
+      return {
+        account,
+        perAccount,
+        selection: [],
+        palette: null,
+        search: null,
+        beforeSearch: null,
+      };
+    }),
   current: () => {
     const s = get();
     return s.account === null ? null : (s.perAccount[s.account] ?? null);

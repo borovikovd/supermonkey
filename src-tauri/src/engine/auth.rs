@@ -24,7 +24,22 @@ impl SignIn {
     }
 }
 
+/// Starting a sign-in cancels the one before it: the user left it in the
+/// browser, and its loopback listener would otherwise wait forever.
 async fn sign_in(e: &EngineRef) -> anyhow::Result<SignIn> {
+    let (cancel, cancelled) = tokio::sync::oneshot::channel();
+    let previous = e.sign_in_cancel.lock().replace(cancel);
+    if let Some(previous) = previous {
+        // Err means that sign-in already finished.
+        let _ = previous.send(());
+    }
+    tokio::select! {
+        signed_in = sign_in_once(e) => signed_in,
+        _ = cancelled => anyhow::bail!("Sign-in cancelled"),
+    }
+}
+
+async fn sign_in_once(e: &EngineRef) -> anyhow::Result<SignIn> {
     if e.config.oauth.client_id.is_empty() {
         anyhow::bail!(
             "This build has no Google OAuth client. Put google-oauth-client.json in the project and rebuild."

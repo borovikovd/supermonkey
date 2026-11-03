@@ -12,6 +12,8 @@ import {
 } from "../commands";
 import type { ConversationData } from "../ipc/types";
 import { useChrome } from "../store/chrome";
+import { useMirror } from "../store/mirror";
+import { blocks } from "../ui/folds";
 
 /** Adds `x` if missing, else removes it. */
 function toggled<T>(xs: readonly T[], x: T): T[] {
@@ -20,14 +22,62 @@ function toggled<T>(xs: readonly T[], x: T): T[] {
   return [...set];
 }
 
+/** The focused row and the list it was last seen in, so a row that leaves keeps its place. */
+let lastSeen: { focus: string; ids: string[] } | null = null;
+
+function focusOf(): string | null {
+  const cur = useChrome.getState().current();
+  if (!cur) return null;
+  return cur.screen.kind === "conversation" ? String(cur.screen.thread) : cur.highlight;
+}
+
+/** From where the focus used to be: the next row still shown, or the previous one. */
+function neighbor(focus: string, ids: string[], forward: boolean): string | null {
+  if (lastSeen?.focus !== focus) return null;
+  const shown = new Set(ids);
+  const at = lastSeen.ids.indexOf(focus);
+  const after = lastSeen.ids.slice(at + 1).find((k) => shown.has(k));
+  const before = lastSeen.ids.slice(0, Math.max(at, 0)).findLast((k) => shown.has(k));
+  return (forward ? (after ?? before) : (before ?? after)) ?? null;
+}
+
+/** Re-anchors the focus, or moves the highlight off a row that left the list. */
+function followFocus() {
+  const focus = focusOf();
+  if (focus === null) return;
+  const ids = visibleIds();
+  if (ids.includes(focus)) {
+    lastSeen = { focus, ids };
+    return;
+  }
+  if (useChrome.getState().current()?.screen.kind !== "list") return;
+  const next = neighbor(focus, ids, true);
+  if (next !== null) useChrome.getState().patchCurrent({ highlight: next });
+}
+
+/**
+ * When a patch from Rust removes the highlighted row, the highlight moves as
+ * after an action. An open conversation whose row left stays open; `j` and
+ * `k` then move from its old place (SPEC Keyboard).
+ */
+export function trackFocus() {
+  useMirror.subscribe(followFocus);
+  useChrome.subscribe(followFocus);
+}
+
 export function moveHighlight(delta: number) {
   const c = useChrome.getState();
   const cur = c.current();
   if (!cur) return;
   const ids = visibleIds();
   if (ids.length === 0) return;
-  const focus = cur.screen.kind === "conversation" ? String(cur.screen.thread) : cur.highlight;
+  const focus = focusOf();
   let at = focus === null ? -1 : ids.indexOf(focus);
+  if (at < 0 && focus !== null) {
+    // The focused row left: step to its old neighbor.
+    const from = neighbor(focus, ids, delta > 0);
+    if (from !== null) at = ids.indexOf(from) - delta;
+  }
   if (at < 0) at = delta > 0 ? -1 : ids.length;
   const next = Math.min(ids.length - 1, Math.max(0, at + delta));
   const key = ids[next];
@@ -120,7 +170,18 @@ export function selectMessage(data: ConversationData, delta: number) {
   const at = c.selectedMessage === null ? -1 : ids.indexOf(c.selectedMessage);
   const next = ids[Math.min(last, Math.max(0, (at < 0 ? last : at) + delta))];
   if (next === undefined) return;
-  c.set({ selectedMessage: next, unfolded: [...c.unfolded, next] });
+  // Selecting a message inside a fold opens the whole fold, as a click on it does.
+  const expanded = new Set(c.expandAll ? ids : c.expanded);
+  const unfolded = new Set(
+    c.selectedMessage === null ? c.unfolded : [...c.unfolded, c.selectedMessage],
+  );
+  const fold = blocks(data.messages, expanded, unfolded).find(
+    (b) => b.type === "fold" && b.ids.includes(next),
+  );
+  c.set({
+    selectedMessage: next,
+    unfolded: fold?.type === "fold" ? [...c.unfolded, ...fold.ids] : c.unfolded,
+  });
   requestAnimationFrame(() =>
     document.querySelector(`[data-message="${next}"]`)?.scrollIntoView({ block: "nearest" }),
   );

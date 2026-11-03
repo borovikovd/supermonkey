@@ -167,10 +167,6 @@ test("RCP-02 ranking and exclusions come from synced mail", async ({ app, gmail 
 });
 
 test("RCP-03 ways to turn typed text into a chip", async ({ app, gmail }) => {
-  test.fail(
-    true,
-    "BUG: an address typed in To but not yet a chip is dropped on Cmd+Enter when the draft has no unsaved edit: openComposer.pending() returns null when not dirty (src/compose/Composer.tsx:258), so commitField never runs: with no chips the send is refused with 'Add a recipient', otherwise it goes out without the typed address (src/compose/start.ts:244-254)",
-  );
   await seeds.standard(gmail, app);
   await app.compose();
   const to = field(app, "To");

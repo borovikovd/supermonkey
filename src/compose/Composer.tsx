@@ -159,6 +159,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   const latest = useRef(fields);
   /** Cancels the scheduled save. */
   const timer = useRef<(() => void) | null>(null);
+  /** This composer's pending save (openComposer.pending belongs to whichever composer is open). */
+  const takePending = useRef<() => DraftFields | null>(() => null);
   const root = useRef<HTMLDivElement>(null);
   const toRef = useRef<RecipientHandle>(null);
   const ccRef = useRef<RecipientHandle>(null);
@@ -174,7 +176,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     timer.current?.();
     timer.current = later(() => {
       timer.current = null;
-      const pending = openComposer.pending();
+      const pending = takePending.current();
       if (pending) act({ type: "saveDraft", draft, save: { type: "update", fields: pending } });
     }, SAVE_DELAY);
   }, [draft]);
@@ -211,9 +213,9 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     autofocus: inline ? "end" : false,
     editorProps: {
       handleKeyDown: (_view, e) => {
+        // The window listener below sends; this only keeps the editor from acting on it.
         if (e.metaKey && e.key === "Enter") {
           e.preventDefault();
-          sendOnScreen();
           return true;
         }
         return false;
@@ -229,12 +231,13 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   // The first load carries the filled fields (adjusted during render, once).
   if (state && !state.gone && !loaded) {
     setLoaded(true);
+    // Anything typed before the load arrived wins over the loaded value.
     setFields((f) => ({
-      from: state.from,
-      to: state.to,
-      cc: state.cc,
-      bcc: state.bcc,
-      subject: state.subject,
+      from: f.from ?? state.from,
+      to: f.to.length > 0 ? f.to : state.to,
+      cc: f.cc.length > 0 ? f.cc : state.cc,
+      bcc: f.bcc.length > 0 ? f.bcc : state.bcc,
+      subject: f.subject || state.subject,
       bodyHtml: f.bodyHtml || state.bodyHtml,
       attachments: state.attachments,
     }));
@@ -254,19 +257,18 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   // Register with the session so send, discard, and close carry the pending save.
   useEffect(() => {
     openComposer.draft = draft;
-    openComposer.pending = () => {
+    takePending.current = () => {
+      // Text typed in a field but not yet a chip becomes one, and counts as an edit.
+      const to = commitField(toRef.current, latest.current.to);
+      const cc = commitField(ccRef.current, latest.current.cc);
+      const bcc = commitField(bccRef.current, latest.current.bcc);
       if (!dirty.current) return null;
       timer.current?.();
       timer.current = null;
       dirty.current = false;
-      const f = latest.current;
-      return {
-        ...f,
-        to: commitField(toRef.current, f.to),
-        cc: commitField(ccRef.current, f.cc),
-        bcc: commitField(bccRef.current, f.bcc),
-      };
+      return { ...latest.current, to, cc, bcc };
     };
+    openComposer.pending = () => takePending.current();
     openComposer.invalid = () =>
       [...latest.current.to, ...latest.current.cc, ...latest.current.bcc]
         .filter((a) => !isValidEmail(a.email))

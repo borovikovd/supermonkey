@@ -192,10 +192,6 @@ test.describe("conversation", () => {
   });
 
   test("CONV-04 expanding, collapsing, and selecting with the mouse", async ({ app, gmail }) => {
-    test.fail(
-      true,
-      "BUG: selecting the visible first or last message of a collapsed run unfolds the whole run; blocks() checks every run member against `unfolded`, and the render adds the selection to it (src/ui/ConversationView.tsx:57, :205)",
-    );
     await seeds.standard(gmail, app);
     await app.row("Q4 plan").click();
     await expect.poll(() => layout(app)).toEqual(PLAN_DEFAULT);
@@ -225,10 +221,6 @@ test.describe("conversation", () => {
   });
 
   test("CONV-05 n, p, and o select and expand messages", async ({ app, gmail }) => {
-    test.fail(
-      true,
-      "BUG: selecting the visible first or last message of a collapsed run unfolds the whole run; blocks() checks every run member against `unfolded`, and the render adds the selection to it (src/ui/ConversationView.tsx:57, :205)",
-    );
     await seeds.standard(gmail, app);
     await app.row("Q4 plan").click();
     await expect.poll(() => layout(app)).toEqual(PLAN_DEFAULT);
@@ -295,10 +287,6 @@ test.describe("conversation", () => {
   });
 
   test("CONV-07 quoted history sits behind •••", async ({ app, gmail }) => {
-    test.fail(
-      true,
-      "BUG: the ••• quote toggle does nothing; MessageFrame's click handler checks `instanceof Element` against the parent's realm, which fails for nodes in the iframe (src/ui/MessageFrame.tsx:98)",
-    );
     await seeds.standard(gmail, app);
     await app.row("Contract").click();
     const body = app.messageBody(0);
@@ -446,10 +434,6 @@ test.describe("conversation", () => {
     app,
     gmail,
   }) => {
-    test.fail(
-      true,
-      "BUG: links in a message do nothing; MessageFrame's click handler checks `instanceof Element` against the parent's realm, which fails for nodes in the iframe (src/ui/MessageFrame.tsx:98)",
-    );
     await seeds.standard(gmail, app);
     await app.row("Links").click();
     const body = app.messageBody(0);

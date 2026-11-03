@@ -26,6 +26,7 @@ import {
   startReply,
 } from "../compose/start";
 import { act, addAccount, snoozeOptions } from "../ipc/bridge";
+import { reportSignIn } from "./signIn";
 import type { PinKind, View } from "../ipc/types";
 import { appHooks } from "../keyboard/refs";
 import { goSplit } from "../keyboard/nav";
@@ -170,7 +171,7 @@ function useCommands(mode: PaletteMode, query: string): { items: Item[]; placeho
           run: () => appHooks.openPalette({ kind: "switchAccount" }),
           keep: true,
         },
-        { id: "add-account", label: "Add account", run: () => void addAccount() },
+        { id: "add-account", label: "Add account", run: () => reportSignIn(addAccount()) },
         {
           id: "mute",
           label: muted ? "Unmute notifications" : "Mute notifications",

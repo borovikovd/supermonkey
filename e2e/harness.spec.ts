@@ -279,7 +279,7 @@ for (const [name, seed] of Object.entries(OTHER_SEEDS)) {
     test.info().annotations.push({ type: "open", description: `${Date.now() - t0} ms` });
     await expect(app.page.getByRole("navigation")).toBeVisible();
     if (name === "drafts") expect(s.drafts.size).toBe(7);
-    if (name === "bulk1000") expect(await app.splitHeader()).toMatch(/^Important 999 /);
+    if (name === "bulk1000") expect(await app.splitHeader()).toMatch(/^Important 999( · |$)/);
     if (name === "splits") expect(s.thread("X").messages).toHaveLength(2);
   });
 }
@@ -400,9 +400,8 @@ test("MIME: a sent reply's part tree", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
   await app.press("j", "j", "Enter");
   await app.reply();
+  // Sent before the autosave runs: the send carries the typed text itself.
   await app.type("Thanks for the note");
-  // Let the autosave run first: a send within its delay loses the typed text (a product bug).
-  await app.settle();
   await app.press("Meta+Enter");
   await app.advance(10_000);
   await app.settle();

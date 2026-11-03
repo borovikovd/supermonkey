@@ -92,6 +92,9 @@ pub struct AccountRt {
     pub ops_kick: Kick,
     pub outbox_kick: Kick,
     pub poll_kick: Kick,
+    /// Wakes fetch workers waiting for the network. Kept apart from
+    /// `poll_kick`, which wakes one waiter and must reach the sync loop.
+    pub online_kick: Kick,
     pub stopped: AtomicBool,
     pub work: work::WorkQueue,
     /// When retrying started, for the quiet sync status after 30 s.
@@ -129,6 +132,9 @@ pub struct Engine {
     pub unfocused_since: AtomicI64,
     /// Wakes the snooze timer when a snooze time changes.
     pub snooze_kick: Kick,
+    /// Cancels the sign-in waiting in the browser, if any. A new sign-in
+    /// replaces one the user abandoned.
+    pub sign_in_cancel: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     /// Every task the engine started, so [`Engine::shutdown`] can stop them.
     tasks: Mutex<Vec<AbortHandle>>,
     shut_down: AtomicBool,
@@ -191,6 +197,7 @@ impl Engine {
             last_notification: Mutex::new(None),
             unfocused_since: AtomicI64::new(0),
             snooze_kick: Kick::default(),
+            sign_in_cancel: Mutex::new(None),
             tasks: Mutex::new(Vec::new()),
             shut_down: AtomicBool::new(false),
         })
@@ -303,6 +310,7 @@ impl Engine {
                     rt.ops_kick.kick();
                     rt.outbox_kick.kick();
                     rt.poll_kick.kick();
+                    rt.online_kick.kick_all();
                 }
             }
         }
@@ -360,6 +368,7 @@ impl Engine {
             ops_kick: Kick::default(),
             outbox_kick: Kick::default(),
             poll_kick: Kick::default(),
+            online_kick: Kick::default(),
             stopped: AtomicBool::new(false),
             work: work::WorkQueue::default(),
             retrying_since: AtomicI64::new(0),
@@ -385,6 +394,7 @@ impl Engine {
         rt.ops_kick.kick_all();
         rt.outbox_kick.kick_all();
         rt.poll_kick.kick_all();
+        rt.online_kick.kick_all();
     }
 
     /// The window gained focus: poll every account, and treat focus that comes

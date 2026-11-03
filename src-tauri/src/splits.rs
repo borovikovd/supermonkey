@@ -135,7 +135,7 @@ pub fn route(
 pub fn create_defaults(ctx: &mut Ctx<'_>, account: AccountId) -> anyhow::Result<()> {
     ctx.tx.execute(
         "INSERT INTO splits (account_id, name, position, kind, hide_when_empty) VALUES
-           (?1, 'Important', 900000, 'important', 1), (?1, 'Other', 1000000, 'other', 0)",
+           (?1, 'Important', 900000, 'important', 1), (?1, 'Other', 1000000, 'other', 1)",
         [account],
     )?;
     Ok(())
