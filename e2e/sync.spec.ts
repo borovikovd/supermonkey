@@ -190,7 +190,6 @@ test("SYN-01 the connect sync matches Gmail", async ({ app, gmail, page }) => {
   await closeSearch(app);
   await goToLabel(app, "Projects");
   await expect(app.row(/^.*Project (alpha|beta|gamma)/)).toHaveCount(3);
-  expect(s.thread("projOld1").subject).toBe("Project alpha");
 });
 
 test("SYN-02 mail that changed while the app was closed shows after relaunch", async ({

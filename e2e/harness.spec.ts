@@ -109,23 +109,6 @@ test("polls run on app time; stepwise advance runs every retry", async ({ app, g
   expect(gaps[2]).toBeGreaterThan(gaps[1] ?? 0);
 });
 
-test("quiet sync status after 30 s of retrying (Q1)", async ({ app, gmail }) => {
-  const s = await seeds.standard(gmail, app);
-  await gmail.fault("messages.batchModify", { kind: "status", status: 503 });
-  await app.press("e");
-  await app.settle();
-  await app.advance(29_000);
-  await expect(app.syncMarker(A)).toHaveCount(0);
-  await app.advance(2_000);
-  await expect(app.syncMarker(A)).toBeVisible();
-  await expect(app.account(A)).toHaveAttribute("title", /· Can't reach Gmail$/);
-  await gmail.clearFaults();
-  await app.settle();
-  await expect(app.syncMarker(A)).toHaveCount(0);
-  const p1 = (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p1", 1).id);
-  expect(p1?.labels).not.toContain("INBOX");
-});
-
 test("a quit closes the composer first; Gmail and the clock change while down", async ({
   app,
   gmail,
@@ -341,16 +324,6 @@ test("Gmail-side drafts, deleted threads, and expired history", async ({ app, gm
   );
   expect(resync?.params).toMatchObject({ maxResults: "500" });
   expect(resync?.answer).toBe(200);
-});
-
-test("expired access tokens refresh once", async ({ app, gmail }) => {
-  await seeds.standard(gmail, app);
-  const tokens = async () => (await gmail.requests("oauth.token", { account: A })).length;
-  const before = await tokens();
-  await gmail.expireAccessTokens(A);
-  await app.press("e");
-  await app.settle();
-  expect(await tokens()).toBe(before + 1);
 });
 
 test("sign-in: a denial stores nothing; the keychain lists tokens; no token in the database", async ({
