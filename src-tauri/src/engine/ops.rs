@@ -15,7 +15,7 @@ use super::{AccountRt, Engine};
 use crate::mail::ModifyOp;
 use crate::model::AccountId;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Op {
     pub id: i64,
     pub action: Option<i64>,
@@ -99,7 +99,7 @@ pub async fn run(e: Arc<Engine>, rt: Arc<AccountRt>) {
                     ref message,
                 } => {
                     attempt = 0;
-                    reject(&e, rt.id, &op, status, message).await;
+                    reject(&e, rt.id, op, status, message).await;
                 }
                 // 404 on what an action names: it was deleted elsewhere; drop it.
                 Outcome::NotFound => {
@@ -141,8 +141,7 @@ async fn finish(e: &Engine, account: AccountId, op: i64) {
 
 /// Gmail rejected the op: roll back its local effect, drop its undo entry,
 /// and leave a notice for the toast. Replay continues with the next op.
-async fn reject(e: &Engine, account: AccountId, op: &Op, status: u16, message: &str) {
-    let op = op.clone();
+async fn reject(e: &Engine, account: AccountId, op: Op, status: u16, message: &str) {
     let text = format!("Gmail rejected a change ({status}): {message}");
     e
         .writer

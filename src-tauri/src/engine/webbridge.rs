@@ -174,8 +174,7 @@ async fn events(State(bridge): State<Bridge>) -> Response {
 }
 
 fn arg<T: serde::de::DeserializeOwned>(v: &Value, k: &str) -> Result<T, String> {
-    serde_json::from_value(v.get(k).cloned().unwrap_or(Value::Null))
-        .map_err(|e| format!("{k}: {e}"))
+    T::deserialize(v.get(k).unwrap_or(&Value::Null)).map_err(|e| format!("{k}: {e}"))
 }
 
 /// Runs a command by name through [`crate::api`], as the Tauri commands do.

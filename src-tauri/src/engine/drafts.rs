@@ -17,7 +17,7 @@ use super::attachments::DownloadError;
 use super::ops::{Done, bad};
 use super::{AccountRt, Engine};
 use crate::db::{from_json, to_json};
-use crate::model::{AccountId, Addr, DraftAttachment, DraftId, DraftKind, MessageId};
+use crate::model::{AccountId, Addr, DraftAttachment, DraftId, DraftKind, MessageId, ThreadId};
 
 /// A draft as stored, for building its MIME.
 pub struct DraftRow {
@@ -75,6 +75,23 @@ pub fn load(e: &Engine, draft: &str) -> Option<DraftRow> {
         .flatten()
 }
 
+/// The Gmail draft id stored for a local draft, if it has one.
+fn gmail_draft_id(e: &Engine, draft: &str) -> Option<String> {
+    e.reads
+        .with(|c| {
+            Ok(c.query_row(
+                "SELECT gmail_draft_id FROM drafts WHERE id = ?1",
+                [draft],
+                |r| r.get(0),
+            )
+            .optional()?)
+        })
+        .inspect_err(|err| log::warn!("read gmail draft id: {err:#}"))
+        .ok()
+        .flatten()
+        .flatten()
+}
+
 fn mime_addr(a: &Addr) -> ub_mime::Addr {
     ub_mime::Addr {
         name: a.name.clone(),
@@ -110,15 +127,15 @@ async fn attachment_bytes(
 ) -> Result<Vec<ub_mime::OutAttachment>, GmailError> {
     let mut out = Vec::new();
     for a in &d.attachments {
-        let path = match (&a.path, a.source) {
-            (Some(p), _) if Path::new(p).exists() => PathBuf::from(p),
-            (_, Some(src)) => download(e, src).await?,
+        let data = match (&a.path, a.source) {
+            (Some(p), _) if Path::new(p).exists() => read_file(Path::new(p))?,
+            (_, Some(src)) => read_file(&download(e, src).await?)?,
             _ => continue,
         };
         out.push(ub_mime::OutAttachment {
             filename: a.filename.clone(),
             mime_type: a.mime_type.clone(),
-            data: read_file(&path)?,
+            data,
         });
     }
     Ok(out)
@@ -273,9 +290,7 @@ async fn recover_create(
     rt: &AccountRt,
     local: &str,
 ) -> Result<Option<ub_gmail::Draft>, GmailError> {
-    if let Some(d) = load(e, local)
-        && let Some(gid) = d.gmail_draft_id
-    {
+    if let Some(gid) = gmail_draft_id(e, local) {
         let g = rt
             .sched
             .run(
@@ -365,7 +380,7 @@ pub async fn store_ids(e: &Engine, local: &str, g: &ub_gmail::Draft) {
     e
         .writer
         .call(move |ctx| {
-            let account: Option<i64> = ctx
+            let account: Option<AccountId> = ctx
                 .tx
                 .query_row("SELECT account_id FROM drafts WHERE id = ?1", [&local], |r| r.get(0))
                 .optional()?;
@@ -489,7 +504,7 @@ pub async fn download_parts(e: Arc<Engine>, draft: DraftId) {
 /// A Gmail change skipped while a composer had the draft open, read when that
 /// composer closes without edits.
 pub async fn read_skipped(e: Arc<Engine>, rt: Arc<AccountRt>, draft: DraftId) {
-    let Some(gid) = load(&e, &draft).and_then(|d| d.gmail_draft_id) else {
+    let Some(gid) = gmail_draft_id(&e, &draft) else {
         return;
     };
     let read = rt
@@ -512,7 +527,7 @@ pub async fn read_skipped(e: Arc<Engine>, rt: Arc<AccountRt>, draft: DraftId) {
 fn drop_gone(
     ctx: &mut crate::writer::Ctx<'_>,
     account: AccountId,
-    gone: Vec<String>,
+    gone: Vec<DraftId>,
 ) -> anyhow::Result<()> {
     for d in gone {
         if ctx.subs.is_draft_open(&d) {
@@ -528,7 +543,7 @@ fn drop_gone(
             )?;
             ctx.touch_draft(account, &d)?;
         } else {
-            let thread: Option<i64> = ctx
+            let thread: Option<ThreadId> = ctx
                 .tx
                 .query_row("SELECT thread_id FROM drafts WHERE id = ?1", [&d], |r| {
                     r.get(0)
@@ -550,7 +565,7 @@ fn drop_gone(
 /// Reconciles local drafts with `drafts.list` (SPEC Drafts).
 pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
     let gmail = list_all(rt).await?;
-    let local: Vec<(String, Option<String>, Option<String>)> = e
+    let local: Vec<(DraftId, Option<String>, Option<String>)> = e
         .reads
         .with(|c| {
             let mut stmt = c.prepare(
@@ -561,18 +576,19 @@ pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
             Ok(rows.collect::<Result<_, _>>()?)
         })
         .unwrap_or_default();
-    let by_gmail: HashMap<String, (String, Option<String>)> = local
-        .iter()
-        .filter_map(|(id, g, m)| g.clone().map(|g| (g, (id.clone(), m.clone()))))
-        .collect();
-    let live: HashSet<String> = gmail.iter().map(|d| d.id.clone()).collect();
-
+    // Gmail draft id → (local id, Gmail message id), for drafts Gmail still has.
+    let mut by_gmail: HashMap<String, (DraftId, Option<String>)> = HashMap::new();
     // Drafts deleted on Gmail (for example sent from a phone).
-    let gone: Vec<String> = local
-        .iter()
-        .filter(|(_, g, _)| g.as_ref().is_some_and(|g| !live.contains(g)))
-        .map(|(id, _, _)| id.clone())
-        .collect();
+    let mut gone: Vec<DraftId> = Vec::new();
+    let live: HashSet<&str> = gmail.iter().map(|d| d.id.as_str()).collect();
+    for (id, g, m) in local {
+        let Some(g) = g else { continue };
+        if live.contains(g.as_str()) {
+            by_gmail.insert(g, (id, m));
+        } else {
+            gone.push(id);
+        }
+    }
     if !gone.is_empty() {
         let account = rt.id;
         e.writer
@@ -583,7 +599,7 @@ pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
 
     // Drafts this app does not know, or whose message changed, are read again.
     for g in gmail {
-        if let Some((local, msg)) = by_gmail.get(&g.id) {
+        if let Some((local, msg)) = by_gmail.remove(&g.id) {
             if msg.as_deref() == Some(g.message.id.as_str()) {
                 continue;
             }
@@ -610,8 +626,7 @@ pub async fn sync_list(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
 
 /// A composer has the draft open: mark the Gmail change for `read_skipped`
 /// instead of overwriting the text being edited.
-async fn defer_if_open(e: &Engine, draft: &str) -> bool {
-    let draft = draft.to_string();
+async fn defer_if_open(e: &Engine, draft: DraftId) -> bool {
     e.writer
         .call(move |ctx| {
             if !ctx.subs.is_draft_open(&draft) {
@@ -634,7 +649,7 @@ async fn defer_if_open(e: &Engine, draft: &str) -> bool {
 /// when its target was the newest non-draft message older than the draft.
 fn gmail_draft_target(
     ctx: &crate::writer::Ctx<'_>,
-    thread: crate::model::ThreadId,
+    thread: ThreadId,
     others: &[crate::threads::Msg],
     m: &super::ingest::Incoming,
 ) -> anyhow::Result<(Option<MessageId>, bool)> {
@@ -644,7 +659,7 @@ fn gmail_draft_target(
             .query_row(
                 "SELECT id FROM messages WHERE thread_id = ?1 AND message_id_hdr = ?2 AND is_draft = 0",
                 params![thread, irt.trim_matches(['<', '>'])],
-                |r| r.get::<_, i64>(0),
+                |r| r.get::<_, MessageId>(0),
             )
             .optional()?,
         None => None,
@@ -677,7 +692,7 @@ fn gmail_draft_rows(
     account: AccountId,
     m: &super::ingest::Incoming,
     gmail_draft: &str,
-) -> anyhow::Result<(Option<i64>, Option<String>)> {
+) -> anyhow::Result<(Option<MessageId>, Option<DraftId>)> {
     let msg_row = ctx
         .tx
         .query_row(
@@ -693,7 +708,7 @@ fn gmail_draft_rows(
             params![
                 account,
                 gmail_draft,
-                m.ub_draft_id.clone().unwrap_or_default()
+                m.ub_draft_id.as_deref().unwrap_or_default()
             ],
             |r| r.get(0),
         )
@@ -704,7 +719,7 @@ fn gmail_draft_rows(
 /// Creates or updates the local draft for a Gmail draft. Its kind is decided
 /// once, when it first appears: new, forward (`Fwd:`), or reply.
 pub async fn store_gmail_draft(e: &Engine, rt: &AccountRt, g: ub_gmail::Draft) {
-    let m = super::ingest::parse(&g.message, true, &HashMap::new());
+    let m = super::ingest::parse(&g.message, true, HashMap::new());
     let raw_html = g
         .message
         .payload
@@ -763,7 +778,7 @@ pub async fn store_gmail_draft(e: &Engine, rt: &AccountRt, g: ub_gmail::Draft) {
                 ctx.touch_draft(account, &local)?;
             } else {
                 let kind = gmail_draft_kind(others.is_empty(), &m);
-                let local = m.ub_draft_id.clone().unwrap_or_else(|| format!("g-{gmail_draft}"));
+                let local = m.ub_draft_id.unwrap_or_else(|| format!("g-{gmail_draft}"));
                 ctx.tx.execute(
                     "INSERT INTO drafts (id, account_id, kind, thread_id, target_message_id, started_on_latest,
                         from_json, to_json, cc_json, bcc_json, subject, body_html, quote_html, attachments_json,

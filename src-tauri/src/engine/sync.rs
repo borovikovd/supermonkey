@@ -12,7 +12,7 @@ use super::ingest::{self, Incoming, PendingOps};
 use super::work::{self, Work};
 use super::{AccountRt, Engine};
 use crate::db::to_json;
-use crate::model::{AccountId, SendAs, ThreadId};
+use crate::model::{AccountId, MessageId, SendAs, ThreadId};
 use crate::writer::Effect;
 
 const POLL: Duration = Duration::from_secs(45);
@@ -169,10 +169,10 @@ pub async fn refresh_send_as(e: &Engine, rt: &AccountRt) -> Result<(), GmailErro
         .run(Priority::P3, cost::SEND_AS_LIST, rt.gmail.list_send_as())
         .await?;
     let send_as: Vec<SendAs> = list
-        .iter()
+        .into_iter()
         .map(|s| SendAs {
-            email: s.send_as_email.clone(),
-            name: s.display_name.clone(),
+            email: s.send_as_email,
+            name: s.display_name,
             is_default: s.is_default,
             is_primary: s.is_primary,
         })
@@ -204,7 +204,7 @@ pub async fn refresh_labels(e: &Engine, rt: &AccountRt) -> Result<(), GmailError
     e
         .writer
         .call(move |ctx| {
-            let gmail_ids: HashSet<String> = labels.iter().map(|l| l.id.clone()).collect();
+            let gmail_ids: HashSet<&str> = labels.iter().map(|l| l.id.as_str()).collect();
             for l in &labels {
                 let system = matches!(l.label_type, Some(ub_gmail::LabelType::System));
                 // A label created here keeps its local id once mapped.
@@ -227,7 +227,7 @@ pub async fn refresh_labels(e: &Engine, rt: &AccountRt) -> Result<(), GmailError
             };
             for (id, gid) in local {
                 if let Some(g) = gid
-                    && !gmail_ids.contains(&g)
+                    && !gmail_ids.contains(g.as_str())
                     && !crate::accounts::SYSTEM_LABELS.iter().any(|(s, _)| *s == id)
                 {
                     ctx.tx
@@ -334,7 +334,7 @@ pub async fn get_thread(
         } else {
             HashMap::new()
         };
-        msgs.push(ingest::parse(m, full, &cids));
+        msgs.push(ingest::parse(m, full, cids));
     }
     Ok((thread.history_id, msgs))
 }
@@ -384,7 +384,7 @@ pub fn drop_thread(
     let Some(t) = crate::db::queries::thread_by_gmail(ctx.tx, account, gmail_thread)? else {
         return Ok(());
     };
-    let ids: Vec<i64> = {
+    let ids: Vec<MessageId> = {
         let mut stmt = ctx
             .tx
             .prepare("SELECT id FROM messages WHERE thread_id = ?1")?;
@@ -462,7 +462,7 @@ struct HistoryBatch {
 }
 
 impl HistoryBatch {
-    fn from_records(records: &[ub_gmail::History]) -> HistoryBatch {
+    fn from_records(records: Vec<ub_gmail::History>) -> HistoryBatch {
         let mut batch = HistoryBatch {
             label_sets: HashMap::new(),
             added: HashSet::new(),
@@ -470,22 +470,18 @@ impl HistoryBatch {
             draft_change: false,
         };
         for h in records {
-            for m in &h.messages_added {
-                batch.added.insert(m.message.id.clone());
-                batch.draft_change |= m.message.label_ids.iter().any(|l| l == "DRAFT");
-                batch.label_sets.insert(
-                    m.message.id.clone(),
-                    (m.message.thread_id.clone(), m.message.label_ids.clone()),
-                );
+            for m in h.messages_added {
+                let m = m.message;
+                batch.draft_change |= m.label_ids.iter().any(|l| l == "DRAFT");
+                batch.added.insert(m.id.clone());
+                batch.label_sets.insert(m.id, (m.thread_id, m.label_ids));
             }
-            for c in h.labels_added.iter().chain(&h.labels_removed) {
-                batch.label_sets.insert(
-                    c.message.id.clone(),
-                    (c.message.thread_id.clone(), c.message.label_ids.clone()),
-                );
+            for c in h.labels_added.into_iter().chain(h.labels_removed) {
+                let m = c.message;
+                batch.label_sets.insert(m.id, (m.thread_id, m.label_ids));
             }
-            for m in &h.messages_deleted {
-                batch.deleted.insert(m.message.id.clone());
+            for m in h.messages_deleted {
+                batch.deleted.insert(m.message.id);
             }
         }
         batch.draft_change |= !batch.deleted.is_empty();
@@ -510,7 +506,7 @@ fn apply_history(
     let refetched: HashSet<&str> = fetched.iter().map(|(gid, ..)| gid.as_str()).collect();
     let mut touched: Vec<ThreadId> = Vec::new();
     for gid in &batch.deleted {
-        let row: Option<(i64, i64)> = ctx
+        let row: Option<(MessageId, ThreadId)> = ctx
             .tx
             .query_row(
                 "SELECT id, thread_id FROM messages WHERE account_id = ?1 AND gmail_id = ?2",
@@ -583,9 +579,9 @@ pub async fn poll(e: &Arc<Engine>, rt: &AccountRt) -> Result<(), GmailError> {
         }
         return Ok(());
     }
-    let batch = HistoryBatch::from_records(&records);
+    let batch = HistoryBatch::from_records(records);
     let draft_change = batch.draft_change;
-    let known: HashSet<&String> = e
+    let known: HashSet<&str> = e
         .reads
         .with(|c| {
             let mut stmt =
@@ -593,6 +589,7 @@ pub async fn poll(e: &Arc<Engine>, rt: &AccountRt) -> Result<(), GmailError> {
             Ok(batch
                 .label_sets
                 .keys()
+                .map(String::as_str)
                 .filter(|id| stmt.exists(params![rt.id, id]).unwrap_or(false))
                 .collect())
         })
@@ -601,7 +598,7 @@ pub async fn poll(e: &Arc<Engine>, rt: &AccountRt) -> Result<(), GmailError> {
     let fetch: HashSet<String> = batch
         .label_sets
         .iter()
-        .filter(|(msg, _)| !known.contains(msg) && !batch.deleted.contains(*msg))
+        .filter(|(msg, _)| !known.contains(msg.as_str()) && !batch.deleted.contains(*msg))
         .map(|(_, (thread, _))| thread.clone())
         .collect();
     let mut fetched: Vec<(String, Option<u64>, Vec<Incoming>)> = Vec::new();
@@ -675,22 +672,21 @@ async fn reconcile_cached(
             Ok(rows.collect::<Result<_, _>>()?)
         })
         .unwrap_or_default();
-    for (gid, hist, rev) in &cached {
-        match listed.get(gid) {
-            None if *rev <= started_rev => {
+    for (gid, hist, rev) in cached {
+        match listed.get(&gid) {
+            None if rev <= started_rev => {
                 let r = rt
                     .sched
                     .run(
                         Priority::P4,
                         cost::threads_get(Format::Minimal),
-                        rt.gmail.get_thread(gid, Format::Minimal, &[]),
+                        rt.gmail.get_thread(&gid, Format::Minimal, &[]),
                     )
                     .await;
                 if let Err(err) = r
                     && matches!(err.outcome, Outcome::NotFound)
                 {
                     let account = rt.id;
-                    let gid = gid.clone();
                     e.writer
                         .call(move |ctx| drop_thread(ctx, account, &gid))
                         .await
@@ -702,7 +698,7 @@ async fn reconcile_cached(
                 rt.work.push(
                     work::OTHER_META,
                     Work::Meta {
-                        thread: gid.clone(),
+                        thread: gid,
                         history: *h,
                         body: None,
                     },

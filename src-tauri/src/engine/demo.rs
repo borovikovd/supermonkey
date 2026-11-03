@@ -74,11 +74,11 @@ fn seed(u: &FakeUser, me: &str) {
                 text: Some("Looks good to me. One question about the second table.".into()),
                 labels: vec!["SENT".into()],
                 thread_id: Some(first.thread_id.clone()),
-                in_reply_to: Some(first.rfc822_message_id.clone()),
+                in_reply_to: Some(first.rfc822_message_id),
                 ..Default::default()
             });
             u.add_message(&NewMessage {
-                from: from.clone(),
+                from,
                 to: vec![me.to_string()],
                 cc: vec![PEOPLE[(i + 1) % PEOPLE.len()].1.to_string()],
                 subject: "Re: Q3 planning".into(),
@@ -88,8 +88,8 @@ fn seed(u: &FakeUser, me: &str) {
                         .into(),
                 ),
                 labels: vec!["INBOX".into(), "CATEGORY_PERSONAL".into()],
-                thread_id: Some(first.thread_id.clone()),
-                in_reply_to: Some(mine.rfc822_message_id.clone()),
+                thread_id: Some(first.thread_id),
+                in_reply_to: Some(mine.rfc822_message_id),
                 attachments: vec![
                     NewAttachment {
                         filename: "chart.png".into(),
@@ -167,15 +167,14 @@ pub fn setup(writer: &Writer) -> Option<(Config, Arc<dyn TokenStore>)> {
         store
             .store_refresh_token(email, u.refresh_token())
             .log_err("demo token");
-        let e = email.to_string();
         let created = writer.call_blocking(move |ctx| {
             let known: bool = ctx.tx.query_row(
                 "SELECT EXISTS (SELECT 1 FROM accounts WHERE email = ?1)",
-                [&e],
+                [email],
                 |r| r.get(0),
             )?;
             if !known {
-                crate::accounts::create(ctx, &e)?;
+                crate::accounts::create(ctx, email)?;
             }
             Ok(())
         });

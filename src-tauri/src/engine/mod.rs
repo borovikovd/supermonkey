@@ -465,7 +465,7 @@ async fn dispatch(engine: Arc<Engine>, mut effects: EffectReceiver) {
     while let Some(tracked) = crate::clock::parked(effects.recv()).await {
         // Busy until this effect is handled; the tasks it starts count on their own.
         let (effect, _handling) = tracked.into_parts();
-        let e = engine.clone();
+        let e = &engine;
         match effect {
             Effect::Ops(a) => {
                 if let Some(rt) = e.account(a) {
@@ -479,7 +479,7 @@ async fn dispatch(engine: Arc<Engine>, mut effects: EffectReceiver) {
             }
             Effect::FetchThread { account, thread } => {
                 if let Some(rt) = e.account(account) {
-                    engine.spawn("fetch thread", sync::fetch_opened(e, rt, thread));
+                    e.spawn("fetch thread", sync::fetch_opened(e.clone(), rt, thread));
                 }
             }
             Effect::GmailList {
@@ -487,19 +487,19 @@ async fn dispatch(engine: Arc<Engine>, mut effects: EffectReceiver) {
                 account,
                 query,
                 page_token,
-            } => search::start(&e, sub, account, query, page_token),
-            Effect::CancelSub(sub) => search::cancel(&e, &sub),
+            } => search::start(e, sub, account, query, page_token),
+            Effect::CancelSub(sub) => search::cancel(e, &sub),
             Effect::AccountRemoved { account, email } => {
-                engine.spawn("forget account", auth::forget(e, account, email));
+                e.spawn("forget account", auth::forget(e.clone(), account, email));
             }
             Effect::DraftParts { account, draft } => {
                 if e.account(account).is_some() {
-                    engine.spawn("draft parts", drafts::download_parts(e, draft));
+                    e.spawn("draft parts", drafts::download_parts(e.clone(), draft));
                 }
             }
             Effect::ReadDraft { account, draft } => {
                 if let Some(rt) = e.account(account) {
-                    engine.spawn("read draft", drafts::read_skipped(e, rt, draft));
+                    e.spawn("read draft", drafts::read_skipped(e.clone(), rt, draft));
                 }
             }
             Effect::OnScreen(a) => {
@@ -507,11 +507,12 @@ async fn dispatch(engine: Arc<Engine>, mut effects: EffectReceiver) {
                     e.scheduler.set_on_screen(Some(&rt.email));
                 }
             }
-            Effect::Badge => update_badge(&e),
-            Effect::Notify(n) => notify::show(&e, &n),
+            Effect::Badge => update_badge(e),
+            Effect::Notify(n) => notify::show(e, n),
             Effect::Snoozes => e.snooze_kick.kick(),
             Effect::RefreshLabels(a) => {
                 if let Some(rt) = e.account(a) {
+                    let e = e.clone();
                     engine.spawn("refresh labels", async move {
                         sync::refresh_labels(&e, &rt)
                             .await

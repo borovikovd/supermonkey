@@ -14,12 +14,12 @@ use rusqlite::{OptionalExtension, params};
 use ub_gmail::{Format, GmailError, Outcome, Priority, cost};
 
 use super::{AccountRt, Engine};
-use crate::model::AccountId;
+use crate::model::{AccountId, DraftId, MessageId, ThreadId};
 
 #[derive(Debug)]
 struct Row {
     id: i64,
-    draft: String,
+    draft: DraftId,
     /// Handed to Gmail with no clear answer yet; otherwise waiting.
     sending: bool,
     send_after: i64,
@@ -124,7 +124,7 @@ fn touch_row_thread(
     account: AccountId,
     outbox: i64,
 ) -> anyhow::Result<()> {
-    let t: Option<i64> = ctx
+    let t: Option<ThreadId> = ctx
         .tx
         .query_row(
             "SELECT thread_id FROM outbox WHERE id = ?1",
@@ -167,13 +167,12 @@ async fn send(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError> {
         }
     };
     super::drafts::store_ids(e, &row.draft, &draft).await;
-    record_gmail_draft(e, row.id, &draft.id).await;
+    record_gmail_draft(e, row.id, draft.id.clone()).await;
     // 4: drafts.send.
     send_draft(e, rt, row, &draft.id).await
 }
 
-async fn record_gmail_draft(e: &Engine, outbox: i64, gid: &str) {
-    let gid = gid.to_string();
+async fn record_gmail_draft(e: &Engine, outbox: i64, gid: String) {
     e.writer
         .call(move |ctx| {
             ctx.tx.execute(
@@ -207,7 +206,7 @@ async fn send_draft(
         .await
     {
         Ok(m) => {
-            sent(e, rt, row, &m.id, &m.thread_id).await;
+            sent(e, rt, row, m.id, &m.thread_id).await;
             return Ok(());
         }
         Err(err) => err,
@@ -291,7 +290,7 @@ async fn settle(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError>
                 .ok()
                 .flatten();
             let Some(thread) = thread else {
-                sent(e, rt, row, "", "").await;
+                sent(e, rt, row, String::new(), "").await;
                 return Ok(());
             };
             let t = rt
@@ -304,12 +303,12 @@ async fn settle(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError>
                 .await?;
             let newest = t
                 .messages
-                .iter()
+                .into_iter()
                 .filter(|m| m.label_ids.iter().any(|l| l == "SENT"))
                 .max_by_key(|m| m.internal_date.unwrap_or(0))
-                .map(|m| m.id.clone())
+                .map(|m| m.id)
                 .unwrap_or_default();
-            sent(e, rt, row, &newest, &thread).await;
+            sent(e, rt, row, newest, &thread).await;
             Ok(())
         }
         Err(err) => Err(err),
@@ -318,11 +317,10 @@ async fn settle(e: &Engine, rt: &AccountRt, row: &Row) -> Result<(), GmailError>
 
 /// Gmail accepted the send. Store the sent message at once, so the reply
 /// never leaves the thread while waiting for the next poll.
-async fn sent(e: &Engine, rt: &AccountRt, row: &Row, message: &str, gmail_thread: &str) {
+async fn sent(e: &Engine, rt: &AccountRt, row: &Row, msg: String, gmail_thread: &str) {
     let account = rt.id;
     let outbox = row.id;
     let draft = row.draft.clone();
-    let msg = message.to_string();
     e.writer
         .call(move |ctx| {
             ctx.tx.execute(
@@ -330,7 +328,7 @@ async fn sent(e: &Engine, rt: &AccountRt, row: &Row, message: &str, gmail_thread
                 params![outbox, msg],
             )?;
             // Gmail removed the draft as it sent.
-            let copies: Vec<i64> = {
+            let copies: Vec<MessageId> = {
                 let mut stmt = ctx
                     .tx
                     .prepare("SELECT id FROM messages WHERE account_id = ?1 AND ub_draft_id = ?2 AND is_draft = 1")?;
@@ -411,7 +409,7 @@ async fn notice_and_remove(
                 "UPDATE drafts SET started_fresh = 0, defaults_json = NULL WHERE id = ?1",
                 [&draft],
             )?;
-            let thread: Option<i64> = ctx
+            let thread: Option<ThreadId> = ctx
                 .tx
                 .query_row(
                     "SELECT thread_id FROM drafts WHERE id = ?1",

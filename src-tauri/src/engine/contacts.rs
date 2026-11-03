@@ -105,17 +105,18 @@ pub async fn backfill_page(
             .filter(|m| {
                 m.label_ids.iter().any(|l| l == "SENT") && !m.label_ids.iter().any(|l| l == "DRAFT")
             })
-            .map(|m| super::ingest::parse(m, false, &std::collections::HashMap::default()))
+            .map(|m| super::ingest::parse(m, false, std::collections::HashMap::default()))
             .collect();
         let account = rt.id;
         e.writer.sync(move |ctx| {
             let mine = crate::db::queries::my_addresses(ctx.tx, account)?;
+            let none = Addr {
+                name: None,
+                email: String::new(),
+            };
             for m in &msgs {
-                let from = m.from.clone().unwrap_or(Addr {
-                    name: None,
-                    email: String::new(),
-                });
-                super::ingest::count_contacts(ctx, account, m, &from, &mine)?;
+                let from = m.from.as_ref().unwrap_or(&none);
+                super::ingest::count_contacts(ctx, account, m, from, &mine)?;
             }
             Ok(())
         });

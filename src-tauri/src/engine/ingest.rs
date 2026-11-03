@@ -75,34 +75,32 @@ pub fn inline_parts_to_fetch(m: &ub_gmail::Message) -> Vec<(String, String, Stri
 pub fn parse(
     m: &ub_gmail::Message,
     with_body: bool,
-    cid_data: &HashMap<String, String>,
+    mut cid_data: HashMap<String, String>,
 ) -> Incoming {
-    let parsed = m
+    let mut parsed = m
         .payload
         .as_ref()
         .map(ub_mime::parse_gmail_payload)
         .unwrap_or_default();
-    let mut cids = cid_data.clone();
-    for p in &parsed.parts {
-        if let (Some(cid), Some(data)) = (&p.content_id, &p.data) {
-            cids.entry(cid.clone())
-                .or_insert_with(|| ub_mime::data_uri(&p.mime_type, data));
-        }
-    }
     let body = with_body.then(|| {
-        let (raw, plain) = match (&parsed.html, &parsed.text) {
-            (Some(h), _) => (h.clone(), false),
+        for p in &parsed.parts {
+            if let (Some(cid), Some(data)) = (&p.content_id, &p.data) {
+                cid_data
+                    .entry(cid.clone())
+                    .or_insert_with(|| ub_mime::data_uri(&p.mime_type, data));
+            }
+        }
+        let text = parsed.text.take();
+        let (raw, plain) = match (parsed.html.take(), &text) {
+            (Some(h), _) => (h, false),
             (None, Some(t)) => (ub_mime::text_to_html(t), true),
             (None, None) => (String::new(), true),
         };
         let (visible, quote) = ub_mime::split_quoted_history(&raw);
-        let text = match (&parsed.text, plain) {
-            (Some(t), _) => t.clone(),
-            _ => ub_mime::html_to_text(&raw),
-        };
+        let text = text.unwrap_or_else(|| ub_mime::html_to_text(&raw));
         Body {
-            html: ub_mime::sanitize_html(&visible, &cids),
-            quote: quote.map(|q| ub_mime::sanitize_html(&q, &cids)),
+            html: ub_mime::sanitize_html(&visible, &cid_data),
+            quote: quote.map(|q| ub_mime::sanitize_html(&q, &cid_data)),
             text,
             plain,
         }
@@ -312,7 +310,7 @@ pub fn store_thread(
     }
     if complete {
         let keep: HashSet<&str> = msgs.iter().map(|m| m.gmail_id.as_str()).collect();
-        let local: Vec<(i64, String)> = {
+        let local: Vec<(MessageId, String)> = {
             let mut stmt = ctx
                 .tx
                 .prepare_cached("SELECT id, gmail_id FROM messages WHERE thread_id = ?1")?;
@@ -348,11 +346,12 @@ fn store_message(
     mine: &HashSet<String>,
 ) -> anyhow::Result<MessageId> {
     let is_draft = m.labels.iter().any(|l| l == "DRAFT");
-    let from = m.from.clone().unwrap_or(Addr {
+    let none = Addr {
         name: None,
         email: String::new(),
-    });
-    let existing: Option<(i64, bool)> = ctx
+    };
+    let from = m.from.as_ref().unwrap_or(&none);
+    let existing: Option<(MessageId, bool)> = ctx
         .tx
         .query_row(
             "SELECT id, has_body FROM messages WHERE account_id = ?1 AND gmail_id = ?2",
@@ -378,7 +377,7 @@ fn store_message(
                 thread,
                 m.gmail_id,
                 m.internal_date,
-                from.name.clone().unwrap_or_default(),
+                from.name.as_deref().unwrap_or(""),
                 from.email,
                 to_json(&m.to),
                 to_json(&m.cc),
@@ -427,11 +426,11 @@ fn store_message(
         ctx.tx.execute(
             "INSERT INTO messages_fts (rowid, from_text, to_text, cc_text, subject, body)
              VALUES (?1, ?2, ?3, ?4, ?5, coalesce(?6, (SELECT body_text FROM messages WHERE id = ?1), ''))",
-            params![id, fmt_addr(&from), to_text, cc_text, m.subject, body_text],
+            params![id, fmt_addr(from), to_text, cc_text, m.subject, body_text],
         )?;
         let spam = m.labels.iter().any(|l| l == "SPAM");
         if !spam {
-            count_contacts(ctx, account, m, &from, mine)?;
+            count_contacts(ctx, account, m, from, mine)?;
         }
     }
     ctx.touch_message(id)?;
@@ -506,7 +505,7 @@ pub fn count_contacts(
             upsert.execute(params![
                 account,
                 email,
-                a.name.clone().unwrap_or_default(),
+                a.name.as_deref().unwrap_or(""),
                 sent_n,
                 recv_n,
                 list_only,
@@ -546,8 +545,8 @@ pub fn set_labels_from_gmail(
             params![account, gmail_msg],
             |r| {
                 Ok((
-                    r.get::<_, i64>(0)?,
-                    r.get::<_, i64>(1)?,
+                    r.get::<_, MessageId>(0)?,
+                    r.get::<_, ThreadId>(1)?,
                     r.get::<_, String>(2)?,
                 ))
             },

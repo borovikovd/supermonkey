@@ -45,9 +45,8 @@ async fn sign_in_once(e: &Engine) -> anyhow::Result<SignIn> {
             "This build has no Google OAuth client. Put google-oauth-client.json in the project and rebuild."
         );
     }
-    let platform = e.platform.clone();
-    let auth = ub_gmail::authorize(&e.config.oauth, &e.http, move |url| {
-        platform.open_url(url);
+    let auth = ub_gmail::authorize(&e.config.oauth, &e.http, |url| {
+        e.platform.open_url(url);
     })
     .await
     .map_err(|err| anyhow::anyhow!("Sign-in failed: {:?}", err.outcome))?;

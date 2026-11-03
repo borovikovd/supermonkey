@@ -6,7 +6,7 @@ use rusqlite::params;
 
 use super::Engine;
 use crate::db::queries;
-use crate::model::AccountId;
+use crate::model::{AccountId, ThreadId};
 use crate::notify::Notification;
 use crate::writer::{Ctx, Effect};
 
@@ -33,7 +33,7 @@ pub fn from_poll(
             })?;
     // Every connected account's addresses.
     let mut mine: HashSet<String> = HashSet::new();
-    let ids: Vec<i64> = {
+    let ids: Vec<AccountId> = {
         let mut stmt = ctx.tx.prepare("SELECT id FROM accounts")?;
         stmt.query_map([], |r| r.get(0))?
             .collect::<Result<_, _>>()?
@@ -55,7 +55,7 @@ pub fn from_poll(
         let Ok((thread, name, from, subject, snippet, labels)) =
             stmt.query_row(params![account, gid], |r| {
                 Ok((
-                    r.get::<_, i64>(0)?,
+                    r.get::<_, ThreadId>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
@@ -103,7 +103,7 @@ pub fn from_poll(
     Ok(())
 }
 
-pub fn show(e: &Engine, n: &Notification) {
-    *e.last_notification.lock() = Some((n.clone(), crate::clock::now_ms()));
-    e.platform.notify(n);
+pub fn show(e: &Engine, n: Notification) {
+    e.platform.notify(&n);
+    *e.last_notification.lock() = Some((n, crate::clock::now_ms()));
 }
