@@ -17,5 +17,9 @@ sha2 = "0.10"
 url = "2"
 tower = { version = "0.5", features = ["util"] }
 
+[dev-dependencies]
+reqwest = { version = "0.13", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+
 [lints]
 workspace = true

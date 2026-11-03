@@ -171,6 +171,9 @@ pub(crate) struct Held {
     /// The hold fault that parked it.
     pub hold: u64,
     pub info: RequestInfo,
+    /// Waiting now. A [`Fault::HoldAnswer`] request is listed from when it chose the hold,
+    /// so a release during its work is not lost, but parks only once its answer is ready.
+    pub parked: bool,
     /// Receives what happens next: a fault to suffer, or `None` to be handled normally.
     pub release: oneshot::Sender<Option<Fault>>,
 }

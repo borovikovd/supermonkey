@@ -44,7 +44,7 @@ use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use axum::Router;
@@ -77,12 +77,22 @@ pub struct FakeGmail {
 
 pub(crate) struct Shared {
     world: Mutex<World>,
-    faults: Mutex<Vec<FaultEntry>>,
-    next_fault: AtomicU64,
+    traffic: Mutex<Traffic>,
     log: Mutex<Vec<LoggedRequest>>,
-    held: Mutex<Vec<Held>>,
     in_flight: AtomicUsize,
     clock: Mutex<Option<Clock>>,
+}
+
+/// Faults and the requests holds have parked, under one lock: a release must never fall
+/// between a request choosing a hold and joining the held list, or nothing releases it.
+/// The log's `held` flag goes on only under this lock, while the request is listed, so a
+/// release cannot leave it on. Lock order: `traffic`, then `log`.
+#[derive(Default)]
+struct Traffic {
+    faults: Vec<FaultEntry>,
+    /// The last fault id handed out.
+    next_fault: u64,
+    held: Vec<Held>,
 }
 
 pub(crate) struct World {
@@ -183,18 +193,53 @@ impl Shared {
         })
     }
 
-    /// The first fault that applies to this request, with its id. Every matching entry counts
-    /// the request, applied or not, so `nth` and `times` count from injection.
-    fn fault_for(&self, request: &RequestInfo) -> Option<(u64, Fault)> {
-        let mut faults = self.faults.lock();
+    /// What the first fault that applies to this request does to it. Every matching entry
+    /// counts the request, applied or not, so `nth` and `times` count from injection.
+    ///
+    /// A hold puts the request on the held list in the same critical section, so a release
+    /// either removes the hold first or finds the request there. A [`Fault::HoldAnswer`]
+    /// request joins the list before its work, unparked: a release during the work lets
+    /// its answer through as soon as it is ready.
+    fn fault_for(&self, seq: usize, request: &RequestInfo) -> Option<Plan<'_>> {
+        let mut traffic = self.traffic.lock();
         let mut chosen = None;
-        for entry in faults.iter_mut().filter(|e| e.matcher.matches(request)) {
+        for entry in traffic
+            .faults
+            .iter_mut()
+            .filter(|e| e.matcher.matches(request))
+        {
             entry.seen += 1;
             if chosen.is_none() && entry.applies() {
                 chosen = Some((entry.id, entry.fault.clone()));
             }
         }
-        chosen
+        let (hold, fault) = chosen?;
+        let parked = match fault {
+            Fault::Hold => true,
+            Fault::HoldAnswer => false,
+            fault => return Some(Plan::Fault(fault)),
+        };
+        let (release, released) = oneshot::channel();
+        traffic.held.push(Held {
+            seq,
+            hold,
+            info: request.clone(),
+            parked,
+            release,
+        });
+        if parked {
+            self.set_held(seq, true);
+        }
+        drop(traffic);
+        let ticket = Ticket {
+            released,
+            unhold: Unhold { shared: self, seq },
+        };
+        Some(if parked {
+            Plan::Hold(ticket)
+        } else {
+            Plan::HoldAnswer(ticket)
+        })
     }
 
     fn set_held(&self, seq: usize, held: bool) {
@@ -203,25 +248,47 @@ impl Shared {
         }
     }
 
+    /// Parks a request's answer, unless a release has taken it off the held list already.
+    fn park(&self, seq: usize) {
+        let mut traffic = self.traffic.lock();
+        if let Some(held) = traffic.held.iter_mut().find(|h| h.seq == seq && !h.parked) {
+            held.parked = true;
+            self.set_held(seq, true);
+        }
+    }
+
     fn answered(&self, seq: usize, answer: Answer) {
         if let Some(entry) = self.log.lock().get_mut(seq) {
             entry.answer = Some(answer);
         }
     }
+}
 
-    /// Parks a request until it is released, then returns what it suffers next.
-    async fn hold(&self, seq: usize, hold: u64, info: RequestInfo) -> Option<Fault> {
-        let (release, released) = oneshot::channel();
-        self.held.lock().push(Held {
-            seq,
-            hold,
-            info,
-            release,
-        });
-        self.set_held(seq, true);
-        // If the client goes away first, the request leaves the held list.
-        let _unhold = Unhold { shared: self, seq };
-        released.await.ok().flatten()
+/// What a request suffers, as [`Shared::fault_for`] chose it.
+enum Plan<'a> {
+    Fault(Fault),
+    /// Parked now; handled once released.
+    Hold(Ticket<'a>),
+    /// Handled now; the answer parks once ready.
+    HoldAnswer(Ticket<'a>),
+}
+
+/// A request on the held list.
+struct Ticket<'a> {
+    released: oneshot::Receiver<Option<Fault>>,
+    // If the client goes away first, the request leaves the held list.
+    unhold: Unhold<'a>,
+}
+
+impl Ticket<'_> {
+    /// Waits until released (at once if it was already), then returns what the request
+    /// suffers next.
+    async fn park(self) -> Option<Fault> {
+        let Ticket { released, unhold } = self;
+        unhold.shared.park(unhold.seq);
+        let then = released.await.ok().flatten();
+        drop(unhold);
+        then
     }
 }
 
@@ -233,7 +300,11 @@ struct Unhold<'a> {
 
 impl Drop for Unhold<'_> {
     fn drop(&mut self) {
-        self.shared.held.lock().retain(|h| h.seq != self.seq);
+        self.shared
+            .traffic
+            .lock()
+            .held
+            .retain(|h| h.seq != self.seq);
         self.shared.set_held(self.seq, false);
     }
 }
@@ -379,7 +450,8 @@ pub enum Fault {
     /// Park the request until [`FakeGmail::release`] lets it go.
     Hold,
     /// Do the request's work now, then park the answer until [`FakeGmail::release`]:
-    /// the client hears what Gmail had before anything that lands in between.
+    /// the client hears what Gmail had before anything that lands in between. A release
+    /// that comes during the work lets the answer go as soon as it is ready.
     HoldAnswer,
     /// Do the request's work, then answer with this error: done, but the client hears otherwise.
     StatusAfterApply { status: u16, reason: String },
@@ -522,10 +594,8 @@ impl FakeGmail {
             .expect("a bound listener has an address");
         let shared = Arc::new(Shared {
             world: Mutex::new(World::default()),
-            faults: Mutex::default(),
-            next_fault: AtomicU64::new(1),
+            traffic: Mutex::default(),
             log: Mutex::default(),
-            held: Mutex::default(),
             in_flight: AtomicUsize::new(0),
             clock: Mutex::new(None),
         });
@@ -607,8 +677,10 @@ impl FakeGmail {
     /// Adds a fault for matching requests. The first applicable fault wins. Returns its id,
     /// which [`Release::Hold`] names.
     pub fn inject(&self, matcher: Matcher, fault: Fault) -> u64 {
-        let id = self.shared.next_fault.fetch_add(1, Ordering::Relaxed);
-        self.shared.faults.lock().push(FaultEntry {
+        let mut traffic = self.shared.traffic.lock();
+        traffic.next_fault += 1;
+        let id = traffic.next_fault;
+        traffic.faults.push(FaultEntry {
             id,
             matcher,
             fault,
@@ -619,23 +691,23 @@ impl FakeGmail {
 
     /// Removes every fault, holds included. Requests already held stay held.
     pub fn clear_faults(&self) {
-        self.shared.faults.lock().clear();
+        self.shared.traffic.lock().faults.clear();
     }
 
     /// Ends holds and lets the requests they parked go on: handled normally, or suffering
-    /// `then`. Returns how many requests it released.
+    /// `then`. Returns how many requests it released, answers of [`Fault::HoldAnswer`]
+    /// still being worked on included.
     pub fn release(&self, which: &Release, then: Option<&Fault>) -> usize {
-        let is_hold = |id: u64, api: Option<&str>| which.covers(id, api);
-        self.shared.faults.lock().retain(|e| {
+        let mut traffic = self.shared.traffic.lock();
+        traffic.faults.retain(|e| {
             !(matches!(e.fault, Fault::Hold | Fault::HoldAnswer)
-                && is_hold(e.id, e.matcher.api.as_deref()))
+                && which.covers(e.id, e.matcher.api.as_deref()))
         });
-        let released: Vec<Held> = self
-            .shared
+        let released: Vec<Held> = traffic
             .held
-            .lock()
-            .extract_if(.., |h| is_hold(h.hold, Some(h.info.api)))
+            .extract_if(.., |h| which.covers(h.hold, Some(h.info.api)))
             .collect();
+        drop(traffic);
         let n = released.len();
         for h in released {
             self.shared.set_held(h.seq, false);
@@ -645,18 +717,26 @@ impl FakeGmail {
         n
     }
 
-    /// Requests parked by a hold now.
+    /// Requests parked by a hold now. A [`Fault::HoldAnswer`] request counts once its work
+    /// is done and its answer waits.
     pub fn held(&self) -> usize {
-        self.shared.held.lock().len()
+        self.shared
+            .traffic
+            .lock()
+            .held
+            .iter()
+            .filter(|h| h.parked)
+            .count()
     }
 
     /// Requests parked now by the holds `which` names.
     pub fn held_by(&self, which: &Release) -> usize {
         self.shared
-            .held
+            .traffic
             .lock()
+            .held
             .iter()
-            .filter(|h| which.covers(h.hold, Some(h.info.api)))
+            .filter(|h| h.parked && which.covers(h.hold, Some(h.info.api)))
             .count()
     }
 
@@ -1104,20 +1184,18 @@ async fn handle(
         seq
     };
     let _in_flight = InFlight::new(&shared.in_flight);
-    let mut fault = shared.fault_for(&info);
     let mut hold_answer = None;
-    match fault {
-        Some((hold, Fault::Hold)) => {
-            fault = shared.hold(seq, hold, info).await.map(|f| (hold, f));
+    let fault = match shared.fault_for(seq, &info) {
+        None => None,
+        Some(Plan::Fault(fault)) => Some(fault),
+        Some(Plan::Hold(ticket)) => ticket.park().await,
+        Some(Plan::HoldAnswer(ticket)) => {
+            hold_answer = Some(ticket);
+            None
         }
-        Some((hold, Fault::HoldAnswer)) => {
-            hold_answer = Some((hold, info));
-            fault = None;
-        }
-        _ => {}
-    }
+    };
     let req = hyper::Request::from_parts(parts, Body::from(body));
-    let response = match fault.map(|(_, f)| f) {
+    let response = match fault {
         None | Some(Fault::Hold | Fault::HoldAnswer) => {
             router.oneshot(req).await.unwrap_or_else(|e| match e {})
         }
@@ -1151,9 +1229,9 @@ async fn handle(
             return std::future::pending().await;
         }
     };
-    if let Some((hold, info)) = hold_answer {
+    if let Some(ticket) = hold_answer {
         // The release's outcome does not apply: the work is already done.
-        let _ = shared.hold(seq, hold, info).await;
+        let _ = ticket.park().await;
     }
     shared.answered(seq, Answer::Status(response.status().as_u16()));
     Ok(response)
