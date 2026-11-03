@@ -127,16 +127,16 @@ impl std::error::Error for ParseError {}
 pub trait RuleSubject {
     /// The From address.
     fn sender(&self) -> (&str, &str);
-    fn to(&self) -> Vec<(&str, &str)>;
-    fn cc(&self) -> Vec<(&str, &str)>;
-    fn bcc(&self) -> Vec<(&str, &str)>;
+    fn to(&self) -> impl Iterator<Item = (&str, &str)> + '_;
+    fn cc(&self) -> impl Iterator<Item = (&str, &str)> + '_;
+    fn bcc(&self) -> impl Iterator<Item = (&str, &str)> + '_;
     fn subject(&self) -> &str;
     /// Plain body text. Only read in [`Mode::Search`].
     fn body(&self) -> &str;
     /// Names of the thread's user labels (not ids), from any of its messages.
-    fn thread_user_labels(&self) -> Vec<&str>;
+    fn thread_user_labels(&self) -> &[String];
     /// This message's own Gmail label ids, such as `INBOX` or `CATEGORY_SOCIAL`.
-    fn message_label_ids(&self) -> Vec<&str>;
+    fn message_label_ids(&self) -> &[String];
     /// The message has a `List-Id` or `List-Unsubscribe` header.
     fn is_list(&self) -> bool;
 }
@@ -171,24 +171,23 @@ pub struct MessageFields {
     pub is_list: bool,
 }
 
-fn pairs(addresses: &[Address]) -> Vec<(&str, &str)> {
+fn pairs(addresses: &[Address]) -> impl Iterator<Item = (&str, &str)> {
     addresses
         .iter()
         .map(|a| (a.name.as_str(), a.email.as_str()))
-        .collect()
 }
 
 impl RuleSubject for MessageFields {
     fn sender(&self) -> (&str, &str) {
         (&self.from.name, &self.from.email)
     }
-    fn to(&self) -> Vec<(&str, &str)> {
+    fn to(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
         pairs(&self.to)
     }
-    fn cc(&self) -> Vec<(&str, &str)> {
+    fn cc(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
         pairs(&self.cc)
     }
-    fn bcc(&self) -> Vec<(&str, &str)> {
+    fn bcc(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
         pairs(&self.bcc)
     }
     fn subject(&self) -> &str {
@@ -197,11 +196,11 @@ impl RuleSubject for MessageFields {
     fn body(&self) -> &str {
         &self.body
     }
-    fn thread_user_labels(&self) -> Vec<&str> {
-        self.thread_user_labels.iter().map(String::as_str).collect()
+    fn thread_user_labels(&self) -> &[String] {
+        &self.thread_user_labels
     }
-    fn message_label_ids(&self) -> Vec<&str> {
-        self.message_label_ids.iter().map(String::as_str).collect()
+    fn message_label_ids(&self) -> &[String] {
+        &self.message_label_ids
     }
     fn is_list(&self) -> bool {
         self.is_list
@@ -372,7 +371,7 @@ impl Expr {
 impl Term {
     fn matches<S: RuleSubject + ?Sized>(&self, s: &S, mode: Mode) -> bool {
         let needle = self.value.to_lowercase();
-        let any = |list: Vec<(&str, &str)>| list.into_iter().any(|a| address_matches(a, &needle));
+        let hit = |a| address_matches(a, &needle);
         match self.field {
             Field::Any => {
                 address_matches(s.sender(), &needle)
@@ -380,9 +379,9 @@ impl Term {
                     || (mode == Mode::Search && contains_ci(s.body(), &needle))
             }
             Field::From => address_matches(s.sender(), &needle),
-            Field::To => any(s.to()),
-            Field::Cc => any(s.cc()),
-            Field::Bcc => any(s.bcc()),
+            Field::To => s.to().any(hit),
+            Field::Cc => s.cc().any(hit),
+            Field::Bcc => s.bcc().any(hit),
             Field::Subject => contains_ci(s.subject(), &needle),
             Field::Label => {
                 if is_system_label_id(&self.value) {
@@ -467,29 +466,30 @@ fn join(parts: Vec<(String, bool)>, op: &str) -> Option<(String, bool)> {
 // ---------------------------------------------------------------------------
 // Lexer
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum TokKind {
+/// Tokens borrow the input; only the terms built from them own their text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokKind<'a> {
     LParen,
     RParen,
     /// A bare `"quoted phrase"`.
     Phrase {
-        text: String,
+        text: &'a str,
         closed: bool,
     },
     /// Anything else, including `op:value`, `op:"quoted value"` and `-negation`.
-    Word(String),
+    Word(&'a str),
 }
 
-#[derive(Debug, Clone)]
-struct Tok {
-    kind: TokKind,
+#[derive(Debug, Clone, Copy)]
+struct Tok<'a> {
+    kind: TokKind<'a>,
     start: usize,
     end: usize,
 }
 
-impl Tok {
+impl Tok<'_> {
     fn is_keyword(&self, keyword: &str) -> bool {
-        matches!(&self.kind, TokKind::Word(w) if w.eq_ignore_ascii_case(keyword))
+        matches!(self.kind, TokKind::Word(w) if w.eq_ignore_ascii_case(keyword))
     }
 }
 
@@ -538,7 +538,7 @@ fn scan_word(s: &str, start: usize) -> usize {
     i
 }
 
-fn lex(s: &str) -> Vec<Tok> {
+fn lex(s: &str) -> Vec<Tok<'_>> {
     let mut toks = Vec::new();
     let mut i = 0;
     while let Some(c) = s[i..].chars().next() {
@@ -561,13 +561,13 @@ fn lex(s: &str) -> Vec<Tok> {
                 i = end;
                 let inner_end = if closed { end - 1 } else { end };
                 TokKind::Phrase {
-                    text: s[start + 1..inner_end].to_owned(),
+                    text: &s[start + 1..inner_end],
                     closed,
                 }
             }
             _ => {
                 i = scan_word(s, start);
-                TokKind::Word(s[start..i].to_owned())
+                TokKind::Word(&s[start..i])
             }
         };
         toks.push(Tok {
@@ -584,7 +584,7 @@ fn lex(s: &str) -> Vec<Tok> {
 
 struct Parser<'a> {
     input: &'a str,
-    toks: Vec<Tok>,
+    toks: Vec<Tok<'a>>,
     pos: usize,
     errors: Vec<ParseError>,
 }
@@ -611,7 +611,7 @@ impl<'a> Parser<'a> {
         });
     }
 
-    fn peek(&self) -> Option<&Tok> {
+    fn peek(&self) -> Option<&Tok<'a>> {
         self.toks.get(self.pos)
     }
 
@@ -643,7 +643,7 @@ impl<'a> Parser<'a> {
     /// group, or the end.
     fn parse_and(&mut self, depth: usize) -> Option<Expr> {
         let mut items = Vec::new();
-        while let Some(tok) = self.peek().cloned() {
+        while let Some(tok) = self.peek().copied() {
             if tok.is_keyword("OR") {
                 break;
             }
@@ -658,7 +658,7 @@ impl<'a> Parser<'a> {
                 }
                 continue;
             }
-            match &tok.kind {
+            match tok.kind {
                 TokKind::RParen if depth > 0 => break,
                 TokKind::RParen => {
                     self.pos += 1;
@@ -685,7 +685,7 @@ impl<'a> Parser<'a> {
                     if text.chars().any(char::is_alphanumeric) {
                         items.push(Expr::Term(Term {
                             field: Field::Any,
-                            value: text.clone(),
+                            value: text.to_owned(),
                             prefix: !closed,
                         }));
                     }
@@ -807,7 +807,7 @@ pub fn strip_is_list(raw: &str) -> String {
         Op,
         Other,
     }
-    let is_list = |t: &Tok| match &t.kind {
+    let is_list = |t: &Tok<'_>| match t.kind {
         TokKind::Word(w) => {
             let w = w.strip_prefix('-').unwrap_or(w);
             w.eq_ignore_ascii_case("is:list")
@@ -819,7 +819,7 @@ pub fn strip_is_list(raw: &str) -> String {
     if !toks.iter().any(is_list) {
         return raw.to_owned();
     }
-    let mut kept: Vec<(Kind, &Tok)> = toks
+    let mut kept: Vec<(Kind, &Tok<'_>)> = toks
         .iter()
         .filter(|t| !is_list(t))
         .map(|t| {
@@ -855,7 +855,7 @@ pub fn strip_is_list(raw: &str) -> String {
     }
 
     let mut out = String::new();
-    let mut prev: Option<&(Kind, &Tok)> = None;
+    let mut prev: Option<&(Kind, &Tok<'_>)> = None;
     for item in &kept {
         if let Some(p) = prev {
             let touching = p.1.end == item.1.start;

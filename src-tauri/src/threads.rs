@@ -54,13 +54,13 @@ impl ub_rules::RuleSubject for RuleMsg<'_> {
     fn sender(&self) -> (&str, &str) {
         (&self.msg.from_name, &self.msg.from_email)
     }
-    fn to(&self) -> Vec<(&str, &str)> {
+    fn to(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
         pairs(&self.msg.to)
     }
-    fn cc(&self) -> Vec<(&str, &str)> {
+    fn cc(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
         pairs(&self.msg.cc)
     }
-    fn bcc(&self) -> Vec<(&str, &str)> {
+    fn bcc(&self) -> impl Iterator<Item = (&str, &str)> + '_ {
         pairs(&self.msg.bcc)
     }
     fn subject(&self) -> &str {
@@ -69,22 +69,21 @@ impl ub_rules::RuleSubject for RuleMsg<'_> {
     fn body(&self) -> &str {
         self.body
     }
-    fn thread_user_labels(&self) -> Vec<&str> {
-        self.user_labels.iter().map(String::as_str).collect()
+    fn thread_user_labels(&self) -> &[String] {
+        self.user_labels
     }
-    fn message_label_ids(&self) -> Vec<&str> {
-        self.msg.labels.iter().map(String::as_str).collect()
+    fn message_label_ids(&self) -> &[String] {
+        &self.msg.labels
     }
     fn is_list(&self) -> bool {
         self.msg.is_list
     }
 }
 
-fn pairs(addrs: &[Addr]) -> Vec<(&str, &str)> {
+fn pairs(addrs: &[Addr]) -> impl Iterator<Item = (&str, &str)> {
     addrs
         .iter()
         .map(|a| (a.name.as_deref().unwrap_or(""), a.email.as_str()))
-        .collect()
 }
 
 pub fn messages(conn: &rusqlite::Connection, thread: ThreadId) -> anyhow::Result<Vec<Msg>> {

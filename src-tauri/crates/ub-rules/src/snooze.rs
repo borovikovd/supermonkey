@@ -185,7 +185,7 @@ fn resolve_parsed<Tz: TimeZone>(
 /// A date without a time means 08:00. A time without a date means today, or
 /// tomorrow once it has passed. Numeric dates like `12/24` are not accepted,
 /// because day/month order is ambiguous.
-pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<DateTime<Tz>> {
+pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: &DateTime<Tz>) -> Option<DateTime<Tz>> {
     let lower = text.to_lowercase().replace(',', " ");
     let toks: Vec<&str> = lower.split_whitespace().collect();
     let local = now.naive_local();
@@ -212,7 +212,9 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<
                     if date.is_some() || time.is_some() || !rest_is_filler {
                         return None;
                     }
-                    return now.checked_add_signed(TimeDelta::try_minutes(minutes)?);
+                    return now
+                        .clone()
+                        .checked_add_signed(TimeDelta::try_minutes(minutes)?);
                 }
                 Span::Days(days) => {
                     set(
@@ -271,7 +273,7 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<
     }
 
     resolve_parsed(
-        &now,
+        now,
         date,
         time.unwrap_or(default_time),
         time.is_some(),
@@ -575,7 +577,7 @@ mod tests {
     }
 
     fn parse_at(text: &str) -> Option<DateTime<Tz>> {
-        parse_snooze_text(text, now())
+        parse_snooze_text(text, &now())
     }
 
     #[test]
@@ -694,12 +696,12 @@ mod tests {
         // Saturday before spring forward: "in 24 hours" is exact, so 11:00 EDT;
         // "in 1 day" keeps the wall time.
         let sat = ny(2026, 3, 7, 10, 0);
-        let exact = parse_snooze_text("in 24 hours", sat).unwrap();
+        let exact = parse_snooze_text("in 24 hours", &sat).unwrap();
         assert_eq!(exact.naive_local().to_string(), "2026-03-08 11:00:00");
-        let calendar = parse_snooze_text("in 1 day", sat).unwrap();
+        let calendar = parse_snooze_text("in 1 day", &sat).unwrap();
         assert_eq!(calendar.naive_local().to_string(), "2026-03-08 10:00:00");
         // 2:30am on the spring-forward day does not exist: first instant after the gap.
-        let gap = parse_snooze_text("tomorrow 2:30am", sat).unwrap();
+        let gap = parse_snooze_text("tomorrow 2:30am", &sat).unwrap();
         assert_eq!(gap.naive_local().to_string(), "2026-03-08 03:00:00");
     }
 }

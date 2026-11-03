@@ -117,11 +117,10 @@ pub fn route(
             return Ok(Some(s.id));
         }
     }
-    let labels: Vec<&str> = msg.labels.iter().map(String::as_str).collect();
     if let Some(imp) = splits
         .iter()
         .find(|s| s.kind == SplitKind::Important && s.enabled)
-        && ub_rules::is_person_to_person(&labels, msg.is_list)
+        && ub_rules::is_person_to_person(&msg.labels, msg.is_list)
     {
         return Ok(Some(imp.id));
     }

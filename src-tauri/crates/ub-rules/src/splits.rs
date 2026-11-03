@@ -15,16 +15,21 @@ const NON_PERSONAL_CATEGORIES: &[&str] = &[
 /// `CATEGORY_SOCIAL`, `CATEGORY_UPDATES`, `CATEGORY_FORUMS`, and has either
 /// `CATEGORY_PERSONAL` or no `CATEGORY_*` label at all. Ids compare
 /// case-insensitively.
-pub fn is_person_to_person(message_label_ids: &[&str], is_list: bool) -> bool {
+pub fn is_person_to_person<S: AsRef<str>>(message_label_ids: &[S], is_list: bool) -> bool {
     if is_list {
         return false;
     }
-    let has = |id: &str| message_label_ids.iter().any(|l| l.eq_ignore_ascii_case(id));
+    let has = |id: &str| {
+        message_label_ids
+            .iter()
+            .any(|l| l.as_ref().eq_ignore_ascii_case(id))
+    };
     if NON_PERSONAL_CATEGORIES.iter().any(|c| has(c)) {
         return false;
     }
     let any_category = message_label_ids.iter().any(|l| {
-        l.get(..CATEGORY_PREFIX.len())
+        l.as_ref()
+            .get(..CATEGORY_PREFIX.len())
             .is_some_and(|p| p.eq_ignore_ascii_case(CATEGORY_PREFIX))
     });
     has("CATEGORY_PERSONAL") || !any_category
@@ -64,7 +69,7 @@ mod tests {
 
     #[test]
     fn person_to_person() {
-        assert!(is_person_to_person(&[], false));
+        assert!(is_person_to_person::<&str>(&[], false));
         assert!(is_person_to_person(&["INBOX", "UNREAD"], false));
         assert!(is_person_to_person(&["INBOX", "CATEGORY_PERSONAL"], false));
         assert!(is_person_to_person(&["category_personal"], false));

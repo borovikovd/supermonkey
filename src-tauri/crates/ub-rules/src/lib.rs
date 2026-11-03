@@ -28,15 +28,15 @@
 //! # Splits ([`splits`])
 //!
 //! ```text
-//! is_person_to_person(message_label_ids: &[&str], is_list: bool) -> bool
+//! is_person_to_person<S: AsRef<str>>(message_label_ids: &[S], is_list: bool) -> bool
 //! STARTER_SPLITS: [StarterSplit { name, query }; 4]
 //! ```
 //!
 //! # Snooze ([`snooze`])
 //!
 //! ```text
-//! snooze_options<Tz: TimeZone>(now: DateTime<Tz>) -> Vec<SnoozeOption<Tz>>
-//! parse_snooze_text<Tz: TimeZone>(text: &str, now: DateTime<Tz>) -> Option<DateTime<Tz>>
+//! snooze_options<Tz: TimeZone>(now: &DateTime<Tz>) -> Vec<SnoozeOption<Tz>>
+//! parse_snooze_text<Tz: TimeZone>(text: &str, now: &DateTime<Tz>) -> Option<DateTime<Tz>>
 //! resolve_local<Tz: TimeZone>(tz: &Tz, naive: NaiveDateTime) -> DateTime<Tz>
 //! ```
 //!

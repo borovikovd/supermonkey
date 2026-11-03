@@ -140,7 +140,7 @@ pub fn snooze_options(text: &str) -> Vec<SnoozeChoice> {
     let mut out: Vec<SnoozeChoice> = Vec::new();
     let text = text.trim();
     if !text.is_empty()
-        && let Some(at) = parse_snooze_text(text, now)
+        && let Some(at) = parse_snooze_text(text, &now)
     {
         out.push(SnoozeChoice {
             label: fmt(&at),
