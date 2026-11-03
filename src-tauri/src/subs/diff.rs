@@ -75,34 +75,3 @@ fn longest_increasing<'a>(items: &[(usize, &'a str)]) -> Vec<&'a str> {
     out.reverse();
     out
 }
-
-/// Applies a patch the way the mirror does. Used by tests.
-pub fn apply(list: &[ListEntry], removed: &[String], moved: &[ListMove]) -> Vec<ListEntry> {
-    let drop: HashSet<&str> = removed
-        .iter()
-        .map(String::as_str)
-        .chain(moved.iter().map(|m| m.key.as_str()))
-        .collect();
-    let mut out: Vec<ListEntry> = list
-        .iter()
-        .filter(|e| !drop.contains(e.key.as_str()))
-        .cloned()
-        .collect();
-    for m in moved {
-        let at = match &m.after {
-            None => 0,
-            Some(a) => out
-                .iter()
-                .position(|e| &e.key == a)
-                .map_or(out.len(), |p| p + 1),
-        };
-        out.insert(
-            at,
-            ListEntry {
-                key: m.key.clone(),
-                split: m.split,
-            },
-        );
-    }
-    out
-}
