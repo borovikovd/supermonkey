@@ -110,3 +110,9 @@ the spec's wording:
   cancelled and its loopback port closed.
 - **A Gmail draft change skipped while a composer had it open** is read on
   close unless the user saved an edit after it (last writer wins).
+- **`Shift+J` / `Shift+K` with nothing selected** extend from the highlighted
+  row: it and the row moved to are both selected.
+- **"Requests for the account on screen go first."** Request slots and the
+  quota bucket are per account, so requests of different accounts never wait
+  on each other. The scheduler still orders waiters by the account on screen,
+  but that order has no effect anyone can observe.

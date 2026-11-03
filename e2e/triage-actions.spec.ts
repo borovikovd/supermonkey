@@ -376,6 +376,16 @@ test("TRI-06 x and Shift+J / Shift+K select; actions apply to the whole selectio
   await app.press("Escape");
   await expect(app.selected).toHaveCount(0);
 
+  // With nothing selected, Shift+J extends from the highlighted row: both are selected.
+  await highlight(app, "Person 2");
+  await app.press("Shift+J");
+  await expect(app.selected).toHaveCount(2);
+  await each([2, 3], (n) =>
+    expect(app.row(`Person ${n}`)).toHaveAttribute("data-selected", "true"),
+  );
+  await app.press("Escape");
+  await expect(app.selected).toHaveCount(0);
+
   // Plain j replaces the selection with the row it lands on.
   await highlight(app, "Person 2");
   await app.press("x");
