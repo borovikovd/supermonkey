@@ -104,7 +104,10 @@ function moveAfterRemoval(before: string[], removed: Set<string>) {
   const next = before.slice(at + 1).find(isShown) ?? before.slice(0, at).findLast(isShown) ?? null;
   if (cur.screen.kind === "conversation") {
     if (next === null) closeThread();
-    else openThread(Number(next));
+    else {
+      openThread(Number(next));
+      markReadOnOpenWhenLoaded(Number(next));
+    }
   } else {
     c.patchCurrent({ highlight: next });
   }

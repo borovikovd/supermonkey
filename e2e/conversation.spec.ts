@@ -554,4 +554,22 @@ test.describe("conversation", () => {
     await expect(app.row("Person 5")).toHaveAttribute("data-unread");
     expect(await labelsOf(app, A, s.message("p5", 1).id)).toContain("UNREAD");
   });
+
+  test("CONV-16 the conversation that opens after an action is marked read", async ({
+    app,
+    gmail,
+  }) => {
+    const s = await seeds.standard(gmail, app);
+    await expect(app.row("Person 5")).toHaveAttribute("data-unread");
+    await app.press("j", "j", "j");
+    await expect(app.highlighted).toContainText("Person 4");
+    await app.press("Enter");
+    await expect(app.conversationTitle).toHaveText(s.thread("p4").subject);
+    await app.press("e");
+    await expect(app.conversationTitle).toHaveText(s.thread("p5").subject);
+    await app.settle();
+    expect(await labelsOf(app, A, s.message("p5", 1).id)).not.toContain("UNREAD");
+    await app.press("Escape");
+    await expect(app.row("Person 5")).not.toHaveAttribute("data-unread");
+  });
 });

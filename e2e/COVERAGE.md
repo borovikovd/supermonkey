@@ -851,6 +851,14 @@ _EG · §Reading (read on open)_
 - **Steps:** pause page timers, move the highlight to `p5` (unread, not prefetched). Park the page's submits, press `Enter` then `Esc`. Release, resume timers (the list now prefetches `p5`), `settle()`.
 - **Expect:** `p5` is still unread in the list and in Gmail.
 
+#### CONV-16 · P1 · The conversation that opens after an action is marked read
+
+_EG · §Reading (read on open), §Keyboard ("When the acted-on conversation leaves the current list")_
+
+- **Seed:** `standard`.
+- **Steps:** open `p4` and press `e`. The next conversation, `p5` (unread), opens. `settle()`, then `Esc`.
+- **Expect:** `p5` is read in Gmail and in the list.
+
 ### 5.5 `triage-actions.spec.ts` (TRI)
 
 Action table. It comes from §Archive, trash, star, read and from the removal table in §UI state (Actions). The Gmail change applies to the thread's **non-draft** messages at the time of the action.
