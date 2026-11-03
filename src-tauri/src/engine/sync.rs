@@ -146,10 +146,13 @@ pub async fn connect(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
     refresh_labels(e, rt).await?;
     let account = rt.id;
     let history = profile.history_id.to_string();
+    // A retry after a failed attempt keeps that attempt's cursor: the lists
+    // it already fetched predate any newer one, so polling from the newer
+    // cursor would miss what changed in between.
     e.writer
         .call(move |ctx| {
             ctx.tx.execute(
-                "UPDATE accounts SET history_id = ?2, connected = 1, last_sync = ?3 WHERE id = ?1",
+                "UPDATE accounts SET history_id = coalesce(history_id, ?2), last_sync = ?3 WHERE id = ?1",
                 params![account, history, ctx.now],
             )?;
             ctx.touch_summary(account);
@@ -161,6 +164,15 @@ pub async fn connect(e: &Engine, rt: &AccountRt) -> Result<(), GmailError> {
     queue_starred_and_sent(rt);
     super::drafts::sync_list(e, rt).await?;
     rt.work.push(work::BACKFILL, Work::Backfill { page: None });
+    // Only now: a launch before this point runs the connect sync again.
+    e.writer
+        .call(move |ctx| {
+            ctx.tx
+                .execute("UPDATE accounts SET connected = 1 WHERE id = ?1", [account])?;
+            Ok(())
+        })
+        .await
+        .log_err("connect");
     Ok(())
 }
 

@@ -297,7 +297,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `undo-send.spec.ts`        | SND    | the outbox state machine, held undo, rejection, no clear answer, restart                     | `standard`                               | H8a, H8b, H9, H13, H15      | 12      | 9       | 3      | 0     |
 | `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 6       | 5       | 1      | 0     |
 | `gmail-errors.spec.ts`     | ERR    | the outcome matrix for actions and `drafts.create`, back-off, 401, 404                       | `standard`                               | H6, H8, H9, H10, H13        | 9       | 5       | 3      | 1     |
-| `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 8       | 5       | 1      | 2     |
+| `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 9       | 5       | 2      | 2     |
 | `notifications.spec.ts`    | NOT    | when to notify, summary, mute, Dock badge, click                                             | `standard`                               | H17, H18                    | 6       | 5       | 1      | 0     |
 | `settings.spec.ts`         | SET    | the sheet, remote images                                                                     | `standard`                               | H15, H20                    | 2       | 1       | 1      | 0     |
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0     |
@@ -2623,6 +2623,14 @@ _EG · §Sync, §Data_
 - **Expect:**
   - "Race" opens with both messages: the stale answer deletes nothing.
   - "Late read" stays read.
+
+#### SYN-09 · P2 · A connect sync retried after a failure misses no change made in between
+
+_EG · §Sync (connect)_
+
+- **Seed:** `standard`, not opened.
+- **Steps:** Fault A's next `drafts.list` with a 500, then open the app: the connect sync lists Inbox and fails at the drafts. Archive `p1` from another client with no poll, then `advance(10_000)` so the connect sync runs again.
+- **Expect:** `p1` leaves Inbox, and Inbox equals Gmail's: polling resumes from the first attempt's cursor, not a newer one.
 
 ### 5.20 `notifications.spec.ts` (NOT)
 

@@ -496,3 +496,21 @@ test("SYN-08 a slower thread fetch never undoes a newer one", async ({ app, gmai
     "data-unread",
   );
 });
+
+test("SYN-09 a connect sync retried after a failure misses no change made in between", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app, { open: false });
+  // The connect sync lists Inbox, then fails at the drafts.
+  await gmail.fault("drafts.list", { kind: "status", status: 500 }, { account: A, times: 1 });
+  await app.open();
+  await expect(app.row("Person 1")).toHaveCount(1);
+
+  // Archived elsewhere before the connect sync is retried.
+  await gmail.modify(A, s.message("p1", 1).id, [], ["INBOX"]);
+  await app.advance(10_000);
+  await app.settle();
+  await expect(app.row("Person 1")).toHaveCount(0);
+  await expectInboxMatchesGmail(app, A);
+});
