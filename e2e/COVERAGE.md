@@ -3040,6 +3040,22 @@ _DT · §Reading, §Settings_
   - The setting survives `restart()`.
   - It is not an undo entry (UND-03).
 
+#### SET-03 · P2 · Hint text is 11px and the shortcut chips are readable
+
+_EP · §Look (Type: hint bar, counts, shortcut chips 11 / 16)_
+
+- **Seed:** `standard`.
+- **Steps:** read the hint bar and a top-bar split count; press `?`.
+- **Expect:** the hint bar and the count are 11px; every key chip in the shortcut sheet is 11px with a contrast ratio of at least 3 against its chip.
+- **Why:** the theme had a color and a text size both named `hint`, and the color won: hint text rendered at 13px, and the chips' keys in the hint bar's near-white.
+
+#### SET-04 · P3 · Shortcut sheet rows never overlap
+
+_EG · §Look_
+
+- **Steps:** press `?`.
+- **Expect:** no row's description runs past its row, and no row overlaps the next, including the long "Next / previous split · cycle links in a conversation".
+
 ### 5.22 `palette.spec.ts` (PAL)
 
 #### PAL-01 · P1 · Open, filter, run, and close the palette

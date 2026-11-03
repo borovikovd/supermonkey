@@ -110,10 +110,12 @@ function Shortcuts() {
             {rows.map(([k, d]) => (
               <div
                 key={k}
-                className="flex h-7 items-center justify-between border-b border-border-2 text-row"
+                className="flex min-h-7 items-center justify-between gap-3 border-b border-border-2 py-1 text-row"
               >
                 <span className="text-text-2">{d}</span>
-                <kbd className="rounded-[4px] bg-fill px-1.5 text-hint font-medium">{k}</kbd>
+                <kbd className="shrink-0 rounded-[4px] bg-fill px-1.5 text-hint font-medium text-text-2">
+                  {k}
+                </kbd>
               </div>
             ))}
           </div>

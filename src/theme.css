@@ -15,7 +15,8 @@
   --color-accent-soft: #f7f5ff;
   --color-link: #4198d2;
   --color-unread: #71c0ea;
-  --color-hint: #edeefa;
+  /* Not `hint`: that name is the 11px text size, and a color of the same name would win. */
+  --color-hintbar: #edeefa;
   --color-danger: #cd0037;
 
   --color-palette-bg: #1f1e1d;

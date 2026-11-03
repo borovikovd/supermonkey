@@ -108,7 +108,9 @@ function SplitTitles() {
           >
             {s.name}
           </button>
-          {s.count > 0 && <span className="tabular text-text-3">{countLabel(s.count)}</span>}
+          {s.count > 0 && (
+            <span className="tabular text-hint font-medium text-text-3">{countLabel(s.count)}</span>
+          )}
         </span>
       ))}
     </div>

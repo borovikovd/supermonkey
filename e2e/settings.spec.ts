@@ -171,3 +171,76 @@ test("SET-02 remote images", async ({ app, gmail }) => {
     .toEqual(expect.arrayContaining(["/img/fresh.png", "/img/fresh-bg.png"]));
   await expect.poll(() => loaded(app, "remote pixel")).toBe(true);
 });
+
+const channels = (css: string): number[] =>
+  (css.match(/\d+(\.\d+)?/g) ?? ["0", "0", "0"]).slice(0, 3).map(Number);
+
+/** Relative luminance of a CSS rgb() color (WCAG). */
+function luminance(css: string): number {
+  const [r = 0, g = 0, b = 0] = channels(css).map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** WCAG contrast ratio between two CSS colors. */
+function contrast(a: string, b: string): number {
+  const [x, y] = [luminance(a), luminance(b)];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+
+test("SET-03 hint text is 11px and the shortcut chips are readable", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  const hintBar = app.page.getByText("E to Mark Done").locator("..");
+  await expect(hintBar).toHaveCSS("font-size", "11px");
+  await expect(
+    app.page.getByRole("button", { name: "Important" }).locator("xpath=following-sibling::*[1]"),
+  ).toHaveCSS("font-size", "11px");
+
+  await app.press("?");
+  const sheet = app.sheet("Keyboard shortcuts");
+  await expect(sheet).toBeVisible();
+  const chips = sheet.locator("kbd");
+  expect(await chips.count()).toBeGreaterThan(20);
+  const looks = await chips.evaluateAll((els) =>
+    els.map((el) => {
+      const css = getComputedStyle(el);
+      return {
+        text: el.textContent ?? "",
+        size: css.fontSize,
+        fg: css.color,
+        bg: css.backgroundColor,
+      };
+    }),
+  );
+  for (const l of looks) {
+    expect(l.size, l.text).toBe("11px");
+    expect(contrast(l.fg, l.bg), `${l.text} contrast`).toBeGreaterThanOrEqual(3);
+  }
+});
+
+test("SET-04 shortcut sheet rows never overlap, even when a description wraps", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await app.press("?");
+  const sheet = app.sheet("Keyboard shortcuts");
+  await expect(sheet).toBeVisible();
+  const overlaps = await sheet.locator("kbd").evaluateAll((els) => {
+    const rows = els.map((k) => k.parentElement).filter((r): r is HTMLElement => r !== null);
+    const out: string[] = [];
+    for (const [i, row] of rows.entries()) {
+      const next = rows[i + 1];
+      if (!next || next.parentElement !== row.parentElement) continue;
+      const a = row.getBoundingClientRect();
+      const b = next.getBoundingClientRect();
+      const text = row.querySelector("span");
+      const t = text?.getBoundingClientRect();
+      if (a.bottom > b.top + 0.5 || (t && t.bottom > a.bottom + 0.5)) out.push(row.innerText);
+    }
+    return out;
+  });
+  expect(overlaps).toEqual([]);
+});

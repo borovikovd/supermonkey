@@ -12,7 +12,7 @@ export function HintBar() {
         ? ["E to Mark Done", "R to Reply", "Enter to Reply all", "⌘K for commands"]
         : ["E to Mark Done", "H to snooze", "⌘K for commands"];
   return (
-    <div className="flex h-hintbar shrink-0 items-center justify-center gap-2 bg-hint text-hint font-medium text-text-2">
+    <div className="flex h-hintbar shrink-0 items-center justify-center gap-2 bg-hintbar text-hint font-medium text-text-2">
       {hints.map((h, i) => (
         <span key={h} className="flex items-center gap-2">
           {i > 0 && <span className="text-text-3">·</span>}
