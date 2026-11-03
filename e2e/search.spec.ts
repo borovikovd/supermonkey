@@ -366,3 +366,24 @@ test("SRC-07 Gmail results come 15 at a time; the next page loads near the oldes
   const tokens = (await pages((p) => p.q === "invoice")).map((r) => r.params.pageToken ?? "");
   expect(tokens).toEqual(["", "15", "30"]);
 });
+
+test("SRC-08 a sent reply is found by local search", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  await app.row("Offsite venue").click();
+  await expect(app.conversationTitle).toHaveText("Offsite venue");
+  await app.settle();
+  await app.reply("r");
+  await app.type("Zanzibar works for me");
+  await app.settle();
+  await app.press("Meta+Enter");
+  await expect(app.editor).toHaveCount(0);
+  await app.advance(10_000);
+  await app.settle();
+  await app.press("Escape");
+
+  // Offline, so only the local index can find it.
+  await gmail.offline(true);
+  await app.advance(45_000);
+  await search(app, "zanzibar");
+  await expect(app.row("Offsite venue")).toHaveCount(1);
+});

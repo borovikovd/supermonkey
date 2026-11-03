@@ -287,7 +287,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 11      | 7       | 4      | 0      |
 | `undo.spec.ts`             | UND    | the `z` stack, partial revert, per-account history, persistence                              | `standard`                               | H15                         | 8       | 4       | 3      | 1      |
 | `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 8       | 2       | 6      | 0      |
-| `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 7       | 3       | 3      | 1      |
+| `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 8       | 3       | 4      | 1      |
 | `splits.spec.ts`           | SPL    | routing, `Tab`, pins, own reply, custom splits, starters, hiding, cap                        | `standard`, `splits`, `bulk`, `bulk1000` | H10, H12, H15               | 10      | 6       | 3      | 1      |
 | `snooze.spec.ts`           | SNZ    | picker, snooze, wake triggers, clearing rules, history echo, undo                            | `standard`                               | H13, H14, H15               | 8       | 6       | 1      | 1      |
 | `compose-reply.spec.ts`    | REP    | inline composer, addressing, quoting, forward, resume rules, Gmail drafts                    | `standard`, `drafts`                     | H4, H6                      | 15      | 10      | 5      | 0      |
@@ -298,13 +298,13 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `undo-send.spec.ts`        | SND    | the outbox state machine, held undo, rejection, no clear answer, restart                     | `standard`                               | H8a, H8b, H9, H13, H15      | 18      | 15      | 3      | 0      |
 | `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 7       | 6       | 1      | 0      |
 | `gmail-errors.spec.ts`     | ERR    | the outcome matrix for actions and `drafts.create`, back-off, 401, 404                       | `standard`                               | H6, H8, H9, H10, H13        | 9       | 5       | 3      | 1      |
-| `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 9       | 5       | 2      | 2      |
+| `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 10      | 5       | 3      | 2      |
 | `notifications.spec.ts`    | NOT    | when to notify, summary, mute, Dock badge, click                                             | `standard`                               | H17, H18                    | 6       | 5       | 1      | 0      |
 | `settings.spec.ts`         | SET    | the sheet, remote images                                                                     | `standard`                               | H15, H20                    | 4       | 1       | 2      | 1      |
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **221** | **129** | **82** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **223** | **129** | **84** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -1347,6 +1347,14 @@ _BVA · §Search, §Views_
   - The first `threads.list` has `maxResults=15`.
   - Scrolling toward the oldest Gmail hit requests the next `pageToken` before the list end is reached.
   - Eventually 40 rows show, with no duplicates.
+
+#### SRC-08 · P2 · A sent reply is found by local search
+
+_EG · §Search (local full-text search), §Undo send_
+
+- **Seed:** `standard`.
+- **Steps:** reply to `addr` with "Zanzibar works for me" and send; after the undo window, go offline and search "zanzibar".
+- **Expect:** `addr` is in the local results: the message, a draft until it was sent, is in the search index.
 
 ### 5.9 `splits.spec.ts` (SPL)
 
@@ -2927,6 +2935,14 @@ _EG · §Sync (connect)_
 - **Seed:** `standard`, not opened.
 - **Steps:** Fault A's next `drafts.list` with a 500, then open the app: the connect sync lists Inbox and fails at the drafts. Archive `p1` from another client with no poll, then `advance(10_000)` so the connect sync runs again.
 - **Expect:** `p1` leaves Inbox, and Inbox equals Gmail's: polling resumes from the first attempt's cursor, not a newer one.
+
+#### SYN-10 · P2 · A reply to a stored thread downloads no inline image again
+
+_EG · §Sync (bodies), §Performance (stored bodies never change)_
+
+- **Seed:** `standard` (the `fwd` contract has an inline `cid:` logo).
+- **Steps:** count `req(attachments.get)`; deliver a reply into `fwd`; `settle()`; open it.
+- **Expect:** a `format=full` fetch of `fwd` ran for the reply's body, `req(attachments.get)` did not grow, and the reply shows expanded with its body.
 
 ### 5.20 `notifications.spec.ts` (NOT)
 

@@ -291,6 +291,21 @@ fn cached_history(e: &Engine, account: AccountId, gmail_thread: &str) -> Option<
         .and_then(|h| h.parse().ok())
 }
 
+/// Gmail ids of the thread's messages whose body is stored.
+fn stored_bodies(e: &Engine, account: AccountId, gmail_thread: &str) -> HashSet<String> {
+    e.reads
+        .with(|c| {
+            let mut stmt = c.prepare_cached(
+                "SELECT m.gmail_id FROM messages m JOIN threads t ON t.id = m.thread_id
+                 WHERE t.account_id = ?1 AND t.gmail_id = ?2 AND m.has_body = 1",
+            )?;
+            let ids = stmt.query_map(params![account, gmail_thread], |r| r.get(0))?;
+            Ok(ids.collect::<Result<_, _>>()?)
+        })
+        .inspect_err(|err| log::warn!("stored bodies of {gmail_thread}: {err:#}"))
+        .unwrap_or_default()
+}
+
 /// Whether any message of the thread lacks its body (or the thread is unknown).
 pub fn needs_bodies(e: &Engine, account: AccountId, gmail_thread: &str) -> bool {
     e.reads
@@ -328,11 +343,14 @@ async fn inline_images(
 }
 
 /// Fetches a thread and parses it, ready for `ingest::store_thread`.
+/// Messages in `stored` already have their body, which never changes: they
+/// are parsed without it, so their inline images are not fetched again.
 pub async fn get_thread(
     rt: &AccountRt,
     gmail_thread: &str,
     format: Format,
     prio: Priority,
+    stored: &HashSet<String>,
 ) -> Result<(Option<u64>, Vec<Incoming>), GmailError> {
     let headers: &[&str] = if format == Format::Metadata {
         METADATA_HEADERS
@@ -350,12 +368,13 @@ pub async fn get_thread(
     let full = format == Format::Full;
     let mut msgs = Vec::with_capacity(thread.messages.len());
     for m in &thread.messages {
-        let cids = if full {
+        let body = full && !stored.contains(&m.id);
+        let cids = if body {
             inline_images(rt, m, prio).await?
         } else {
             HashMap::new()
         };
-        msgs.push(ingest::parse(m, full, cids));
+        msgs.push(ingest::parse(m, body, cids));
     }
     Ok((thread.history_id, msgs))
 }
@@ -371,7 +390,12 @@ pub async fn fetch_thread(
     let account = rt.id;
     let gid = gmail_thread.to_string();
     let read = rt.landed.read();
-    match get_thread(rt, gmail_thread, format, prio).await {
+    let stored = if format == Format::Full {
+        stored_bodies(e, account, gmail_thread)
+    } else {
+        HashSet::new()
+    };
+    match get_thread(rt, gmail_thread, format, prio, &stored).await {
         Ok((history, msgs)) => {
             let stored = e
                 .writer
@@ -639,9 +663,17 @@ pub async fn poll(e: &Arc<Engine>, rt: &AccountRt) -> Result<(), GmailError> {
         .filter(|(msg, _)| !known.contains(msg.as_str()) && !batch.deleted.contains(*msg))
         .map(|(_, (thread, _))| thread.clone())
         .collect();
+    // Concurrently: the scheduler runs several requests at once.
+    let none = HashSet::new();
+    let answers = futures_util::future::join_all(
+        fetch
+            .iter()
+            .map(|t| get_thread(rt, t, Format::Metadata, Priority::P3, &none)),
+    )
+    .await;
     let mut fetched: Vec<(String, Option<u64>, Vec<Incoming>)> = Vec::new();
-    for t in &fetch {
-        match get_thread(rt, t, Format::Metadata, Priority::P3).await {
+    for (t, answer) in fetch.iter().zip(answers) {
+        match answer {
             Ok((h, msgs)) => fetched.push((t.clone(), h, msgs)),
             Err(err) if matches!(err.outcome, Outcome::NotFound) => {
                 fetched.push((t.clone(), None, vec![]));

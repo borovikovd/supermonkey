@@ -360,16 +360,16 @@ fn store_message(
         email: String::new(),
     };
     let from = m.from.as_ref().unwrap_or(&none);
-    let existing: Option<(MessageId, bool)> = ctx
+    let existing: Option<(MessageId, bool, bool)> = ctx
         .tx
         .query_row(
-            "SELECT id, has_body FROM messages WHERE account_id = ?1 AND gmail_id = ?2",
+            "SELECT id, has_body, is_draft FROM messages WHERE account_id = ?1 AND gmail_id = ?2",
             params![account, m.gmail_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()?;
     let has_attachments = m.parts.iter().any(|p| !p.inline);
-    let id = if let Some((id, _)) = existing {
+    let id = if let Some((id, _, _)) = existing {
         ctx.tx.execute(
             "UPDATE messages SET thread_id = ?2, label_ids = ?3, snippet = ?4, is_draft = ?5 WHERE id = ?1",
             params![id, thread, to_json(&labels), m.snippet, is_draft],
@@ -408,12 +408,18 @@ fn store_message(
         store_parts(ctx, id, &m.parts)?;
         id
     };
-    let had_body = existing.is_some_and(|(_, b)| b);
+    let had_body = existing.is_some_and(|(_, b, _)| b);
     if !had_body {
         store_body(ctx, id, m, existing.is_some())?;
     }
+    // Headers and bodies never change, so the search row is written only for
+    // a new message, a body just stored, or a draft that was sent.
+    let reindex =
+        existing.is_none_or(|(_, _, was_draft)| was_draft) || (!had_body && m.body.is_some());
     if !is_draft {
-        index(ctx, id, m, from)?;
+        if reindex {
+            index(ctx, id, m, from)?;
+        }
         let spam = m.labels.iter().any(|l| l == "SPAM");
         if !spam {
             count_contacts(ctx, account, m, from, mine)?;

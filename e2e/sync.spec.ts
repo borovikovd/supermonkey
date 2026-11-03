@@ -514,3 +514,35 @@ test("SYN-09 a connect sync retried after a failure misses no change made in bet
   await expect(app.row("Person 1")).toHaveCount(0);
   await expectInboxMatchesGmail(app, A);
 });
+
+test("SYN-10 a reply to a stored thread downloads no inline image again", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const fullFetches = async () =>
+    (await gmail.requests("threads.get", { account: A })).filter(
+      (r) => r.path.includes(s.thread("fwd").threadId) && r.query.includes("format=full"),
+    ).length;
+  const images = async () => (await gmail.requests("attachments.get", { account: A })).length;
+  // The connect sync stored the contract with its inline logo.
+  expect(await images()).toBeGreaterThan(0);
+  const [fetchesBefore, imagesBefore] = [await fullFetches(), await images()];
+
+  await gmail.deliver({
+    account: A,
+    from: "Alice Adams <alice@law.test>",
+    subject: "Re: Contract",
+    text: "One more clause.",
+    threadId: s.thread("fwd").threadId,
+    inReplyTo: s.message("fwd", 1).messageId,
+  });
+  await app.settle();
+
+  // The reply's body came in a full fetch of the thread, without the logo again.
+  expect(await fullFetches()).toBeGreaterThan(fetchesBefore);
+  expect(await images()).toBe(imagesBefore);
+  await app.row("Contract").click();
+  await expect(app.messages).toHaveCount(2);
+  await expect(app.messages.last().locator("iframe")).toHaveCount(1);
+});
