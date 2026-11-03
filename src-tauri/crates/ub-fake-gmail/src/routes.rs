@@ -167,16 +167,18 @@ impl FromRequestParts<Arc<Shared>> for Caller {
 impl Caller {
     /// Checks the bearer token and runs `f` on the user's mailbox.
     fn mailbox<T>(&self, f: impl FnOnce(&mut Mailbox) -> ApiResult<T>) -> ApiResult<T> {
-        let mut world = self.state.world();
+        let mut guard = self.state.world();
+        // Through a plain reference, tokens and mailboxes borrow apart.
+        let world = &mut *guard;
         let email = match world.access_tokens.get(&self.token) {
             Some((email, expiry))
                 if *expiry > Instant::now() && (self.user == "me" || self.user == *email) =>
             {
-                email.clone()
+                email
             }
             _ => return Err(ApiError::Unauthenticated),
         };
-        f(world.mailboxes.get_mut(&email).expect("token user exists"))
+        f(world.mailboxes.get_mut(email).expect("token user exists"))
     }
 }
 
@@ -300,13 +302,9 @@ async fn list_history(caller: Caller, params: Params) -> ApiResult {
             .ok_or_else(|| ApiError::BadRequest("Missing startHistoryId".into()))?;
         let records = mb.history_after(start)?;
         let out = json!({ "historyId": mb.history_id.to_string() });
-        Ok(Json(with_page(
-            out,
-            "history",
-            &records,
-            &params,
-            Value::clone,
-        )))
+        Ok(Json(with_page(out, "history", &records, &params, |r| {
+            r.json()
+        })))
     })
 }
 
@@ -388,7 +386,7 @@ async fn batch_modify(caller: Caller, body: Bytes) -> ApiResult<StatusCode> {
 
 async fn trash_message(caller: Caller, Path((_, id)): Path<(String, String)>) -> ApiResult {
     caller.mailbox(|mb| {
-        mb.modify(&id, &["TRASH".into()], &["INBOX".into(), "SPAM".into()])?;
+        mb.modify(&id, &["TRASH"], &["INBOX", "SPAM"])?;
         Ok(Json(mb.messages[&id].json("minimal", &[])))
     })
 }
@@ -622,11 +620,11 @@ async fn revoke(State(s): State<Arc<Shared>>, mut params: Params, body: Bytes) -
     let Some(email) = world.token_owner(token) else {
         return oauth_error("invalid_token", "Token expired or revoked");
     };
-    world.revocations.push(crate::Revocation {
-        token: token.to_owned(),
-        email: email.clone(),
-    });
     world.refresh_tokens.retain(|_, e| *e != email);
     world.access_tokens.retain(|_, (e, _)| *e != email);
+    world.revocations.push(crate::Revocation {
+        token: token.to_owned(),
+        email,
+    });
     StatusCode::OK.into_response()
 }

@@ -625,14 +625,12 @@ impl FakeGmail {
             !(matches!(e.fault, Fault::Hold | Fault::HoldAnswer)
                 && is_hold(e.id, e.matcher.api.as_deref()))
         });
-        let released: Vec<Held> = {
-            let mut held = self.shared.held.lock();
-            let (go, stay) = held
-                .drain(..)
-                .partition(|h| is_hold(h.hold, Some(h.info.api)));
-            *held = stay;
-            go
-        };
+        let released: Vec<Held> = self
+            .shared
+            .held
+            .lock()
+            .extract_if(.., |h| is_hold(h.hold, Some(h.info.api)))
+            .collect();
         let n = released.len();
         for h in released {
             self.shared.set_held(h.seq, false);
@@ -674,7 +672,7 @@ impl FakeGmail {
             .log
             .lock()
             .iter()
-            .filter(|r| matcher.matches(&r.info()))
+            .filter(|r| matcher.matches(&r.info))
             .count()
     }
 
@@ -875,11 +873,11 @@ impl FakeUser {
             let id = mb.send_draft(draft_id, None, now).ok()?;
             let msg = &mb.messages[&id];
             Some(AddedMessage {
-                id: id.clone(),
                 thread_id: msg.thread_id.clone(),
                 rfc822_message_id: mime::header(&msg.headers, "Message-ID")
                     .unwrap_or_default()
                     .to_owned(),
+                id,
             })
         })
     }
@@ -909,7 +907,7 @@ impl FakeUser {
 
     /// Changes a message's labels as another client would, recording history.
     pub fn modify_labels(&self, message_id: &str, add: &[&str], remove: &[&str]) {
-        self.with(|mb| mb.modify(message_id, &owned(add), &owned(remove)))
+        self.with(|mb| mb.modify(message_id, add, remove))
             .expect("message exists");
     }
 
@@ -1086,7 +1084,13 @@ async fn handle(
     let seq = {
         let mut log = shared.log.lock();
         let seq = log.len();
-        log.push(LoggedRequest::new(seq, &info, &parts.headers, &body, at_ms));
+        log.push(LoggedRequest::new(
+            seq,
+            info.clone(),
+            &parts.headers,
+            &body,
+            at_ms,
+        ));
         seq
     };
     let _in_flight = InFlight::new(&shared.in_flight);

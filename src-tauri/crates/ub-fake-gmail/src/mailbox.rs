@@ -52,7 +52,7 @@ enum Change {
     LabelsRemoved(Vec<String>),
 }
 
-struct HistoryRecord {
+pub(crate) struct HistoryRecord {
     id: u64,
     message_id: String,
     thread_id: String,
@@ -230,12 +230,10 @@ impl Mailbox {
         internal_date: Option<u64>,
     ) -> String {
         let id = self.new_id();
-        let mut attachment_ids = Vec::new();
+        let mut attachments = 0;
         let parsed = mime::parse(&raw, &mut || {
-            let n = attachment_ids.len() + 1;
-            let att = format!("ANGjdJ_{id}_{n}");
-            attachment_ids.push(att.clone());
-            att
+            attachments += 1;
+            format!("ANGjdJ_{id}_{attachments}")
         });
         let internal_date = internal_date.unwrap_or_else(|| self.next_date());
         let msg = Msg {
@@ -304,10 +302,9 @@ impl Mailbox {
         raw: Option<Vec<u8>>,
         date: Option<u64>,
     ) -> Result<String, Missing> {
-        let old = self.drafts.get(draft_id).cloned().ok_or(Missing)?;
+        let old = self.drafts.remove(draft_id).ok_or(Missing)?;
         let raw = raw.unwrap_or_else(|| self.messages[&old].raw.clone());
         let thread_id = self.messages[&old].thread_id.clone();
-        self.drafts.remove(draft_id);
         self.delete(&old)?;
         Ok(self.insert_raw(raw, Some(thread_id), vec!["SENT".into()], date))
     }
@@ -319,18 +316,26 @@ impl Mailbox {
     }
 
     /// Adds and removes labels, recording only real changes.
-    pub fn modify(&mut self, id: &str, add: &[String], remove: &[String]) -> Result<(), Missing> {
+    pub fn modify<L: AsRef<str>>(
+        &mut self,
+        id: &str,
+        add: &[L],
+        remove: &[L],
+    ) -> Result<(), Missing> {
         let msg = self.messages.get_mut(id).ok_or(Missing)?;
+        let has = |labels: &[String], l: &str| labels.iter().any(|x| x == l);
         let added: Vec<String> = add
             .iter()
-            .filter(|l| !msg.label_ids.contains(l))
-            .cloned()
+            .map(AsRef::as_ref)
+            .filter(|l| !has(&msg.label_ids, l))
+            .map(str::to_owned)
             .collect();
         msg.label_ids.extend(added.iter().cloned());
         let removed: Vec<String> = remove
             .iter()
-            .filter(|l| msg.label_ids.contains(l) && !add.contains(l))
-            .cloned()
+            .map(AsRef::as_ref)
+            .filter(|&l| has(&msg.label_ids, l) && !add.iter().any(|a| a.as_ref() == l))
+            .map(str::to_owned)
             .collect();
         msg.label_ids.retain(|l| !removed.contains(l));
         if !added.is_empty() {
@@ -412,7 +417,7 @@ impl Mailbox {
         label_ids: &[String],
         include_spam_trash: bool,
         now_ms: u64,
-    ) -> Vec<String> {
+    ) -> Vec<&str> {
         let query = Query::parse(q, self, now_ms);
         let wants_spam_trash = include_spam_trash
             || query.wants_spam_trash
@@ -436,7 +441,7 @@ impl Mailbox {
             .into_iter()
             .collect();
         hits.sort_by(|a, b| latest[b].cmp(&latest[a]).then(b.cmp(a)));
-        hits.into_iter().map(str::to_owned).collect()
+        hits
     }
 
     pub fn thread_summary_json(&self, thread_id: &str) -> Value {
@@ -444,16 +449,11 @@ impl Mailbox {
     }
 
     /// History records after `start`, or `Missing` if `start` is older than the floor.
-    pub fn history_after(&self, start: u64) -> Result<Vec<Value>, Missing> {
+    pub fn history_after(&self, start: u64) -> Result<Vec<&HistoryRecord>, Missing> {
         if start < self.history_floor {
             return Err(Missing);
         }
-        Ok(self
-            .history
-            .iter()
-            .filter(|r| r.id > start)
-            .map(history_json)
-            .collect())
+        Ok(self.history.iter().filter(|r| r.id > start).collect())
     }
 }
 
@@ -466,23 +466,25 @@ fn thread_summary_json(thread_id: &str, messages: &[&Msg]) -> Value {
     })
 }
 
-fn history_json(r: &HistoryRecord) -> Value {
-    let message = json!({ "id": r.message_id, "threadId": r.thread_id, "labelIds": r.label_ids });
-    let mut out = json!({
-        "id": r.id.to_string(),
-        "messages": [{ "id": r.message_id, "threadId": r.thread_id }],
-    });
-    match &r.change {
-        Change::Added => out["messagesAdded"] = json!([{ "message": message }]),
-        Change::Deleted => out["messagesDeleted"] = json!([{ "message": message }]),
-        Change::LabelsAdded(ids) => {
-            out["labelsAdded"] = json!([{ "message": message, "labelIds": ids }]);
+impl HistoryRecord {
+    pub fn json(&self) -> Value {
+        let message = json!({ "id": self.message_id, "threadId": self.thread_id, "labelIds": self.label_ids });
+        let mut out = json!({
+            "id": self.id.to_string(),
+            "messages": [{ "id": self.message_id, "threadId": self.thread_id }],
+        });
+        match &self.change {
+            Change::Added => out["messagesAdded"] = json!([{ "message": message }]),
+            Change::Deleted => out["messagesDeleted"] = json!([{ "message": message }]),
+            Change::LabelsAdded(ids) => {
+                out["labelsAdded"] = json!([{ "message": message, "labelIds": ids }]);
+            }
+            Change::LabelsRemoved(ids) => {
+                out["labelsRemoved"] = json!([{ "message": message, "labelIds": ids }]);
+            }
         }
-        Change::LabelsRemoved(ids) => {
-            out["labelsRemoved"] = json!([{ "message": message, "labelIds": ids }]);
-        }
+        out
     }
-    out
 }
 
 /// A tiny subset of Gmail search: `in:`/`label:`/`is:` label filters, `from:`, `to:`,

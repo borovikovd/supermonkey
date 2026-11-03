@@ -123,12 +123,8 @@ pub enum Answer {
 pub struct LoggedRequest {
     /// 0-based position in the log.
     pub seq: usize,
-    pub api: &'static str,
-    pub method: String,
-    pub path: String,
-    /// The raw query string, without `?`.
-    pub query: String,
-    pub account: Option<String>,
+    /// The request as a matcher sees it.
+    pub info: RequestInfo,
     /// The body, when it is JSON.
     pub body: Option<Value>,
     /// App time when it arrived (see [`crate::FakeGmail::set_clock`]), Unix ms.
@@ -145,7 +141,7 @@ pub struct LoggedRequest {
 impl LoggedRequest {
     pub(crate) fn new(
         seq: usize,
-        info: &RequestInfo,
+        info: RequestInfo,
         headers: &HeaderMap,
         body: &[u8],
         at_ms: u64,
@@ -158,28 +154,13 @@ impl LoggedRequest {
         };
         LoggedRequest {
             seq,
-            api: info.api,
-            method: info.method.clone(),
-            path: info.path.clone(),
-            query: info.query.clone(),
-            account: info.account.clone(),
+            info,
             body: serde_json::from_slice(body).ok(),
             at_ms,
             origin: header(axum::http::header::ORIGIN),
             user_agent: header(axum::http::header::USER_AGENT),
             held: false,
             answer: None,
-        }
-    }
-
-    /// The request as a matcher sees it.
-    pub fn info(&self) -> RequestInfo {
-        RequestInfo {
-            api: self.api,
-            method: self.method.clone(),
-            path: self.path.clone(),
-            query: self.query.clone(),
-            account: self.account.clone(),
         }
     }
 }

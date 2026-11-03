@@ -1306,7 +1306,7 @@ fn answer_json(a: Option<&Answer>) -> Value {
 
 fn request_json(r: &LoggedRequest) -> Value {
     let mut params = serde_json::Map::new();
-    for (k, v) in r.info().query_pairs() {
+    for (k, v) in r.info.query_pairs() {
         match params.get_mut(&k) {
             Some(Value::String(have)) => {
                 have.push(',');
@@ -1319,12 +1319,12 @@ fn request_json(r: &LoggedRequest) -> Value {
     }
     json!({
         "seq": r.seq,
-        "api": r.api,
-        "method": r.method,
-        "path": r.path,
-        "query": r.query,
+        "api": r.info.api,
+        "method": r.info.method,
+        "path": r.info.path,
+        "query": r.info.query,
         "params": params,
-        "account": r.account,
+        "account": r.info.account,
         "body": r.body,
         "at": r.at_ms,
         "held": r.held,
