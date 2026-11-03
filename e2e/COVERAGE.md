@@ -590,6 +590,14 @@ _ST · §Keyboard ("When a patch from Rust removes the highlighted row…")_
 | The last row is highlighted           | remove `INBOX` from that thread | The highlight is on the new last row.                                                           |
 | Conversation X (a middle row) is open | remove `INBOX` from X           | X stays open with its messages. `j` then opens the conversation that followed X's old position. |
 
+#### NAV-08 · P2 · `j` keeps the prefetched neighbors it still needs
+
+_EG · §Performance (prefetch), §Subscriptions_
+
+- **Seed:** `standard`.
+- **Steps:** with `p1` highlighted, `settle()` (the prefetch holds `p1` and `p2`). Press `j`, `settle()`.
+- **Expect:** three conversation subscriptions, and `p1` and `p2` keep the subscription ids they had: not dropped (data cleared) and made again.
+
 ### 5.3 `views.spec.ts` (VIEW)
 
 #### VIEW-01 · P2 · A thread's latest message sets its row

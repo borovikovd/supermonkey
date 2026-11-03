@@ -366,3 +366,25 @@ test("NAV-07 the highlight moves when a poll removes the highlighted row", async
   await app.press("j");
   await expect(app.conversationTitle).toHaveText("Person 6");
 });
+
+/** Conversation subscriptions in the mirror, as thread → subscription id. A string: `__ub` is the app's hook. */
+const CONVERSATION_SUBS = `Object.fromEntries(Object.entries(window.__ub.useMirror.getState().subs)
+  .filter(([, s]) => s.type === "conversation").map(([id, s]) => [String(s.key.thread), id]))`;
+
+test("NAV-08 j keeps the prefetched neighbors it still needs", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  await expect(app.highlighted).toContainText("Person 1");
+  await app.settle();
+  const p1 = await app.rowKey("Person 1");
+  const p2 = await app.rowKey("Person 2");
+  const before = await app.page.evaluate<Record<string, string>>(CONVERSATION_SUBS);
+  expect(Object.keys(before).toSorted()).toEqual([p1, p2].toSorted());
+
+  await app.press("j");
+  await app.settle();
+  const after = await app.page.evaluate<Record<string, string>>(CONVERSATION_SUBS);
+  expect(Object.keys(after)).toHaveLength(3);
+  // The same subscriptions, not dropped and made again (their data stays).
+  expect(after[p1]).toBe(before[p1]);
+  expect(after[p2]).toBe(before[p2]);
+});

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { visibleIds } from "../commands";
@@ -20,7 +20,8 @@ export function Prefetch() {
         : { thread: null, openTrashMode: false, row: cur?.highlight || null };
     }),
   );
-  const [keys, setKeys] = useState<SubKey[]>([]);
+  /** The subscriptions held now. */
+  const held = useRef<SubKey[]>([]);
 
   useEffect(() => {
     const center = thread === null ? row : String(thread);
@@ -35,17 +36,26 @@ export function Prefetch() {
       const around = [ids[at - 1], thread === null ? center : undefined, ids[at + 1]].filter(
         (x): x is string => x !== undefined && !Number.isNaN(Number(x)),
       );
-      setKeys(
-        around.map((x) => ({ type: "conversation", thread: Number(x), trashMode, open: false })),
-      );
+      const next: SubKey[] = around.map((x) => ({
+        type: "conversation",
+        thread: Number(x),
+        trashMode,
+        open: false,
+      }));
+      // New ones first: a neighbor kept across the move keeps its
+      // subscription and data instead of being dropped and loaded again.
+      for (const k of next) subscribe(k);
+      for (const k of held.current) unsubscribe(k);
+      held.current = next;
     }, 100);
   }, [thread, openTrashMode, row]);
 
-  useEffect(() => {
-    for (const k of keys) subscribe(k);
-    return () => {
-      for (const k of keys) unsubscribe(k);
-    };
-  }, [keys]);
+  useEffect(
+    () => () => {
+      for (const k of held.current) unsubscribe(k);
+      held.current = [];
+    },
+    [],
+  );
   return null;
 }
