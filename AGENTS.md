@@ -27,7 +27,7 @@ vp run demo                # app against the in-process fake Gmail (no Google ne
 vp run tauri dev           # app against real Gmail (needs google-oauth-client.json)
 vp run tauri build         # release .app
 vp check --fix             # format + lint + type check (TS)
-vp test                    # Vitest
+vp exec playwright test    # end-to-end suite (builds the UI and the e2e-server first)
 ./scripts/gate.sh          # every check: run before each commit
 ```
 
@@ -114,8 +114,17 @@ cargo clippy --workspace --all-targets --features fake -- -D warnings
 
 ## Testing
 
-- Rust tests that need Gmail use `ub-fake-gmail`, which can inject any outcome. Tests
-  never hit the network or real Google.
+- Behavior is tested end to end: Playwright drives the built UI in WebKit, through the
+  web bridge, against the real core and `ub-fake-gmail`, which can inject any Gmail
+  outcome. Tests never hit the network or real Google.
+- `e2e/COVERAGE.md` is the test design: each case id there is one test in
+  `e2e/*.spec.ts`. A new user-visible behavior adds a case there and a test.
+- The harness is in `e2e/app.ts` (page helpers), `e2e/control.ts` (the test server's
+  control API) and `e2e/seeds.ts`. Tests move app time with `app.advance()` and wait
+  with `app.settle()`, never with sleeps.
+- Unit tests are only for complex logic the end-to-end suite can't pin down (the list
+  is in `e2e/COVERAGE.md`, section 9). Don't add unit tests for what a user can see.
+- A product bug a test exposes is marked `test.fail(true, "BUG: …")` until fixed.
 - Every bug fix comes with a test that fails without it.
 - UI changes need a look in the running app (`vp run demo`). Passing type checks are
   not enough.

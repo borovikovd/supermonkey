@@ -229,39 +229,3 @@ pub(crate) fn parse_date(value: &str) -> Option<i64> {
         .ok()
         .map(|d| d.timestamp_millis())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ids() {
-        assert_eq!(
-            message_ids("<a@x> <b@y>\r\n <c@z>"),
-            vec!["a@x", "b@y", "c@z"]
-        );
-        assert_eq!(message_ids("a@x"), vec!["a@x"]);
-        assert_eq!(message_ids("<>"), Vec::<String>::new());
-    }
-
-    #[test]
-    fn dates() {
-        assert_eq!(
-            parse_date("Mon, 6 Jan 2025 10:00:00 +0000"),
-            Some(1_736_157_600_000)
-        );
-        assert_eq!(
-            parse_date("Mon, 6 Jan 2025 10:00:00 +0000 (UTC)"),
-            Some(1_736_157_600_000)
-        );
-        assert_eq!(
-            parse_date("6 Jan 2025 12:00:00  +0200"),
-            Some(1_736_157_600_000)
-        );
-        assert_eq!(
-            parse_date("Mon, 6 Jan 2025 10:00:00 GMT"),
-            Some(1_736_157_600_000)
-        );
-        assert_eq!(parse_date("garbage"), None);
-    }
-}

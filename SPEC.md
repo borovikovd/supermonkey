@@ -726,12 +726,13 @@ Tauri's dev and build commands are `vp dev` and `vp build`.
 
 ## Testing
 
-Gates before a build step is called done: `vp check`, `cargo test`, `cargo clippy`, and the performance budgets on the perf fixture.
+Gates before a commit: `vp check`, `cargo test`, `cargo clippy`, and the end-to-end suite, all run by `scripts/gate.sh`. Before a release, the performance budgets on the perf fixture.
 
-- Mirror: Vitest unit tests for applying channel messages, re-applying pending actions after `ack`, the removal table, the `rev` rule, and choosing the entry `z` undoes.
+- End to end: Playwright drives the built UI in WebKit. The UI talks to the real Rust core through the web bridge, and the core talks to the fake Gmail. A test server controls app time, waits for the core to go idle, restarts or crashes the app, and records what the native shell would do: notifications, the Dock badge, opened URLs and files, and stored tokens. `e2e/COVERAGE.md` maps each user case in this spec to a test. Tauri's WebDriver has no macOS support, so this is the end-to-end path.
+- Unit tests only for complex logic the end-to-end suite can't pin down: the sanitizer against hostile HTML, MIME parsing that never panics, the split query language and snooze phrases, the Gmail scheduler, and the OAuth state check, shared refresh, and secrets kept out of debug output.
 - Writer and channel: Rust property tests with proptest. They generate random sequences of UI actions, sync results, subscribes, and closes. After every channel message, a list built from its first load plus patches equals a fresh first load at that `rev`, and a model mirror never shows a row the user just removed coming back while its action is pending.
-- Fake Gmail: a local HTTP server in the test crate that serves the endpoints the app uses, with stored state for labels, threads, messages, drafts, history, and `sendAs`. It can inject each outcome in Gmail errors: no connection, no response after the request is sent, 401, 429, 5xx, 404, and other 4xx. Debug builds read the Gmail and Google OAuth base URLs from config, so token refresh is tested too. Sync, queue replay, the outbox and undo send, draft reconciliation, and `drafts.create` recovery are tested against it.
-- Real Gmail: the Done when list is run by hand against two test Google accounts before v1. Tauri's WebDriver does not support macOS, so there are no automated end-to-end tests.
+- Fake Gmail: a local HTTP server (`ub-fake-gmail`) that serves the endpoints the app uses, with stored state for labels, threads, messages, drafts, history, and `sendAs`. It can inject each outcome in Gmail errors: no connection, no response after the request is sent, 401, 429, 5xx, 404, and other 4xx. Debug builds read the Gmail and Google OAuth base URLs from config, so token refresh is tested too. The end-to-end suite runs against it.
+- Real Gmail: the Done when list is run by hand against two test Google accounts before v1.
 
 ## Build order
 

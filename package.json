@@ -7,7 +7,6 @@
     "dev": "vp dev",
     "build": "vp build",
     "check": "vp check",
-    "test": "vp test",
     "tauri": "tauri",
     "demo": "UBERMENSCH_FAKE=1 UBERMENSCH_WEB_BRIDGE=1 UBERMENSCH_DB=${TMPDIR:-/tmp}/ubermensch-demo.db tauri dev --features fake"
   },

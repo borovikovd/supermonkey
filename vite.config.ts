@@ -121,11 +121,6 @@ export default defineConfig({
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
   },
 
-  test: {
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-    environment: "node",
-  },
-
   // Pre-commit: format and lint the staged files.
   staged: {
     "*.{ts,tsx,js,json,css,md,html}": "vp check --fix --no-error-on-unmatched-pattern",

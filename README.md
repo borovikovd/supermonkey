@@ -25,7 +25,8 @@ vp run tauri build     # src-tauri/target/release/bundle/macos/Ubermensch.app
 ## Checks
 
 ```sh
-./scripts/gate.sh       # vp check, vp test, cargo fmt, cargo test, cargo clippy, bindings
+./scripts/gate.sh       # vp check, cargo fmt, cargo test, cargo clippy, bindings, E2E suite
+vp exec playwright test # E2E suite alone (Playwright + WebKit; `vp exec playwright install webkit` once)
 vp config --hooks       # once per clone: pre-commit runs `vp staged` (format and lint staged files)
 ```
 
