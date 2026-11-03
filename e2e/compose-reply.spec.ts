@@ -7,7 +7,7 @@ import { files } from "./files.ts";
 import { expect, test } from "./fixtures.ts";
 import { attachments, findPart, htmlOf, parseMime } from "./mime.ts";
 import * as seeds from "./seeds.ts";
-import { A, A_ALIAS, PERSONS } from "./seeds.ts";
+import { A, A_ALIAS, PERSONS, dates } from "./seeds.ts";
 
 // ------------------------------------------------------------------ helpers
 
@@ -212,14 +212,46 @@ test("REP-02 what r, Enter, and f do on the list and in a conversation", async (
 test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
   test.slow();
   const s = await seeds.standard(gmail, app);
+  // Subjects get `Re:` unless they already start with it (Q5): own's latest
+  // message is "Re: Budget draft".
   const rows = [
-    { key: "addr", to: ["carol@corp.test"], cc: ["dave@corp.test", "erin@corp.test"], from: A },
-    { key: "replyto", to: ["tickets@help.test"], cc: ["jo@help.test"], from: A },
-    { key: "alias", to: ["gus@guild.test"], cc: ["hal@guild.test"], from: A_ALIAS },
-    { key: "own", to: ["kim@kite.test"], cc: ["lee@kite.test"], from: A },
-    { key: "ownAlias", to: ["kim@kite.test"], cc: [], from: A_ALIAS },
+    {
+      key: "addr",
+      to: ["carol@corp.test"],
+      cc: ["dave@corp.test", "erin@corp.test"],
+      from: A,
+      subject: "Re: Offsite venue",
+    },
+    {
+      key: "replyto",
+      to: ["tickets@help.test"],
+      cc: ["jo@help.test"],
+      from: A,
+      subject: "Re: Ticket #42",
+    },
+    {
+      key: "alias",
+      to: ["gus@guild.test"],
+      cc: ["hal@guild.test"],
+      from: A_ALIAS,
+      subject: "Re: Guild meetup",
+    },
+    {
+      key: "own",
+      to: ["kim@kite.test"],
+      cc: ["lee@kite.test"],
+      from: A,
+      subject: "Re: Budget draft",
+    },
+    { key: "ownAlias", to: ["kim@kite.test"], cc: [], from: A_ALIAS, subject: "Re: Alias note" },
     // COVERAGE lists no Cc here, but SPEC Addressing puts the message's other To on Cc.
-    { key: "news1", to: ["news@letters.test"], cc: ["subscribers@letters.test"], from: A },
+    {
+      key: "news1",
+      to: ["news@letters.test"],
+      cc: ["subscribers@letters.test"],
+      from: A,
+      subject: "Re: Digest: week 44",
+    },
   ];
 
   const modes = ["r", "Enter"] as const;
@@ -250,8 +282,28 @@ test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
       expect(emails(m.headers.from), `${label} From`).toEqual([row.from]);
       expect(emails(m.headers.to), `${label} To`).toEqual(row.to);
       expect(emails(m.headers.cc), `${label} Cc`).toEqual(mode === "r" ? [] : row.cc);
+      expect(m.headers.subject, `${label} Subject`).toBe(row.subject);
     });
   });
+});
+
+test("REP-03 reply all leaves the To address off Cc", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  // Gus copies himself, so reply all's To (Gus) is also among the message's Cc.
+  await gmail.deliver({
+    account: A,
+    from: "Gus Grant <gus@guild.test>",
+    to: [A],
+    cc: ["gus@guild.test", "hal@guild.test"],
+    subject: "Self copy",
+    text: "Copying myself.",
+  });
+  await app.settle();
+
+  await open(app, "Self copy");
+  await app.reply("Enter");
+  expect(await chipAddresses(app, "To")).toEqual(["gus@guild.test"]);
+  expect(await chipAddresses(app, "Cc")).toEqual(["hal@guild.test"]);
 });
 
 test("REP-04 a sent reply stays on the thread and carries Gmail's quote", async ({
@@ -342,6 +394,7 @@ test("REP-06 forward quotes the target, carries its attachments, and stays on th
 
   const m = await sentWith(gmail, A, "Please see below");
   const alice = s.message("fwd", 1).messageId;
+  expect(m.headers.subject).toBe("Fwd: Contract");
   expect(m.threadId).toBe(s.thread("fwd").threadId);
   expect(m.headers["in-reply-to"]).toBe(alice);
   expect(m.headers.references).toContain(alice);
@@ -574,6 +627,42 @@ test("REP-09 drafts from Gmail get a kind and a target", async ({ app, gmail }) 
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
   await app.reply("r");
   await expect(app.editor).toHaveText("Started on the latest");
+  await closeComposer(app);
+  await app.press("Escape");
+
+  // The app first sees this draft after a newer message has arrived. It still
+  // counts as started on the latest: its target was the newest message older
+  // than the draft, though no longer the thread's latest.
+  await gmail.deliver({
+    account: A,
+    from: PERSONS[2] ?? "",
+    to: [A],
+    subject: "Re: Person 3",
+    text: "Rae again.",
+    threadId: s.thread("p3").threadId,
+    inReplyTo: s.latest("p3").messageId,
+    poll: false,
+  });
+  await gmail.createDraft(
+    A,
+    {
+      subject: "Re: Person 3",
+      to: [PERSONS[2] ?? ""],
+      threadId: s.thread("p3").threadId,
+      inReplyTo: s.latest("p3").messageId,
+      html: "<p>Written before Rae replied</p>",
+      date: dates.minutesAgo(5),
+    },
+    { poll: false },
+  );
+  await gmail.poll();
+  await app.settle();
+  await open(app, "Person 3");
+  await expect(app.messages).toHaveCount(2);
+  await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
+  await app.reply("r");
+  await expect(app.editor).toHaveText("Written before Rae replied");
+  await expect(app.messages.first()).toHaveAttribute("aria-current", "true");
   await closeComposer(app);
   await app.press("Escape");
 

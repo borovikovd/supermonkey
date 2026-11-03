@@ -546,6 +546,18 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await expect(app.row("Person 2")).toHaveCount(1);
   await expectLeft("r, closed by Ctrl+2", null);
 
+  // Q4: judged by value. Typed, saved to Gmail, then deleted back to empty: the
+  // draft is untouched, so it is discarded here and in Gmail.
+  await open(app, "Person 5");
+  await app.reply("r");
+  await app.type("Second thoughts");
+  await app.settle();
+  await app.eventually(A, (g) => g.drafts.length === 1, "the typed draft reached Gmail");
+  await app.press("Meta+a", "Backspace");
+  await expect(app.editor).toHaveText("");
+  await closeComposer(app);
+  await expectLeft("r, typed then deleted", 0);
+
   // Touched rows: kept.
   await open(app, "Person 1");
   await app.reply("r");

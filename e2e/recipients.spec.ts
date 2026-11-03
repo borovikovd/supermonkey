@@ -161,6 +161,13 @@ test("RCP-02 ranking and exclusions come from synced mail", async ({ app, gmail 
   await app.settle();
   expect(await suggested(app)).toEqual([]);
 
+  // Never sent to and seen only on list mail: the list's sender (List Bot
+  // <bot@list.test>) as well as Sly.
+  await to.fill("");
+  await app.type("list");
+  await app.settle();
+  expect(await suggested(app)).toEqual([]);
+
   // Matched at the start of the domain; never from the middle of the local part.
   await to.fill("");
   await app.type("recv");
