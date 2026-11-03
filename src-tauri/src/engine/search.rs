@@ -113,7 +113,14 @@ async fn list_page(
         });
         Ok(())
     });
-    e.searches.lock().remove(&sub);
+    // A newer page of this subscription may have replaced this task's handle.
+    let mut searches = e.searches.lock();
+    if searches
+        .get(&sub)
+        .is_some_and(|h| Some(h.id()) == tokio::task::try_id())
+    {
+        searches.remove(&sub);
+    }
 }
 
 fn thread_list_query(query: GmailListQuery, page: Option<String>) -> ThreadListQuery {

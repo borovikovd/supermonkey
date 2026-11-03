@@ -119,6 +119,13 @@ export function act(action: Action): number {
 
 const byKey = new Map<string, { id: string; refs: number }>();
 let subSeq = 0;
+/**
+ * Makes this page's subscription ids unlike any earlier page's, so a result
+ * Rust queued for an old page's subscription can't land on a new one.
+ */
+const pageTag = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) =>
+  b.toString(16).padStart(2, "0"),
+).join("");
 
 export const keyString = (key: SubKey) => JSON.stringify(key);
 
@@ -130,7 +137,7 @@ export function subscribe(key: SubKey): string {
     have.refs++;
     return have.id;
   }
-  const id = `s${++subSeq}`;
+  const id = `s${++subSeq}-${pageTag}`;
   byKey.set(k, { id, refs: 1 });
   useMirror.getState().addSub(id, subForKey(key));
   act({ type: "subscribe", sub: id, key });
