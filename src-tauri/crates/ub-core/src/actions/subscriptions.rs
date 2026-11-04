@@ -16,8 +16,9 @@ pub(super) fn reset(ctx: &mut ActionCtx<'_, '_>) -> Result<(), ActionError> {
     for draft in ctx.state.subs.composer_drafts() {
         crate::drafts::close(ctx.tx, ctx.state, &draft, ctx.now)?;
     }
-    for id in ctx.state.subs.close_all() {
+    for (id, key) in ctx.state.subs.close_all() {
         ctx.state.effect(Effect::CancelSub(id));
+        released(ctx, &key);
     }
     Ok(())
 }
@@ -68,14 +69,30 @@ pub(super) fn subscribe(
     for effect in effects {
         ctx.state.effect(effect);
     }
-    ctx.state.subs.open(sub, key, online && gmail.is_some());
+    if let Some(replaced) = ctx.state.subs.open(sub, key, online && gmail.is_some()) {
+        released(ctx, &replaced);
+    }
     Ok(())
 }
 
 /// Closes a subscription and cancels its queued Gmail work.
 pub(super) fn unsubscribe(ctx: &mut ActionCtx<'_, '_>, sub: SubId) {
-    ctx.state.subs.close(&sub);
+    let closed = ctx.state.subs.close(&sub);
     ctx.state.effect(Effect::CancelSub(sub));
+    if let Some(key) = closed {
+        released(ctx, &key);
+    }
+}
+
+/// A subscription watching `key` closed: a conversation's thread no other
+/// subscription shows no longer needs its bodies read, so a read of them
+/// still waiting (offline, backing off) stops.
+fn released(ctx: &mut ActionCtx<'_, '_>, key: &SubKey) {
+    if let SubKey::Conversation { thread, .. } = *key
+        && !ctx.state.subs.watches_thread(thread)
+    {
+        ctx.state.effect(Effect::ThreadUnneeded(thread));
+    }
 }
 
 /// Asks Gmail for a list's next page. The page token is taken, so asking

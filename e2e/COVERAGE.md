@@ -296,7 +296,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `attachments.spec.ts`      | ATT    | attach, download on demand, offline forward, MIME tree                                       | `standard`                               | H4, H9, H23                 | 7       | 6       | 1      | 0      |
 | `drafts.spec.ts`           | DRF    | autosave and upsert, Drafts `Enter`, Gmail-side edits and deletes, offline, reload and crash | `standard`, `drafts`                     | H6, H15, H16                | 18      | 15      | 2      | 1      |
 | `undo-send.spec.ts`        | SND    | the outbox state machine, held undo, rejection, no clear answer, restart                     | `standard`                               | H8a, H8b, H9, H13, H15      | 18      | 15      | 3      | 0      |
-| `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 7       | 6       | 1      | 0      |
+| `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 8       | 6       | 2      | 0      |
 | `gmail-errors.spec.ts`     | ERR    | the outcome matrix for actions and `drafts.create`, back-off, 401, 404                       | `standard`                               | H6, H8, H9, H10, H13        | 9       | 5       | 3      | 1      |
 | `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 10      | 5       | 3      | 2      |
 | `notifications.spec.ts`    | NOT    | when to notify, summary, mute, Dock badge, click                                             | `standard`                               | H17, H18                    | 6       | 5       | 1      | 0      |
@@ -305,7 +305,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 8       | 6       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **241** | **143** | **88** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **242** | **143** | **89** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -2807,6 +2807,16 @@ _EG · §Offline ("Loss of network leaves the queued action in place")_
   - `p2` and `p3` never reappear locally.
   - At the end, all three are archived in Gmail.
   - Each thread's change appears exactly once in the log, apart from the dropped attempt.
+
+#### OFF-08 · P2 · Conversations opened offline read only the bodies still on screen when the network returns
+
+_EG · §Sync (priority 2: a thread the user opens, then its prefetched neighbors), §Offline, AGENTS.md (isolation, bounded work)_
+
+- **Steps:**
+  1. `fault(threads.get format=full, 400)` and deliver six threads: their bodies are not stored. Clear the fault.
+  2. `offline(true)`. Open the oldest and press `j` four times, `k` three times, `j` twice, with `settle()` after each.
+  3. Note the conversations subscribed now. `offline(false)`, `settle()`.
+- **Expect:** after the reconnect, the `format=full` reads are exactly one per subscribed thread among the six: a thread opened or prefetched several times reads once, and one no longer on screen does not read at all.
 
 ### 5.18 `gmail-errors.spec.ts` (ERR)
 

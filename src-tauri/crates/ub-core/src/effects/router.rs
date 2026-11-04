@@ -46,6 +46,7 @@ impl Router {
                     worker.fetch_opened(thread);
                 }
             }
+            Effect::ThreadUnneeded(thread) => self.workers.release_opened(thread),
             Effect::GmailList {
                 sub,
                 account,

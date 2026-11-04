@@ -54,34 +54,45 @@ pub(crate) struct Registry {
 
 impl Registry {
     /// Opens a subscription; its first load goes out with the next commit.
-    /// An id already open is replaced.
-    pub(crate) fn open(&mut self, id: SubId, key: SubKey, searching: bool) {
+    /// An id already open is replaced; returns what it watched.
+    pub(crate) fn open(&mut self, id: SubId, key: SubKey, searching: bool) -> Option<SubKey> {
         self.opened = self.opened.saturating_add(1);
-        self.subs.insert(
-            id,
-            Sub {
-                key,
-                opened: self.opened,
-                ids: Vec::new(),
-                gmail_hits: Vec::new(),
-                searching,
-                next_page: None,
-                first_sent: false,
-                forced: false,
-            },
-        );
+        self.subs
+            .insert(
+                id,
+                Sub {
+                    key,
+                    opened: self.opened,
+                    ids: Vec::new(),
+                    gmail_hits: Vec::new(),
+                    searching,
+                    next_page: None,
+                    first_sent: false,
+                    forced: false,
+                },
+            )
+            .map(|replaced| replaced.key)
     }
 
-    /// Closes a subscription, if it is open.
-    pub(crate) fn close(&mut self, id: &SubId) {
-        self.subs.remove(id);
+    /// Closes a subscription, if it is open, and returns what it watched.
+    pub(crate) fn close(&mut self, id: &SubId) -> Option<SubKey> {
+        self.subs.remove(id).map(|sub| sub.key)
     }
 
-    /// Closes every subscription and returns their ids, in open order.
-    pub(crate) fn close_all(&mut self) -> Vec<SubId> {
+    /// Closes every subscription and returns their ids and what they
+    /// watched, in open order.
+    pub(crate) fn close_all(&mut self) -> Vec<(SubId, SubKey)> {
         let mut all: Vec<(SubId, Sub)> = self.subs.drain().collect();
         all.sort_by_key(|(_, sub)| sub.opened);
-        all.into_iter().map(|(id, _)| id).collect()
+        all.into_iter().map(|(id, sub)| (id, sub.key)).collect()
+    }
+
+    /// Whether a conversation, open or prefetched, shows `thread`: its
+    /// bodies are still wanted.
+    pub(crate) fn watches_thread(&self, thread: ThreadId) -> bool {
+        self.subs
+            .values()
+            .any(|s| matches!(&s.key, SubKey::Conversation { thread: t, .. } if *t == thread))
     }
 
     /// Whether a composer has `draft` open (SPEC Drafts: Rust treats a

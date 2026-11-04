@@ -22,6 +22,7 @@ mod fetcher;
 mod health;
 mod history;
 mod ingest;
+mod opened;
 mod poller;
 mod profile;
 mod queue;
@@ -41,6 +42,7 @@ pub(crate) use queue::{LATE, Work};
 pub(crate) use read::{ReadMessage, draft_message, parse};
 
 use self::health::Health;
+use self::opened::OpenedReads;
 use self::queue::FetchQueue;
 use crate::activity::Tasks;
 use crate::workers::ops::{self, OpsLane};
@@ -50,6 +52,8 @@ use crate::workers::{drafts, outbox};
 #[derive(Clone)]
 pub(crate) struct AccountWorker {
     ctx: Arc<AccountCtx>,
+    /// Reads of conversations' bodies in flight.
+    opened: Arc<OpenedReads>,
 }
 
 impl AccountWorker {
@@ -95,7 +99,10 @@ impl AccountWorker {
                 tasks.spawn("fetcher", fetcher::run(Arc::clone(&starting)));
             }
         });
-        Self { ctx }
+        Self {
+            ctx,
+            opened: Arc::default(),
+        }
     }
 
     /// The state its tasks share, for work started from outside: an opened
@@ -166,12 +173,28 @@ impl AccountWorker {
         });
     }
 
-    /// Reads an opened or prefetched thread's missing bodies at priority 2.
+    /// Reads an opened or prefetched thread's missing bodies at priority 2,
+    /// unless a read of them is in flight already. The read stops once no
+    /// subscription shows the thread ([`AccountWorker::release_opened`]).
     pub(crate) fn fetch_opened(&self, thread: ThreadId) {
+        let Some(read) = self.opened.begin(thread) else {
+            return;
+        };
         let ctx = Arc::clone(&self.ctx);
-        self.ctx
-            .tasks
-            .spawn("fetch thread", fetcher::fetch_opened(ctx, thread));
+        self.ctx.tasks.spawn("fetch thread", async move {
+            tokio::select! {
+                biased;
+                () = read.stopped().cancelled() => {}
+                () = fetcher::fetch_opened(ctx, thread) => {}
+            }
+            drop(read);
+        });
+    }
+
+    /// Stops the read of `thread`'s bodies for a conversation: no
+    /// subscription shows it any more.
+    pub(crate) fn release_opened(&self, thread: ThreadId) {
+        self.opened.stop(thread);
     }
 
     /// Cancels every task without waiting.

@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use parking_lot::Mutex;
 use tokio::sync::{RwLock, mpsc};
-use ub_domain::{AccountId, DraftId};
+use ub_domain::{AccountId, DraftId, ThreadId};
 use ub_gmail::{Gmail, HttpClient, RefreshToken, Scheduler, TokenStore, Tokens};
 use ub_store::Priority;
 
@@ -285,6 +285,14 @@ impl AccountWorkers {
         for worker in self.all() {
             worker.poll_now();
             worker.refresh_profile();
+        }
+    }
+
+    /// Stops the read of `thread`'s bodies for a conversation, in whichever
+    /// account has it: no subscription shows it any more.
+    pub(crate) fn release_opened(&self, thread: ThreadId) {
+        for worker in self.all() {
+            worker.release_opened(thread);
         }
     }
 

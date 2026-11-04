@@ -18,6 +18,9 @@ pub enum Effect {
         /// The thread.
         thread: ThreadId,
     },
+    /// No subscription shows the thread any more: a read of its bodies for
+    /// a conversation stops.
+    ThreadUnneeded(ThreadId),
     /// Run a Gmail search or view listing for a list subscription (SPEC
     /// Search, Views).
     GmailList {
@@ -80,6 +83,7 @@ impl Effect {
     pub fn name(&self) -> &'static str {
         match self {
             Self::FetchThread { .. } => "fetch thread",
+            Self::ThreadUnneeded(_) => "thread unneeded",
             Self::GmailList { .. } => "gmail list",
             Self::CancelSub(_) => "cancel sub",
             Self::DraftParts { .. } => "draft parts",
