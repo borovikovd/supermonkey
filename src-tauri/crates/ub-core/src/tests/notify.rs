@@ -19,7 +19,7 @@ async fn only_messages_history_reported_added_notify() {
             let stored = tx.threads().store(&FetchedThread {
                 account,
                 gmail_id: GmailThreadId::from("t-old"),
-                history_id: Some("2".to_owned()),
+                history_id: Some(ub_domain::HistoryId(2)),
                 messages: vec![
                     message("old", NEWEST - 1, "pat@example.org", &["INBOX", "UNREAD"]),
                     message("new", NEWEST, "pat@example.org", &["INBOX", "UNREAD"]),

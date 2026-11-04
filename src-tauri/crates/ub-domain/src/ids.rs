@@ -185,3 +185,58 @@ str_id!(
     /// Gmail's id of a draft.
     GmailDraftId,
 );
+
+/// Gmail's mailbox history cursor (`historyId`): it grows with every change
+/// to the mailbox. Gmail sends it as a decimal string, and SQLite keeps it
+/// as one; it is a number everywhere else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+pub struct HistoryId(pub u64);
+
+impl fmt::Display for HistoryId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl FromStr for HistoryId {
+    type Err = ParseIntError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse().map(Self)
+    }
+}
+
+/// Gmail's JSON spelling: a decimal string or, leniently, a number.
+impl<'de> Deserialize<'de> for HistoryId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::Error as _;
+
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Number(u64),
+            Text(String),
+        }
+        match Raw::deserialize(d)? {
+            Raw::Number(n) => Ok(Self(n)),
+            Raw::Text(s) => s.parse().map_err(D::Error::custom),
+        }
+    }
+}
+
+#[cfg(feature = "sqlite")]
+impl rusqlite::ToSql for HistoryId {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.0.to_string().into())
+    }
+}
+
+/// A stored cursor that is not a number is an error, never a missing one:
+/// polling would stop without a word.
+#[cfg(feature = "sqlite")]
+impl rusqlite::types::FromSql for HistoryId {
+    fn column_result(v: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        v.as_str()?
+            .parse()
+            .map_err(|e| rusqlite::types::FromSqlError::Other(Box::new(e)))
+    }
+}

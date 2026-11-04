@@ -215,7 +215,8 @@ fn write_account(
             is_primary: true,
         }],
     )?;
-    tx.accounts().set_history(account, "1", now)?;
+    tx.accounts()
+        .set_history(account, ub_domain::HistoryId(1), now)?;
     tx.accounts().set_connected(account)?;
     let gmail_labels: Vec<GmailLabel> = LABELS
         .iter()
@@ -374,7 +375,7 @@ fn thread(
     let fetched = FetchedThread {
         account,
         gmail_id: GmailThreadId::from(format!("t{n}_{t:06}")),
-        history_id: Some("1".to_owned()),
+        history_id: Some(ub_domain::HistoryId(1)),
         messages,
         complete: true,
     };

@@ -276,7 +276,7 @@ pub(crate) fn seed(tx: &mut WriteTx<'_>) -> Result<(AccountId, Vec<ThreadId>), S
         let stored = tx.threads().store(&FetchedThread {
             account,
             gmail_id: GmailThreadId::from(format!("t{t}")),
-            history_id: Some("1".to_owned()),
+            history_id: Some(ub_domain::HistoryId(1)),
             messages,
             complete: true,
         })?;

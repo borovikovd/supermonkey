@@ -113,7 +113,7 @@ async fn reconcile_cached(
                     Err(e) => return Err(e),
                 }
             }
-            Some(history) if thread.history_id != history.map(|h| h.to_string()) => {
+            Some(history) if thread.history_id != *history => {
                 ctx.queue.push(
                     LATE,
                     Work::Meta {

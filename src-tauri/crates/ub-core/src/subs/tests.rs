@@ -258,7 +258,8 @@ fn a_commit_that_changes_nothing_shown_sends_no_patch() {
     // Another account's mail, and a history id nothing shows.
     let updates = subs.write(move |tx| {
         let other = tx.accounts().create("b@example.com", "B")?;
-        tx.threads().set_history_id(thread, "99")?;
+        tx.threads()
+            .set_history_id(thread, ub_domain::HistoryId(99))?;
         tx.threads().store(&FetchedThread {
             account: other,
             gmail_id: GmailThreadId::from("x"),

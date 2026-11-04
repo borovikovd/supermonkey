@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 
 use rusqlite::Row;
 use ub_domain::{
-    AccountId, GmailThreadId, LabelSet, MessageId, Millis, Rev, SplitId, SystemLabel, ThreadId,
-    View,
+    AccountId, GmailThreadId, HistoryId, LabelSet, MessageId, Millis, Rev, SplitId, SystemLabel,
+    ThreadId, View,
 };
 
 use crate::StoreError;
@@ -57,7 +57,7 @@ pub struct ThreadRow {
     /// Its Split Inbox split while in the Inbox.
     pub split: Option<SplitId>,
     /// Gmail's `historyId` at the last fetch.
-    pub history_id: Option<String>,
+    pub history_id: Option<HistoryId>,
     /// The `rev` of its last change.
     pub rev: Rev,
 }
@@ -96,7 +96,7 @@ pub struct ThreadSyncState {
     /// Gmail's id.
     pub gmail_id: GmailThreadId,
     /// Gmail's `historyId` at the last fetch.
-    pub history_id: Option<String>,
+    pub history_id: Option<HistoryId>,
     /// The `rev` of its last change: a full resync drops a thread only when
     /// it has not changed since the resync began.
     pub rev: Rev,
@@ -392,7 +392,7 @@ pub struct FetchedThread {
     /// Gmail's id.
     pub gmail_id: GmailThreadId,
     /// Gmail's `historyId` for it.
-    pub history_id: Option<String>,
+    pub history_id: Option<HistoryId>,
     /// Its messages.
     pub messages: Vec<NewMessage>,
     /// The fetch listed every message the thread has, so stored ones it
@@ -441,7 +441,7 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
             (account, &fetched.gmail_id),
             |r| r.get("id"),
         )?;
-        if let Some(history) = &fetched.history_id {
+        if let Some(history) = fetched.history_id {
             db.execute(
                 "store a thread's history id",
                 "UPDATE threads SET history_id = ?2 WHERE id = ?1",
@@ -496,7 +496,11 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
     }
 
     /// Stores Gmail's `historyId` for the thread, as a history batch moves it.
-    pub fn set_history_id(&mut self, id: ThreadId, history_id: &str) -> Result<(), StoreError> {
+    pub fn set_history_id(
+        &mut self,
+        id: ThreadId,
+        history_id: HistoryId,
+    ) -> Result<(), StoreError> {
         self.tx.db().execute(
             "store a thread's history id",
             "UPDATE threads SET history_id = ?2 WHERE id = ?1",

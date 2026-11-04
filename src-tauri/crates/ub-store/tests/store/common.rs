@@ -137,7 +137,7 @@ pub fn fetched(account: AccountId, gmail_id: &str, messages: Vec<NewMessage>) ->
     FetchedThread {
         account,
         gmail_id: GmailThreadId::from(gmail_id),
-        history_id: Some("100".to_owned()),
+        history_id: Some(ub_domain::HistoryId(100)),
         messages,
         complete: true,
     }

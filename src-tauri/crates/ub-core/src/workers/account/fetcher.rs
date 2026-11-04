@@ -237,7 +237,7 @@ pub(crate) async fn is_current(
         })
         .await;
     match stored {
-        Ok(stored) => stored.is_some_and(|s| s == history.to_string()),
+        Ok(stored) => stored == Some(history),
         Err(e) => {
             tracing::warn!(error = %e, "couldn't read a thread's history id");
             false

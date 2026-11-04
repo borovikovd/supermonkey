@@ -68,7 +68,7 @@ pub(crate) fn store_thread(
     let stored = tx.threads().store(&FetchedThread {
         account,
         gmail_id: read.gmail_id,
-        history_id: read.history.map(|h| h.to_string()),
+        history_id: read.history,
         messages,
         complete: true,
     })?;
@@ -203,14 +203,13 @@ pub(crate) fn apply_history(
             continue;
         };
         if stored_history(tx.read(), id)?.is_none_or(|stored| stored < *newest) {
-            tx.threads().set_history_id(id, &newest.to_string())?;
+            tx.threads().set_history_id(id, *newest)?;
         }
     }
     for &thread in &touched {
         wake_if_back_in_inbox(tx, thread, &local)?;
     }
-    tx.accounts()
-        .set_history(account, &cursor.to_string(), now)?;
+    tx.accounts().set_history(account, cursor, now)?;
     if unknown {
         state.effect(Effect::RefreshLabels(account));
     }
@@ -219,12 +218,7 @@ pub(crate) fn apply_history(
 
 /// The stored thread's Gmail `historyId`.
 fn stored_history(reads: Reads<'_>, thread: ThreadId) -> Result<Option<HistoryId>, StoreError> {
-    Ok(reads
-        .threads()
-        .row(thread)?
-        .and_then(|row| row.history_id)
-        .and_then(|h| h.parse().ok())
-        .map(HistoryId))
+    Ok(reads.threads().row(thread)?.and_then(|row| row.history_id))
 }
 
 /// Stores the bodies a read brought for messages that have none yet.
@@ -366,7 +360,7 @@ mod tests {
                 tx.threads().store(&FetchedThread {
                     account,
                     gmail_id: GmailThreadId::from("t1"),
-                    history_id: Some(stored.to_string()),
+                    history_id: Some(HistoryId(stored)),
                     messages: vec![message("m1", 1, "b@example.com", &[])],
                     complete: true,
                 })?;

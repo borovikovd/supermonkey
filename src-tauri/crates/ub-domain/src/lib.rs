@@ -46,7 +46,7 @@ pub use hue::{AVATAR_HUES, avatar_hue};
 pub use identity::{Identity, SendAsAddress};
 pub use ids::{
     AccountId, ActionNo, AttachmentId, DraftId, GmailDraftId, GmailMessageId, GmailThreadId,
-    LabelId, MessageId, NoticeId, OutboxId, Rev, SplitId, SubId, ThreadId, UndoEntryId,
+    HistoryId, LabelId, MessageId, NoticeId, OutboxId, Rev, SplitId, SubId, ThreadId, UndoEntryId,
 };
 pub use kinds::{
     DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SplitKind, SyncStatus, UndoKind, View,

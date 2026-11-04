@@ -120,7 +120,7 @@ async fn connect(ctx: &AccountCtx) -> Result<(), GmailError> {
             };
             if record.history_id.is_none() {
                 tx.accounts()
-                    .set_history(account, &profile.history_id.to_string(), now)?;
+                    .set_history(account, profile.history_id, now)?;
             }
             Ok::<_, ub_store::StoreError>(())
         })
@@ -191,9 +191,7 @@ async fn poll(ctx: &AccountCtx) -> Result<(), GmailError> {
         .unwrap_or_else(|e| {
             tracing::warn!(account = account.0, error = %e, "couldn't read the history cursor");
             None
-        })
-        .and_then(|h| h.parse().ok())
-        .map(HistoryId);
+        });
     let Some(start) = start else {
         return Ok(());
     };
@@ -303,7 +301,7 @@ pub(crate) async fn store_cursor(ctx: &AccountCtx, cursor: HistoryId) {
     let stored = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, _| {
-            tx.accounts().set_history(account, &cursor.to_string(), now)
+            tx.accounts().set_history(account, cursor, now)
         })
         .await;
     if let Err(e) = stored {

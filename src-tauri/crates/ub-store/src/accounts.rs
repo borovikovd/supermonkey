@@ -3,8 +3,8 @@
 use rusqlite::{Row, named_params};
 use serde::{Deserialize, Serialize};
 use ub_domain::{
-    AccountId, IMPORTANT_POSITION, Identity, Millis, OTHER_POSITION, SendAsAddress, SplitKind,
-    SyncStatus, SystemLabel, avatar_hue,
+    AccountId, HistoryId, IMPORTANT_POSITION, Identity, Millis, OTHER_POSITION, SendAsAddress,
+    SplitKind, SyncStatus, SystemLabel, avatar_hue,
 };
 
 use crate::StoreError;
@@ -28,7 +28,7 @@ pub struct AccountRecord {
     /// The avatar hue slot; [`AccountRecord::hue`] is its color.
     pub hue_slot: i64,
     /// Gmail's history cursor.
-    pub history_id: Option<String>,
+    pub history_id: Option<HistoryId>,
     /// When sync last stored a cursor.
     pub last_sync: Option<Millis>,
     /// The stored sync state.
@@ -294,7 +294,7 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
     pub fn set_history(
         &mut self,
         id: AccountId,
-        history_id: &str,
+        history_id: HistoryId,
         synced_at: Millis,
     ) -> Result<(), StoreError> {
         self.tx.db().execute(
