@@ -1,16 +1,13 @@
-#![expect(clippy::unwrap_used, reason = "Tests fail loudly on purpose.")]
-use std::collections::HashMap;
+//! The sanitizer against hostile HTML (COVERAGE section 9).
 
-use ub_mime::{html_to_text, sanitize_html};
+use ub_mime::{CidImages, html_to_text, sanitize_html};
 
-fn hostile() -> String {
-    let path = format!("{}/tests/fixtures/hostile.html", env!("CARGO_MANIFEST_DIR"));
-    std::fs::read_to_string(path).unwrap()
-}
+/// Kept byte for byte: the expectations below quote it.
+const HOSTILE: &str = include_str!("fixtures/hostile.html");
 
 #[test]
 fn hostile_html_is_defused() {
-    let clean = sanitize_html(&hostile(), &HashMap::new());
+    let clean = sanitize_html(HOSTILE, &CidImages::new());
     let lower = clean.to_lowercase();
 
     for gone in [
@@ -79,14 +76,14 @@ fn hostile_html_is_defused() {
 
 #[test]
 fn cid_references_are_rewritten_before_sanitizing() {
-    let uri = "data:image/gif;base64,R0lGODlhAQABAAAAACw=".to_string();
-    let cids = HashMap::from([
-        ("ii_abc".to_string(), uri.clone()),
-        ("logo@corp.example".to_string(), uri.clone()),
-    ]);
+    let gif = [0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00];
+    let uri = "data:image/gif;base64,R0lGODlhAQA=";
+    let mut images = CidImages::new();
+    images.insert("ii_abc", "image/gif", &gif);
+    images.insert("<logo@corp.example>", "image/gif", &gif);
     let html = r#"<img src="cid:ii_abc"><img src='CID:logo%40corp.example'><img src="cid:unknown"><table><tr><td background="cid:ii_abc">x</td></tr></table>"#;
-    let clean = sanitize_html(html, &cids);
-    assert_eq!(clean.matches(&uri).count(), 3, "{clean}");
+    let clean = sanitize_html(html, &images);
+    assert_eq!(clean.matches(uri).count(), 3, "{clean}");
     // Unknown cid: is not an allowed scheme, so the attribute goes.
     assert!(!clean.contains("cid:unknown"));
 }
@@ -94,10 +91,21 @@ fn cid_references_are_rewritten_before_sanitizing() {
 #[test]
 fn data_urls_only_for_images() {
     let html = r#"<img src="data:text/html,<b>x</b>"><a href="data:image/png;base64,AAAA">a</a><img src="data:image/gif;base64,R0lG">"#;
-    let clean = sanitize_html(html, &HashMap::new());
+    let clean = sanitize_html(html, &CidImages::new());
     assert_eq!(
         clean,
         r#"<img><a rel="noopener noreferrer">a</a><img src="data:image/gif;base64,R0lG">"#
+    );
+}
+
+#[test]
+fn css_escapes_and_entities_do_not_hide_a_script_url() {
+    let html = r#"<div style="background:url('\6a avascript:alert(1)')">a</div><div style="background:url(&quot;java\script:x&quot;)">b</div><div style="background:url(https://cdn.example.com/ok.png)">c</div>"#;
+    let clean = sanitize_html(html, &CidImages::new());
+    assert_eq!(clean.matches("url()").count(), 2, "{clean}");
+    assert!(
+        clean.contains("url(https://cdn.example.com/ok.png)"),
+        "{clean}"
     );
 }
 
@@ -111,7 +119,7 @@ fn text_leaves_out_a_style_block_in_the_body() {
 
 #[test]
 fn text_of_hostile_html_has_no_hidden_content() {
-    let text = html_to_text(&hostile());
+    let text = html_to_text(HOSTILE);
     assert!(text.starts_with("Hello"), "{text}");
     assert!(text.contains("KEEP_CELL KEEP_FONT"));
     for hidden in [
