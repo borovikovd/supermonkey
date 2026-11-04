@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/borovikovd/ubermensch/compare/v0.1.1...v0.1.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* open links in emails in the browser ([341424c](https://github.com/borovikovd/ubermensch/commit/341424c4a805c8b66a2854eebeb907a808d38234))
+
 ## [0.1.1](https://github.com/borovikovd/ubermensch/compare/v0.1.0...v0.1.1) (2026-11-04)
 
 
