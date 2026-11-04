@@ -16,6 +16,7 @@ use crate::Error;
 use crate::activity::{Kick, Tasks, Tracked};
 use crate::clock::Clock;
 use crate::workers::network::Network;
+use crate::workers::notifications::Notifier;
 use crate::workers::ops::OpsLane;
 use crate::writer::CoreWriter;
 
@@ -31,6 +32,8 @@ pub(crate) struct WorkerDeps {
     pub(crate) pool: Arc<ReadPool>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) network: Arc<Network>,
+    /// Whether the window has focus, for which new mail notifies.
+    pub(crate) notifier: Arc<Notifier>,
 }
 
 /// One running worker, as the registry tells them apart: an account that

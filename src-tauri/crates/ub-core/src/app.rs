@@ -11,13 +11,13 @@ use ub_store::{Priority, ReadPool, StoreError};
 
 use crate::accounts::Accounts;
 use crate::actions::{Actions, Received};
-use crate::activity::{Activity, Tasks};
+use crate::activity::{Activity, Kick, Tasks};
 use crate::clock::Clock;
 use crate::effects::{Effect, Router};
-use crate::lifecycle::Lifecycle;
+use crate::lifecycle::{Lifecycle, LifecycleDeps};
 use crate::mail::Mail;
 use crate::queries::Queries;
-use crate::workers::{AccountWorkers, Network, Searches, WorkerDeps};
+use crate::workers::{AccountWorkers, Network, Notifier, Searches, WorkerDeps};
 use crate::writer::CoreWriter;
 use crate::{Error, Platform};
 
@@ -131,6 +131,8 @@ impl App {
             Ok::<_, StoreError>(())
         }));
         let network = Arc::new(Network::new(writer.clone(), Arc::clone(&activity)));
+        let notifier = Arc::new(Notifier::new(Arc::clone(&platform), Arc::clone(&clock)));
+        let snoozes = Arc::new(Kick::new(Arc::clone(&activity)));
         let workers = AccountWorkers::new(
             Arc::new(WorkerDeps {
                 data_dir: config.data_dir.clone(),
@@ -138,6 +140,7 @@ impl App {
                 pool: Arc::clone(&pool),
                 clock: Arc::clone(&clock),
                 network: Arc::clone(&network),
+                notifier: Arc::clone(&notifier),
             }),
             config.gmail.clone(),
             HttpClient::new()?,
@@ -149,6 +152,8 @@ impl App {
             platform: Arc::clone(&platform),
             workers: Arc::clone(&workers),
             searches: Arc::new(Searches::default()),
+            notifier: Arc::clone(&notifier),
+            snoozes: Arc::clone(&snoozes),
         };
         tasks.spawn("effects", router.run(from_writers));
         // The Dock badge as the database has it at launch. The router is
@@ -163,12 +168,17 @@ impl App {
             ),
             queries: Queries::new(Arc::clone(&pool), Arc::clone(&clock)),
             lifecycle: Lifecycle::new(
-                writer.clone(),
-                received,
-                clock,
-                tasks,
-                Arc::clone(&workers),
-                network,
+                LifecycleDeps {
+                    writer: writer.clone(),
+                    pool: Arc::clone(&pool),
+                    received,
+                    clock,
+                    tasks,
+                    workers: Arc::clone(&workers),
+                    network,
+                    notifier,
+                    snoozes,
+                },
                 config.debug,
             ),
             accounts: Accounts::new(writer.clone(), Arc::clone(&workers), Arc::clone(&platform)),

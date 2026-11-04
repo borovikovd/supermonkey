@@ -2,6 +2,8 @@
 
 mod actions;
 mod clock;
+mod notify;
+mod snooze;
 mod writer_channel;
 
 use std::path::Path;
@@ -15,13 +17,14 @@ use ub_ipc::{Action, ChannelMessage, NumberedAction};
 use ub_store::{FetchedThread, NewMessage, Priority, StoreError, WriteTx};
 
 use crate::activity::Activity;
-use crate::clock::SystemClock;
+use crate::clock::{Clock, SystemClock};
 use crate::{App, Config, Deps, GmailConfig, Notification, Platform, PlatformError};
 
 /// A platform that records what the core asked of it.
 #[derive(Default)]
 pub(crate) struct Recorder {
     pub(crate) badges: Mutex<Vec<Option<u32>>>,
+    pub(crate) notifications: Mutex<Vec<Notification>>,
 }
 
 impl Platform for Recorder {
@@ -37,7 +40,9 @@ impl Platform for Recorder {
         Ok(())
     }
 
-    fn notify(&self, _: &Notification) {}
+    fn notify(&self, notification: &Notification) {
+        self.notifications.lock().push(notification.clone());
+    }
 
     fn set_badge(&self, count: Option<u32>) {
         self.badges.lock().push(count);
@@ -63,7 +68,15 @@ impl Harness {
     }
 
     pub(crate) async fn start_in(dir: TempDir) -> Self {
-        let activity = Activity::new();
+        Self::start_with(dir, Activity::new(), Arc::new(SystemClock)).await
+    }
+
+    /// A core on `clock`, whose timers count in `activity`.
+    pub(crate) async fn start_with(
+        dir: TempDir,
+        activity: Arc<Activity>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
         let platform = Arc::new(Recorder::default());
         let app = App::start(
             &Config::in_data_dir(
@@ -73,7 +86,7 @@ impl Harness {
             ),
             Deps {
                 platform: Arc::<Recorder>::clone(&platform),
-                clock: Arc::new(SystemClock),
+                clock,
                 tokens: Arc::new(MemoryTokenStore::default()),
                 activity: Arc::clone(&activity),
             },

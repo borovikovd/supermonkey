@@ -6,14 +6,30 @@
 use std::collections::HashSet;
 
 use ub_domain::{
-    AccountId, LabelDelta, SnoozeEdit, Thread, ThreadChange, ThreadModify, UndoEntryId,
-    plan_modify, snooze_after,
+    AccountId, ActionNo, LabelDelta, Millis, ModifyKind, SnoozeEdit, Thread, ThreadChange,
+    ThreadId, ThreadModify, UndoEntryId, plan_modify, snooze_after,
 };
 use ub_ipc::{ModifyAction, SnoozeChange};
-use ub_store::UndoAction;
+use ub_store::{UndoAction, WriteTx};
 
 use super::{ActionCtx, ActionError, splits};
+use crate::effects::Effect;
 use crate::ops::{ModifyOp, queue_modify, queue_revert, revert};
+use crate::writer::WriterState;
+
+/// A label and snooze change to make to some of an account's threads.
+pub(crate) struct ThreadsChange {
+    /// The threads' account.
+    pub(crate) account: AccountId,
+    /// What the change is, for its snooze rule and undo label.
+    pub(crate) kind: ModifyKind,
+    /// The threads; repeats and threads gone since are skipped.
+    pub(crate) threads: Vec<ThreadId>,
+    /// The labels to add and remove.
+    pub(crate) delta: LabelDelta,
+    /// How the snooze changes, if it does.
+    pub(crate) snooze: Option<SnoozeEdit>,
+}
 
 /// `modify`: applies a resolved label and snooze change to each thread's
 /// messages as they are now, records what really changed for undo, and
@@ -36,32 +52,71 @@ pub(super) fn modify(ctx: &mut ActionCtx<'_, '_>, action: ModifyAction) -> Resul
             return Err(ActionError::Invalid("no such label"));
         }
     }
-    let edit = snooze.map(|s| match s {
+    let snooze = snooze.map(|s| match s {
         SnoozeChange::Set(at) => SnoozeEdit::Set(at),
         SnoozeChange::Clear => SnoozeEdit::Clear,
     });
+    let change = ThreadsChange {
+        account,
+        kind,
+        threads,
+        delta,
+        snooze,
+    };
+    let entry = change_threads(ctx.tx, ctx.state, change, Some(ctx.n), ctx.now)?;
+    if undoable && !entry.is_empty() {
+        ctx.tx.undo().record(
+            account,
+            UndoEntryId(ctx.n.0),
+            kind.undo_label(),
+            &UndoAction::Mail { threads: entry },
+        )?;
+    }
+    Ok(())
+}
+
+/// Makes `change` here and queues it for Gmail as made by `action` (`None`
+/// for the core's own, such as a snooze waking). Returns what really
+/// changed, per thread: the undo entry's payload. A snooze time set wakes
+/// the snooze timer.
+pub(crate) fn change_threads(
+    tx: &mut WriteTx<'_>,
+    state: &mut WriterState,
+    change: ThreadsChange,
+    action: Option<ActionNo>,
+    now: Millis,
+) -> Result<Vec<ThreadChange>, ActionError> {
+    let ThreadsChange {
+        account,
+        kind,
+        threads,
+        delta,
+        snooze,
+    } = change;
     let mut seen = HashSet::new();
     let mut entry = Vec::new();
     let mut messages = Vec::new();
     for thread in threads.into_iter().filter(|t| seen.insert(*t)) {
-        let Some(row) = ctx.tx.read().threads().row(thread)? else {
+        let Some(row) = tx.read().threads().row(thread)? else {
             // Gone since the UI saw it, say after a poll.
             continue;
         };
         if row.account != account {
             return Err(ActionError::Invalid("a thread is not in the account"));
         }
-        let facts = Thread::new(ctx.tx.read().messages().facts(thread)?);
+        let facts = Thread::new(tx.read().messages().facts(thread)?);
         let ThreadModify {
             op_messages,
             changes,
         } = plan_modify(&facts, &delta);
         messages.extend(op_messages.into_iter().map(|m| m.gmail_id.clone()));
-        ctx.tx.messages().apply(&changes)?;
-        let after = snooze_after(edit, kind, row.snooze_until);
+        tx.messages().apply(&changes)?;
+        let after = snooze_after(snooze, kind, row.snooze_until);
         if after != row.snooze_until {
-            // Extension point: the snooze slice re-arms its timer here.
-            ctx.tx.threads().set_snooze(thread, after)?;
+            tx.threads().set_snooze(thread, after)?;
+            if after.is_some() {
+                state.effect(Effect::Snoozes);
+            }
         }
         entry.push(ThreadChange {
             thread,
@@ -69,9 +124,6 @@ pub(super) fn modify(ctx: &mut ActionCtx<'_, '_>, action: ModifyAction) -> Resul
             snooze_before: row.snooze_until,
             snooze_after: after,
         });
-    }
-    if entry.is_empty() {
-        return Ok(());
     }
     let relabels = entry.iter().any(|t| !t.changes.is_empty());
     if relabels && !messages.is_empty() {
@@ -81,17 +133,9 @@ pub(super) fn modify(ctx: &mut ActionCtx<'_, '_>, action: ModifyAction) -> Resul
             remove: delta.remove().clone(),
             threads: entry.clone(),
         };
-        queue_modify(ctx.tx, ctx.state, account, Some(ctx.n), &op, ctx.now)?;
+        queue_modify(tx, state, account, action, &op, now)?;
     }
-    if undoable {
-        ctx.tx.undo().record(
-            account,
-            UndoEntryId(ctx.n.0),
-            kind.undo_label(),
-            &UndoAction::Mail { threads: entry },
-        )?;
-    }
-    Ok(())
+    Ok(entry)
 }
 
 /// `undo`: reverts one entry of the account's history and removes it. An
@@ -111,6 +155,12 @@ pub(super) fn undo(
     match record.action {
         UndoAction::Mail { threads } => {
             let reverted = revert(ctx.tx, &threads)?;
+            if reverted
+                .iter()
+                .any(|t| t.snooze_after.is_some() && t.snooze_after != t.snooze_before)
+            {
+                ctx.state.effect(Effect::Snoozes);
+            }
             queue_revert(ctx.tx, ctx.state, account, ctx.n, reverted, ctx.now)?;
             Ok(())
         }

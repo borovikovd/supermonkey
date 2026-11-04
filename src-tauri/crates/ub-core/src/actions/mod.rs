@@ -3,8 +3,7 @@
 //! handler reads and writes through the store's repositories, decides with
 //! `ub_domain` rules, and records effects on the writer state.
 //!
-//! One module per group of actions. The splits sheet rejects with
-//! [`ActionError::NotYetImplemented`] until its slice lands.
+//! One module per group of actions.
 
 mod accounts;
 mod batch;
@@ -24,3 +23,4 @@ pub(crate) use dispatch::ActionCtx;
 pub(crate) use error::ActionError;
 pub use handle::Actions;
 pub(crate) use handle::Received;
+pub(crate) use mail::{ThreadsChange, change_threads};

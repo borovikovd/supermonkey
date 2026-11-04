@@ -3,12 +3,11 @@
 use ub_domain::{AccountId, DraftId, LabelId, SubId, ThreadId};
 use ub_gmail::PageToken;
 
+use crate::Notification;
+
 /// Work for the async side after a commit. Jobs record effects on the
 /// writer state; the writer releases them to the router only once the
 /// commit has landed, and drops them when it rolls back.
-///
-/// Each later slice adds the variants its workers consume (notifications,
-/// the snooze timer).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     /// A conversation was subscribed: fetch its bodies if any are missing
@@ -73,6 +72,10 @@ pub enum Effect {
     /// Ops were queued for this account: its runner sends them (SPEC
     /// Offline).
     Ops(AccountId),
+    /// New mail to post a notification for (SPEC Notifications).
+    Notify(Notification),
+    /// A snooze time was set: the snooze timer looks again (SPEC Snooze).
+    Snoozes,
 }
 
 impl Effect {
@@ -91,6 +94,8 @@ impl Effect {
             Self::AccountRemoved { .. } => "account removed",
             Self::Badge => "badge",
             Self::Ops(_) => "ops",
+            Self::Notify(_) => "notify",
+            Self::Snoozes => "snoozes",
         }
     }
 }

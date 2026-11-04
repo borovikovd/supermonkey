@@ -19,6 +19,7 @@ use super::read::read_thread;
 use super::resync::full_resync;
 use crate::Error;
 use crate::workers::drafts::{Occasion, reconcile};
+use crate::workers::snooze;
 
 /// How often history is polled while Gmail answers.
 const POLL_EVERY: Duration = Duration::from_secs(45);
@@ -82,9 +83,11 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
         let now = ctx.clock().now();
         let gap = u64::try_from(now.0.saturating_sub(last.0)).unwrap_or(0);
         if Duration::from_millis(gap) > WOKE_AFTER {
-            // Extension point: the snooze and outbox slices wake due snoozes
-            // and sends here, before the list shows.
+            // Timers stood still while the Mac slept; the wall clock did not.
+            // Snoozes and sends that came due meanwhile go now.
             tracing::info!(account = ctx.account.0, "woke from sleep");
+            snooze::wake_due(ctx.writer(), now).await;
+            ctx.outbox.kick();
         }
         last = now;
     }
@@ -240,16 +243,17 @@ async fn poll(ctx: &AccountCtx) -> Result<(), GmailError> {
         }
     }
     let now = ctx.clock().now();
+    let notifier = Arc::clone(&ctx.deps.notifier);
     let applied = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
-            apply_history(tx, state, account, &batch, read, latest, now, &ticket)
+            let added = apply_history(tx, state, account, &batch, read, latest, now, &ticket)?;
+            let focused = notifier.is_focused();
+            crate::notify::new_mail(tx.read(), state, account, &added, &batch.added, focused)
         })
         .await;
     match applied {
-        // Extension point: the notifications slice raises notifications for
-        // the messages added (SPEC Notifications).
-        Ok(_added) => {
+        Ok(()) => {
             for thread in to_read {
                 ctx.queue
                     .push(super::queue::POLL_BODIES, Work::Body { thread });

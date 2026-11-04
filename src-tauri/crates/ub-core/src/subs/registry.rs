@@ -90,6 +90,13 @@ impl Registry {
         self.subs.values().any(|s| is_composer_of(&s.key, draft))
     }
 
+    /// Whether a conversation shows `thread` open, not just prefetched.
+    pub(crate) fn is_open(&self, thread: ThreadId) -> bool {
+        self.subs.values().any(|s| {
+            matches!(&s.key, SubKey::Conversation { thread: t, open: true, .. } if *t == thread)
+        })
+    }
+
     /// The drafts open in composers, in open order.
     pub(crate) fn composer_drafts(&self) -> Vec<DraftId> {
         let mut open: Vec<(&Sub, &DraftId)> = self

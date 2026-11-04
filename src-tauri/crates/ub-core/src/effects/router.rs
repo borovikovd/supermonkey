@@ -8,9 +8,9 @@ use ub_store::ReadPool;
 
 use super::Effect;
 use crate::Platform;
-use crate::activity::{Tracked, parked};
+use crate::activity::{Kick, Tracked, parked};
 use crate::views;
-use crate::workers::{AccountWorkers, Searches};
+use crate::workers::{AccountWorkers, Notifier, Searches};
 
 /// Where the writer sends committed effects.
 pub(crate) type EffectSender = mpsc::UnboundedSender<Tracked<Effect>>;
@@ -23,6 +23,9 @@ pub(crate) struct Router {
     pub(crate) platform: Arc<dyn Platform>,
     pub(crate) workers: Arc<AccountWorkers>,
     pub(crate) searches: Arc<Searches>,
+    pub(crate) notifier: Arc<Notifier>,
+    /// Wakes the snooze timer.
+    pub(crate) snoozes: Arc<Kick>,
 }
 
 impl Router {
@@ -84,6 +87,8 @@ impl Router {
                 }
             }
             Effect::DraftFilesGone(draft) => self.workers.delete_draft_files(&draft),
+            Effect::Notify(notification) => self.notifier.show(notification),
+            Effect::Snoozes => self.snoozes.kick(),
         }
     }
 
