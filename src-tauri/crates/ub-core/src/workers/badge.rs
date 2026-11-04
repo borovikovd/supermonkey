@@ -12,6 +12,7 @@ use ub_store::ReadPool;
 use crate::Platform;
 use crate::activity::Kick;
 use crate::clock::Clock;
+use crate::read::read;
 use crate::views;
 
 /// How long the task waits for a kick before it counts again anyway.
@@ -27,13 +28,9 @@ pub(crate) async fn run(
 ) {
     loop {
         kick.wait(&*clock, LOOK_AGAIN).await;
-        let reads = Arc::clone(&pool);
-        let count =
-            tokio::task::spawn_blocking(move || reads.with(|r| views::badge_count(**r))).await;
-        match count {
-            Ok(Ok(count)) => platform.set_badge((count > 0).then_some(count)),
-            Ok(Err(e)) => tracing::warn!(error = %e, "couldn't count unread mail for the badge"),
-            Err(e) => tracing::warn!(error = %e, "the badge count task failed"),
+        match read(&pool, |r| views::badge_count(**r)).await {
+            Ok(count) => platform.set_badge((count > 0).then_some(count)),
+            Err(e) => tracing::warn!(error = %e, "couldn't count unread mail for the badge"),
         }
     }
 }

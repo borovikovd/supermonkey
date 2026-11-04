@@ -122,8 +122,7 @@ impl AccountCtx {
         &self,
         read: impl FnOnce(&ReadTx<'_>) -> Result<T, StoreError> + Send + 'static,
     ) -> Result<T, Error> {
-        let pool = Arc::clone(&self.deps.pool);
-        Ok(tokio::task::spawn_blocking(move || pool.with(read)).await??)
+        crate::read::read(&self.deps.pool, read).await
     }
 
     /// Records a call's outcome for the account's sync state.

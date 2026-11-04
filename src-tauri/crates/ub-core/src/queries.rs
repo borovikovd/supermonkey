@@ -35,8 +35,7 @@ impl Queries {
         &self,
         read: impl FnOnce(&ReadTx<'_>) -> Result<T, StoreError> + Send + 'static,
     ) -> Result<T, Error> {
-        let pool = Arc::clone(&self.pool);
-        Ok(tokio::task::spawn_blocking(move || pool.with(read)).await??)
+        crate::read::read(&self.pool, read).await
     }
 
     /// Rows for list keys, fetched ahead of scrolling: draft ids for the

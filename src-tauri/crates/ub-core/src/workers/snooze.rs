@@ -47,18 +47,12 @@ pub(crate) async fn run(
 /// The soonest snooze end; `None` when there is none or it can't be read,
 /// which is logged.
 async fn next_snooze(pool: &Arc<ReadPool>) -> Option<Millis> {
-    let pool = Arc::clone(pool);
-    match tokio::task::spawn_blocking(move || pool.with(|r| r.threads().next_snooze())).await {
-        Ok(Ok(next)) => next,
-        Ok(Err(e)) => {
+    crate::read::read(pool, |r| r.threads().next_snooze())
+        .await
+        .unwrap_or_else(|e| {
             tracing::warn!(error = %e, "couldn't read the next snooze");
             None
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "the next-snooze read failed");
-            None
-        }
-    }
+        })
 }
 
 /// Wakes the snoozes due by `now` and waits for the commit. Returns whether

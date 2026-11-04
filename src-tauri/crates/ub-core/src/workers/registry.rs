@@ -19,6 +19,7 @@ use super::files::{attachments_dir, draft_dir};
 use super::grants::{Grant, Grants};
 use super::ops::OpsLane;
 use crate::activity::{Tasks, Tracked, parked};
+use crate::read::read;
 use crate::writer::CoreWriter;
 use crate::{Error, GmailConfig};
 
@@ -162,17 +163,10 @@ impl AccountWorkers {
         }
         let workers = Arc::clone(self);
         self.tasks.spawn("launch accounts", async move {
-            let pool = Arc::clone(&workers.deps.pool);
-            let accounts =
-                tokio::task::spawn_blocking(move || pool.with(|r| r.accounts().all())).await;
-            let accounts = match accounts {
-                Ok(Ok(accounts)) => accounts,
-                Ok(Err(e)) => {
-                    tracing::error!(error = %e, "couldn't read the accounts at launch");
-                    return;
-                }
+            let accounts = match read(&workers.deps.pool, |r| r.accounts().all()).await {
+                Ok(accounts) => accounts,
                 Err(e) => {
-                    tracing::error!(error = %e, "the launch read failed");
+                    tracing::error!(error = %e, "couldn't read the accounts at launch");
                     return;
                 }
             };

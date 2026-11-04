@@ -50,12 +50,10 @@ pub(crate) async fn open_attachment(
     platform: &dyn Platform,
     attachment: AttachmentId,
 ) -> Result<(), Error> {
-    let reads = Arc::clone(pool);
-    let account =
-        tokio::task::spawn_blocking(move || reads.with(|r| r.messages().attachment(attachment)))
-            .await??
-            .ok_or(DownloadError::Gone)?
-            .account;
+    let account = crate::read::read(pool, move |r| r.messages().attachment(attachment))
+        .await?
+        .ok_or(DownloadError::Gone)?
+        .account;
     let worker = workers.get(account).ok_or(DownloadError::Stopped)?;
     let path = ensure(worker.ctx(), attachment).await?;
     platform.open_path(&path)?;
