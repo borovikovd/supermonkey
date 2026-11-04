@@ -1,6 +1,10 @@
-//! `List-Unsubscribe` (RFC 2369) and `List-Unsubscribe-Post` (RFC 8058).
+//! `List-Unsubscribe` (RFC 2369) and `List-Unsubscribe-Post` (RFC 8058), for
+//! SPEC Unwanted mail.
 
-use crate::is_valid_email;
+use percent_encoding::percent_decode_str;
+use ub_domain::Addr;
+
+use crate::addr::is_valid_email;
 
 /// The ways a list offers to unsubscribe.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -11,64 +15,61 @@ pub struct ListUnsubscribe {
     pub web: Option<String>,
     /// `List-Unsubscribe-Post: List-Unsubscribe=One-Click` with a web URI: a
     /// POST to [`ListUnsubscribe::web`] unsubscribes without a page. Which URLs
-    /// may be posted to (https) is the caller's decision.
-    pub one_click: bool,
+    /// may be posted to (https only) is the caller's decision.
+    pub is_one_click: bool,
 }
 
 /// A `mailto:` unsubscribe address with its optional subject and body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mailto {
-    pub to: String,
+    /// The address to write to, without a display name.
+    pub to: Addr,
+    /// The `subject` field, when it is not empty.
     pub subject: Option<String>,
+    /// The `body` field, when it is not empty.
     pub body: Option<String>,
 }
 
-/// Reads the `<uri>, <uri>` list of a `List-Unsubscribe` header. URIs outside
-/// angle brackets and schemes other than mailto and http(s) are ignored.
+/// Reads the `<uri>, <uri>` list of a `List-Unsubscribe` header, and its
+/// `List-Unsubscribe-Post` companion. URIs outside angle brackets and schemes
+/// other than mailto and http(s) are ignored.
 pub fn list_unsubscribe(header: &str, post: Option<&str>) -> ListUnsubscribe {
     let mut out = ListUnsubscribe::default();
-    for uri in header
+    let uris = header
         .split('<')
         .skip(1)
-        .filter_map(|part| part.split_once('>').map(|(uri, _)| uri.trim()))
-    {
+        .filter_map(|part| part.split_once('>').map(|(uri, _)| uri.trim()));
+    for uri in uris {
         let Ok(url) = url::Url::parse(uri) else {
             continue;
         };
         match url.scheme() {
             "mailto" if out.mailto.is_none() => out.mailto = mailto(&url),
-            "https" | "http" if out.web.is_none() => out.web = Some(url.to_string()),
+            "https" | "http" if out.web.is_none() => out.web = Some(url.into()),
             _ => {}
         }
     }
-    out.one_click = post
-        .is_some_and(|p| p.trim().eq_ignore_ascii_case("List-Unsubscribe=One-Click"))
-        && out.web.is_some();
+    out.is_one_click = out.web.is_some()
+        && post.is_some_and(|p| p.trim().eq_ignore_ascii_case("List-Unsubscribe=One-Click"));
     out
 }
 
 fn mailto(url: &url::Url) -> Option<Mailto> {
-    let to = percent_decode(url.path());
+    let to = percent_decode_str(url.path()).decode_utf8_lossy();
     if !is_valid_email(&to) {
         return None;
     }
     let field = |name: &str| {
         url.query_pairs()
-            .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v.into_owned())
-            .filter(|v| !v.is_empty())
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.into_owned())
+            .filter(|value| !value.is_empty())
     };
     Some(Mailto {
-        to,
+        to: Addr::new(to),
         subject: field("subject"),
         body: field("body"),
     })
-}
-
-fn percent_decode(s: &str) -> String {
-    percent_encoding::percent_decode_str(s)
-        .decode_utf8_lossy()
-        .into_owned()
 }
 
 #[cfg(test)]
@@ -85,32 +86,32 @@ mod tests {
             got,
             ListUnsubscribe {
                 mailto: Some(Mailto {
-                    to: "unsub@list.example".into(),
+                    to: Addr::new("unsub@list.example"),
                     subject: Some("stop please".into()),
                     body: None,
                 }),
                 web: Some("https://list.example/u/42".into()),
-                one_click: true,
+                is_one_click: true,
             }
         );
     }
 
     #[test]
     fn one_click_needs_the_post_header_and_a_web_uri() {
-        assert!(!list_unsubscribe("<https://list.example/u>", None).one_click);
+        assert!(!list_unsubscribe("<https://list.example/u>", None).is_one_click);
         assert!(
             !list_unsubscribe(
                 "<mailto:u@list.example>",
                 Some("List-Unsubscribe=One-Click")
             )
-            .one_click
+            .is_one_click
         );
         assert!(
             list_unsubscribe(
                 "<https://list.example/u>",
                 Some(" list-unsubscribe=one-click ")
             )
-            .one_click
+            .is_one_click
         );
     }
 
@@ -134,7 +135,7 @@ mod tests {
         assert_eq!(
             got.mailto,
             Some(Mailto {
-                to: "list+unsub@d.example".into(),
+                to: Addr::new("list+unsub@d.example"),
                 subject: None,
                 body: Some("remove me".into()),
             })
