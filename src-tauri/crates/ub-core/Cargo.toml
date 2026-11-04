@@ -1,0 +1,13 @@
+[package]
+name = "ub-core"
+version = "0.1.0"
+description = "The application: actions, queries, subscriptions, and per-account workers"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

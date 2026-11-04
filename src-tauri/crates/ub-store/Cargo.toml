@@ -1,0 +1,13 @@
+[package]
+name = "ub-store"
+version = "0.1.0"
+description = "SQLite storage: the writer actor, the read pool, and typed repositories"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

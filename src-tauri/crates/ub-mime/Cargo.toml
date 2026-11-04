@@ -1,0 +1,13 @@
+[package]
+name = "ub-mime"
+version = "0.1.0"
+description = "Mail formats: parse Gmail payloads, sanitize HTML, build outgoing MIME"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

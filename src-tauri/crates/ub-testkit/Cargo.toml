@@ -1,0 +1,13 @@
+[package]
+name = "ub-testkit"
+version = "0.1.0"
+description = "Test and demo support: the /__test control server and demo seeding"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -2,6 +2,9 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, lazyPlugins } from "vite-plus";
 
+/** E2E specs the rewrite has turned green so far; `gate:slice` runs only these. */
+const SLICE_SPECS = ["e2e/plan.spec.ts"];
+
 export default defineConfig({
   // Tauri expects a fixed port and does not need the browser opened.
   clearScreen: false,
@@ -166,6 +169,12 @@ export default defineConfig({
       // Last and alone: the end-to-end suite is timing-sensitive under load.
       gate: {
         command: "vp run e2e",
+        dependsOn: ["lint:rust", "lint:ts", "typecheck", "bindings"],
+      },
+      // Branch `rewrite` only (ARCHITECTURE.md, section 12): the full gate
+      // with only the E2E specs of the slices done so far.
+      "gate:slice": {
+        command: `playwright test ${SLICE_SPECS.join(" ")}`,
         dependsOn: ["lint:rust", "lint:ts", "typecheck", "bindings"],
       },
     },

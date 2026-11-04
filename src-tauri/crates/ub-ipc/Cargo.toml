@@ -1,0 +1,13 @@
+[package]
+name = "ub-ipc"
+version = "0.1.0"
+description = "The IPC contract: DTOs exported to TypeScript and the command dispatch"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true
