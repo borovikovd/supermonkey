@@ -8,6 +8,23 @@ license.workspace = true
 publish = false
 
 [dependencies]
+ub-core = { path = "../ub-core" }
+ub-bridge = { path = "../ub-bridge", features = ["web"] }
+ub-ipc = { path = "../ub-ipc" }
+ub-domain = { path = "../ub-domain" }
+ub-gmail = { path = "../ub-gmail" }
+ub-fake-gmail = { path = "../ub-fake-gmail" }
+anyhow = "1"
+axum = "0.8"
+base64 = "0.22"
+parking_lot = "0.12"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "fs"] }
+tracing = "0.1"
+url = "2"
 
 [lints]
 workspace = true
