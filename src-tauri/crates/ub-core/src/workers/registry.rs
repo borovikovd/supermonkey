@@ -15,6 +15,7 @@ use ub_gmail::{Gmail, HttpClient, RefreshToken, Scheduler, TokenStore, Tokens};
 use ub_store::Priority;
 
 use super::account::{AccountWorker, SignOutSender, WorkerDeps, WorkerId};
+use super::ops::OpsLane;
 use crate::activity::{Tasks, Tracked, parked};
 use crate::writer::CoreWriter;
 use crate::{Error, GmailConfig};
@@ -33,6 +34,9 @@ pub(crate) struct AccountWorkers {
     tasks: Tasks,
     data_dir: PathBuf,
     live: Arc<Live>,
+    /// Each account's op lane. It outlives the account's workers, so an op
+    /// a replaced worker had sent lands before the next one replays.
+    lanes: Mutex<HashMap<AccountId, Arc<OpsLane>>>,
     sign_outs: SignOutSender,
     next_id: AtomicU64,
     /// Workers start only once the core has launched.
@@ -85,6 +89,7 @@ impl AccountWorkers {
             tasks,
             data_dir,
             live,
+            lanes: Mutex::default(),
             sign_outs,
             next_id: AtomicU64::new(0),
             launched: AtomicBool::new(false),
@@ -227,6 +232,12 @@ impl AccountWorkers {
         )
         .map_err(|e| Error::Invalid(e.to_string()))?;
         let id = WorkerId(self.next_id.fetch_add(1, Ordering::SeqCst));
+        let lane = Arc::clone(
+            self.lanes
+                .lock()
+                .entry(account)
+                .or_insert_with(|| OpsLane::new(self.tasks.child())),
+        );
         let mut workers = self.live.workers.lock();
         let old = workers.remove(&account);
         if let Some(old) = &old {
@@ -238,6 +249,7 @@ impl AccountWorkers {
             id,
             gmail,
             self.tasks.child(),
+            lane,
             self.sign_outs.clone(),
             old,
         );
@@ -287,6 +299,10 @@ impl AccountWorkers {
             let worker = workers.live.workers.lock().remove(&account);
             if let Some(worker) = worker {
                 worker.stop().await;
+            }
+            let lane = workers.lanes.lock().remove(&account);
+            if let Some(lane) = lane {
+                lane.stop().await;
             }
             match workers.load_token(&email).await {
                 Ok(Some(token)) => {

@@ -155,7 +155,12 @@ impl App {
         // gone only if the runtime is shutting down.
         let _ = to_router.send(activity.track("effect", Effect::Badge));
         Ok(Self {
-            actions: Actions::new(writer.clone(), Arc::clone(&received), tasks.clone()),
+            actions: Actions::new(
+                writer.clone(),
+                Arc::clone(&received),
+                Arc::clone(&clock),
+                tasks.clone(),
+            ),
             queries: Queries::new(Arc::clone(&pool), clock),
             lifecycle: Lifecycle::new(
                 writer.clone(),

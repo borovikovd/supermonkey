@@ -1,5 +1,6 @@
 //! Why an action was rejected.
 
+use ub_domain::ModifyError;
 use ub_store::StoreError;
 
 /// Why the core rejected a UI action. A rejected action is logged and its
@@ -14,6 +15,9 @@ pub(crate) enum ActionError {
     /// something the core does not accept.
     #[error("{0}")]
     Invalid(&'static str),
+    /// A mail change that can't be made as asked.
+    #[error(transparent)]
+    Modify(#[from] ModifyError),
     /// A later slice of the rewrite handles this action.
     #[error("{0} is not built yet")]
     NotYetImplemented(&'static str),

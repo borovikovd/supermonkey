@@ -218,6 +218,8 @@ async fn poll(ctx: &AccountCtx) -> Result<(), GmailError> {
     let Some(start) = start else {
         return Ok(());
     };
+    // Before history is read: ops that land from now on are kept on top of it.
+    let ticket = ctx.lane.landed.read();
     let Some((records, latest)) = history_since(ctx, start).await? else {
         return full_resync(ctx).await;
     };
@@ -264,7 +266,7 @@ async fn poll(ctx: &AccountCtx) -> Result<(), GmailError> {
     let applied = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
-            apply_history(tx, state, account, &batch, read, latest, now)
+            apply_history(tx, state, account, &batch, read, latest, now, &ticket)
         })
         .await;
     match applied {

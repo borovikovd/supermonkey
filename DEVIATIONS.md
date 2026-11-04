@@ -194,3 +194,23 @@ the spec's wording:
   start of the reply, not shortcuts: printable keys and Backspace are kept
   and put in the editor when it opens. Leaving the conversation first drops
   them. `c` does not do this.
+
+## Decided in the rewrite: mail actions and the op queue
+
+- **Rejection toasts** read "Gmail rejected a change (status): Gmail's
+  message". Two answers that are not a plain 4xx count as rejections too, so
+  the change rolls back instead of retrying forever: a `batchModify` 404
+  where every message still exists (a label it names is gone), and a
+  `labels.create` 409 for a name `labels.list` then does not show.
+- **One op at a time per account, across worker replacement.** An op's
+  Gmail call and the write of its result run outside the worker that
+  started them, and the next worker's runner waits for them, so a second
+  sign-in never sends a queued op twice (ACC-13). Quitting can still cut an
+  op off; it stays queued and is sent again on the next launch, which
+  `batchModify` and `labels.create` (by its 409) make harmless.
+- **A label list read before a label made here got its Gmail id** keeps
+  every label made here, not only that one; the next refresh drops any that
+  Gmail no longer has.
+- **A label made here that merges into one Gmail already had** (a refresh
+  stored Gmail's copy before the create answered) is renamed in queued ops
+  and undo entries too, so they keep naming a label that exists.

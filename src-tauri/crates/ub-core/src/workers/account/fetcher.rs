@@ -13,6 +13,7 @@ use super::ctx::{AccountCtx, AfterError};
 use super::ingest::{drop_thread, store_thread};
 use super::queue::{Listing, Slot, Work};
 use super::read::read_thread;
+use crate::ops::LocalChanges;
 
 /// Fetch workers per account. The account's scheduler caps how many of
 /// their requests run at once.
@@ -184,12 +185,14 @@ pub(crate) async fn fetch_thread(
         Vec::new()
     };
     let stored: HashSet<GmailMessageId> = stored.into_iter().collect();
+    let ticket = ctx.lane.landed.read();
     match read_thread(ctx, thread, format, priority, &stored).await {
         Ok(read) => {
             let stored = ctx
                 .writer()
                 .call(WritePriority::Sync, move |tx, state| {
-                    store_thread(tx, state, account, read)
+                    let local = LocalChanges::load(tx.read(), account, ticket.landed())?;
+                    store_thread(tx, state, account, read, &local)
                 })
                 .await;
             if let Err(e) = stored {

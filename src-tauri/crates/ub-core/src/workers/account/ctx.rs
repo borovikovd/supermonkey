@@ -15,6 +15,7 @@ use crate::Error;
 use crate::activity::{Kick, Tasks, Tracked};
 use crate::clock::Clock;
 use crate::workers::network::Network;
+use crate::workers::ops::OpsLane;
 use crate::writer::CoreWriter;
 
 /// How soon a task tries again while Gmail is unreachable, unless the
@@ -48,6 +49,10 @@ pub(crate) struct AccountCtx {
     pub(crate) queue: FetchQueue,
     /// Wakes the poller: a poll now.
     pub(crate) poll: Kick,
+    /// Wakes the ops runner: ops were queued.
+    pub(crate) ops: Kick,
+    /// What the account's op replay keeps across worker replacements.
+    pub(crate) lane: Arc<OpsLane>,
     pub(crate) health: Health,
     pub(crate) deps: Arc<WorkerDeps>,
     /// The worker's task group: cancelled when it stops.
@@ -79,6 +84,7 @@ impl AccountCtx {
         tasks: Tasks,
         health: Health,
         queue: FetchQueue,
+        lane: Arc<OpsLane>,
         sign_out: SignOutSender,
     ) -> Self {
         Self {
@@ -87,6 +93,8 @@ impl AccountCtx {
             gmail,
             queue,
             poll: Kick::new(Arc::clone(tasks.activity())),
+            ops: Kick::new(Arc::clone(tasks.activity())),
+            lane,
             health,
             deps,
             tasks,

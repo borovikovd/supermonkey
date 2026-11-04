@@ -52,6 +52,11 @@ impl Router {
                 .searches
                 .start(&self.workers, sub, account, query, page),
             Effect::CancelSub(sub) => self.searches.cancel(&sub),
+            Effect::Ops(account) => {
+                if let Some(worker) = self.workers.get(account) {
+                    worker.kick_ops();
+                }
+            }
             Effect::RefreshLabels(account) => {
                 if let Some(worker) = self.workers.get(account) {
                     worker.refresh_labels();

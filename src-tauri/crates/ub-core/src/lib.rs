@@ -28,6 +28,7 @@ mod app;
 mod error;
 mod lifecycle;
 mod mail;
+mod ops;
 mod platform;
 mod queries;
 mod subs;

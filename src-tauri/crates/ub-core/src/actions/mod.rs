@@ -3,9 +3,9 @@
 //! handler reads and writes through the store's repositories, decides with
 //! `ub_domain` rules, and records effects on the writer state.
 //!
-//! One module per group of actions. This slice handles the subscriptions,
-//! settings, notices, and send toasts; the rest reject with
-//! [`ActionError::NotYetImplemented`] until their slice lands.
+//! One module per group of actions. Compose actions, undoing a send, and
+//! the splits sheet reject with [`ActionError::NotYetImplemented`] until
+//! their slice lands.
 
 mod accounts;
 mod batch;
@@ -13,6 +13,7 @@ mod compose;
 mod dispatch;
 mod error;
 mod handle;
+mod labels;
 mod mail;
 mod notices;
 mod outbox;

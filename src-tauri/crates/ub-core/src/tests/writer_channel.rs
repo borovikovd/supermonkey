@@ -4,10 +4,8 @@
 //! built from its first load plus patches equals a fresh read of that list
 //! at that `rev`.
 //!
-//! The mail actions (`modify`, `undo`) are the actions slice's; until it
-//! lands, `Modify` and `Undo` here make the same label and snooze writes as
-//! UI-priority writer jobs, through `ub_domain::plan_modify` and the store,
-//! so the property still covers lists changed by the user's own actions.
+//! `Modify` and `Undo` are the real UI actions, so the property covers
+//! lists changed by the user's own actions as the core makes them.
 
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
@@ -17,10 +15,12 @@ use parking_lot::Mutex;
 use proptest::prelude::*;
 use ub_domain::{
     AccountId, ActionNo, LabelDelta, LabelId, LabelSet, Millis, ModifyKind, SnoozeEdit, SubId,
-    Thread, ThreadChange, ThreadId, View, plan_modify, snooze_after,
+    UndoEntryId, View,
 };
-use ub_ipc::{Action, ListEntry, ListMove, NumberedAction, SubKey, SubUpdate};
-use ub_store::{NewMessage, Pending, Priority, ReadPool, StoreError, WriteTx};
+use ub_ipc::{
+    Action, ListEntry, ListMove, ModifyAction, NumberedAction, SnoozeChange, SubKey, SubUpdate,
+};
+use ub_store::{NewMessage, Pending, Priority, ReadPool, StoreError};
 
 use super::{Harness, NEWEST, eventually, seed};
 
@@ -182,61 +182,6 @@ fn redated(m: &ub_store::MessageRecord, date: i64) -> NewMessage {
     }
 }
 
-/// A mail action's writes, as the actions slice's `modify` will make them.
-fn modify(
-    tx: &mut WriteTx<'_>,
-    kind: ModifyKind,
-    threads: &[ThreadId],
-) -> Result<Vec<ThreadChange>, StoreError> {
-    let (delta, edit) = delta(kind);
-    let mut entry = Vec::new();
-    for &thread in threads {
-        let facts = Thread::new(tx.read().messages().facts(thread)?);
-        let changes = plan_modify(&facts, &delta).changes;
-        tx.messages().apply(&changes)?;
-        let before = tx
-            .read()
-            .threads()
-            .row(thread)?
-            .and_then(|r| r.snooze_until);
-        let after = snooze_after(edit, kind, before);
-        if after != before {
-            tx.threads().set_snooze(thread, after)?;
-        }
-        entry.push(ThreadChange {
-            thread,
-            changes,
-            snooze_before: before,
-            snooze_after: after,
-        });
-    }
-    Ok(entry)
-}
-
-/// Reverts a mail action's writes, newest first, as undo will.
-fn revert(tx: &mut WriteTx<'_>, entry: &[ThreadChange]) -> Result<(), StoreError> {
-    for change in entry.iter().rev() {
-        for c in change.changes.iter().rev() {
-            let Some(current) = tx.read().messages().get(c.message)? else {
-                continue;
-            };
-            if let Some(back) = c.reverted(&current.labels) {
-                tx.messages().apply(&[back])?;
-            }
-        }
-        let now = tx
-            .read()
-            .threads()
-            .row(change.thread)?
-            .and_then(|r| r.snooze_until);
-        if change.restores_snooze(now) {
-            tx.threads()
-                .set_snooze(change.thread, change.snooze_before)?;
-        }
-    }
-    Ok(())
-}
-
 /// Replays `ops` and returns the lists rebuilt from patches, by
 /// subscription id (`s1`, `s2`, … in subscribe order).
 #[expect(
@@ -291,7 +236,8 @@ async fn run(ops: Vec<Op>) -> Result<HashMap<SubId, Vec<ListEntry>>, TestCaseErr
             .unwrap();
     }
     let writer = h.app.writer();
-    let undo: Arc<Mutex<Vec<Vec<ThreadChange>>>> = Arc::default();
+    // The undo entries made so far, newest last: each is its action's number.
+    let mut undo: Vec<UndoEntryId> = Vec::new();
     let mut jobs: Vec<Pending<(), StoreError>> = Vec::new();
     let mut n = h.app.actions().last_received().0;
     let mut slots: HashMap<usize, SubId> = HashMap::new();
@@ -303,6 +249,7 @@ async fn run(ops: Vec<Op>) -> Result<HashMap<SubId, Vec<ListEntry>>, TestCaseErr
             n: ActionNo(n),
             action,
         }]);
+        n
     };
     let pick = |i: usize| threads[i % threads.len()];
     for op in ops {
@@ -330,23 +277,25 @@ async fn run(ops: Vec<Op>) -> Result<HashMap<SubId, Vec<ListEntry>>, TestCaseErr
                 }
             }
             Op::Modify(kind, picked) => {
-                let targets: Vec<ThreadId> = picked.into_iter().map(pick).collect();
-                let undo = Arc::clone(&undo);
-                jobs.push(writer.call(Priority::Ui, move |tx, _| {
-                    let entry = modify(tx, kind, &targets)?;
-                    undo.lock().push(entry);
-                    Ok(())
+                let (delta, edit) = delta(kind);
+                let n = submit(Action::Modify(ModifyAction {
+                    account,
+                    kind,
+                    threads: picked.into_iter().map(pick).collect(),
+                    add: delta.add().iter().cloned().collect(),
+                    remove: delta.remove().iter().cloned().collect(),
+                    snooze: edit.map(|e| match e {
+                        SnoozeEdit::Set(at) => SnoozeChange::Set(at),
+                        SnoozeEdit::Clear => SnoozeChange::Clear,
+                    }),
+                    undoable: true,
                 }));
+                undo.push(UndoEntryId(n));
             }
             Op::Undo => {
-                let undo = Arc::clone(&undo);
-                jobs.push(writer.call(Priority::Ui, move |tx, _| {
-                    let entry = undo.lock().pop();
-                    match entry {
-                        Some(entry) => revert(tx, &entry),
-                        None => Ok(()),
-                    }
-                }));
+                if let Some(entry) = undo.pop() {
+                    submit(Action::Undo { account, entry });
+                }
             }
             Op::Remote(i, label, add) => {
                 let thread = pick(i);

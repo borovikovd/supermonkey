@@ -5,6 +5,7 @@
 //!   focus, and when kicked, with the full resync when history expired;
 //! - the fetchers: the fetch queue's metadata and body reads, in priority
 //!   order, and the contacts backfill;
+//! - the ops runner (`workers::ops`): queued Gmail mutations, in order;
 //! - one-off reads: a thread the user opens, a label refresh, a Gmail
 //!   listing for a list subscription.
 //!
@@ -30,13 +31,14 @@ use std::sync::Arc;
 use ub_domain::ThreadId;
 use ub_gmail::Gmail;
 
-pub(crate) use ctx::{AccountCtx, SignOutSender, WorkerDeps, WorkerId};
+pub(crate) use ctx::{AccountCtx, OFFLINE_RETRY, SignOutSender, WorkerDeps, WorkerId};
 pub(crate) use fetcher::{fetch_thread, is_current, needs_bodies};
 pub(crate) use queue::{LATE, Work};
 
 use self::health::Health;
 use self::queue::FetchQueue;
 use crate::activity::Tasks;
+use crate::workers::ops::{self, OpsLane};
 
 /// A running account worker.
 #[derive(Clone)]
@@ -47,13 +49,19 @@ pub(crate) struct AccountWorker {
 impl AccountWorker {
     /// Starts the worker's tasks in `tasks`, its own group. With `after`, they
     /// start only once that worker, the one it replaces, has stopped, so the
-    /// two never poll or replay at once.
+    /// two never poll or replay at once. `lane` is the account's: an op the
+    /// old worker had sent finishes there before this one's runner goes on.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the worker's parts, built once by the registry"
+    )]
     pub(crate) fn spawn(
         deps: Arc<WorkerDeps>,
         account: ub_domain::AccountId,
         id: WorkerId,
         gmail: Gmail,
         tasks: Tasks,
+        lane: Arc<OpsLane>,
         sign_out: SignOutSender,
         after: Option<Self>,
     ) -> Self {
@@ -66,7 +74,7 @@ impl AccountWorker {
         );
         let queue = FetchQueue::new(Arc::clone(tasks.activity()));
         let ctx = Arc::new(AccountCtx::new(
-            account, id, gmail, deps, tasks, health, queue, sign_out,
+            account, id, gmail, deps, tasks, health, queue, lane, sign_out,
         ));
         let starting = Arc::clone(&ctx);
         ctx.tasks.spawn("account start", async move {
@@ -75,6 +83,7 @@ impl AccountWorker {
             }
             let tasks = &starting.tasks;
             tasks.spawn("poller", poller::run(Arc::clone(&starting)));
+            tasks.spawn("ops", ops::run(Arc::clone(&starting)));
             for _ in 0..fetcher::FETCHERS {
                 tasks.spawn("fetcher", fetcher::run(Arc::clone(&starting)));
             }
@@ -96,6 +105,11 @@ impl AccountWorker {
     /// Polls history now.
     pub(crate) fn poll_now(&self) {
         self.ctx.poll.kick();
+    }
+
+    /// Wakes the ops runner: ops were queued.
+    pub(crate) fn kick_ops(&self) {
+        self.ctx.ops.kick();
     }
 
     /// Reads `sendAs` and the labels again (SPEC Sync: on focus).

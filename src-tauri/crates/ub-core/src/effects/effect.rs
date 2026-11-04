@@ -60,6 +60,9 @@ pub enum Effect {
     },
     /// Unread counts or mute settings may have changed: redraw the Dock badge.
     Badge,
+    /// Ops were queued for this account: its runner sends them (SPEC
+    /// Offline).
+    Ops(AccountId),
 }
 
 impl Effect {
@@ -75,6 +78,7 @@ impl Effect {
             Self::RefreshLabels(_) => "refresh labels",
             Self::AccountRemoved { .. } => "account removed",
             Self::Badge => "badge",
+            Self::Ops(_) => "ops",
         }
     }
 }

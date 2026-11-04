@@ -11,6 +11,7 @@ use ub_store::StoreError;
 
 use super::batch::apply_batch;
 use crate::activity::Tasks;
+use crate::clock::Clock;
 use crate::writer::CoreWriter;
 
 /// The highest action number received, applied or still queued.
@@ -32,14 +33,21 @@ impl Received {
 pub struct Actions {
     writer: CoreWriter,
     received: Arc<Received>,
+    clock: Arc<dyn Clock>,
     tasks: Tasks,
 }
 
 impl Actions {
-    pub(crate) fn new(writer: CoreWriter, received: Arc<Received>, tasks: Tasks) -> Self {
+    pub(crate) fn new(
+        writer: CoreWriter,
+        received: Arc<Received>,
+        clock: Arc<dyn Clock>,
+        tasks: Tasks,
+    ) -> Self {
         Self {
             writer,
             received,
+            clock,
             tasks,
         }
     }
@@ -57,8 +65,9 @@ impl Actions {
             return;
         };
         self.received.note(last);
+        let now = self.clock.now();
         let applied = self.writer.call(Priority::Ui, move |tx, state| {
-            apply_batch(tx, state, actions)
+            apply_batch(tx, state, actions, now)
         });
         let writer = self.writer.clone();
         self.tasks.spawn("actions", async move {

@@ -1,8 +1,8 @@
 //! The async workers (ARCHITECTURE.md, sections 4 and 8.2): one worker per
-//! signed-in account (`account`), the registry that starts and stops them
-//! (`registry`), Gmail listings for list subscriptions (`search`), and the
-//! app's network flag (`network`). Effects reach them through
-//! [`crate::effects`]'s router.
+//! signed-in account (`account`) with its ops runner (`ops`), the registry
+//! that starts and stops them (`registry`), Gmail listings for list
+//! subscriptions (`search`), and the app's network flag (`network`).
+//! Effects reach them through [`crate::effects`]'s router.
 //!
 //! The other modules are extension points that later slices of the rewrite
 //! fill in.

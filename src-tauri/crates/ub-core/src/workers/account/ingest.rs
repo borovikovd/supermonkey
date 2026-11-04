@@ -5,8 +5,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use ub_domain::{
-    AccountId, GmailMessageId, GmailThreadId, LabelId, LabelSet, MessageId, Millis, SystemLabel,
-    Thread, ThreadId,
+    AccountId, GmailThreadId, LabelId, LabelSet, MessageId, Millis, SystemLabel, Thread, ThreadId,
 };
 use ub_gmail::HistoryId;
 use ub_store::{FetchedThread, Reads, StoreError, WriteTx};
@@ -15,6 +14,7 @@ use super::contacts::sightings;
 use super::history::HistoryBatch;
 use super::read::{ReadMessage, ReadThread};
 use crate::effects::Effect;
+use crate::ops::{LocalChanges, ReadTicket};
 use crate::writer::WriterState;
 
 /// What storing a thread did.
@@ -27,14 +27,16 @@ pub(crate) struct Stored {
 }
 
 /// Stores a thread read from Gmail (SPEC Sync): its messages replace what is
-/// stored, labels included, and messages it no longer has go. An answer
-/// older than the stored thread (a slow read overtaken by a poll) keeps
-/// only the bodies it brought, which never change.
+/// stored, labels included, with this app's changes still on their way
+/// (`local`) kept on top, and messages it no longer has go. An answer older
+/// than the stored thread (a slow read overtaken by a poll) keeps only the
+/// bodies it brought, which never change.
 pub(crate) fn store_thread(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
     account: AccountId,
     read: ReadThread,
+    local: &LocalChanges,
 ) -> Result<Stored, StoreError> {
     let reads = tx.read();
     let cached = reads.threads().by_gmail_id(account, &read.gmail_id)?;
@@ -52,7 +54,6 @@ pub(crate) fn store_thread(
         });
     }
     let labels = Labels::load(reads, account)?;
-    let local = LocalChanges::load(reads, account)?;
     let mut unknown = false;
     let messages = read
         .messages
@@ -74,7 +75,7 @@ pub(crate) fn store_thread(
     store_bodies(tx, account, &read.messages)?;
     count_contacts(tx, account, &read.messages)?;
     if let Some(thread) = stored.thread {
-        wake_if_back_in_inbox(tx, thread, &local)?;
+        wake_if_back_in_inbox(tx, thread, local)?;
     }
     if unknown {
         state.effect(Effect::RefreshLabels(account));
@@ -102,8 +103,12 @@ pub(crate) fn drop_thread(
 /// is gone), then label changes for the messages it knows, with this app's
 /// changes still on their way kept on top. Then each thread's history moves
 /// up to the newest record that named it, so an older read counts as
-/// older; the snooze rule runs; and the cursor moves to `cursor`. Returns
-/// the messages added.
+/// older; the snooze rule runs; and the cursor moves to `cursor`. `ticket`
+/// is the poll's, taken before it read history. Returns the messages added.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one poll's parts, gathered by the poller"
+)]
 pub(crate) fn apply_history(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -112,7 +117,9 @@ pub(crate) fn apply_history(
     read: Vec<(GmailThreadId, Option<ReadThread>)>,
     cursor: HistoryId,
     now: Millis,
+    ticket: &ReadTicket,
 ) -> Result<Vec<MessageId>, StoreError> {
+    let local = LocalChanges::load(tx.read(), account, ticket.landed())?;
     let mut touched = BTreeSet::new();
     let mut gone = Vec::new();
     for message in &batch.deleted {
@@ -127,7 +134,7 @@ pub(crate) fn apply_history(
     for (thread, answer) in read {
         match answer {
             Some(answer) => {
-                let stored = store_thread(tx, state, account, answer)?;
+                let stored = store_thread(tx, state, account, answer, &local)?;
                 touched.extend(stored.thread);
                 added.extend(stored.added);
             }
@@ -136,7 +143,6 @@ pub(crate) fn apply_history(
     }
     let reads = tx.read();
     let labels = Labels::load(reads, account)?;
-    let local = LocalChanges::load(reads, account)?;
     let mut unknown = false;
     let mut changed = Vec::new();
     for (message, (thread, gmail_labels)) in &batch.labels {
@@ -271,38 +277,5 @@ impl Labels {
                 })
             })
             .collect()
-    }
-}
-
-/// Label changes this app made that have not reached Gmail yet: they win
-/// over what Gmail says about the same messages (SPEC Offline).
-///
-/// Extension point: the actions slice fills this from the op queue, and
-/// from the ops that reached Gmail while a read was in flight.
-struct LocalChanges;
-
-impl LocalChanges {
-    #[expect(
-        clippy::unnecessary_wraps,
-        reason = "an extension point: the actions slice reads the op queue here"
-    )]
-    fn load(_reads: Reads<'_>, _account: AccountId) -> Result<Self, StoreError> {
-        Ok(Self)
-    }
-
-    /// Puts this app's pending changes to `message` on top of `labels`.
-    #[expect(
-        clippy::unused_self,
-        reason = "an extension point: the actions slice re-applies queued ops here"
-    )]
-    fn apply(&self, _message: &GmailMessageId, _labels: &mut LabelSet) {}
-
-    /// Whether this app has a change to `message` still on its way.
-    #[expect(
-        clippy::unused_self,
-        reason = "an extension point: the actions slice reads the op queue here"
-    )]
-    fn touches(&self, _message: &GmailMessageId) -> bool {
-        false
     }
 }

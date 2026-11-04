@@ -1,10 +1,11 @@
 //! One action to its handler.
 
+use ub_domain::{ActionNo, Millis};
 use ub_ipc::Action;
 use ub_store::WriteTx;
 
 use super::{
-    ActionError, accounts, compose, mail, notices, outbox, settings, splits, subscriptions,
+    ActionError, accounts, compose, labels, mail, notices, outbox, settings, splits, subscriptions,
 };
 use crate::writer::WriterState;
 
@@ -15,6 +16,10 @@ pub(crate) struct ActionCtx<'a, 'c> {
     pub(crate) tx: &'a mut WriteTx<'c>,
     /// Subscriptions and effects.
     pub(crate) state: &'a mut WriterState,
+    /// The action's number: the id of the undo entry it makes.
+    pub(crate) n: ActionNo,
+    /// When its batch was submitted.
+    pub(crate) now: Millis,
 }
 
 /// Applies one action.
@@ -37,14 +42,24 @@ pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), A
         } => settings::set_setting(ctx, account, &key, &value),
         Action::AckNotice { notice } => notices::ack_notice(ctx, notice),
         Action::CloseToast { outbox } => outbox::close_toast(ctx, outbox),
-        Action::Modify(_) => mail::modify(),
-        Action::Undo { .. } => mail::undo(),
-        Action::CreateLabel { .. } => mail::create_label(),
+        Action::Modify(modify) => mail::modify(ctx, modify),
+        Action::Undo { account, entry } => mail::undo(ctx, account, entry),
+        Action::CreateLabel {
+            account,
+            id,
+            name,
+            apply,
+        } => labels::create_label(ctx, account, &id, &name, apply),
         Action::SaveDraft { .. } => compose::save_draft(),
         Action::CloseComposer { .. } => compose::close_composer(),
         Action::SendDraft { .. } => compose::send_draft(),
         Action::DiscardDraft { .. } => compose::discard_draft(),
-        Action::Pin { .. } => splits::pin(),
+        Action::Pin {
+            account,
+            kind,
+            value,
+            split,
+        } => splits::pin(ctx, account, kind, &value, split),
         Action::SaveSplits { .. } => splits::save_splits(),
         Action::RemoveAccount { account } => accounts::remove_account(ctx, account),
     }
