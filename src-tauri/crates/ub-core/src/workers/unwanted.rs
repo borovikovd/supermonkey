@@ -2,7 +2,7 @@
 //! and are not queued: a queued unsubscribe could fire long after the user
 //! stopped caring (DEVIATIONS).
 
-use ub_domain::{Addr, MessageFacts, ThreadId};
+use ub_domain::{Addr, MessageFacts, ThreadId, email_domain};
 use ub_gmail::{Filter, FilterId, GmailError, HttpClient, Priority};
 use ub_ipc::{BlockResult, BlockedSender, BlockedSenders, Unsubscribed};
 use ub_mime::{PlainMessage, build_plain, list_unsubscribe};
@@ -102,7 +102,7 @@ pub(crate) async fn block(
         ));
     };
     let from = if domain {
-        let Some((_, at)) = email.rsplit_once('@') else {
+        let Some(at) = email_domain(&email) else {
             return Err(Error::Invalid("The sender has no domain".to_owned()));
         };
         format!("@{at}")

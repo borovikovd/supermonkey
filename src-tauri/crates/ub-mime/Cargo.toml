@@ -22,8 +22,5 @@ serde_json = "1"
 thiserror = "2"
 url = "2"
 
-[dev-dependencies]
-mail-parser = "1"
-
 [lints]
 workspace = true

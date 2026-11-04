@@ -101,7 +101,7 @@ pedantic = { level = "warn", priority = -1 }
 # Pedantic lints that do not fit an application crate:
 # - `#[must_use]` on every getter adds noise; real must-use types are marked;
 must_use_candidate = "allow"
-# - errors are anyhow chains with context, and nothing here is a published API;
+# - errors are typed per crate and documented on the enum, and nothing here is a published API;
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 # - every hash map and set uses the default hasher; generic hashers would only add type noise.

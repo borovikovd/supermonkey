@@ -99,6 +99,19 @@ pub(crate) fn json_column<T: DeserializeOwned>(row: &Row<'_>, column: &str) -> r
         .map_err(|e| rusqlite::Error::FromSqlConversionFailure(index, Type::Text, Box::new(e)))
 }
 
+/// A nullable JSON column read as `T`; see [`json_column`].
+pub(crate) fn json_column_opt<T: DeserializeOwned>(
+    row: &Row<'_>,
+    column: &str,
+) -> rusqlite::Result<Option<T>> {
+    let index = row.as_ref().column_index(column)?;
+    row.get_ref(index)?
+        .as_str_or_null()?
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(|e| rusqlite::Error::FromSqlConversionFailure(index, Type::Text, Box::new(e)))
+}
+
 /// A value as a JSON column's text.
 pub(crate) fn to_json<T: Serialize + ?Sized>(
     column: &'static str,

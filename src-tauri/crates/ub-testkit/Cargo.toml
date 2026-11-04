@@ -10,7 +10,6 @@ publish = false
 [dependencies]
 ub-core = { path = "../ub-core" }
 ub-bridge = { path = "../ub-bridge", features = ["web"] }
-ub-ipc = { path = "../ub-ipc" }
 ub-domain = { path = "../ub-domain" }
 ub-gmail = { path = "../ub-gmail" }
 ub-store = { path = "../ub-store" }

@@ -68,9 +68,6 @@ impl Router {
             Effect::AccountRemoved { account, email } => {
                 self.workers.forget(account, email).await;
             }
-            // Requests of different accounts never wait on each other, so
-            // the account on screen needs no head start (DEVIATIONS).
-            Effect::OnScreen(_) => {}
             Effect::Outbox(account) => {
                 if let Some(worker) = self.workers.get(account) {
                     worker.kick_outbox();

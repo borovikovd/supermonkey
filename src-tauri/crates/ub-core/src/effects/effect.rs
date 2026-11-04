@@ -53,9 +53,6 @@ pub enum Effect {
     /// The account's outbox changed: its runner looks again (SPEC Send and
     /// undo).
     Outbox(AccountId),
-    /// The UI is showing this account. Its Gmail requests need no head
-    /// start: each account has its own slots and budget (DEVIATIONS).
-    OnScreen(AccountId),
     /// A message named a label the app does not know: read the labels again
     /// (SPEC Sync).
     RefreshLabels(AccountId),
@@ -89,7 +86,6 @@ impl Effect {
             Self::DraftFilesGone(_) => "draft files gone",
             Self::ReadDraft { .. } => "read draft",
             Self::Outbox(_) => "outbox",
-            Self::OnScreen(_) => "on screen",
             Self::RefreshLabels(_) => "refresh labels",
             Self::AccountRemoved { .. } => "account removed",
             Self::Badge => "badge",

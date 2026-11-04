@@ -3,8 +3,8 @@
 
 use std::collections::BTreeMap;
 
-use ub_domain::{AccountId, LabelDelta, LabelSet, Millis, ModifyKind, SnoozeEdit, SystemLabel};
-use ub_store::{StoreError, WriteTx};
+use ub_domain::{AccountId, LabelDelta, Millis, ModifyKind, SnoozeEdit};
+use ub_store::WriteTx;
 
 use crate::actions::{ActionError, ThreadsChange, change_threads};
 use crate::writer::WriterState;
@@ -17,7 +17,7 @@ pub(crate) fn wake_due(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
     now: Millis,
-) -> Result<usize, StoreError> {
+) -> Result<usize, ActionError> {
     let due = tx.read().threads().snoozes_due(now)?;
     let count = due.len();
     let mut by_account: BTreeMap<AccountId, Vec<_>> = BTreeMap::new();
@@ -25,10 +25,8 @@ pub(crate) fn wake_due(
         by_account.entry(account).or_default().push(thread);
     }
     for (account, threads) in by_account {
-        let mut add = LabelSet::new();
-        add.insert(SystemLabel::Inbox.label_id());
-        let delta = LabelDelta::new(add, LabelSet::new())
-            .map_err(|e| StoreError::Invalid(e.to_string()))?;
+        let delta = LabelDelta::preset(ModifyKind::ReturnToInbox)
+            .ok_or(ActionError::Invalid("Return to inbox has no label change"))?;
         let change = ThreadsChange {
             account,
             kind: ModifyKind::ReturnToInbox,
@@ -36,10 +34,7 @@ pub(crate) fn wake_due(
             delta,
             snooze: Some(SnoozeEdit::Clear),
         };
-        change_threads(tx, state, change, None, now).map_err(|e| match e {
-            ActionError::Store(e) => e,
-            other => StoreError::Invalid(other.to_string()),
-        })?;
+        change_threads(tx, state, change, None, now)?;
     }
     if count > 0 {
         tracing::info!(count, "woke due snoozes");

@@ -8,7 +8,7 @@ use std::time::Duration;
 use ub_ipc::LaunchInfo;
 use ub_store::{Priority, ReadPool, StoreError};
 
-use crate::actions::Received;
+use crate::actions::{ActionError, Received};
 use crate::activity::{Kick, Tasks};
 use crate::clock::Clock;
 use crate::workers::{AccountWorkers, Network, Notifier, snooze};
@@ -94,7 +94,8 @@ impl Lifecycle {
         let settled = deps.writer.call(Priority::Ui, move |tx, state| {
             crate::snooze::wake_due(tx, state, now)?;
             crate::outbox::on_launch(tx, state, now)?;
-            crate::drafts::on_launch(tx, state, now)
+            crate::drafts::on_launch(tx, state, now)?;
+            Ok::<_, ActionError>(())
         });
         let launching = Arc::clone(deps);
         deps.tasks.spawn("launch", async move {

@@ -122,11 +122,6 @@ impl GmailError {
         &self.outcome
     }
 
-    /// What happened, by value.
-    pub fn into_outcome(self) -> Outcome {
-        self.outcome
-    }
-
     /// The cause underneath, for logs.
     pub fn detail(&self) -> Option<&str> {
         self.detail.as_deref()

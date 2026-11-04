@@ -1,5 +1,5 @@
 //! `List-Unsubscribe` (RFC 2369) and `List-Unsubscribe-Post` (RFC 8058), for
-//! SPEC Unwanted mail.
+//! SPEC Unsubscribe and block.
 
 use percent_encoding::percent_decode_str;
 use ub_domain::Addr;

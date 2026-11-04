@@ -21,11 +21,6 @@ impl Thread {
         &self.messages
     }
 
-    /// The messages back, oldest first.
-    pub fn into_messages(self) -> Vec<MessageFacts> {
-        self.messages
-    }
-
     /// The message with this row id.
     pub fn message(&self, id: MessageId) -> Option<&MessageFacts> {
         self.messages.iter().find(|m| m.id == id)

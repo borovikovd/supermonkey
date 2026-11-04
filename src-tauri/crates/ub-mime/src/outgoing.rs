@@ -135,8 +135,8 @@ pub fn build_mime(message: &Outgoing<'_>) -> Result<Vec<u8>, BuildError> {
     Ok(out)
 }
 
-/// A plain-text message, such as a list's unsubscribe request (SPEC Unwanted
-/// mail). It carries no draft header: it is not one of the app's drafts.
+/// A plain-text message, such as a list's unsubscribe request (SPEC
+/// Unsubscribe and block). It carries no draft header: it is not one of the app's drafts.
 #[derive(Debug, Clone, Copy)]
 pub struct PlainMessage<'a> {
     /// The sender. Its domain also names the `Message-ID`.

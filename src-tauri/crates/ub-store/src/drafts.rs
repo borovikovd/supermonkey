@@ -1,7 +1,6 @@
 //! Drafts: the composer's state, its defaults, and its Gmail copy's ids
 //! (SPEC Drafts, Reply composer).
 
-use rusqlite::types::Type;
 use rusqlite::{Row, named_params};
 use serde::{Deserialize, Serialize};
 use ub_domain::{
@@ -10,7 +9,7 @@ use ub_domain::{
 };
 
 use crate::StoreError;
-use crate::db::{Db, id_list, json_column, to_json};
+use crate::db::{Db, id_list, json_column, json_column_opt, to_json};
 use crate::tx::WriteTx;
 
 /// One attachment of a draft.
@@ -152,15 +151,7 @@ pub struct DraftRecord {
 }
 
 fn draft_row(r: &Row<'_>) -> rusqlite::Result<DraftRecord> {
-    let defaults: Option<String> = r.get("defaults")?;
-    let defaults = defaults
-        .map(|text| {
-            serde_json::from_str(&text).map_err(|e| {
-                let index = r.as_ref().column_index("defaults").unwrap_or_default();
-                rusqlite::Error::FromSqlConversionFailure(index, Type::Text, Box::new(e))
-            })
-        })
-        .transpose()?;
+    let defaults = json_column_opt(r, "defaults")?;
     Ok(DraftRecord {
         draft: Draft {
             id: r.get("id")?,

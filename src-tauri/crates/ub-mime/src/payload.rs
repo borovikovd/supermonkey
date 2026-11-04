@@ -52,7 +52,7 @@ pub struct MessageHeaders {
     pub in_reply_to: Option<String>,
     /// `References` ids in order, without angle brackets.
     pub references: Vec<String>,
-    /// `List-Id` or `List-Unsubscribe` is present (SPEC Splits).
+    /// `List-Id` or `List-Unsubscribe` is present (SPEC Split Inbox).
     pub is_list: bool,
     /// The local draft id from `X-Ubermensch-Draft`, on drafts this app wrote.
     pub draft_id: Option<DraftId>,

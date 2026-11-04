@@ -146,7 +146,7 @@ pub(crate) async fn add_attachment(
     cmd::add_attachment(&shell.core, draft, filename, mime_type, &data).await
 }
 
-/// Quits after the UI has closed an open composer (SPEC Undo send: Cmd+Q).
+/// Quits after the UI has closed an open composer (SPEC Send and undo: Cmd+Q).
 #[tauri::command]
 pub(crate) fn quit_now(app: AppHandle) {
     crate::quit(&app);

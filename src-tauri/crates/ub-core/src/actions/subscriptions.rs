@@ -33,15 +33,14 @@ pub(super) fn subscribe(
     let reads = ctx.tx.read();
     let mut effects = Vec::new();
     match &key {
-        SubKey::Conversation { thread, open, .. } => {
+        SubKey::Conversation { thread, .. } => {
+            // Requests of different accounts never wait on each other, so
+            // the account on screen needs no head start (DEVIATIONS).
             if let Some(account) = reads.threads().account_of(*thread)? {
                 effects.push(Effect::FetchThread {
                     account,
                     thread: *thread,
                 });
-                if *open {
-                    effects.push(Effect::OnScreen(account));
-                }
             }
         }
         SubKey::Composer { draft } => {
@@ -54,10 +53,7 @@ pub(super) fn subscribe(
                 });
             }
         }
-        SubKey::List { account, .. } | SubKey::Search { account, .. } => {
-            effects.push(Effect::OnScreen(*account));
-        }
-        SubKey::App | SubKey::Account { .. } => {}
+        SubKey::List { .. } | SubKey::Search { .. } | SubKey::App | SubKey::Account { .. } => {}
     }
     let gmail = gmail_query(reads, &key)?;
     let online = ctx.state.online();
