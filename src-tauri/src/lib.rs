@@ -9,6 +9,9 @@
 //!   (SPEC Undo send), then exits.
 //! - Debug builds with the `web` feature serve the web bridge on
 //!   127.0.0.1:1430 when `UBERMENSCH_WEB_BRIDGE=1`, for the UI in a browser.
+//! - Debug builds with the `fake` feature run demo mode when
+//!   `UBERMENSCH_FAKE=1` (`vp run demo`): an in-process fake Gmail with demo
+//!   mail and two accounts, on fresh data in its own folder each launch.
 
 mod commands;
 mod logging;
@@ -42,6 +45,18 @@ pub(crate) struct Shell {
     tasks: Tasks,
     /// Set by the first quit, so a second Cmd+Q doesn't quit twice.
     quitting: AtomicBool,
+    /// Demo mode's fake Gmail, kept running for as long as the app.
+    #[cfg(feature = "fake")]
+    _demo: Option<ub_testkit::Demo>,
+}
+
+/// Where the core keeps its data, which Gmail it talks to, and where its
+/// refresh tokens live.
+struct Setup {
+    config: Config,
+    tokens: Arc<dyn TokenStore>,
+    #[cfg(feature = "fake")]
+    demo: Option<ub_testkit::Demo>,
 }
 
 /// Starts the app.
@@ -124,29 +139,26 @@ pub fn run() {
     });
 }
 
-/// Opens the core in the app's data folder and launches it.
+/// Opens the core and launches it: in the app's data folder, or on demo
+/// data in demo mode.
 fn start_core(app: &AppHandle) -> anyhow::Result<Shell> {
-    #[cfg(feature = "fake")]
-    if std::env::var_os("UBERMENSCH_FAKE").is_some() {
-        anyhow::bail!("demo mode (UBERMENSCH_FAKE) is not rebuilt yet");
-    }
-    let data_dir = app.path().app_data_dir()?;
-    std::fs::create_dir_all(&data_dir)?;
-    let mut config = Config::in_data_dir(&data_dir, cfg!(debug_assertions), gmail_config());
-    if let Some(path) = std::env::var_os("UBERMENSCH_DB") {
-        config.db_path = PathBuf::from(path);
-    }
     let runtime = tauri::async_runtime::handle().inner().clone();
-    // The core spawns its tasks on the runtime it starts in.
+    // The core spawns its tasks on the runtime it starts in, and so does
+    // demo mode's fake Gmail.
     let _in_runtime = runtime.enter();
+    let setup = setup(app)?;
     let activity = Activity::new();
     let deps = Deps {
         platform: Arc::new(TauriPlatform(app.clone())),
         clock: Arc::new(SystemClock),
-        tokens: token_store(&data_dir),
+        tokens: setup.tokens,
         activity: Arc::clone(&activity),
     };
-    let core = Arc::new(App::start(&config, deps)?);
+    let core = Arc::new(App::start(&setup.config, deps)?);
+    #[cfg(feature = "fake")]
+    if let Some(demo) = &setup.demo {
+        tauri::async_runtime::block_on(demo.register(&core))?;
+    }
     core.lifecycle().launch();
     let tasks = Tasks::new(runtime.clone(), activity);
     start_web_bridge(&core, &tasks);
@@ -154,6 +166,34 @@ fn start_core(app: &AppHandle) -> anyhow::Result<Shell> {
         core,
         tasks,
         quitting: AtomicBool::new(false),
+        #[cfg(feature = "fake")]
+        _demo: setup.demo,
+    })
+}
+
+/// The app's data folder, Google's Gmail, and the token file; or, in demo
+/// mode, the demo's.
+fn setup(app: &AppHandle) -> anyhow::Result<Setup> {
+    #[cfg(feature = "fake")]
+    if cfg!(debug_assertions) && std::env::var("UBERMENSCH_FAKE").as_deref() == Ok("1") {
+        let demo = ub_testkit::Demo::start()?;
+        return Ok(Setup {
+            config: Config::in_data_dir(demo.data_dir(), true, demo.gmail_config()),
+            tokens: demo.tokens(),
+            demo: Some(demo),
+        });
+    }
+    let data_dir = app.path().app_data_dir()?;
+    std::fs::create_dir_all(&data_dir)?;
+    let mut config = Config::in_data_dir(&data_dir, cfg!(debug_assertions), gmail_config());
+    if let Some(path) = std::env::var_os("UBERMENSCH_DB") {
+        config.db_path = PathBuf::from(path);
+    }
+    Ok(Setup {
+        config,
+        tokens: token_store(&data_dir),
+        #[cfg(feature = "fake")]
+        demo: None,
     })
 }
 

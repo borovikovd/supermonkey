@@ -1,6 +1,6 @@
 //! Test and demo support (ARCHITECTURE.md, sections 3 and 13): the E2E
-//! server, its `/__test` control API, and the recording platform. Linked
-//! only into debug builds with the `fake` feature.
+//! server, its `/__test` control API, and the recording platform; demo
+//! mode ([`Demo`]). Linked only into debug builds with the `fake` feature.
 //!
 //! [`run`] serves, on one origin:
 //! - the debug web bridge (`/invoke`, `/events`) over the real core;
@@ -17,8 +17,11 @@
 //! core has nothing left to do.
 
 mod control;
+mod demo;
 mod platform;
 mod server;
+
+pub use demo::Demo;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
