@@ -1,8 +1,5 @@
 //! The `Mail` handle (ARCHITECTURE.md, section 8.1): links, attachments,
 //! unsubscribe, and block (SPEC Reading, Unsubscribe and block, Compose).
-//!
-//! Extension points: the unwanted-mail slice fills in [`Mail::unsubscribe`],
-//! [`Mail::block`], [`Mail::blocked_senders`], and [`Mail::unblock`].
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -12,7 +9,9 @@ use ub_ipc::{BlockResult, BlockedSenders, DraftAttachment, Unsubscribed};
 use ub_store::ReadPool;
 use url::Url;
 
-use crate::workers::{AccountWorkers, open_attachment, safe_name};
+use ub_gmail::FilterId;
+
+use crate::workers::{AccountWorker, AccountWorkers, open_attachment, safe_name, unwanted};
 use crate::{Error, Platform};
 
 /// Links, attachments, unsubscribe, and block.
@@ -100,68 +99,47 @@ impl Mail {
         })
     }
 
-    /// Unsubscribes from the list `thread`'s latest message came from.
-    #[expect(
-        clippy::unused_async,
-        clippy::unused_async_trait_impl,
-        reason = "an extension point: the unwanted-mail slice unsubscribes here"
-    )]
+    /// Unsubscribes from the list `thread`'s latest message came from (SPEC
+    /// Unsubscribe and block). Needs the network; nothing is queued.
     pub async fn unsubscribe(
         &self,
         account: AccountId,
         thread: ThreadId,
     ) -> Result<Unsubscribed, Error> {
-        tracing::debug!(
-            account = account.0,
-            thread = thread.0,
-            "unsubscribe asked for"
-        );
-        Err(Error::NotYetImplemented("unsubscribing"))
+        let worker = self.worker(account)?;
+        unwanted::unsubscribe(worker.ctx(), self.workers.http(), &*self.platform, thread).await
     }
 
     /// Blocks the sender of `thread`'s latest message, or the sender's
     /// domain, with a Gmail filter.
-    #[expect(
-        clippy::unused_async,
-        clippy::unused_async_trait_impl,
-        reason = "an extension point: the unwanted-mail slice blocks here"
-    )]
     pub async fn block(
         &self,
         account: AccountId,
         thread: ThreadId,
         domain: bool,
     ) -> Result<BlockResult, Error> {
-        tracing::debug!(
-            account = account.0,
-            thread = thread.0,
-            domain,
-            "block asked for"
-        );
-        Err(Error::NotYetImplemented("blocking senders"))
+        let worker = self.worker(account)?;
+        unwanted::block(worker.ctx(), thread, domain).await
     }
 
     /// The account's blocked senders: its Gmail filters that send mail to
     /// Trash.
-    #[expect(
-        clippy::unused_async,
-        clippy::unused_async_trait_impl,
-        reason = "an extension point: the unwanted-mail slice lists filters here"
-    )]
     pub async fn blocked_senders(&self, account: AccountId) -> Result<BlockedSenders, Error> {
-        tracing::debug!(account = account.0, "blocked senders asked for");
-        Err(Error::NotYetImplemented("blocked senders"))
+        let worker = self.worker(account)?;
+        unwanted::blocked_senders(worker.ctx()).await
     }
 
     /// Unblocks a sender by deleting its Gmail filter.
-    #[expect(
-        clippy::unused_async,
-        clippy::unused_async_trait_impl,
-        reason = "an extension point: the unwanted-mail slice deletes the filter here"
-    )]
     pub async fn unblock(&self, account: AccountId, filter: &str) -> Result<(), Error> {
-        tracing::debug!(account = account.0, filter, "unblock asked for");
-        Err(Error::NotYetImplemented("unblocking senders"))
+        let worker = self.worker(account)?;
+        unwanted::unblock(worker.ctx(), FilterId::from(filter)).await
+    }
+
+    /// The account's running worker: these calls need its Gmail.
+    fn worker(&self, account: AccountId) -> Result<AccountWorker, Error> {
+        self.workers
+            .get(account)
+            .ok_or_else(|| Error::Invalid("The account is not signed in".to_owned()))
     }
 }
 

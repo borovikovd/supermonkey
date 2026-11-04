@@ -29,6 +29,7 @@ url = "2"
 [dev-dependencies]
 ub-store = { path = "../ub-store", features = ["test-hooks"] }
 proptest = "1"
+serde_json = "1"
 tempfile = "3"
 
 [lints]

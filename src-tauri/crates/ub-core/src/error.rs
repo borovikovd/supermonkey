@@ -44,8 +44,4 @@ pub enum Error {
     /// A file of the app's data folder could not be written.
     #[error("{0}")]
     Io(#[from] std::io::Error),
-    /// A feature a later slice of the rewrite adds (ARCHITECTURE.md, section
-    /// 12); it names the feature.
-    #[error("{0} is not implemented yet")]
-    NotYetImplemented(&'static str),
 }
