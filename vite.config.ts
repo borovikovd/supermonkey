@@ -10,7 +10,15 @@ export default defineConfig({
   build: { target: "safari17", outDir: "dist", chunkSizeWarningLimit: 2048 },
 
   fmt: {
-    ignorePatterns: ["src/bindings/**", "src-tauri/**", "SPEC.md", ".claude/**"],
+    // release-please writes CHANGELOG.md and its manifest in its own format.
+    ignorePatterns: [
+      "src/bindings/**",
+      "src-tauri/**",
+      "SPEC.md",
+      ".claude/**",
+      "CHANGELOG.md",
+      ".release-please-manifest.json",
+    ],
   },
 
   lint: {
