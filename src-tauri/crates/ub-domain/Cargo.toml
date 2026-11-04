@@ -10,8 +10,16 @@ publish = false
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
+# Date math only: no `clock` feature, so nothing here can read the time.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 rusqlite = { version = "0.40", optional = true }
 ts-rs = { version = "12", optional = true }
+
+[dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+chrono-tz = "0.10"
+# Only to check that `Query::to_fts5` output is valid FTS5 syntax.
+rusqlite = { version = "0.40", features = ["bundled"] }
 
 [features]
 # SQLite conversions for the newtypes, for ub-store.
