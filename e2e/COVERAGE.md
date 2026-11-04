@@ -281,7 +281,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | File                       | Prefix | Scope                                                                                        | Main seeds                               | Harness beyond H1–H3        | Cases   | P1      | P2     | P3     |
 | -------------------------- | ------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | ------- | ------- | ------ | ------ |
 | `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 15      | 10      | 5      | 0      |
-| `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 9       | 4       | 5      | 0      |
+| `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 10      | 5       | 5      | 0      |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 6       | 4       | 2      | 0      |
 | `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 19      | 4       | 14     | 1      |
 | `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 12      | 8       | 4      | 0      |
@@ -304,7 +304,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **228** | **133** | **85** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **229** | **134** | **85** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -625,6 +625,18 @@ _EG · §Views (`g` then `o`)_
 - **Seed:** `standard`.
 - **Steps:** `g e`, `settle()`. Park the page's submits, press `g o`, run page time 2 s, release, `settle()`.
 - **Expect:** the highlight is on the first row of Other, and Other is the active split.
+
+#### NAV-10 · P1 · The highlight follows the mouse, so `e` acts on the row under it
+
+_EP · §Layout (rows), §Keyboard_
+
+- **Seed:** `standard`.
+- **Steps:** move the mouse onto `p3`. Press `j`, then send a mouse move to the same point. Move onto `p2` and press `e`. Then shrink the window to 1000×420 and move onto the row cut off by the bottom edge.
+- **Expect:**
+  - Hovering `p3` highlights it, and it is the only row painted as highlighted.
+  - `j` moves on to `p4`; the move that does not change position leaves `p4` highlighted.
+  - `e` archives `p2`, the row under the pointer, in Gmail.
+  - The cut-off row is highlighted and the list does not scroll.
 
 ### 5.3 `views.spec.ts` (VIEW)
 

@@ -46,7 +46,7 @@ Opening a conversation replaces the list with the conversation view. The message
 
 Views are reached from the keyboard and the command palette. On Inbox, the list header shows the visible splits inline (`Important 13 · Other 33`) plus search. The split holding the highlight is active, and clicking a split name scrolls the list to that split's section. Other views show their name there.
 
-Each row is one line: the sender, the subject, the snippet, and the time. Unread rows have a dot and a heavier sender. The highlighted row is a light highlight. `j` and `k` move that highlight. In the Inbox they also cross from one split into the next. Split headers are not selectable.
+Each row is one line: the sender, the subject, the snippet, and the time. Unread rows have a dot and a heavier sender. The highlighted row is a light highlight. `j` and `k` move that highlight, and so does moving the mouse onto a row, as in Superhuman, so `e` acts on the row under the pointer. Rows that scroll under a resting pointer do not take the highlight, and a row the mouse highlights is not scrolled into view. There is no separate hover style. In the Inbox they also cross from one split into the next. Split headers are not selectable.
 
 Empty inbox is a quiet inbox-zero state, not a splash.
 

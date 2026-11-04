@@ -20,6 +20,20 @@ type Item =
   | { type: "row"; key: string }
   | { type: "header"; split: number; name: string; count: number };
 
+/**
+ * Where the pointer was at its last move anywhere in the window. WebKit sends
+ * mouse moves without the pointer moving when the page changes under it (a
+ * sheet closes, the list scrolls); those match this and are ignored. Window
+ * listeners run after React's, so a row compares against the move before.
+ */
+const pointer = { x: -1, y: -1 };
+if (typeof window !== "undefined") {
+  window.addEventListener("mousemove", (e) => {
+    pointer.x = e.clientX;
+    pointer.y = e.clientY;
+  });
+}
+
 // Memoized by hand: ListView is not compiled (see useVirtualizer) and
 // re-renders on every scroll.
 const Row = memo(function Row({
@@ -28,14 +42,16 @@ const Row = memo(function Row({
   highlighted,
   selected,
   onClick,
+  onHover,
 }: {
   row: ListRow | undefined;
   rowKey: string;
   highlighted: boolean;
   selected: boolean;
   onClick: (key: string) => void;
+  onHover: (key: string, e: React.MouseEvent) => void;
 }) {
-  const bg = selected ? "bg-fill" : highlighted ? "bg-accent-soft" : "hover:bg-fill-half";
+  const bg = selected ? "bg-fill" : highlighted ? "bg-accent-soft" : "";
   return (
     // An ARIA listbox option: focus stays on the listbox (aria-activedescendant)
     // and j / k / Enter drive it through the global shortcut handler. Rows are
@@ -47,6 +63,7 @@ const Row = memo(function Row({
       aria-selected={highlighted}
       id={`row-${rowKey}`}
       onClick={() => onClick(rowKey)}
+      onMouseMove={(e) => onHover(rowKey, e)}
       className={`relative flex h-row items-center gap-3 px-4 text-row ${bg}`}
       data-row={rowKey}
       data-selected={selected ? true : undefined}
@@ -183,9 +200,13 @@ export function ListView() {
     };
   }, []);
 
-  // Keep the highlight in view.
+  // Keep the highlight in view, unless the pointer put it there: that row is
+  // already under the mouse, and scrolling would move the list under it.
+  const hovered = useRef<string | null>(null);
   useEffect(() => {
-    if (highlight === null) return;
+    const fromPointer = hovered.current === highlight;
+    hovered.current = null;
+    if (highlight === null || fromPointer) return;
     const i = items.findIndex((it) => it.type === "row" && it.key === highlight);
     if (i < 0) return;
     const toTop = headerToTop.current;
@@ -251,6 +272,17 @@ export function ListView() {
     [isDrafts],
   );
 
+  // The highlight follows the mouse, as in Superhuman, so e acts on the row
+  // under it. Only a real move counts: j and k scroll rows under a resting
+  // pointer, and that must not pull the highlight back.
+  const onHover = useCallback((k: string, e: React.MouseEvent) => {
+    if (e.clientX === pointer.x && e.clientY === pointer.y) return;
+    const c = useChrome.getState();
+    if (c.current()?.highlight === k) return;
+    hovered.current = k;
+    c.patchCurrent({ highlight: k });
+  }, []);
+
   const selected = useMemo(() => new Set(selection), [selection]);
 
   if (items.length === 0) {
@@ -297,6 +329,7 @@ export function ListView() {
                   highlighted={it.key === highlight}
                   selected={selected.has(it.key)}
                   onClick={onClick}
+                  onHover={onHover}
                 />
               )}
             </div>

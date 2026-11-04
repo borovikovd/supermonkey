@@ -403,3 +403,55 @@ test("NAV-09 g o highlights Other however long the Inbox takes to load", async (
   const other = (await app.sections()).find((g) => g.name.startsWith("Other"));
   await expect(app.highlighted).toContainText(other?.subjects[0] ?? "no Other section");
 });
+
+test("NAV-10 the highlight follows the mouse, so e acts on the row under it", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await expect(app.highlighted).toContainText("Person 1");
+  const centre = async (text: string) => {
+    const box = await app.row(text).boundingBox();
+    if (!box) throw new Error(`no row ${text}`);
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  };
+
+  // Hover Person 3: it is the one highlighted, and the only row painted.
+  const p3 = await centre("Person 3");
+  await app.page.mouse.move(p3.x, p3.y);
+  await expect(app.highlighted).toContainText("Person 3");
+  await expect(app.page.locator("[role=option].bg-accent-soft")).toHaveCount(1);
+
+  // j moves on from there. A pointer event without movement leaves it.
+  await app.press("j");
+  await expect(app.highlighted).toContainText("Person 4");
+  await app.page.mouse.move(p3.x, p3.y);
+  await expect(app.highlighted).toContainText("Person 4");
+
+  // Moving onto a row and pressing e archives that row.
+  const p2 = await centre("Person 2");
+  await app.page.mouse.move(p2.x, p2.y);
+  await expect(app.highlighted).toContainText("Person 2");
+  await app.press("e");
+  await expect(app.row("Person 2")).toHaveCount(0);
+  await app.settle();
+  const p2msg = (await gmail.gmail(A)).messages.find((m) => m.id === s.latest("p2").id);
+  expect(p2msg?.labels).not.toContain("INBOX");
+
+  // Hovering a row cut off at the bottom highlights it without scrolling the list.
+  await app.page.setViewportSize({ width: 1000, height: 420 });
+  const scroller = app.list.locator("xpath=..");
+  const cut = await app.rows.evaluateAll((rows) => {
+    const list = rows[0]?.closest("[role=listbox]")?.parentElement?.getBoundingClientRect();
+    const r = rows.find((row) => {
+      const b = row.getBoundingClientRect();
+      return list !== undefined && b.top < list.bottom - 4 && b.bottom > list.bottom + 4;
+    });
+    return r ? { y: r.getBoundingClientRect().top + 4, key: r.getAttribute("data-row") } : null;
+  });
+  expect(cut, "a row cut off by the bottom edge").not.toBeNull();
+  const before = await scroller.evaluate((el) => el.scrollTop);
+  await app.page.mouse.move(500, cut?.y ?? 0);
+  await expect(app.highlighted).toHaveAttribute("data-row", cut?.key ?? "");
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBe(before);
+});
