@@ -46,6 +46,17 @@ impl CoreWriter {
             })
     }
 
+    /// Queues a job whose caller does not wait for it: a sync write nothing
+    /// else depends on. A failure is logged as `what`.
+    pub(crate) fn queue<F>(&self, priority: Priority, what: &'static str, job: F)
+    where
+        F: FnOnce(&mut WriteTx<'_>, &mut WriterState) -> Result<(), StoreError> + Send + 'static,
+    {
+        drop(self.call(priority, move |tx, state| {
+            job(tx, state).inspect_err(|e| tracing::warn!(error = %e, "couldn't {what}"))
+        }));
+    }
+
     /// Stops the writer after the UI jobs queued so far; see [`Writer::stop`].
     pub(crate) fn stop(&self) -> Pending<(), StoreError> {
         self.writer.stop()

@@ -15,6 +15,12 @@ pub fn html_to_text(html: &str) -> String {
     collapse_whitespace(&render(html, Style::Search))
 }
 
+/// A Gmail `snippet` as text: Gmail sends it with HTML entities (`&#39;`,
+/// `&amp;`) escaped, though it holds no markup.
+pub fn snippet_text(snippet: &str) -> Cow<'_, str> {
+    html_escape::decode_html_entities(snippet)
+}
+
 /// The `text/plain` alternative of an outgoing HTML body: lines from blocks and
 /// `<br>`, `> ` before quoted lines, `- ` before list items, and `text <url>`
 /// for http(s) links whose text is not the URL.

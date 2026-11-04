@@ -24,6 +24,26 @@ pub enum Error {
     /// The operating system refused a request.
     #[error(transparent)]
     Platform(#[from] PlatformError),
+    /// The token store could not be read or written; the message says
+    /// which file and why, never a token.
+    #[error(transparent)]
+    Tokens(#[from] ub_gmail::TokenStoreError),
+    /// A Google sign-in did not finish; the message says why.
+    #[error("Sign-in failed: {0}")]
+    SignIn(#[from] ub_gmail::SignInError),
+    /// A newer sign-in replaced this one, which was still waiting in the
+    /// browser. The UI matches this text.
+    #[error("Sign-in cancelled")]
+    SignInCancelled,
+    /// A Gmail call failed.
+    #[error("{0}")]
+    Gmail(#[from] ub_gmail::GmailError),
+    /// The HTTP client could not be built.
+    #[error(transparent)]
+    Http(#[from] ub_gmail::HttpClientError),
+    /// A file of the app's data folder could not be written.
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
     /// A feature a later slice of the rewrite adds (ARCHITECTURE.md, section
     /// 12); it names the feature.
     #[error("{0} is not implemented yet")]

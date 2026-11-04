@@ -10,16 +10,19 @@ use super::Effect;
 use crate::Platform;
 use crate::activity::{Tracked, parked};
 use crate::views;
+use crate::workers::{AccountWorkers, Searches};
 
 /// Where the writer sends committed effects.
 pub(crate) type EffectSender = mpsc::UnboundedSender<Tracked<Effect>>;
 /// The router's end.
 pub(crate) type EffectReceiver = mpsc::UnboundedReceiver<Tracked<Effect>>;
 
-/// What the router needs to do the effects it handles itself.
+/// What the router hands effects to.
 pub(crate) struct Router {
     pub(crate) pool: Arc<ReadPool>,
     pub(crate) platform: Arc<dyn Platform>,
+    pub(crate) workers: Arc<AccountWorkers>,
+    pub(crate) searches: Arc<Searches>,
 }
 
 impl Router {
@@ -35,16 +38,34 @@ impl Router {
     async fn route(&self, effect: Effect) {
         match effect {
             Effect::Badge => self.badge().await,
-            // Extension points: the sync slice fetches threads and orders
-            // requests by the account on screen, the search slice runs and
-            // cancels Gmail listings, and the compose slice downloads draft
-            // parts and deletes draft files.
-            Effect::FetchThread { .. }
-            | Effect::GmailList { .. }
-            | Effect::CancelSub(_)
-            | Effect::DraftParts { .. }
-            | Effect::DraftFilesGone(_)
-            | Effect::OnScreen(_) => {
+            Effect::FetchThread { account, thread } => {
+                if let Some(worker) = self.workers.get(account) {
+                    worker.fetch_opened(thread);
+                }
+            }
+            Effect::GmailList {
+                sub,
+                account,
+                query,
+                page,
+            } => self
+                .searches
+                .start(&self.workers, sub, account, query, page),
+            Effect::CancelSub(sub) => self.searches.cancel(&sub),
+            Effect::RefreshLabels(account) => {
+                if let Some(worker) = self.workers.get(account) {
+                    worker.refresh_labels();
+                }
+            }
+            Effect::AccountRemoved { account, email } => {
+                self.workers.forget(account, email).await;
+            }
+            // Requests of different accounts never wait on each other, so
+            // the account on screen needs no head start (DEVIATIONS).
+            Effect::OnScreen(_) => {}
+            // Extension points: the compose slice downloads draft parts and
+            // deletes draft files.
+            Effect::DraftParts { .. } | Effect::DraftFilesGone(_) => {
                 tracing::debug!(effect = effect.name(), "no worker for this effect yet");
             }
         }

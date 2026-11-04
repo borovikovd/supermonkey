@@ -12,7 +12,7 @@ use ub_gmail::PageToken;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     /// A conversation was subscribed: fetch its bodies if any are missing
-    /// (SPEC Sync, priority 2). Filled by the sync slice.
+    /// (SPEC Sync, priority 2).
     FetchThread {
         /// The thread's account.
         account: AccountId,
@@ -20,7 +20,7 @@ pub enum Effect {
         thread: ThreadId,
     },
     /// Run a Gmail search or view listing for a list subscription (SPEC
-    /// Search). Filled by the search slice.
+    /// Search, Views).
     GmailList {
         /// The subscription its hits go to.
         sub: SubId,
@@ -44,8 +44,20 @@ pub enum Effect {
     /// A draft's row is gone: delete its attachment files. Filled by the
     /// compose slice.
     DraftFilesGone(DraftId),
-    /// The UI is showing this account: its Gmail requests go first.
+    /// The UI is showing this account. Its Gmail requests need no head
+    /// start: each account has its own slots and budget (DEVIATIONS).
     OnScreen(AccountId),
+    /// A message named a label the app does not know: read the labels again
+    /// (SPEC Sync).
+    RefreshLabels(AccountId),
+    /// An account was removed and its rows are gone: stop its worker, revoke
+    /// and delete its refresh token, and delete its files (SPEC Accounts).
+    AccountRemoved {
+        /// The account.
+        account: AccountId,
+        /// Its address, which keys its refresh token.
+        email: String,
+    },
     /// Unread counts or mute settings may have changed: redraw the Dock badge.
     Badge,
 }
@@ -60,6 +72,8 @@ impl Effect {
             Self::DraftParts { .. } => "draft parts",
             Self::DraftFilesGone(_) => "draft files gone",
             Self::OnScreen(_) => "on screen",
+            Self::RefreshLabels(_) => "refresh labels",
+            Self::AccountRemoved { .. } => "account removed",
             Self::Badge => "badge",
         }
     }
@@ -68,8 +82,11 @@ impl Effect {
 /// The Gmail `threads.list` a list subscription merges into its local rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GmailQuery {
-    /// A `q=` query, as Gmail should get it.
+    /// A search box query, as Gmail should get it; it waits for typing to
+    /// pause.
     Search(String),
+    /// A view's `q=` query: Done's and All Mail's.
+    View(String),
     /// Threads with a label.
     Label {
         /// Gmail's id for the label.

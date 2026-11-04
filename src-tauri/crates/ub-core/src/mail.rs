@@ -1,23 +1,26 @@
 //! The `Mail` handle (ARCHITECTURE.md, section 8.1): links, attachments,
 //! unsubscribe, and block (SPEC Reading, Unsubscribe and block, Compose).
 //!
-//! Extension points: the reading slice fills in [`Mail::open_attachment`],
-//! the compose slice [`Mail::add_attachment`], and the unwanted-mail slice
-//! [`Mail::unsubscribe`], [`Mail::block`], [`Mail::blocked_senders`], and
-//! [`Mail::unblock`].
+//! Extension points: the compose slice fills in [`Mail::add_attachment`],
+//! and the unwanted-mail slice [`Mail::unsubscribe`], [`Mail::block`],
+//! [`Mail::blocked_senders`], and [`Mail::unblock`].
 
 use std::sync::Arc;
 
 use ub_domain::{AccountId, AttachmentId, DraftId, ThreadId};
 use ub_ipc::{BlockResult, BlockedSenders, DraftAttachment, Unsubscribed};
+use ub_store::ReadPool;
 use url::Url;
 
+use crate::workers::{AccountWorkers, open_attachment};
 use crate::{Error, Platform};
 
 /// Links, attachments, unsubscribe, and block.
 #[derive(Clone)]
 pub struct Mail {
     platform: Arc<dyn Platform>,
+    workers: Arc<AccountWorkers>,
+    pool: Arc<ReadPool>,
 }
 
 /// What a file the user attaches to a draft is: its name, type, and bytes.
@@ -32,8 +35,16 @@ pub struct NewAttachment {
 }
 
 impl Mail {
-    pub(crate) fn new(platform: Arc<dyn Platform>) -> Self {
-        Self { platform }
+    pub(crate) fn new(
+        platform: Arc<dyn Platform>,
+        workers: Arc<AccountWorkers>,
+        pool: Arc<ReadPool>,
+    ) -> Self {
+        Self {
+            platform,
+            workers,
+            pool,
+        }
     }
 
     /// Opens a link from a message in the default browser or mail app. Only
@@ -51,15 +62,9 @@ impl Mail {
     }
 
     /// Downloads an attachment if it isn't on disk yet and opens it with its
-    /// default app.
-    #[expect(
-        clippy::unused_async,
-        clippy::unused_async_trait_impl,
-        reason = "an extension point: the reading slice downloads the attachment here"
-    )]
+    /// default app (SPEC Reading).
     pub async fn open_attachment(&self, attachment: AttachmentId) -> Result<(), Error> {
-        tracing::debug!(attachment = attachment.0, "open attachment asked for");
-        Err(Error::NotYetImplemented("opening attachments"))
+        open_attachment(&self.workers, &self.pool, &*self.platform, attachment).await
     }
 
     /// Keeps a file the user attached to a draft with the draft's files.

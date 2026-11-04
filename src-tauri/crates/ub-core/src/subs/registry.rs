@@ -27,6 +27,9 @@ pub(crate) struct Sub {
     pub(crate) next_page: Option<PageToken>,
     /// Its first load went out; until then it gets no patches.
     first_sent: bool,
+    /// It gets a patch with the next commit, whatever that changed: its
+    /// `searching` or `more` changed, which live here, not in the database.
+    forced: bool,
 }
 
 /// A commit's updates for the subscriptions: patches, then the first loads
@@ -64,6 +67,7 @@ impl Registry {
                 searching,
                 next_page: None,
                 first_sent: false,
+                forced: false,
             },
         );
     }
@@ -90,6 +94,29 @@ impl Registry {
         self.app_forced = true;
     }
 
+    /// A Gmail listing page for a list subscription finished: its hits join
+    /// the ones it holds, it offers `next`, and it stops searching. The
+    /// subscription gets a patch with the next commit. A subscription closed
+    /// meanwhile is left alone.
+    pub(crate) fn merge_gmail_hits(
+        &mut self,
+        id: &SubId,
+        hits: Vec<ThreadId>,
+        next: Option<PageToken>,
+    ) {
+        let Some(sub) = self.subs.get_mut(id) else {
+            return;
+        };
+        for hit in hits {
+            if !sub.gmail_hits.contains(&hit) {
+                sub.gmail_hits.push(hit);
+            }
+        }
+        sub.next_page = next;
+        sub.searching = false;
+        sub.forced = true;
+    }
+
     /// The updates a commit with `changes` makes, from its snapshot, in the
     /// order the subscriptions opened. Records what each sends, so the next
     /// patch starts from it: call it only once the commit has landed.
@@ -103,8 +130,8 @@ impl Registry {
         subs.sort_by_key(|(_, sub)| sub.opened);
         let mut out = Updates::default();
         for (id, sub) in subs {
+            let forced = std::mem::take(&mut sub.forced) || (app_forced && sub.key == SubKey::App);
             if sub.first_sent {
-                let forced = app_forced && sub.key == SubKey::App;
                 match build::patch(reads, id, sub, changes, forced, online) {
                     Ok(Some(update)) => out.patches.push(update),
                     Ok(None) => {}

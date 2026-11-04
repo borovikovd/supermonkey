@@ -108,9 +108,9 @@ fn gmail_query(
     reads: Reads<'_>,
     key: &SubKey,
 ) -> Result<Option<(AccountId, GmailQuery)>, StoreError> {
-    let (account, listing) = match key {
-        SubKey::List { account, view } => (*account, view.gmail_listing()),
-        SubKey::Search { account, query } => (*account, GmailListing::search(query)),
+    let (account, listing, typed) = match key {
+        SubKey::List { account, view } => (*account, view.gmail_listing(), false),
+        SubKey::Search { account, query } => (*account, GmailListing::search(query), true),
         SubKey::App
         | SubKey::Account { .. }
         | SubKey::Conversation { .. }
@@ -118,7 +118,8 @@ fn gmail_query(
     };
     Ok(match listing {
         None => None,
-        Some(GmailListing::Query(q)) => Some((account, GmailQuery::Search(q))),
+        Some(GmailListing::Query(q)) if typed => Some((account, GmailQuery::Search(q))),
+        Some(GmailListing::Query(q)) => Some((account, GmailQuery::View(q))),
         Some(GmailListing::Label {
             label,
             include_spam_trash,

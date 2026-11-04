@@ -1,11 +1,10 @@
 //! The `Lifecycle` handle: connecting a page, the online flag, and quitting
 //! (ARCHITECTURE.md, sections 4 and 8.1).
 //!
-//! Extension points: the accounts and sync slices fill in
-//! [`Lifecycle::launch`] (start each signed-in account's worker, wake due
+//! Extension points: later slices add to [`Lifecycle::launch`] (wake due
 //! snoozes, settle the outbox, apply the untouched rule to drafts still
-//! started fresh), and the notifications slice [`Lifecycle::focus`] (poll on
-//! focus, and a click-through on the last notification).
+//! started fresh), and the notifications slice to [`Lifecycle::focus`] (a
+//! click-through on the last notification).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,6 +14,7 @@ use ub_store::{Priority, StoreError};
 
 use crate::actions::Received;
 use crate::activity::Tasks;
+use crate::workers::{AccountWorkers, Network};
 use crate::writer::{ChannelSink, CoreWriter};
 use crate::{Error, Notification};
 
@@ -27,6 +27,8 @@ pub struct Lifecycle {
     writer: CoreWriter,
     received: Arc<Received>,
     tasks: Tasks,
+    workers: Arc<AccountWorkers>,
+    network: Arc<Network>,
     debug: bool,
 }
 
@@ -35,12 +37,16 @@ impl Lifecycle {
         writer: CoreWriter,
         received: Arc<Received>,
         tasks: Tasks,
+        workers: Arc<AccountWorkers>,
+        network: Arc<Network>,
         debug: bool,
     ) -> Self {
         Self {
             writer,
             received,
             tasks,
+            workers,
+            network,
             debug,
         }
     }
@@ -71,29 +77,32 @@ impl Lifecycle {
     }
 
     /// Starts the work that talks to Gmail, once, after
-    /// [`App::start`](crate::App::start): each signed-in account's worker,
-    /// due snoozes, the outbox, and drafts left untouched. The E2E server
-    /// seeds accounts between the two.
+    /// [`App::start`](crate::App::start): each signed-in account's worker
+    /// (SPEC Accounts: one with no stored token shows Sign in again). The
+    /// E2E server seeds accounts between the two.
     pub fn launch(&self) {
+        self.workers.launch();
         tracing::info!("launched");
     }
 
-    /// The main window gained or lost focus. On focus, returns the
-    /// notification the focus counts as a click on, if any: the shell then
-    /// shows that thread.
+    /// The main window gained or lost focus. Focus polls every account and
+    /// reads its `sendAs` and labels again (SPEC Sync). On focus, returns
+    /// the notification the focus counts as a click on, if any: the shell
+    /// then shows that thread.
     pub fn focus(&self, focused: bool) -> Option<Notification> {
         tracing::debug!(focused, "window focus changed");
+        if focused {
+            self.workers.refresh_all();
+        }
         None
     }
 
-    /// Records whether Gmail is reachable; the app subscription shows it.
-    /// Ordered with the UI's actions.
+    /// Records whether Gmail is reachable, as the outcome of a Gmail call
+    /// does; the app subscription shows it. Ordered with the UI's actions.
     pub async fn set_online(&self, online: bool) -> Result<(), Error> {
+        self.network.set_online(online);
         self.writer
-            .call(Priority::Ui, move |_, state| {
-                state.set_online(online);
-                Ok::<_, StoreError>(())
-            })
+            .call(Priority::Ui, |_, _| Ok::<_, StoreError>(()))
             .await?;
         Ok(())
     }

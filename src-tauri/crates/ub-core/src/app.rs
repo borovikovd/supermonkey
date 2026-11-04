@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
-use ub_gmail::{GMAIL_BASE_URL, OAuthConfig, QuotaConfig, TokenStore};
+use ub_gmail::{GMAIL_BASE_URL, HttpClient, OAuthConfig, QuotaConfig, TokenStore};
 use ub_store::{Priority, ReadPool, StoreError};
 
 use crate::accounts::Accounts;
@@ -17,6 +17,7 @@ use crate::effects::{Effect, Router};
 use crate::lifecycle::Lifecycle;
 use crate::mail::Mail;
 use crate::queries::Queries;
+use crate::workers::{AccountWorkers, Network, Searches, WorkerDeps};
 use crate::writer::CoreWriter;
 use crate::{Error, Platform};
 
@@ -129,9 +130,25 @@ impl App {
             state.sent_ack = last;
             Ok::<_, StoreError>(())
         }));
+        let network = Arc::new(Network::new(writer.clone(), Arc::clone(&activity)));
+        let workers = AccountWorkers::new(
+            Arc::new(WorkerDeps {
+                writer: writer.clone(),
+                pool: Arc::clone(&pool),
+                clock: Arc::clone(&clock),
+                network: Arc::clone(&network),
+            }),
+            config.gmail.clone(),
+            HttpClient::new()?,
+            tokens,
+            tasks.clone(),
+            config.data_dir.clone(),
+        );
         let router = Router {
             pool: Arc::clone(&pool),
             platform: Arc::clone(&platform),
+            workers: Arc::clone(&workers),
+            searches: Arc::new(Searches::default()),
         };
         tasks.spawn("effects", router.run(from_writers));
         // The Dock badge as the database has it at launch. The router is
@@ -139,10 +156,17 @@ impl App {
         let _ = to_router.send(activity.track("effect", Effect::Badge));
         Ok(Self {
             actions: Actions::new(writer.clone(), Arc::clone(&received), tasks.clone()),
-            queries: Queries::new(pool, clock),
-            lifecycle: Lifecycle::new(writer.clone(), received, tasks, config.debug),
-            accounts: Accounts::new(writer.clone(), tokens, config.gmail.clone()),
-            mail: Mail::new(platform),
+            queries: Queries::new(Arc::clone(&pool), clock),
+            lifecycle: Lifecycle::new(
+                writer.clone(),
+                received,
+                tasks,
+                Arc::clone(&workers),
+                network,
+                config.debug,
+            ),
+            accounts: Accounts::new(writer.clone(), Arc::clone(&workers), Arc::clone(&platform)),
+            mail: Mail::new(platform, workers, pool),
             #[cfg(test)]
             writer,
         })

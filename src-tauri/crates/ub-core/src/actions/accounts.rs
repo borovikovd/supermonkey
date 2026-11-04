@@ -1,12 +1,25 @@
-//! Removing an account (SPEC Settings).
-//!
-//! Extension point: the accounts slice fills this in: it stops the
-//! account's worker, deletes its rows and token, and closes its
-//! subscriptions (the commit's `Changes::accounts`).
+//! Removing an account (SPEC Accounts, Settings).
 
-use super::ActionError;
+use ub_domain::AccountId;
 
-/// `removeAccount`: sign out and forget an account.
-pub(super) fn remove_account() -> Result<(), ActionError> {
-    Err(ActionError::NotYetImplemented("removeAccount"))
+use super::{ActionCtx, ActionError};
+use crate::effects::Effect;
+
+/// `removeAccount`: deletes the account's rows, its queue and outbox
+/// among them, in this transaction. Its worker stops, and its refresh token
+/// is revoked and deleted, once the commit lands. Its lists and summary go
+/// empty with the commit's patches.
+pub(super) fn remove_account(
+    ctx: &mut ActionCtx<'_, '_>,
+    account: AccountId,
+) -> Result<(), ActionError> {
+    let Some(record) = ctx.tx.read().accounts().get(account)? else {
+        return Err(ActionError::Invalid("no such account"));
+    };
+    ctx.tx.accounts().remove(account)?;
+    ctx.state.effect(Effect::AccountRemoved {
+        account,
+        email: record.email,
+    });
+    Ok(())
 }

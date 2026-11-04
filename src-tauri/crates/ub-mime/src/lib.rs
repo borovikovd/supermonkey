@@ -57,7 +57,7 @@ pub use reply::{
     QuoteSource, UtcOffset, forward_quote_html, forward_subject, reply_quote_html, reply_subject,
 };
 pub use sanitize::sanitize_html;
-pub use text::html_to_text;
+pub use text::{html_to_text, snippet_text};
 pub use text_html::text_to_html;
 pub use unsubscribe::{ListUnsubscribe, Mailto, list_unsubscribe};
 

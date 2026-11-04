@@ -46,7 +46,7 @@ pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), A
         Action::DiscardDraft { .. } => compose::discard_draft(),
         Action::Pin { .. } => splits::pin(),
         Action::SaveSplits { .. } => splits::save_splits(),
-        Action::RemoveAccount { .. } => accounts::remove_account(),
+        Action::RemoveAccount { account } => accounts::remove_account(ctx, account),
     }
 }
 
