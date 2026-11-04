@@ -228,7 +228,8 @@ The slices from the plan, each green on the slice gate (`vp run gate:slice`) bef
    - the full gate;
    - fresh-agent reviews.
 
-## 13. Open questions for review
+## 13. Decisions from review
 
-1. **`ipc` with axum:** the debug web bridge lives in `ipc` behind a `bridge` feature, so `testkit` and `app` (debug) share it. Alternative: put it in `testkit` only, and have the dev web UI (`UBERMENSCH_WEB_BRIDGE=1`) depend on `testkit`. The first keeps `testkit` purely for tests.
-2. **`tracing` vs `log`:** the plan uses `tracing` for spans around Gmail calls and writer jobs. It is a new dependency, but standard.
+1. **The debug web bridge lives in `ipc`**, behind a `bridge` feature, so `testkit` and the debug `app` share one dispatch. Release builds leave the feature off.
+2. **Logging uses `tracing`**, with spans around Gmail calls and writer jobs.
+3. **The `e2e-server` binary stays in the root package**, as a thin `main` over `testkit`, so `e2e/global-setup.ts` builds it as before.
