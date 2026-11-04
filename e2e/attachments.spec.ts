@@ -1,5 +1,6 @@
 // Attachments (COVERAGE 5.14, SPEC Reading, Drafts, Addressing, Send and undo):
 // attach and send, download on demand, offline forwards, the MIME tree.
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 import type { App } from "./app.ts";
@@ -234,5 +235,22 @@ test.describe("attachments", () => {
     expect(drafts).toHaveLength(1);
     const kept = filesOf(parseMime(drafts[0]?.message.raw ?? ""));
     expect(Object.keys(kept)).toEqual(["notes.txt"]);
+  });
+
+  test("ATT-07 a downloaded attachment is quarantined before it opens", async ({ app, gmail }) => {
+    await seeds.standard(gmail, app);
+    await app.row("Contract").click();
+    await app.conversation.getByRole("button", { name: /contract\.pdf/ }).click();
+    await app.settle();
+    const [opened] = (await gmail.platform()).openedFiles;
+    expect(opened).toBeDefined();
+    const flag = execFileSync("xattr", ["-p", "com.apple.quarantine", opened ?? ""], {
+      encoding: "utf8",
+    }).trim();
+    const [flags, time, agent, event] = flag.split(";");
+    expect(flags).toBe("0081");
+    expect(Number.parseInt(time ?? "", 16)).toBe(Math.floor((await gmail.now()) / 1000));
+    expect(agent).toBe("Ubermensch");
+    expect(event).toMatch(/^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[0-9A-F]{4}-[0-9A-F]{12}$/);
   });
 });

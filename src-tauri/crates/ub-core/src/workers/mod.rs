@@ -15,6 +15,7 @@ mod network;
 mod notifications;
 mod ops;
 mod outbox;
+mod quarantine;
 mod registry;
 mod search;
 pub(crate) mod snooze;

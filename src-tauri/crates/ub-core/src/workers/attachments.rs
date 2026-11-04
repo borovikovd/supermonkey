@@ -6,12 +6,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use ub_domain::AttachmentId;
+use ub_domain::{AttachmentId, Millis};
 use ub_gmail::{GmailAttachmentId, GmailError, Priority};
 use ub_store::{AttachmentSource, Priority as WritePriority, ReadPool, StoreError};
 
 use super::account::AccountCtx;
 use super::files::{attachments_dir, safe_name};
+use super::quarantine::quarantine;
 use super::registry::AccountWorkers;
 use crate::{Error, Platform};
 
@@ -104,10 +105,12 @@ pub(crate) async fn ensure(
     }
     let dir = attachments_dir(&ctx.deps.data_dir, account).join(message_gmail_id.as_str());
     let name = safe_name(&record.filename);
-    let path = tokio::task::spawn_blocking(move || write_file(&dir, &name, attachment, &bytes))
-        .await
-        .map_err(Error::from)?
-        .map_err(Error::from)?;
+    let now = ctx.clock().now();
+    let path =
+        tokio::task::spawn_blocking(move || write_file(&dir, &name, attachment, &bytes, now))
+            .await
+            .map_err(Error::from)?
+            .map_err(Error::from)?;
     let stored = path.to_string_lossy().into_owned();
     ctx.writer()
         .call(WritePriority::Ui, move |tx, _| {
@@ -121,13 +124,15 @@ pub(crate) async fn ensure(
 /// Writes an attachment of the message whose folder is `message_dir` into
 /// its own folder there, so two parts with one name (`image.png`,
 /// `ATT00001.htm`) never share a file and the name stays as sent. Writes
-/// aside, then renames into place, so two downloads of one attachment at
-/// once never leave a half-written file at its path.
+/// aside, quarantined as downloaded at `now`, then renames into place, so
+/// two downloads of one attachment at once never leave a half-written file
+/// at its path, and no file from mail is ever there without the flag.
 fn write_file(
     message_dir: &Path,
     name: &str,
     attachment: AttachmentId,
     bytes: &[u8],
+    now: Millis,
 ) -> Result<PathBuf, std::io::Error> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let dir = message_dir.join(attachment.0.to_string());
@@ -139,6 +144,13 @@ fn write_file(
         NEXT.fetch_add(1, Ordering::SeqCst)
     ));
     std::fs::write(&part, bytes)?;
+    if let Err(e) = quarantine(&part, now) {
+        // Never left where it could open unflagged.
+        if let Err(removed) = std::fs::remove_file(&part) {
+            tracing::warn!(error = %removed, "couldn't remove an attachment that could not be quarantined");
+        }
+        return Err(e);
+    }
     std::fs::rename(&part, &path)?;
     Ok(path)
 }
@@ -150,8 +162,22 @@ mod tests {
     #[test]
     fn two_attachments_with_one_name_keep_their_own_files() {
         let dir = tempfile::tempdir().unwrap();
-        let first = write_file(dir.path(), "image.png", AttachmentId(1), b"first").unwrap();
-        let second = write_file(dir.path(), "image.png", AttachmentId(2), b"second").unwrap();
+        let first = write_file(
+            dir.path(),
+            "image.png",
+            AttachmentId(1),
+            b"first",
+            Millis(0),
+        )
+        .unwrap();
+        let second = write_file(
+            dir.path(),
+            "image.png",
+            AttachmentId(2),
+            b"second",
+            Millis(0),
+        )
+        .unwrap();
         assert_ne!(first, second);
         assert_eq!(
             first.file_name(),

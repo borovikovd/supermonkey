@@ -25,6 +25,9 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
 url = "2"
+# The quarantine flag on files written from mail (SPEC Reading), and its event id.
+uuid = { version = "1", features = ["v4"] }
+xattr = { version = "1", default-features = false }
 
 [dev-dependencies]
 ub-store = { path = "../ub-store", features = ["test-hooks"] }

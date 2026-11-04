@@ -293,7 +293,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `compose-reply.spec.ts`    | REP    | inline composer, addressing, quoting, forward, resume rules, Gmail drafts                    | `standard`, `drafts`                     | H4, H6                      | 15      | 10      | 5      | 0      |
 | `compose-new.spec.ts`      | NEW    | `c` screen, formatting, shortcuts, `Esc` machine, untouched rule, discard                    | `standard`                               | H4                          | 12      | 7       | 5      | 0      |
 | `recipients.spec.ts`       | RCP    | chips, autocomplete, ranking, invalid addresses, Cc/Bcc                                      | `contacts`, `standard`                   | H23                         | 10      | 3       | 7      | 0      |
-| `attachments.spec.ts`      | ATT    | attach, download on demand, offline forward, MIME tree                                       | `standard`                               | H4, H9, H23                 | 6       | 5       | 1      | 0      |
+| `attachments.spec.ts`      | ATT    | attach, download on demand, offline forward, MIME tree                                       | `standard`                               | H4, H9, H23                 | 7       | 6       | 1      | 0      |
 | `drafts.spec.ts`           | DRF    | autosave and upsert, Drafts `Enter`, Gmail-side edits and deletes, offline, reload and crash | `standard`, `drafts`                     | H6, H15, H16                | 17      | 14      | 2      | 1      |
 | `undo-send.spec.ts`        | SND    | the outbox state machine, held undo, rejection, no clear answer, restart                     | `standard`                               | H8a, H8b, H9, H13, H15      | 18      | 15      | 3      | 0      |
 | `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 7       | 6       | 1      | 0      |
@@ -305,7 +305,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 8       | 6       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **239** | **141** | **88** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **240** | **142** | **88** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -2260,6 +2260,14 @@ _EG · §Keyboard (untouched rule), DEVIATIONS (a file still attaching)_
 - **Expect:**
   - After step 2, the composer is gone.
   - Gmail has one draft, carrying `notes.txt`. The draft was not discarded as untouched.
+
+#### ATT-07 · P1 · A downloaded attachment is quarantined before it opens
+
+_EG · §Reading (open with the default app), AGENTS.md (treat external content as hostile)_
+
+- **Seed:** `standard`.
+- **Steps:** open `fwd` and click `contract.pdf`.
+- **Expect:** the opened file carries `com.apple.quarantine` as Mail writes it: flags `0081`, the app time in hex Unix seconds, the agent `Ubermensch`, and an upper-case UUID. So Gatekeeper checks a file a stranger sent, such as a `.terminal` or `.jar`, before it runs.
 
 ### 5.15 `drafts.spec.ts` (DRF)
 
