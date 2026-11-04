@@ -280,7 +280,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 
 | File                       | Prefix | Scope                                                                                        | Main seeds                               | Harness beyond H1–H3        | Cases   | P1      | P2     | P3     |
 | -------------------------- | ------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | ------- | ------- | ------ | ------ |
-| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 15      | 10      | 5      | 0      |
+| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 16      | 11      | 5      | 0      |
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 10      | 5       | 5      | 0      |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 6       | 4       | 2      | 0      |
 | `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 19      | 4       | 14     | 1      |
@@ -305,7 +305,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 8       | 6       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **242** | **143** | **89** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **243** | **144** | **89** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -516,6 +516,20 @@ _EP · §Accounts (switching)_
 - **Steps:** click A's avatar while A is on screen, then `Esc`. Click B's avatar, then click it again.
 - **Expect:** the first click opens Settings with A's block. Clicking B switches to B's Inbox without opening Settings; clicking B again opens Settings.
 - **Why:** with one account, its avatar did nothing, so it looked broken.
+
+#### ACC-16 · P1 · A removal waiting on its revoke holds up no other account
+
+_EG · §Accounts (remove), AGENTS.md (isolation: a slow resource must not block the others)_
+
+- **Seed:** `standard`, with C signed in too.
+- **Steps:**
+  1. `hold(oauth.revoke)`. Remove B in Settings; its revoke parks.
+  2. `nextSignIn(B)` and run `Add account`: the sign-in waits for the revoke (ACC-12).
+  3. Remove C. Open `p1` in A and press `e`.
+  4. Release the revokes, `settle()`.
+- **Expect:**
+  - After step 3, C's revoke is parked too, and A's `messages.batchModify` reaches Gmail before any revoke answers.
+  - After step 4, B's and C's grants are revoked, and B is signed in again.
 
 ### 5.2 `inbox-navigation.spec.ts` (NAV)
 

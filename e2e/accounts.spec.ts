@@ -6,7 +6,7 @@ import type { App } from "./app.ts";
 import type { Control } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
-import { A, B } from "./seeds.ts";
+import { A, B, C } from "./seeds.ts";
 
 /** A's Inbox in the `standard` mail (COVERAGE §2), sorted. */
 const A_INBOX = [
@@ -788,4 +788,44 @@ test("ACC-15 clicking the account on screen opens Settings; another account swit
   await expect(app.sheet("Settings")).toHaveCount(0);
   await app.account(B).click();
   await expect(app.sheet("Settings")).toBeVisible();
+});
+
+test("ACC-16 a removal waiting on its revoke holds up no other account", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app, { connect: ["A", "B", "C"] });
+  const tokens = await gmail.tokens();
+  const revoke = await gmail.hold("oauth.revoke");
+  const held = async () => (await gmail.requests("oauth.revoke")).filter((r) => r.held).length;
+  const remove = async (email: string) => {
+    await app.press("Meta+,");
+    const settings = app.sheet("Settings");
+    await settingsBlock(app, email).getByRole("button", { name: "Remove account" }).click();
+    await settings.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(app.account(email)).toHaveCount(0);
+    await app.press("Escape");
+  };
+
+  await remove(B);
+  await expect.poll(held).toBe(1);
+  // A sign-in waits for that revoke, as it must (ACC-12).
+  await gmail.nextSignIn({ email: B });
+  await command(app, "Add account");
+  await app.settle();
+
+  // Another removal and an action on A go ahead while B's revoke is held.
+  await remove(C);
+  await expect.poll(held).toBe(2);
+  const modifies = (await gmail.requests("messages.batchModify")).length;
+  await app.row("Person 1").click();
+  await expect(app.conversationTitle).toHaveText("Person 1");
+  await app.press("e");
+  await expect
+    .poll(async () => (await gmail.requests("messages.batchModify")).length)
+    .toBeGreaterThan(modifies);
+
+  await revoke.release(undefined, { min: 2 });
+  await app.settle();
+  const revoked = (await gmail.revocations()).map((r) => r.account).toSorted();
+  expect(revoked).toEqual([B, C].toSorted());
+  expect(tokens.map((t) => t.account)).toEqual(expect.arrayContaining([A, B, C]));
+  await expect(app.account(B)).toBeVisible();
 });

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use parking_lot::Mutex;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{mpsc, watch};
 use ub_domain::{AccountId, DraftId, ThreadId};
 use ub_gmail::{Gmail, HttpClient, RefreshToken, Scheduler, TokenStore, Tokens};
 use ub_store::Priority;
@@ -37,9 +37,9 @@ pub(crate) struct AccountWorkers {
     next_id: AtomicU64,
     /// Workers start only once the core has launched.
     launched: AtomicBool,
-    /// Held (shared) by each removed account's clean-up. A sign-in waits for
-    /// them first: a revoke landing after it would end the new grant too.
-    removals: Arc<RwLock<()>>,
+    /// How many removed accounts are still being cleaned up. A sign-in waits
+    /// until none is: a revoke landing after it would end the new grant too.
+    removals: watch::Sender<usize>,
 }
 
 /// The running workers, by account.
@@ -87,7 +87,7 @@ impl AccountWorkers {
             sign_outs,
             next_id: AtomicU64::new(0),
             launched: AtomicBool::new(false),
-            removals: Arc::default(),
+            removals: watch::Sender::new(0),
         })
     }
 
@@ -303,14 +303,20 @@ impl AccountWorkers {
 
     /// Waits until no removed account is still being cleaned up.
     pub(crate) async fn removals_done(&self) {
-        // A removal's clean-up counts as busy on its own.
-        drop(parked(self.removals.write()).await);
+        let mut removals = self.removals.subscribe();
+        // A removal's clean-up counts as busy on its own. The sender lives
+        // as long as `self`, so the wait never fails.
+        if parked(removals.wait_for(|&n| n == 0)).await.is_err() {
+            tracing::debug!("the removal count is gone; nothing to wait for");
+        }
     }
 
     /// An account was removed (its rows are gone): stops its worker, revokes
-    /// and deletes its refresh token, and deletes its files.
-    pub(crate) async fn forget(self: &Arc<Self>, account: AccountId, email: String) {
-        let removal = Arc::clone(&self.removals).read_owned().await;
+    /// and deletes its refresh token, and deletes its files. Returns at
+    /// once: the clean-up runs on its own task, counted until it ends, so
+    /// a slow revoke holds up only the sign-ins that must wait for it.
+    pub(crate) fn forget(self: &Arc<Self>, account: AccountId, email: String) {
+        let removal = Removal::start(&self.removals);
         let workers = Arc::clone(self);
         self.tasks.spawn("forget account", async move {
             let _removal = removal;
@@ -354,6 +360,23 @@ impl AccountWorkers {
             }
             tracing::info!(account = account.0, "account forgotten");
         });
+    }
+}
+
+/// One removed account's clean-up, counted until it is dropped: when it
+/// ends, or when the core stops it.
+struct Removal(watch::Sender<usize>);
+
+impl Removal {
+    fn start(removals: &watch::Sender<usize>) -> Self {
+        removals.send_modify(|n| *n = n.saturating_add(1));
+        Self(removals.clone())
+    }
+}
+
+impl Drop for Removal {
+    fn drop(&mut self) {
+        self.0.send_modify(|n| *n = n.saturating_sub(1));
     }
 }
 

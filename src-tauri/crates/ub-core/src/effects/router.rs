@@ -66,9 +66,7 @@ impl Router {
                     worker.refresh_labels();
                 }
             }
-            Effect::AccountRemoved { account, email } => {
-                self.workers.forget(account, email).await;
-            }
+            Effect::AccountRemoved { account, email } => self.workers.forget(account, email),
             Effect::Outbox(account) => {
                 if let Some(worker) = self.workers.get(account) {
                     worker.kick_outbox();
