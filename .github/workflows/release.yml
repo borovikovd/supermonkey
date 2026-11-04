@@ -76,7 +76,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-please.outputs.tag }}
-        run: gh release upload "$TAG" src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg --clobber
+        # GitHub's release API sometimes answers 5xx; both calls are safe to repeat.
+        run: |
+          for try in 1 2 3; do
+            gh release upload "$TAG" src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg --clobber && exit 0
+            sleep 15
+          done
+          exit 1
 
       - name: Keep the .dmg (dry run)
         if: needs.release-please.outputs.created != 'true'
@@ -111,4 +117,8 @@ jobs:
             echo
             gh release view "$TAG" --json body --jq .body
           } > notes.md
-          gh release edit "$TAG" --notes-file notes.md --draft=false
+          for try in 1 2 3; do
+            gh release edit "$TAG" --notes-file notes.md --draft=false && exit 0
+            sleep 15
+          done
+          exit 1
