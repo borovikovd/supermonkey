@@ -3,6 +3,7 @@ import { Archive, Clock, File, Inbox, Send, Star } from "lucide-react";
 import { switchAccount } from "../accounts";
 import { goTo } from "../commands";
 import type { AccountInfo, View } from "../ipc/types";
+import { useChrome } from "../store/chrome";
 import { useCurrent } from "../store/hooks";
 import { countLabel } from "./format";
 
@@ -62,8 +63,15 @@ export function Rail({ accounts }: { accounts: AccountInfo[] }) {
           <button
             key={a.id}
             title={`${a.email} (Ctrl+${i + 1})${status(a)}`}
-            onClick={() => switchAccount(a.id)}
-            className={`relative rounded-full p-0.5 ${a.id === account ? "ring-[1.5px] ring-accent" : ""}`}
+            // The account on screen opens its settings; another one switches to it.
+            onClick={() =>
+              a.id === account
+                ? useChrome.getState().set({ sheet: "settings", palette: null })
+                : switchAccount(a.id)
+            }
+            className={`relative rounded-full p-0.5 ${
+              a.id === account ? "ring-[1.5px] ring-accent" : "hover:ring-[1.5px] hover:ring-border"
+            }`}
           >
             <Avatar account={a} />
             {a.inboxUnread > 0 && (

@@ -280,7 +280,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 
 | File                       | Prefix | Scope                                                                                        | Main seeds                               | Harness beyond H1–H3        | Cases   | P1      | P2     | P3     |
 | -------------------------- | ------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | ------- | ------- | ------ | ------ |
-| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 14      | 10      | 4      | 0      |
+| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 15      | 10      | 5      | 0      |
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 9       | 4       | 5      | 0      |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 6       | 4       | 2      | 0      |
 | `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 19      | 4       | 14     | 1      |
@@ -304,7 +304,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **227** | **133** | **84** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **228** | **133** | **85** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -506,6 +506,15 @@ _ST · §Accounts_
 - **Expect before sign-in:** A's avatar shows the needs-sign-in marker; B's does not. The panel shows "You're signed out of ana@acme.test." and no rows.
 - **Expect after sign-in:** the marker is gone, A's list is back, `tokens()` holds A and B, and `p1` is archived on Gmail.
 - **Why:** tokens moved from the Keychain to the token file, so accounts signed in before that start without one.
+
+#### ACC-15 · P2 · Clicking the account on screen opens Settings; another account switches
+
+_EP · §Accounts (switching)_
+
+- **Seed:** `standard`.
+- **Steps:** click A's avatar while A is on screen, then `Esc`. Click B's avatar, then click it again.
+- **Expect:** the first click opens Settings with A's block. Clicking B switches to B's Inbox without opening Settings; clicking B again opens Settings.
+- **Why:** with one account, its avatar did nothing, so it looked broken.
 
 ### 5.2 `inbox-navigation.spec.ts` (NAV)
 

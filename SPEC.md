@@ -190,7 +190,7 @@ Removing an account deletes its refresh token and its rows from the local databa
 
 ### Switching
 
-One account is on screen at a time. `Ctrl+1` to `Ctrl+9` switch to the accounts in rail order, as do clicking an avatar and the palette's `Switch account`. Each avatar shows that account's unread Inbox count, hidden at zero. Switching:
+One account is on screen at a time. `Ctrl+1` to `Ctrl+9` switch to the accounts in rail order, as do clicking an avatar and the palette's `Switch account`. Clicking the avatar of the account already on screen opens Settings, where its Sign in again, Split Inbox settings, and Remove are. Each avatar shows that account's unread Inbox count, hidden at zero. Switching:
 - closes the palette and search
 - closes an open composer as a second `Esc` would: kept as a draft in its own account, or discarded if it is an untouched fresh composer
 - returns to the new account's last view and highlight, or its Inbox with the top row highlighted on the first visit since launch. An open conversation is not reopened.

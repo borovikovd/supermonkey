@@ -767,3 +767,23 @@ test("ACC-14 an account with no stored token at launch shows Sign in again", asy
   await app.settle();
   expect(await labelsOf(gmail, A, s.latest("p1").id)).not.toContain("INBOX");
 });
+
+test("ACC-15 clicking the account on screen opens Settings; another account switches", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await expect(app.highlighted).toContainText("Person 1");
+
+  await app.account(A).click();
+  await expect(app.sheet("Settings")).toBeVisible();
+  await expect(settingsBlock(app, A)).toBeVisible();
+  await app.press("Escape");
+  await expect(app.sheet("Settings")).toHaveCount(0);
+
+  await app.account(B).click();
+  await expect(app.highlighted).toContainText("Bea Blue");
+  await expect(app.sheet("Settings")).toHaveCount(0);
+  await app.account(B).click();
+  await expect(app.sheet("Settings")).toBeVisible();
+});
