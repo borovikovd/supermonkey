@@ -4,7 +4,7 @@
       <stop offset="0" stop-color="#34275a"/>
       <stop offset="1" stop-color="#0d0a17"/>
     </linearGradient>
-    <radialGradient id="dawn" cx="512" cy="860" r="520" gradientUnits="userSpaceOnUse">
+    <radialGradient id="dawn" cx="512" cy="762" r="430" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#ff9f5a" stop-opacity="0.55"/>
       <stop offset="0.5" stop-color="#b8487e" stop-opacity="0.2"/>
       <stop offset="1" stop-color="#714cb6" stop-opacity="0"/>
@@ -32,12 +32,8 @@
     </filter>
     <filter id="grain" x="0" y="0" width="100%" height="100%">
       <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="7"/>
-      <feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.09 0"/>
+      <feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.05 0"/>
     </filter>
-  <linearGradient id="star" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#ffe3a3"/>
-      <stop offset="1" stop-color="#f2a94e"/>
-    </linearGradient>
   </defs>
   <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)" filter="url(#shadow)"/>
   <g clip-path="url(#tile)">
@@ -45,16 +41,9 @@
     <rect x="100" y="100" width="824" height="824" filter="url(#grain)"/>
   </g>
   <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="url(#rim)" stroke-width="3"/>
-  <linearGradient id="deep" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#b3a1dc"/>
-      <stop offset="1" stop-color="#7d67b8"/>
-    </linearGradient>
-  <g>
-    <path fill="url(#shade)" d="M272 380 L512 580 L512 812 L272 500 Z"/>
-    <path fill="url(#deep)" d="M752 380 L512 580 L512 812 L752 500 Z"/>
-    <path fill="url(#lit)" d="M272 380 H752 L512 580 Z"/>
-    <path fill="url(#star)" d="M422 202 L439 247 L484 264 L439 281 L422 326 L405 281 L360 264 L405 247 Z"/>
-    <path fill="url(#star)" d="M602 202 L619 247 L664 264 L619 281 L602 326 L585 281 L540 264 L585 247 Z"/>
+  <g transform="translate(0 22)">
+    <circle cx="512" cy="740" r="118" fill="url(#sun)" clip-path="url(#horizon)"/>
+    <path fill="url(#lit)" d="M250 740 L512 240 L512 469 L370 740 Z"/>
+    <path fill="url(#shade)" d="M512 240 L774 740 L654 740 L512 469 Z"/>
   </g>
 </svg>
-

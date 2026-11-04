@@ -119,10 +119,9 @@ written. Each keeps the spec's intent.
 - **App icon.** The spec names none. `src-tauri/icons/app-icon.svg` is the
   source; `vp run tauri icon src-tauri/icons/app-icon.svg` makes every size
   (delete the `android` and `ios` folders it adds). It is a dark violet tile,
-  as Superhuman's is, holding a faceted gem whose top facet is an envelope
-  flap. Two gold four-pointed stars above it make the shape an "Ü" and
-  recall Nietzsche's "dancing star". A low amber glow stands for
-  Zarathustra's dawn.
+  as Superhuman's is, holding one faceted mark: Zarathustra's mountain, a
+  peak lit on one face, with the sun rising in its notch and a low dawn
+  glow behind.
 - In Drafts the hint bar reads `Enter to open draft · C to compose · ⌘K for
   commands`: the spec's example hints (`E`, `H`) do nothing there.
 
