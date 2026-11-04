@@ -116,6 +116,13 @@ written. Each keeps the spec's intent.
   shadows for the palette, sheets, and toasts). Recipients show as blue
   names, Cc/Bcc sit behind a chevron on the To row, and the footer has Send
   on the left and attach and discard icons on the right.
+- **App icon.** The spec names none. `src-tauri/icons/app-icon.svg` is the
+  source; `vp run tauri icon src-tauri/icons/app-icon.svg` makes every size
+  (delete the `android` and `ios` folders it adds). It is a dark violet tile,
+  as Superhuman's is, holding a faceted gem whose top facet is an envelope
+  flap. Two gold four-pointed stars above it make the shape an "Ü" and
+  recall Nietzsche's "dancing star". A low amber glow stands for
+  Zarathustra's dawn.
 - In Drafts the hint bar reads `Enter to open draft · C to compose · ⌘K for
   commands`: the spec's example hints (`E`, `H`) do nothing there.
 
