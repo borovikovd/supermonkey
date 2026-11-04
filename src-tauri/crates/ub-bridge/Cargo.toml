@@ -1,0 +1,13 @@
+[package]
+name = "ub-bridge"
+version = "0.1.0"
+description = "Command dispatch over ub-core for the Tauri commands and the debug web bridge"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+
+[lints]
+workspace = true

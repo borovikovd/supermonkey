@@ -39,34 +39,34 @@ The rewrite is judged against these, which it may not change without a decision:
 
 ## 3. Crates
 
-Crates live under `src-tauri/crates/` with a `ub-` prefix (`ub-domain`, `ub-store`, `ub-gmail`, `ub-mime`, `ub-core`, `ub-ipc`, `ub-testkit`): a crate named `core` would shadow Rust's own. Below and in code paths they are written without the prefix.
+Crates live under `src-tauri/crates/` with a `ub-` prefix (`ub-domain`, `ub-mime`, `ub-gmail`, `ub-store`, `ub-ipc`, `ub-core`, `ub-bridge`, `ub-testkit`): a crate named `core` would shadow Rust's own. Below and in code paths they are written without the prefix.
 
 ```
                  app (src-tauri: Tauri shell, binary `ubermensch`)
-                  │            │
-                  │         testkit (debug + `fake`: /__test server, e2e-server, demo)
-                  │            │
-                 ipc  ─────────┤   DTOs (ts-rs), command dispatch, web bridge
-                  │            │
-                 core ─────────┘   application: actions, queries, subscriptions, sync, ops, outbox, drafts
-         ┌───────┼─────────┬──────────┐
-       store   gmail      mime      domain
-         │       │          │
-       domain  domain     (none)
+                  │        │
+                  │     testkit (debug + `fake`: /__test server, e2e-server, demo)
+                  │        │
+                 bridge ───┘   command dispatch for Tauri and the debug web bridge
+                  │
+                 core          application: actions, queries, subscriptions, sync, ops, outbox, drafts
+     ┌──────┬─────┼──────┬──────────┐
+   store  gmail  mime   ipc        (ipc: the frozen IPC types, and nothing else)
+     └──────┴─────┴──────┴──▶ domain
 ```
 
-| Crate     | Job                                                                                                                                                                                                                                        | Depends on                                                | Never                                       |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------- | ------------------------------------------- |
-| `domain`  | Ids and units (newtypes), the mail model (thread, message, label, draft, split, pin), view membership and the latest-message rule, removal semantics, split routing, the search and rule query language, snooze times, addressing defaults | `serde`, `thiserror`, `chrono`                            | I/O, async, SQL, HTTP, the system clock     |
-| `mime`    | Parse Gmail payloads, sanitize HTML, build outgoing MIME, quote blocks, `List-Unsubscribe`                                                                                                                                                 | `ammonia`, `mail-builder`, `domain` (for `Addr`)          | I/O                                         |
-| `gmail`   | One HTTP client per account, OAuth (loopback + PKCE, refresh, revoke), the quota bucket and priority scheduler, the outcome taxonomy (SPEC Gmail errors), wire types                                                                       | `reqwest`, `oauth2`, `tokio`, `domain`                    | SQL, Tauri, app state                       |
-| `store`   | SQLite: schema, the writer actor, the read pool, typed repositories, `rev` stamping, change tracking, FTS                                                                                                                                  | `rusqlite`, `domain`                                      | HTTP, Tauri, async runtime types in its API |
-| `core`    | The application: action handlers, queries, subscriptions and patches, the per-account workers (sync, fetch, ops, outbox, drafts, contacts), notifications, snooze timer, launch and shutdown                                               | `domain`, `store`, `gmail`, `mime`, `tokio`, `tokio-util` | Tauri, ts-rs, HTTP servers                  |
-| `ipc`     | The DTOs exported to TS, conversions from `core` views, and one `dispatch` used by both the Tauri commands and the debug web bridge                                                                                                        | `core`, `ts-rs`, `axum` (bridge, debug only)              | Business rules                              |
-| `testkit` | The `/__test` control server, the `e2e-server` binary, demo seeding, the recording `Platform`                                                                                                                                              | `core`, `ipc`, `ub-fake-gmail`                            | Being linked into release builds            |
-| `app`     | Tauri setup, plugins, window and Dock, the Tauri `Platform`, command handlers that call `ipc::dispatch`                                                                                                                                    | `ipc`, `core`, `tauri*`                                   | Logic beyond wiring                         |
+| Crate     | Job                                                                                                                                                                                                                                                                              | Depends on                                                                               | Never                                       |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `domain`  | Ids and units (newtypes); the small enums rules depend on (`View`, kinds, states); the mail model (thread, message, label, draft, split, pin); view membership and the latest-message rule; split routing; the search and rule query language; snooze times; addressing defaults | `serde`, `thiserror` (and, behind features, `rusqlite` and `ts-rs` for trait impls only) | I/O, async, SQL, HTTP, the system clock     |
+| `mime`    | Parse Gmail payloads, sanitize HTML, build outgoing MIME, quote blocks, `List-Unsubscribe`, address lists                                                                                                                                                                        | `ammonia`, `mail-builder`, `domain` (for `Addr`)                                         | I/O                                         |
+| `gmail`   | One HTTP client per account, OAuth (loopback + PKCE, refresh, revoke), the quota bucket and priority scheduler, the outcome taxonomy (SPEC Gmail errors), wire types                                                                                                             | `reqwest`, `oauth2`, `tokio`, `domain`                                                   | SQL, Tauri, app state                       |
+| `store`   | SQLite: schema, the writer actor, the read pool, typed repositories, `rev` stamping, change tracking, FTS                                                                                                                                                                        | `rusqlite`, `domain`                                                                     | HTTP, Tauri, async runtime types in its API |
+| `ipc`     | The contract: every type exported to TypeScript (`src/bindings`), with serde and ts-rs derives                                                                                                                                                                                   | `domain` (`ts`), `serde`, `ts-rs`                                                        | Behavior                                    |
+| `core`    | The application: action handlers, queries, subscriptions and patches, the per-account workers (sync, fetch, ops, outbox, drafts, contacts), notifications, snooze timer, launch and shutdown. Takes `ipc` actions in and gives `ipc` read models and channel messages out        | `domain`, `mime`, `gmail`, `store`, `ipc`, `tokio`, `tokio-util`                         | Tauri, HTTP servers                         |
+| `bridge`  | One `dispatch(command, args)` over `core`, used by the Tauri commands and by the debug web bridge (`axum`, behind a `web` feature)                                                                                                                                               | `core`, `ipc`, `axum` (optional)                                                         | Business rules                              |
+| `testkit` | The `/__test` control server, the `e2e-server` code, demo seeding, the recording `Platform`                                                                                                                                                                                      | `core`, `bridge`, `ipc`, `ub-fake-gmail`                                                 | Being linked into release builds            |
+| `app`     | Tauri setup, plugins, window and Dock, the Tauri `Platform`, command handlers that call `bridge::dispatch`                                                                                                                                                                       | `bridge`, `core`, `ipc`, `tauri*`                                                        | Logic beyond wiring                         |
 
-`rusqlite` appears only in `store`, `reqwest` only in `gmail` (and the one-click unsubscribe POST, through `gmail`'s HTTP client), and `tauri` only in `app`. A workspace test (`tests/layers.rs`, reading `cargo metadata`) fails on any other dependency edge, so the layering can't drift.
+`rusqlite` is used only in `store` (and in `domain`'s `sqlite` impls), `reqwest` only in `gmail` (the one-click unsubscribe POST goes through `gmail`'s HTTP client too), and `tauri` only in `app`. A workspace test (`tests/layers.rs`, reading `cargo metadata`) fails on any other dependency edge, so the layering can't drift.
 
 ## 4. Runtime
 
@@ -92,7 +92,7 @@ Crates live under `src-tauri/crates/` with a `ub-` prefix (`ub-domain`, `ub-stor
 ### 5.1 A UI action
 
 ```
-UI ──submit(actions)──▶ ipc::dispatch ──▶ core::Actions::submit
+UI ──submit(actions)──▶ bridge::dispatch ──▶ core::Actions::submit
      (numbered, batched)                     │ enqueue writer job (priority: UI)
                                              ▼
                         writer thread: begin tx
@@ -176,7 +176,7 @@ Each has exactly two implementations. AGENTS.md forbids traits with one.
 
 - Each crate has its own `thiserror` enum: `domain::RuleError`, `store::StoreError`, `gmail::GmailError` (carrying an `Outcome`), `core::Error`.
 - `anyhow` only in `app` and `testkit` glue.
-- Commands map `core::Error` to the strings the UI reads, and only in `ipc`.
+- Commands map `core::Error` to the strings the UI reads, and only in `bridge`.
 - `tracing` with targets per crate. One line per event, with context, and no user content (addresses, subjects, bodies) or secrets. Noisy third-party targets are filtered at the subscriber.
 
 ## 10. Testing
@@ -211,7 +211,7 @@ The slices from the plan, each green on the slice gate (`vp run gate:slice`) bef
    - `domain` ids;
    - `store` schema and writer;
    - subscriptions and channel;
-   - `ipc` and the web bridge;
+   - `ipc` types and the `bridge` with its web bridge;
    - `testkit` minimal;
    - `app` shell.
 
@@ -230,6 +230,7 @@ The slices from the plan, each green on the slice gate (`vp run gate:slice`) bef
 
 ## 13. Decisions from review
 
-1. **The debug web bridge lives in `ipc`**, behind a `bridge` feature, so `testkit` and the debug `app` share one dispatch. Release builds leave the feature off.
+1. **The debug web bridge lives in `bridge`**, behind a `web` feature, so `testkit` and the debug `app` share one dispatch. Release builds leave the feature off.
 2. **Logging uses `tracing`**, with spans around Gmail calls and writer jobs.
 3. **The `e2e-server` binary stays in the root package**, as a thin `main` over `testkit`, so `e2e/global-setup.ts` builds it as before.
+4. **`ipc` sits below `core`** and holds only the contract types, so `core` takes and returns them directly instead of mirroring 47 types with conversions. `domain`'s `sqlite` and `ts` features add trait impls for its newtypes and small enums, since the orphan rule keeps those impls out of `store` and `ipc`.

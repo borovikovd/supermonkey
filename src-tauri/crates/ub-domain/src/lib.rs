@@ -5,9 +5,13 @@
 
 mod addr;
 mod ids;
+mod kinds;
 mod time;
 
 pub use addr::Addr;
+pub use kinds::{
+    DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SplitKind, SyncStatus, UndoKind, View,
+};
 
 pub use ids::{
     AccountId, ActionNo, AttachmentId, DraftId, GmailDraftId, GmailMessageId, GmailThreadId,

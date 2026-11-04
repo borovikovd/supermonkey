@@ -53,6 +53,7 @@ members = [
     "crates/ub-store",
     "crates/ub-core",
     "crates/ub-ipc",
+    "crates/ub-bridge",
     "crates/ub-testkit",
     "crates/ub-fake-gmail",
 ]
