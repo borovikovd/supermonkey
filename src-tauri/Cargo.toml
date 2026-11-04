@@ -19,9 +19,11 @@ name = "e2e-server"
 path = "src/bin/e2e_server.rs"
 required-features = ["fake"]
 
+# Dev tools sit behind `fake` so the bundler leaves them out of the app.
 [[bin]]
 name = "perf-fixture"
 path = "src/bin/perf_fixture.rs"
+required-features = ["fake"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

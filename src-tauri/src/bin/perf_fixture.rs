@@ -1,6 +1,6 @@
 //! Writes the perf fixture or demo data into a database file.
 //!
-//!     cargo run --bin perf-fixture -- <db path> [perf|demo]
+//!     cargo run --features fake --bin perf-fixture -- <db path> [perf|demo]
 
 #![expect(
     clippy::print_stdout,

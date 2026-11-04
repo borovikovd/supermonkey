@@ -47,7 +47,7 @@ Lint setup:
 Perf fixture (two accounts × 20,000 threads):
 
 ```sh
-cargo run --manifest-path src-tauri/Cargo.toml --release --bin perf-fixture -- /tmp/perf.db perf
+cargo run --manifest-path src-tauri/Cargo.toml --release --features fake --bin perf-fixture -- /tmp/perf.db perf
 UBERMENSCH_DB=/tmp/perf.db vp run tauri dev
 UBERMENSCH_PERF_DB=/tmp/perf.db cargo test --manifest-path src-tauri/Cargo.toml --release --test perf_search -- --ignored --nocapture
 ```
