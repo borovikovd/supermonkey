@@ -26,8 +26,7 @@ pub(crate) async fn unsubscribe(
     thread: ThreadId,
 ) -> Result<Unsubscribed, Error> {
     let messages = thread_messages(ctx, thread).await?;
-    let live = || messages.iter().rev().filter(|m| m.is_live());
-    let Some(message) = live().find(|m| m.is_list).or_else(|| live().next()) else {
+    let Some(message) = unsubscribe_source(&messages) else {
         return Err(Error::Invalid(
             "The conversation has no message to unsubscribe from".to_owned(),
         ));
@@ -72,6 +71,15 @@ pub(crate) async fn unsubscribe(
         return Ok(Unsubscribed::OpenedPage { sender });
     }
     Ok(Unsubscribed::NoLink { sender })
+}
+
+/// The message an unsubscribe reads: the latest list message, else the
+/// latest message, drafts aside. Trashed ones count: "Unsubscribe, and trash
+/// all" trashes the conversation first, and that may commit before this
+/// reads it.
+fn unsubscribe_source(messages: &[MessageFacts]) -> Option<&MessageFacts> {
+    let sent = || messages.iter().rev().filter(|m| !m.is_draft);
+    sent().find(|m| m.is_list).or_else(|| sent().next())
 }
 
 /// Blocks the sender of `thread`'s latest message, or everyone at its
@@ -181,6 +189,41 @@ mod tests {
 
     fn filter(json: &str) -> Filter {
         serde_json::from_str(json).unwrap()
+    }
+
+    fn fact(id: i64, is_list: bool, is_draft: bool, labels: &[&str]) -> MessageFacts {
+        MessageFacts {
+            id: ub_domain::MessageId(id),
+            gmail_id: ub_domain::GmailMessageId::from(format!("m{id}")),
+            date: ub_domain::Millis(id),
+            from: Addr::new("news@news.test"),
+            to: Vec::new(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: String::new(),
+            snippet: String::new(),
+            is_draft,
+            is_list,
+            has_attachments: false,
+            labels: labels.iter().copied().collect(),
+        }
+    }
+
+    #[test]
+    fn unsubscribe_reads_the_latest_list_message_even_once_trashed() {
+        let trashed = [
+            fact(1, true, false, &["TRASH"]),
+            fact(2, true, false, &["TRASH"]),
+            fact(3, false, false, &["TRASH"]),
+            fact(4, false, true, &["DRAFT"]),
+        ];
+        assert_eq!(unsubscribe_source(&trashed).map(|m| m.id.0), Some(2));
+        let plain = [
+            fact(1, false, false, &["INBOX"]),
+            fact(2, false, true, &["DRAFT"]),
+        ];
+        assert_eq!(unsubscribe_source(&plain).map(|m| m.id.0), Some(1));
+        assert!(unsubscribe_source(&[fact(1, false, true, &["DRAFT"])]).is_none());
     }
 
     #[test]
