@@ -57,7 +57,11 @@ pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), A
             value,
             split,
         } => splits::pin(ctx, account, kind, &value, split),
-        Action::SaveSplits { .. } => splits::save_splits(),
+        Action::SaveSplits {
+            account,
+            splits,
+            deleted,
+        } => splits::save_splits(ctx, account, splits, &deleted),
         Action::RemoveAccount { account } => accounts::remove_account(ctx, account),
     }
 }

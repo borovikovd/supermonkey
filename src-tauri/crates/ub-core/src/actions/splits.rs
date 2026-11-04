@@ -1,10 +1,8 @@
 //! Split Inbox pins and the splits sheet (SPEC Split Inbox).
-//!
-//! Extension point: the splits slice fills in `saveSplits`, validating rules
-//! with `ub_domain::Query::parse_rule` before the store saves them.
 
-use ub_domain::{AccountId, Pin, PinKind, SplitId, UndoEntryId};
-use ub_store::UndoAction;
+use ub_domain::{AccountId, Pin, PinKind, Query, SplitId, SplitKind, UndoEntryId};
+use ub_ipc::SplitInfo;
+use ub_store::{SplitEdit, UndoAction};
 
 use super::{ActionCtx, ActionError};
 
@@ -64,7 +62,33 @@ pub(super) fn undo_pin(
     Ok(())
 }
 
-/// `saveSplits`: the splits sheet.
-pub(super) fn save_splits() -> Result<(), ActionError> {
-    Err(ActionError::NotYetImplemented("saveSplits"))
+/// `saveSplits`: the splits sheet. Deletes the custom splits in `deleted`
+/// with their pins, saves the rest in the order given, and re-routes the
+/// Inbox. A custom split's rule must parse strictly; a blank one matches
+/// nothing. Important and Other can't be deleted, and Other stays on.
+pub(super) fn save_splits(
+    ctx: &mut ActionCtx<'_, '_>,
+    account: AccountId,
+    splits: Vec<SplitInfo>,
+    deleted: &[SplitId],
+) -> Result<(), ActionError> {
+    if ctx.tx.read().accounts().get(account)?.is_none() {
+        return Err(ActionError::Invalid("no such account"));
+    }
+    let mut edits = Vec::with_capacity(splits.len());
+    for split in splits {
+        if split.kind == SplitKind::Custom && !split.query.trim().is_empty() {
+            Query::parse_rule(&split.query)?;
+        }
+        edits.push(SplitEdit {
+            id: split.id,
+            name: split.name,
+            kind: split.kind,
+            query: split.query,
+            enabled: split.enabled,
+            hide_when_empty: split.hide_when_empty,
+        });
+    }
+    ctx.tx.splits().save(account, &edits, deleted)?;
+    Ok(())
 }

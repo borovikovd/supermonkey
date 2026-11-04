@@ -535,3 +535,36 @@ async fn a_save_that_arrives_after_the_send_is_dropped() {
         "the outbox sends what was sent"
     );
 }
+
+#[tokio::test]
+async fn a_split_whose_rule_does_not_parse_is_not_saved() {
+    let mut h = Harness::start().await;
+    let (account, _) = h.write(seed).await;
+    let custom = |name: &str, query: &str| ub_ipc::SplitInfo {
+        id: ub_domain::SplitId(0),
+        name: name.to_owned(),
+        kind: ub_domain::SplitKind::Custom,
+        query: query.to_owned(),
+        enabled: true,
+        hide_when_empty: true,
+        position: 0,
+    };
+    let save = |split| Action::SaveSplits {
+        account,
+        splits: vec![split],
+        deleted: Vec::new(),
+    };
+    h.act(vec![
+        save(custom("Broken", "from:(ada")),
+        save(custom("Lists", "is:list")),
+    ])
+    .await;
+    let names = h
+        .write(move |tx| {
+            let splits = tx.read().splits().all(account)?;
+            Ok::<_, StoreError>(splits.into_iter().map(|s| s.name).collect::<Vec<_>>())
+        })
+        .await;
+    assert!(names.contains(&"Lists".to_owned()), "{names:?}");
+    assert!(!names.contains(&"Broken".to_owned()), "{names:?}");
+}
