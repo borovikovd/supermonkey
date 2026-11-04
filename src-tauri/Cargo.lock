@@ -4605,6 +4605,16 @@ dependencies = [
 [[package]]
 name = "ub-store"
 version = "0.1.0"
+dependencies = [
+ "parking_lot",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "ub-domain",
+]
 
 [[package]]
 name = "ub-testkit"
