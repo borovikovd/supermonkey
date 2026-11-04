@@ -38,6 +38,14 @@ impl Scheduler {
             .or_insert_with(|| AccountScheduler::new(self.config, now))
             .clone()
     }
+
+    /// Forgets the account `email`: it was removed, and its clients are
+    /// gone. Handles still held keep working on their own; the next
+    /// [`Scheduler::account`] for the address starts afresh.
+    pub fn forget(&self, email: &str) {
+        let forgotten = self.accounts.lock().remove(email);
+        drop(forgotten);
+    }
 }
 
 /// One account's slots and budget. A cheap handle: clones share the account.

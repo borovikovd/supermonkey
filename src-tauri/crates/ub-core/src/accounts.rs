@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use parking_lot::Mutex;
 use tokio_util::sync::CancellationToken;
 use ub_domain::AccountId;
-use ub_gmail::{Gmail, Priority, RefreshToken, SignIn, Tokens};
+use ub_gmail::{Gmail, Priority, RefreshToken, Scheduler, SignIn, Tokens};
 use ub_store::{Priority as WritePriority, StoreError};
 
 use crate::workers::{AccountWorkers, Grant};
@@ -182,11 +182,13 @@ impl Accounts {
             http.clone(),
             grant,
         ));
+        // Its own scheduler: one request, for an address not known yet, and
+        // nothing left behind in the accounts' schedulers.
         let probe = Gmail::new(
             &config.base_url,
             http.clone(),
             Arc::clone(&tokens),
-            self.workers.scheduler().account("sign-in"),
+            Scheduler::new(config.quota).account("sign-in"),
         )
         .map_err(|e| Error::Invalid(e.to_string()))?;
         let profile = probe.get_profile(Priority::P1).await?;

@@ -53,6 +53,20 @@ async fn queued_requests_run_in_priority_order() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_forgotten_account_starts_afresh() {
+    let scheduler = Scheduler::new(one_at_a_time());
+    let held = scheduler.account(A).acquire(Priority::P1, Units(1)).await;
+    scheduler.forget(A);
+    let fresh = tokio::time::timeout(
+        Duration::from_secs(1),
+        scheduler.account(A).acquire(Priority::P1, Units(1)),
+    )
+    .await;
+    assert!(fresh.is_ok(), "the removed account's slot is not shared");
+    drop(held);
+}
+
+#[tokio::test(start_paused = true)]
 async fn at_most_eight_requests_run_at_once_per_account() {
     let scheduler = Scheduler::new(QuotaConfig::default());
     let running = Arc::new(AtomicUsize::new(0));

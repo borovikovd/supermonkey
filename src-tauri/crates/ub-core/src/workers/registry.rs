@@ -105,11 +105,6 @@ impl AccountWorkers {
         &self.http
     }
 
-    /// The per-account request schedulers.
-    pub(crate) fn scheduler(&self) -> &Scheduler {
-        &self.scheduler
-    }
-
     /// Where refresh tokens live.
     pub(crate) fn tokens(&self) -> &Arc<dyn TokenStore> {
         &self.tokens
@@ -373,6 +368,7 @@ impl AccountWorkers {
                     tracing::warn!(account = account.0, error = %e, "couldn't read a removed account's token");
                 }
             }
+            workers.scheduler.forget(&email);
             let tokens = Arc::clone(&workers.tokens);
             let dir = attachments_dir(&workers.deps.data_dir, account);
             let cleaned = tokio::task::spawn_blocking(move || {

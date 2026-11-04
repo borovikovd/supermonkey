@@ -3558,7 +3558,7 @@ These stay, and the E2E suite deliberately does not repeat their partitions. Pat
 
 Also kept, because they test logic the E2E suite can't observe:
 
-- `crates/ub-gmail/tests/gmail/scheduler.rs`: priorities, concurrency, quota, and back-off.
+- `crates/ub-gmail/tests/gmail/scheduler.rs`: priorities, concurrency, quota, and back-off, and that a forgotten (removed) account starts afresh instead of staying in the map.
 - `crates/ub-gmail/tests/gmail/oauth.rs`: the `state` check, token caching and early refresh, one refresh shared by concurrent 401s, and secrets kept out of debug output.
 - `crates/ub-core/src/tests/clock.rs`: the activity tracking `settle()` relies on, that closing a `Kick` (an account stopping) wakes a loop even between its last check and its wait, and that stopping a task group (quit) waits for the tasks of the groups inside it, such as the account workers' (a task mid-step at the stop can't be timed from E2E).
 - `crates/ub-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser: several URIs, mailto subject and body, a `+` in the address, junk, spacing, and when one-click applies.
