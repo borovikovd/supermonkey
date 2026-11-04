@@ -27,6 +27,7 @@ import {
   goSplit,
   jumpSplit,
   moveHighlight,
+  selectAll,
   selectMessage,
   toggleExpand,
   toggleExpandAll,
@@ -140,6 +141,18 @@ export function onKeyDown(e: KeyboardEvent) {
     e.preventDefault();
     appHooks.openPalette({ kind: "commands" });
     measure("palette", start);
+    return;
+  }
+  if (
+    e.metaKey &&
+    !e.altKey &&
+    e.key.toLowerCase() === "a" &&
+    cur?.screen.kind === "list" &&
+    !needsSignin(c.account)
+  ) {
+    e.preventDefault();
+    selectAll(!e.shiftKey);
+    measure("x", start);
     return;
   }
   if (e.metaKey || e.altKey || (e.ctrlKey && e.key !== "Tab")) return;

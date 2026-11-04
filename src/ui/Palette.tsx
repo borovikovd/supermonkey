@@ -29,7 +29,7 @@ import { act, addAccount, snoozeOptions } from "../ipc/bridge";
 import { reportSignIn } from "./signIn";
 import type { PinKind, SnoozeChoice, View } from "../ipc/types";
 import { appHooks } from "../keyboard/refs";
-import { goSplit } from "../keyboard/nav";
+import { goSplit, selectAll } from "../keyboard/nav";
 import { measure } from "../keyboard/meter";
 import { useChrome, type PaletteMode } from "../store/chrome";
 import { useAppState, useCurrent, useSummary } from "../store/hooks";
@@ -108,6 +108,13 @@ function useCommands(mode: PaletteMode, query: string): Commands {
         { id: "spam", label: "Mark as spam", keys: "!", run: spam },
         { id: "star", label: "Star or unstar", keys: "S", run: toggleStar },
         { id: "read", label: "Mark read or unread", keys: "U", run: toggleRead },
+        { id: "select-all", label: "Select all", keys: "⌘ ⇧ A", run: () => selectAll(false) },
+        {
+          id: "select-from-here",
+          label: "Select all from here",
+          keys: "⌘ A",
+          run: () => selectAll(true),
+        },
         {
           id: "label",
           label: "Add or remove label",

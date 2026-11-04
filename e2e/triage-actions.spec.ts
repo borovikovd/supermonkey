@@ -739,3 +739,40 @@ test("TRI-12 e marks the conversation read, and z makes the same messages unread
   await app.press("i");
   await expect(app.row("Half read")).toHaveAttribute("data-unread", "true");
 });
+
+test("TRI-13 Cmd+A selects from the highlight to the end of its split; Cmd+Shift+A the whole split", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.splits(gmail, app);
+  await expect.poll(() => app.splitHeader()).toBe("Important 18 · Other 7");
+  const [first] = (await app.sections()).find((s) => s.name === "Important")?.subjects ?? [];
+  await expect(app.highlighted).toContainText(first ?? "?");
+
+  // From the second Important row: it and every Important row below it, nothing in Other.
+  await app.press("j");
+  await app.press("Meta+a");
+  await app.press("e");
+  await expect.poll(() => app.splitHeader()).toBe("Important 1 · Other 7");
+  await expect(app.row(first ?? "?")).toHaveCount(1);
+
+  // On Other, Cmd+Shift+A takes all of Other, and only Other.
+  await app.press("Tab");
+  await app.press("Meta+Shift+A");
+  await expect(app.selected).toHaveCount(7);
+  await app.press("e");
+  await expect.poll(() => app.splitHeader()).toBe("Important 1");
+  await app.settle();
+  const inbox = (await gmail.gmail(A)).messages.filter((m) => m.labels.includes("INBOX"));
+  expect(new Set(inbox.map((m) => m.threadId)).size).toBe(1);
+
+  // Outside the Inbox it is the whole list, from the palette too. Esc clears it.
+  await app.press("g", "e");
+  await expect(app.rows.first()).toBeVisible();
+  await app.press("Meta+k");
+  await app.type("Select all");
+  await app.press("Enter");
+  await expect(app.selected).toHaveCount(await app.rows.count());
+  await app.press("Escape");
+  await expect(app.selected).toHaveCount(0);
+});

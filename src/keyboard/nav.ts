@@ -114,6 +114,30 @@ export function extendSelection(delta: number) {
   useChrome.getState().set({ selection: [...sel] });
 }
 
+/**
+ * The rows Select All covers, as in Superhuman: in a split Inbox the split that
+ * holds the highlight, otherwise the whole list.
+ */
+function selectionScope(highlight: string | null): string[] {
+  const ids = visibleIds();
+  const entries = currentListView()?.ids ?? [];
+  const split = entries.find((e) => e.key === highlight)?.split ?? null;
+  if (split === null) return ids;
+  const inSplit = new Set(entries.filter((e) => e.split === split).map((e) => e.key));
+  return ids.filter((k) => inSplit.has(k));
+}
+
+/** `Cmd+Shift+A` selects every row in scope; `Cmd+A` the highlighted row and those below it. */
+export function selectAll(fromHere: boolean) {
+  const c = useChrome.getState();
+  const cur = c.current();
+  if (!cur || cur.screen.kind !== "list") return;
+  const scope = selectionScope(cur.highlight);
+  const at = fromHere && cur.highlight !== null ? scope.indexOf(cur.highlight) : 0;
+  if (at < 0) return;
+  c.set({ selection: scope.slice(at) });
+}
+
 /** Visible splits of the Inbox list in order, with their first conversation. */
 export function visibleSplits(): { split: number; first: string }[] {
   const list = currentListView();

@@ -284,7 +284,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 10      | 5       | 5      | 0      |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 6       | 4       | 2      | 0      |
 | `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 19      | 4       | 14     | 1      |
-| `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 12      | 8       | 4      | 0      |
+| `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 13      | 9       | 4      | 0      |
 | `undo.spec.ts`             | UND    | the `z` stack, partial revert, per-account history, persistence                              | `standard`                               | H15                         | 8       | 4       | 3      | 1      |
 | `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 8       | 2       | 6      | 0      |
 | `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 8       | 3       | 4      | 1      |
@@ -304,7 +304,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **229** | **134** | **85** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **230** | **135** | **85** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -1106,6 +1106,17 @@ _ST · §Archive, trash, star, read; DEVIATIONS (`e` marks read)_
 - **Expect:**
   - After `e`, neither message has `INBOX` in Gmail, the second has lost `UNREAD`, and the row in Done is read.
   - After `z`, both are back in Inbox, only the second is `UNREAD` again, and the row is unread.
+
+#### TRI-13 · P1 · `Cmd+A` selects from the highlight to the end of its split; `Cmd+Shift+A` the whole split
+
+_EP, BVA · §Keyboard (selection)_
+
+- **Seed:** `splits` (Important 18, Other 7).
+- **Steps:** `j` to the second Important row, `Cmd+A`, `e`. `Tab` to Other, `Cmd+Shift+A`, `e`. `g e`, then the palette's "Select all", then `Esc`.
+- **Expect:**
+  - The first `e` leaves "Important 1 · Other 7": the first row stays, Other is untouched.
+  - `Cmd+Shift+A` on Other selects its 7 rows, and `e` leaves "Important 1"; one Inbox thread is left in Gmail.
+  - In Done the palette's Select all selects every row; `Esc` clears it.
 
 ### 5.6 `undo.spec.ts` (UND)
 
