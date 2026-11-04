@@ -9,6 +9,7 @@
 
 mod account;
 mod attachments;
+pub(crate) mod badge;
 mod drafts;
 mod files;
 mod grants;

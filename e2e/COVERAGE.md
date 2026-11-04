@@ -3567,6 +3567,7 @@ Also kept, because they test logic the E2E suite can't observe:
 - `crates/ub-core/src/outbox/machine.rs`: the send state machine's every event in every state.
 - `crates/ub-core/src/tests/actions.rs`: a draft save that arrives after its send is dropped, and a split whose rule does not parse is not saved (the sheet checks rules before it saves).
 - `crates/ub-core/src/tests/writer_channel.rs` (also): a commit whose updates panic while being sent still releases its effects and goes idle, so `settle()` never hangs on it (E2E can't make the core panic).
+- `crates/ub-core/src/tests/badge.rs`: commits that land while the Dock badge is being set make one more count, not one each (the recorded platform keeps only the last badge).
 - `crates/ub-core/src/tests/accounts.rs`: a sign-out reported for a grant older than the last sign-in changes nothing, even when its writer job runs after the sign-in's (the sign-in's job has the UI's priority; E2E can't hold the writer between the two).
 - `crates/ub-core/src/tests/notify.rs`: a poll that reads a whole thread for one changed message notifies only for the mail history reported added.
 - `crates/ub-core/src/tests/snooze.rs`: a new snooze time re-arms the snooze timer (the E2E clock fires every due timer on an advance, so it can't tell).

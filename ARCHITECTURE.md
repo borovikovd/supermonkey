@@ -84,7 +84,7 @@ Crates live under `src-tauri/crates/` with a `ub-` prefix (`ub-domain`, `ub-mime
 
   Removing or signing out an account cancels the token and waits for the group to stop.
 
-- **App-wide tasks:** the effect router (section 8.4) and the snooze timer. Wake from sleep is a poller noticing a gap in app time of more than three poll intervals; notification click-through is a focus within 30 s of a notification shown in the background (DEVIATIONS).
+- **App-wide tasks:** the effect router (section 8.4), the snooze timer, and the Dock badge count. Wake from sleep is a poller noticing a gap in app time of more than three poll intervals; notification click-through is a focus within 30 s of a notification shown in the background (DEVIATIONS).
 - **Shutdown:** quitting waits up to 5 s for pending UI actions to commit (SPEC), then cancels the root token and exits.
 
 ## 5. Data flow
@@ -178,7 +178,7 @@ Each has exactly two implementations. AGENTS.md forbids traits with one.
 
 Rules that write live in modules the writer runs, each a set of functions over `&mut WriteTx` and the writer state: `actions` (one module per group of UI actions), `ops` (queueing, revert, rejection), `outbox` (a pure send state machine and its steps), `drafts`, `snooze` (waking due threads, as the same label change as Return to inbox), and `notify` (which new mail notifies, decided in the poll's own transaction so open conversations and stored messages agree). They record `Effect`s; the writer releases them to the router only after the commit lands.
 
-The router (`effects::Router`) is one task that hands each effect to its worker: fetches, Gmail listings, ops, outbox and draft work go to the account's worker; `Notify` goes to the `Notifier`, which posts it and remembers it for click-through; `Snoozes` re-arms the snooze timer; `Badge` recounts unread mail. Each account's ops run in an `OpsLane` that outlives its worker, so a replaced worker's in-flight op lands before the next one replays.
+The router (`effects::Router`) is one task that hands each effect to its worker: fetches, Gmail listings, ops, outbox and draft work go to the account's worker; `Notify` goes to the `Notifier`, which posts it and remembers it for click-through; `Snoozes` re-arms the snooze timer; `Badge` kicks the badge task, which recounts unread mail once per wake, so a burst of commits costs one count. Each account's ops run in an `OpsLane` that outlives its worker, so a replaced worker's in-flight op lands before the next one replays.
 
 Every task, timer, kick, and queued job counts in one `Activity`, so the E2E server's `settle()` can tell when the core is idle, and its manual clock moves app time.
 

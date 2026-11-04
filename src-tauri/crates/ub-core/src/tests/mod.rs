@@ -2,6 +2,7 @@
 
 mod accounts;
 mod actions;
+mod badge;
 mod clock;
 mod notify;
 mod perf;
@@ -27,6 +28,43 @@ use crate::{App, Config, Deps, GmailConfig, Notification, Platform, PlatformErro
 pub(crate) struct Recorder {
     pub(crate) badges: Mutex<Vec<Option<u32>>>,
     pub(crate) notifications: Mutex<Vec<Notification>>,
+    /// While closed, setting the badge blocks: a Dock slow to answer.
+    pub(crate) badge_gate: Gate,
+}
+
+/// Blocks the threads that pass it while closed.
+#[derive(Default)]
+pub(crate) struct Gate {
+    closed: Mutex<bool>,
+    opened: parking_lot::Condvar,
+    waiting: std::sync::atomic::AtomicUsize,
+}
+
+impl Gate {
+    pub(crate) fn close(&self) {
+        *self.closed.lock() = true;
+    }
+
+    pub(crate) fn open(&self) {
+        *self.closed.lock() = false;
+        self.opened.notify_all();
+    }
+
+    /// How many threads wait at it now.
+    pub(crate) fn waiting(&self) -> usize {
+        self.waiting.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn pass(&self) {
+        let mut closed = self.closed.lock();
+        self.waiting
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        while *closed {
+            self.opened.wait(&mut closed);
+        }
+        self.waiting
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 impl Platform for Recorder {
@@ -47,6 +85,7 @@ impl Platform for Recorder {
     }
 
     fn set_badge(&self, count: Option<u32>) {
+        self.badge_gate.pass();
         self.badges.lock().push(count);
     }
 

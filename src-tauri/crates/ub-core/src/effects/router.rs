@@ -4,12 +4,9 @@
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
-use ub_store::ReadPool;
 
 use super::Effect;
-use crate::Platform;
 use crate::activity::{Kick, Tracked, parked};
-use crate::views;
 use crate::workers::{AccountWorkers, Notifier, Searches};
 
 /// Where the writer sends committed effects.
@@ -19,13 +16,13 @@ pub(crate) type EffectReceiver = mpsc::UnboundedReceiver<Tracked<Effect>>;
 
 /// What the router hands effects to.
 pub(crate) struct Router {
-    pub(crate) pool: Arc<ReadPool>,
-    pub(crate) platform: Arc<dyn Platform>,
     pub(crate) workers: Arc<AccountWorkers>,
     pub(crate) searches: Arc<Searches>,
     pub(crate) notifier: Arc<Notifier>,
     /// Wakes the snooze timer.
     pub(crate) snoozes: Arc<Kick>,
+    /// Wakes the badge count.
+    pub(crate) badge: Arc<Kick>,
 }
 
 impl Router {
@@ -34,13 +31,13 @@ impl Router {
     pub(crate) async fn run(self, mut effects: EffectReceiver) {
         while let Some(tracked) = parked(effects.recv()).await {
             let (effect, _handling) = tracked.into_parts();
-            self.route(effect).await;
+            self.route(effect);
         }
     }
 
-    async fn route(&self, effect: Effect) {
+    fn route(&self, effect: Effect) {
         match effect {
-            Effect::Badge => self.badge().await,
+            Effect::Badge => self.badge.kick(),
             Effect::FetchThread { account, thread } => {
                 if let Some(worker) = self.workers.get(account) {
                     worker.fetch_opened(thread);
@@ -85,18 +82,6 @@ impl Router {
             Effect::DraftFilesGone(draft) => self.workers.delete_draft_files(&draft),
             Effect::Notify(notification) => self.notifier.show(notification),
             Effect::Snoozes => self.snoozes.kick(),
-        }
-    }
-
-    /// The Dock badge: unread Inbox threads across accounts not muted.
-    async fn badge(&self) {
-        let pool = Arc::clone(&self.pool);
-        let count =
-            tokio::task::spawn_blocking(move || pool.with(|r| views::badge_count(**r))).await;
-        match count {
-            Ok(Ok(count)) => self.platform.set_badge((count > 0).then_some(count)),
-            Ok(Err(e)) => tracing::warn!(error = %e, "couldn't count unread mail for the badge"),
-            Err(e) => tracing::warn!(error = %e, "the badge count task failed"),
         }
     }
 }

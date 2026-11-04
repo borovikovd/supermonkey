@@ -13,11 +13,11 @@ use crate::accounts::Accounts;
 use crate::actions::{Actions, Received};
 use crate::activity::{Activity, Kick, Tasks};
 use crate::clock::Clock;
-use crate::effects::{Effect, Router};
+use crate::effects::Router;
 use crate::lifecycle::{Lifecycle, LifecycleDeps};
 use crate::mail::Mail;
 use crate::queries::Queries;
-use crate::workers::{AccountWorkers, Network, Notifier, Searches, WorkerDeps};
+use crate::workers::{AccountWorkers, Network, Notifier, Searches, WorkerDeps, badge};
 use crate::writer::CoreWriter;
 use crate::{Error, Platform};
 
@@ -122,7 +122,7 @@ impl App {
         } = deps;
         let tasks = Tasks::new(runtime, Arc::clone(&activity));
         let (to_router, from_writers) = mpsc::unbounded_channel();
-        let writer = CoreWriter::start(&config.db_path, Arc::clone(&activity), to_router.clone())?;
+        let writer = CoreWriter::start(&config.db_path, Arc::clone(&activity), to_router)?;
         let pool = Arc::new(ReadPool::open(&config.db_path, config.read_connections)?);
         let last = pool.with(|r| r.meta().last_action())?;
         let received = Arc::new(Received::default());
@@ -149,18 +149,26 @@ impl App {
             tokens,
             tasks.clone(),
         );
+        let badge = Arc::new(Kick::new(Arc::clone(&activity)));
         let router = Router {
-            pool: Arc::clone(&pool),
-            platform: Arc::clone(&platform),
             workers: Arc::clone(&workers),
             searches: Arc::new(Searches::default()),
             notifier: Arc::clone(&notifier),
             snoozes: Arc::clone(&snoozes),
+            badge: Arc::clone(&badge),
         };
         tasks.spawn("effects", router.run(from_writers));
-        // The Dock badge as the database has it at launch. The router is
-        // gone only if the runtime is shutting down.
-        let _ = to_router.send(activity.track("effect", Effect::Badge));
+        // The Dock badge as the database has it at launch.
+        badge.kick();
+        tasks.spawn(
+            "badge",
+            badge::run(
+                badge,
+                Arc::clone(&pool),
+                Arc::clone(&platform),
+                Arc::clone(&clock),
+            ),
+        );
         Ok(Self {
             actions: Actions::new(
                 writer.clone(),
