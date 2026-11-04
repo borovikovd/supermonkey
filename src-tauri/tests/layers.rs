@@ -25,6 +25,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "ub-ipc",
             "ub-domain",
             "ub-gmail",
+            "ub-store",
             "ub-fake-gmail",
         ],
     ),

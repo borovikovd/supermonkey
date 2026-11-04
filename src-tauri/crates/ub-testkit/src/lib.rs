@@ -1,6 +1,7 @@
 //! Test and demo support (ARCHITECTURE.md, sections 3 and 13): the E2E
 //! server, its `/__test` control API, and the recording platform; demo
-//! mode ([`Demo`]). Linked only into debug builds with the `fake` feature.
+//! mode ([`Demo`]); and the perf fixture ([`fixture`]). Linked only into
+//! debug builds with the `fake` feature.
 //!
 //! [`run`] serves, on one origin:
 //! - the debug web bridge (`/invoke`, `/events`) over the real core;
@@ -18,6 +19,7 @@
 
 mod control;
 mod demo;
+pub mod fixture;
 mod platform;
 mod server;
 

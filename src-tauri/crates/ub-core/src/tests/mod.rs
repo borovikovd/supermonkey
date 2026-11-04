@@ -3,6 +3,7 @@
 mod actions;
 mod clock;
 mod notify;
+mod perf;
 mod snooze;
 mod writer_channel;
 

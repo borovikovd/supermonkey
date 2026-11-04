@@ -20,6 +20,11 @@ name = "e2e-server"
 path = "src/bin/e2e_server.rs"
 required-features = ["fake"]
 
+[[bin]]
+name = "perf-fixture"
+path = "src/bin/perf_fixture.rs"
+required-features = ["fake"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 serde_json = "1"
@@ -46,8 +51,8 @@ tracing-subscriber = "0.3"
 # Debug only: the web bridge on 127.0.0.1:1430 (UBERMENSCH_WEB_BRIDGE=1), for
 # the UI in a browser. Release builds leave it off.
 web = ["ub-bridge/web"]
-# Debug only: the E2E server (`e2e-server`) and demo mode
-# (UBERMENSCH_FAKE=1), against an in-process fake Gmail.
+# Debug only: the E2E server (`e2e-server`), demo mode (UBERMENSCH_FAKE=1),
+# against an in-process fake Gmail, and the perf fixture (`perf-fixture`).
 fake = ["web", "dep:ub-testkit", "dep:tokio"]
 
 [lints]
