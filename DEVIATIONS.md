@@ -132,7 +132,12 @@ written. Each keeps the spec's intent.
   queued: a queued unsubscribe could fire long after the user stopped caring.
   Debug builds also allow a one-click `POST` to loopback `http`, where the E2E
   server stands in for a list.
-- In Drafts the hint bar reads `Enter to open draft · C to compose · ⌘K for
+- **Block is a Gmail filter**, so it works with the app closed and on other
+  devices. It needs `gmail.settings.basic`, so accounts signed in before it
+  sign in again once, when they first block. The filter trashes the mail (as
+  Gmail's "Delete it"), and blocking also trashes the conversation it was
+  done from, since the filter only acts on mail that arrives later.
+  `Enter to open draft · C to compose · ⌘K for
   commands`: the spec's example hints (`E`, `H`) do nothing there.
 
 ## Decided while designing the E2E suite

@@ -242,6 +242,20 @@ async fn run(bridge: &Bridge, e: &Arc<Engine>, cmd: &str, args: &Value) -> Resul
             arg(args, "account")?,
             arg(args, "thread")?,
         )?),
+        "block" => json!(
+            api::block(
+                e,
+                arg(args, "account")?,
+                arg(args, "thread")?,
+                arg(args, "domain")?,
+            )
+            .await?
+        ),
+        "blocked_senders" => json!(api::blocked_senders(e, arg(args, "account")?).await?),
+        "unblock" => {
+            api::unblock(e, arg(args, "account")?, &arg::<String>(args, "id")?).await?;
+            Value::Null
+        }
         "open_attachment" => {
             api::open_attachment(e, arg(args, "attachment")?).await?;
             Value::Null

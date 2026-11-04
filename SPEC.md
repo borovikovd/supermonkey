@@ -176,7 +176,7 @@ Most archived, labeled, trashed, and spam mail is older than the first sync. Ope
 
 ## Accounts
 
-Add an account from the first-run screen or the palette (`Add account`). Sign-in is Google OAuth for an installed app, in the system browser only. It uses a loopback redirect to `127.0.0.1` on a free port, PKCE, and the scope `https://www.googleapis.com/auth/gmail.modify`. That scope covers read, send, drafts, labels, archive, and trash. It does not allow permanent deletion of threads and messages. Deleting a draft is allowed. Google blocks sign-in from embedded webviews, so the app never uses one.
+Add an account from the first-run screen or the palette (`Add account`). Sign-in is Google OAuth for an installed app, in the system browser only. It uses a loopback redirect to `127.0.0.1` on a free port, PKCE, and two scopes: `https://www.googleapis.com/auth/gmail.modify`, which covers read, send, drafts, labels, archive, and trash but not permanent deletion of threads and messages, and `https://www.googleapis.com/auth/gmail.settings.basic`, which Block needs for Gmail filters. Deleting a draft is allowed. Google blocks sign-in from embedded webviews, so the app never uses one.
 
 The OAuth client is a Desktop-type client in the user's own Google Cloud project. Its client ID and secret are build-time config. Google treats a desktop secret as not confidential. The consent screen is published In production, not Testing, because Testing expires refresh tokens after 7 days. The app stays unverified, so each sign-in shows Google's unverified-app warning.
 
@@ -431,7 +431,13 @@ Rust then reads the `List-Unsubscribe` and `List-Unsubscribe-Post` headers of th
 2. an email: a plain message from the account to the `mailto:` address, with its subject and body or "Unsubscribe", sent with `messages.send`;
 3. the list's web page, opened in the browser.
 
-A toast says which happened, "No unsubscribe link in this email" when there is none, or "Couldn't unsubscribe" with the reason. Unsubscribing needs the network and is not queued.
+A toast says which happened, "No unsubscribe link in this email" (with a Block sender action) when there is none, or "Couldn't unsubscribe" with the reason. Unsubscribing needs the network and is not queued.
+
+Block, in the palette, offers "Block <address>" and "Block everyone at <domain>". It creates a Gmail filter with `settings.filters.create`: mail from the address (or from `@domain`) gets `TRASH` and loses `INBOX`. Gmail then keeps that mail out of the Inbox itself, with the app closed and on every device. When the filter is made, the conversation is trashed. The palette's Mark as spam offers *Mark spam*, *Mark spam, and block <address>*, and *Mark spam, and block everyone at <domain>*; these mark the conversation spam at once, then make the filter. `!` still marks spam directly.
+
+Blocked senders, in the palette, lists the account's filters that match only a sender and add `TRASH`, the shape Block makes; filters the user made in Gmail for other things are left out. Choosing one unblocks it by deleting its filter.
+
+An account signed in before the app asked for `gmail.settings.basic` gets a 403 `insufficientPermissions` on filters. Block then shows "Blocking needs one more Google permission" with Sign in again, and nothing is blocked or trashed until it succeeds.
 
 ## Labels
 

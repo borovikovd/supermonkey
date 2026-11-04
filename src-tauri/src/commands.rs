@@ -102,6 +102,33 @@ pub async fn unsubscribe(
     api::unsubscribe(&engine, account, thread).await
 }
 
+#[tauri::command]
+pub async fn block(
+    engine: State<'_, Arc<Engine>>,
+    account: AccountId,
+    thread: ThreadId,
+    domain: bool,
+) -> CmdResult<crate::model::BlockResult> {
+    api::block(&engine, account, thread, domain).await
+}
+
+#[tauri::command]
+pub async fn blocked_senders(
+    engine: State<'_, Arc<Engine>>,
+    account: AccountId,
+) -> CmdResult<crate::model::BlockedSenders> {
+    api::blocked_senders(&engine, account).await
+}
+
+#[tauri::command]
+pub async fn unblock(
+    engine: State<'_, Arc<Engine>>,
+    account: AccountId,
+    id: String,
+) -> CmdResult<()> {
+    api::unblock(&engine, account, &id).await
+}
+
 #[tauri::command(async)]
 pub fn sender_threads(
     engine: State<'_, Arc<Engine>>,

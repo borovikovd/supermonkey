@@ -304,8 +304,8 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
-| `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 4       | 3       | 1      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **234** | **138** | **86** | **10** |
+| `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 8       | 6       | 2      | 0      |
+| **Total**                  |        |                                                                                              |                                          |                             | **238** | **141** | **87** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -326,7 +326,7 @@ _ST · §Accounts, §Security · Done when 1_
   - After sign-in, A's Inbox shows the same threads as Gmail's `INBOX`.
 - **Expect platform:**
   - `tokens()` has exactly one item, for `ana@acme.test`, and `tokenFileMode()` is `600`.
-  - The auth URL in `openedUrls` uses the system browser. It has a `redirect_uri` on `http://127.0.0.1:<port>`, a `code_challenge` with `S256`, and `scope` equal to `https://www.googleapis.com/auth/gmail.modify` only.
+  - The auth URL in `openedUrls` uses the system browser. It has a `redirect_uri` on `http://127.0.0.1:<port>`, a `code_challenge` with `S256`, and `scope` equal to `https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.settings.basic`.
   - `inspect.dbContains(<refresh token>)` is false.
 
 #### ACC-02 · P1 · Add a second account from the palette, then switch with `Ctrl+1` and `Ctrl+2`
@@ -3367,6 +3367,38 @@ _EG · §Unsubscribe and block_
 - **Seed:** `empty`, then a mail from news@news.test with no list headers.
 - **Steps:** `Cmd+U`, Unsubscribe. Then `offline(true)`, `Cmd+U`, "Unsubscribe, and mark done all".
 - **Expect:** the toast reads "No unsubscribe link in this email" and nothing changes; offline, the row leaves the Inbox at once and a "Couldn't unsubscribe" toast shows.
+
+#### UNW-05 · P1 · Block makes a Gmail filter to Trash, trashes the conversation, and keeps new mail out
+
+_ST · §Unsubscribe and block_
+
+- **Seed:** `empty`, then a mail from news@news.test.
+- **Steps:** palette Block, "Block news@news.test". Deliver another mail from that sender. Deliver a mail from deals@shop.test, then Block, "Block everyone at shop.test".
+- **Expect:** `filters(A)` is `{from: news@news.test, add: [TRASH], remove: [INBOX]}`; the conversation is in Trash in Gmail and leaves the list; the next mail from the sender lands in Trash and never shows in the Inbox; the domain block adds a filter on `@shop.test`.
+
+#### UNW-06 · P2 · Blocked senders lists the blocks, and Unblock deletes the filter
+
+_ST · §Unsubscribe and block_
+
+- **Seed:** `empty`, then block news@news.test.
+- **Steps:** palette Blocked senders, "Unblock news@news.test". Open Blocked senders again.
+- **Expect:** the toast reads "Unblocked news@news.test", `filters(A)` is empty, and the list says "No blocked senders".
+
+#### UNW-07 · P1 · An account signed in before filters were asked for is offered Sign in again
+
+_EG · §Unsubscribe and block, §Accounts_
+
+- **Seed:** `empty`, then `settingsScope(A, false)` and a mail from news@news.test.
+- **Steps:** Block the sender. Click the toast's Sign in again; the fake approves both scopes. Block again.
+- **Expect:** the first Block shows "Blocking needs one more Google permission", makes no filter, and leaves the conversation; after signing in again, Block makes the filter.
+
+#### UNW-08 · P1 · Mark spam, and block the domain
+
+_ST · §Unsubscribe and block_
+
+- **Seed:** `empty`, then a mail from x@junk.test.
+- **Steps:** palette Mark as spam, "Mark spam, and block everyone at junk.test".
+- **Expect:** the message has `SPAM` (not `TRASH`) in Gmail, the row leaves the list, and `filters(A)` has one filter on `@junk.test`.
 
 ---
 

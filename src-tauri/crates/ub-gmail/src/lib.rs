@@ -33,8 +33,8 @@ mod types;
 pub use client::{GMAIL_BASE_URL, Gmail, ThreadListQuery, default_http_client};
 pub use error::{GmailError, Outcome};
 pub use oauth::{
-    AccessToken, AuthResult, GMAIL_SCOPE, OAuthConfig, OAuthTokens, RefreshToken, authorize,
-    refresh, revoke,
+    AccessToken, AuthResult, GMAIL_SCOPE, GMAIL_SETTINGS_SCOPE, OAuthConfig, OAuthTokens,
+    RefreshToken, authorize, refresh, revoke,
 };
 pub use quota::{AccountScheduler, Permit, Priority, QuotaBucket, QuotaConfig, Scheduler, cost};
 pub use retry::{backoff, with_retry};

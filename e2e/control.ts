@@ -100,6 +100,9 @@ export type ApiMethod =
   | "messages.get"
   | "messages.trash"
   | "messages.send"
+  | "filters.list"
+  | "filters.create"
+  | "filters.delete"
   | "attachments.get"
   | "drafts.list"
   | "drafts.create"
@@ -379,6 +382,16 @@ export class Control {
   /** Deletes an account's token from the file, as if it was never saved. */
   forgetToken(email: string): Promise<null> {
     return this.call("POST", "/__test/tokens/forget", { email });
+  }
+
+  /** The user's Gmail filters, oldest first. */
+  filters(email: string): Promise<{ id: string; from: string; add: string[]; remove: string[] }[]> {
+    return this.call("GET", `/__test/gmail/${encodeURIComponent(email)}/filters`);
+  }
+
+  /** Whether the user's grant includes Gmail filters, until the next sign-in decides. */
+  settingsScope(email: string, granted: boolean): Promise<null> {
+    return this.call("POST", "/__test/settings-scope", { email, granted });
   }
 
   /** Tokens revoked at Google, oldest first. */

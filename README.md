@@ -11,6 +11,9 @@ A fast, keyboard-first Gmail client for macOS, in the spirit of Superhuman.
   the network returns.
 - **Split Inbox, snooze, undo.** Important and Other splits plus your own, snooze
   to any time, undo send, and `z` to undo the last action.
+- **Unsubscribe and block.** `⌘U` unsubscribes in one step and can archive or
+  trash the list's mail. Block keeps a sender or a whole domain out with a Gmail
+  filter.
 - **Several accounts.** Switch with `Ctrl+1`…`9`. Done, All Mail, labels, and
   search list from Gmail as well as from what is on your Mac.
 - **Private.** Your mail is stored on your Mac. Messages render sandboxed with

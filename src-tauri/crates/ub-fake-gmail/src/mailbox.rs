@@ -76,9 +76,43 @@ pub(crate) struct Mailbox {
     pub messages: BTreeMap<String, Msg>,
     /// Draft id to message id.
     pub drafts: BTreeMap<String, String>,
+    /// `settings.filters`, oldest first.
+    pub filters: Vec<Filter>,
     history: Vec<HistoryRecord>,
     next_id: u64,
     clock_ms: u64,
+}
+
+/// A Gmail filter: mail from `from` gets `add` and loses `remove`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Filter {
+    pub id: String,
+    /// An address, or `@domain`.
+    pub from: String,
+    pub add: Vec<String>,
+    pub remove: Vec<String>,
+}
+
+impl Filter {
+    pub fn json(&self) -> Value {
+        json!({
+            "id": self.id,
+            "criteria": { "from": self.from },
+            "action": { "addLabelIds": self.add, "removeLabelIds": self.remove },
+        })
+    }
+
+    /// Gmail's `from:` match, as far as the app uses it: a whole address, or
+    /// `@domain` matching every address there.
+    fn matches(&self, sender: &str) -> bool {
+        let sender = sender.to_ascii_lowercase();
+        let from = self.from.to_ascii_lowercase();
+        if from.starts_with('@') {
+            sender.ends_with(&from)
+        } else {
+            sender == from
+        }
+    }
 }
 
 /// Returned when something is not there.
@@ -163,10 +197,24 @@ impl Mailbox {
                 .collect(),
             messages: BTreeMap::new(),
             drafts: BTreeMap::new(),
+            filters: Vec::new(),
             history: Vec::new(),
             next_id: id_base(email),
             clock_ms: 1_700_000_000_000,
         }
+    }
+
+    /// Labels for incoming mail from `sender` after the mailbox's filters.
+    pub fn filtered_labels(&self, sender: &str, mut labels: Vec<String>) -> Vec<String> {
+        for f in self.filters.iter().filter(|f| f.matches(sender)) {
+            labels.retain(|l| !f.remove.contains(l));
+            for l in &f.add {
+                if !labels.contains(l) {
+                    labels.push(l.clone());
+                }
+            }
+        }
+        labels
     }
 
     /// A fresh Gmail-looking hex id, never one another mailbox hands out.

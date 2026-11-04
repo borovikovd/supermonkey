@@ -20,6 +20,8 @@ use crate::error::{self, GmailError, Outcome, ReadResponse};
 
 /// The only scope the app asks for.
 pub const GMAIL_SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify";
+/// Gmail filters, which Block creates (SPEC: Unsubscribe and block).
+pub const GMAIL_SETTINGS_SCOPE: &str = "https://www.googleapis.com/auth/gmail.settings.basic";
 
 /// Refresh an access token this long before it expires.
 const REFRESH_MARGIN: Duration = Duration::from_secs(60);
@@ -145,6 +147,7 @@ pub async fn authorize(
     let (url, state) = client
         .authorize_url(CsrfToken::new_random)
         .add_scope(Scope::new(GMAIL_SCOPE.into()))
+        .add_scope(Scope::new(GMAIL_SETTINGS_SCOPE.into()))
         .set_pkce_challenge(challenge)
         .add_extra_param("access_type", "offline")
         .add_extra_param("prompt", "consent")
@@ -262,6 +265,7 @@ fn rejected(status: u16, message: impl Into<String>) -> GmailError {
     Outcome::Rejected {
         status,
         message: message.into(),
+        reason: None,
     }
     .into()
 }

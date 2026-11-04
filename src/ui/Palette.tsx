@@ -11,6 +11,7 @@ import {
   rowOf,
   snooze,
   unsubscribe,
+  block,
   spam,
   targets,
   toggleRead,
@@ -26,9 +27,17 @@ import {
   startCompose,
   startReply,
 } from "../compose/start";
-import { act, addAccount, snoozeOptions } from "../ipc/bridge";
+import {
+  act,
+  addAccount,
+  blockedSenders,
+  signInAgain,
+  snoozeOptions,
+  unblockSender,
+} from "../ipc/bridge";
+import { toast } from "sonner";
 import { reportSignIn } from "./signIn";
-import type { PinKind, SnoozeChoice, View } from "../ipc/types";
+import type { BlockedSenders, PinKind, SnoozeChoice, View } from "../ipc/types";
 import { appHooks } from "../keyboard/refs";
 import { goSplit, selectAll } from "../keyboard/nav";
 import { measure } from "../keyboard/meter";
@@ -74,6 +83,9 @@ function useCommands(mode: PaletteMode, query: string): Commands {
   const summary = useSummary(account);
   const app = useAppState();
   const [snoozes, setSnoozes] = useState<{ query: string; options: SnoozeChoice[] } | null>(null);
+  const [blocked, setBlocked] = useState<
+    BlockedSenders | { kind: "error"; message: string } | null
+  >(null);
   // What the palette acts on, read once when it opens: keys go to the palette
   // while it is open, so the selection cannot move under it.
   const [opened] = useState(() => {
@@ -89,6 +101,17 @@ function useCommands(mode: PaletteMode, query: string): Commands {
       live = false;
     };
   }, [mode.kind, query]);
+
+  useEffect(() => {
+    if (mode.kind !== "blocked" || account === null) return;
+    let live = true;
+    blockedSenders(account)
+      .then((b) => live && setBlocked(b))
+      .catch((err: unknown) => live && setBlocked({ kind: "error", message: String(err) }));
+    return () => {
+      live = false;
+    };
+  }, [mode.kind, account]);
 
   const userLabels = (summary?.labels ?? []).filter((l) => !l.system);
   const muted = summary?.account.muted ?? false;
@@ -106,7 +129,25 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           keep: true,
         },
         { id: "trash", label: "Trash", keys: "#", run: trash },
-        { id: "spam", label: "Mark as spam", keys: "!", run: spam },
+        {
+          id: "spam",
+          label: "Mark as spam",
+          keys: "!",
+          run: () => appHooks.openPalette({ kind: "spam" }),
+          keep: true,
+        },
+        {
+          id: "block",
+          label: "Block",
+          run: () => appHooks.openPalette({ kind: "block" }),
+          keep: true,
+        },
+        {
+          id: "blocked",
+          label: "Blocked senders",
+          run: () => appHooks.openPalette({ kind: "blocked" }),
+          keep: true,
+        },
         { id: "star", label: "Star or unstar", keys: "S", run: toggleStar },
         {
           id: "unsubscribe",
@@ -289,6 +330,64 @@ function useCommands(mode: PaletteMode, query: string): Commands {
         ],
         placeholder: "Unsubscribe from this sender",
       };
+    case "block":
+    case "spam": {
+      const thread = opened.threads[0];
+      if (thread === undefined) return { items: [], placeholder: "Nothing selected" };
+      const email = opened.rows[0]?.senderEmail.toLowerCase() ?? "";
+      const domain = email.split("@")[1] ?? "";
+      const asSpam = mode.kind === "spam";
+      const then = asSpam ? "Mark spam, and block" : "Block";
+      return {
+        items: [
+          ...(asSpam ? [{ id: "spam", label: "Mark spam", run: spam }] : []),
+          {
+            id: "address",
+            label: email ? `${then} ${email}` : `${then} the sender`,
+            run: () => void block(thread, false, asSpam),
+          },
+          ...(domain
+            ? [
+                {
+                  id: "domain",
+                  label: `${then} everyone at ${domain}`,
+                  run: () => void block(thread, true, asSpam),
+                },
+              ]
+            : []),
+        ],
+        placeholder: asSpam ? "Mark as spam" : "Block",
+      };
+    }
+    case "blocked": {
+      if (blocked === null) return { items: [], placeholder: "Loading blocked senders…" };
+      if (blocked.kind === "error") return { items: [], placeholder: blocked.message };
+      if (blocked.kind === "needsPermission") {
+        return {
+          items: [
+            {
+              id: "signin",
+              label: "Sign in again to manage blocked senders",
+              run: () => account !== null && reportSignIn(signInAgain(account)),
+            },
+          ],
+          placeholder: "Blocked senders",
+        };
+      }
+      return {
+        items: blocked.senders.map((b) => ({
+          id: b.id,
+          label: `Unblock ${b.from}`,
+          run: () => {
+            if (account === null) return;
+            unblockSender(account, b.id)
+              .then(() => toast(`Unblocked ${b.from}`))
+              .catch((err: unknown) => toast.error(`Couldn't unblock: ${String(err)}`));
+          },
+        })),
+        placeholder: blocked.senders.length > 0 ? "Blocked senders" : "No blocked senders",
+      };
+    }
     case "switchAccount":
       return {
         items: (app?.accounts ?? []).map((a, i) => ({

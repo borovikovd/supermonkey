@@ -13,8 +13,8 @@ use serde_json::{Value, json};
 use crate::error::{self, GmailError, Outcome, ReadResponse};
 use crate::oauth::OAuthTokens;
 use crate::types::{
-    Draft, Format, Label, ListDraftsResponse, ListHistoryResponse, ListThreadsResponse, Message,
-    MessagePartBody, Profile, SendAs, Thread,
+    Draft, Filter, Format, Label, ListDraftsResponse, ListFiltersResponse, ListHistoryResponse,
+    ListThreadsResponse, Message, MessagePartBody, Profile, SendAs, Thread,
 };
 
 /// Google's Gmail API base URL.
@@ -193,6 +193,31 @@ impl Gmail {
         let body = json!({ "raw": URL_SAFE.encode(raw_rfc822) });
         self.json(Method::POST, "messages/send", &[], Some(&body))
             .await
+    }
+
+    /// `users.settings.filters.create`: mail from `from` (an address or
+    /// `@domain`) skips the Inbox and goes to Trash. Cost 5. Needs
+    /// [`crate::GMAIL_SETTINGS_SCOPE`].
+    pub async fn create_trash_filter(&self, from: &str) -> Result<Filter, GmailError> {
+        let body = json!({
+            "criteria": { "from": from },
+            "action": { "addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"] },
+        });
+        self.json(Method::POST, "settings/filters", &[], Some(&body))
+            .await
+    }
+
+    /// `users.settings.filters.list`. Cost 1.
+    pub async fn list_filters(&self) -> Result<Vec<Filter>, GmailError> {
+        let r: ListFiltersResponse = self.get("settings/filters", &[]).await?;
+        Ok(r.filter)
+    }
+
+    /// `users.settings.filters.delete`. Cost 5.
+    pub async fn delete_filter(&self, id: &str) -> Result<(), GmailError> {
+        self.send(Method::DELETE, &format!("settings/filters/{id}"), &[], None)
+            .await?;
+        Ok(())
     }
 
     /// `users.messages.attachments.get`, decoded to bytes. Cost 20.

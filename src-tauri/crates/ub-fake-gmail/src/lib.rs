@@ -58,6 +58,7 @@ use tokio::sync::{Notify, oneshot, watch};
 use tokio::task::JoinHandle;
 use tower::ServiceExt;
 
+pub use crate::mailbox::Filter;
 use crate::mailbox::{Mailbox, Msg, SendAsEntry};
 use crate::traffic::Held;
 pub use crate::traffic::{Answer, LoggedRequest, Release, RequestInfo, api_name};
@@ -105,6 +106,8 @@ pub(crate) struct World {
     pub access_tokens: HashMap<String, (String, Instant)>,
     pub auth_codes: HashMap<String, AuthCode>,
     pub invalid_grant: HashSet<String>,
+    /// Users whose grant lacks `gmail.settings.basic`.
+    pub no_settings_scope: HashSet<String>,
     pub token_lifetime: Duration,
     pub last_auth_request: Option<Vec<(String, String)>>,
     /// The next consent page answers `access_denied`.
@@ -123,6 +126,8 @@ pub struct Revocation {
 
 pub(crate) struct AuthCode {
     pub email: String,
+    /// The space-separated scopes the consent page granted.
+    pub scope: String,
     pub redirect_uri: String,
     pub code_challenge: String,
 }
@@ -136,6 +141,7 @@ impl Default for World {
             access_tokens: HashMap::new(),
             auth_codes: HashMap::new(),
             invalid_grant: HashSet::new(),
+            no_settings_scope: HashSet::new(),
             token_lifetime: Duration::from_secs(3600),
             last_auth_request: None,
             deny_next_auth: false,
@@ -845,6 +851,23 @@ impl FakeUser {
     }
 
     /// While set, refreshing any of this user's tokens answers `invalid_grant`.
+    /// The user's Gmail filters, oldest first.
+    pub fn filters(&self) -> Vec<Filter> {
+        self.with(|mb| mb.filters.clone())
+    }
+
+    /// Whether the user's grant includes `gmail.settings.basic`. Off, as for an
+    /// account signed in before the app asked for it, filter calls answer 403
+    /// until a sign-in grants it.
+    pub fn set_settings_scope(&self, granted: bool) {
+        let mut world = self.shared.world();
+        if granted {
+            world.no_settings_scope.remove(&self.email);
+        } else {
+            world.no_settings_scope.insert(self.email.clone());
+        }
+    }
+
     pub fn set_invalid_grant(&self, invalid: bool) {
         let mut world = self.shared.world();
         if invalid {
@@ -901,7 +924,8 @@ impl FakeUser {
         self.with(|mb| {
             let date = msg.internal_date.or(now).unwrap_or_else(|| mb.next_date());
             let (raw, rfc822_message_id) = built(mb, msg, date);
-            let id = mb.insert_raw(raw, msg.thread_id.clone(), msg.labels.clone(), Some(date));
+            let labels = mb.filtered_labels(sender_email(&msg.from), msg.labels.clone());
+            let id = mb.insert_raw(raw, msg.thread_id.clone(), labels, Some(date));
             AddedMessage {
                 thread_id: mb.messages[&id].thread_id.clone(),
                 id,
@@ -1253,4 +1277,11 @@ async fn omit_threads(response: Response, ids: &[String]) -> Response {
         threads.retain(|t| !ids.iter().any(|id| t["id"] == id.as_str()));
     }
     (parts.status, axum::Json(json)).into_response()
+}
+
+/// The address in a `From` value: inside angle brackets, or the whole value.
+fn sender_email(from: &str) -> &str {
+    from.rsplit_once('<')
+        .and_then(|(_, rest)| rest.split_once('>'))
+        .map_or(from.trim(), |(addr, _)| addr.trim())
 }

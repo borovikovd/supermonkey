@@ -38,8 +38,25 @@ pub enum Outcome {
     NotFound,
     /// 409, for example `labels.create` with a name that exists.
     Conflict,
-    /// Any other 4xx. The only outcome that rolls back an action.
-    Rejected { status: u16, message: String },
+    /// Any other 4xx. The only outcome that rolls back an action. `reason` is
+    /// Google's `error.errors[0].reason`, when it gave one.
+    Rejected {
+        status: u16,
+        message: String,
+        reason: Option<String>,
+    },
+}
+
+impl Outcome {
+    /// A 403 `insufficientPermissions`: the grant lacks a scope the method
+    /// needs, as for filters on an account signed in before the app asked for
+    /// `gmail.settings.basic`. Signing in again fixes it.
+    pub fn is_missing_scope(&self) -> bool {
+        matches!(
+            self,
+            Outcome::Rejected { status: 403, reason: Some(r), .. } if r == "insufficientPermissions"
+        )
+    }
 }
 
 impl fmt::Display for Outcome {
@@ -53,7 +70,9 @@ impl fmt::Display for Outcome {
             Outcome::ServerError { status } => write!(f, "server error {status}"),
             Outcome::NotFound => write!(f, "not found"),
             Outcome::Conflict => write!(f, "conflict"),
-            Outcome::Rejected { status, message } => write!(f, "rejected ({status}): {message}"),
+            Outcome::Rejected {
+                status, message, ..
+            } => write!(f, "rejected ({status}): {message}"),
         }
     }
 }
@@ -174,6 +193,7 @@ impl ReadResponse {
             _ => Outcome::Rejected {
                 status: code,
                 message: message.unwrap_or_else(|| self.status.to_string()),
+                reason,
             },
         };
         outcome.into()

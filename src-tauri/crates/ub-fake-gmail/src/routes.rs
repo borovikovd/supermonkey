@@ -14,14 +14,14 @@ use axum::http::header::{AUTHORIZATION, LOCATION, RETRY_AFTER};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use base64::Engine;
 use base64::engine::DecodePaddingMode;
 use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig, URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::mailbox::{Mailbox, Missing};
+use crate::mailbox::{Filter, Mailbox, Missing};
 use crate::{AuthCode, Shared};
 
 const BASE64URL_LENIENT: GeneralPurpose = GeneralPurpose::new(
@@ -30,11 +30,14 @@ const BASE64URL_LENIENT: GeneralPurpose = GeneralPurpose::new(
 );
 
 const GMAIL_SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify";
+const SETTINGS_SCOPE: &str = "https://www.googleapis.com/auth/gmail.settings.basic";
 
 pub(crate) fn router(state: Arc<Shared>) -> Router {
     let gmail = Router::new()
         .route("/profile", get(profile))
         .route("/settings/sendAs", get(send_as))
+        .route("/settings/filters", get(list_filters).post(create_filter))
+        .route("/settings/filters/{id}", delete(delete_filter))
         .route("/labels", get(list_labels).post(create_label))
         .route("/history", get(list_history))
         .route("/threads", get(list_threads))
@@ -100,6 +103,8 @@ pub(crate) fn google_error(
 /// An error a Gmail handler answers with.
 enum ApiError {
     Unauthenticated,
+    /// The grant lacks the scope the method needs.
+    InsufficientScope,
     NotFound,
     BadRequest(String),
     DuplicateLabel,
@@ -112,6 +117,12 @@ impl IntoResponse for ApiError {
                 401,
                 "authError",
                 "Request had invalid authentication credentials.",
+                None,
+            ),
+            ApiError::InsufficientScope => google_error(
+                403,
+                "insufficientPermissions",
+                "Request had insufficient authentication scopes.",
                 None,
             ),
             ApiError::NotFound => {
@@ -180,6 +191,22 @@ impl Caller {
             _ => return Err(ApiError::Unauthenticated),
         };
         f(world.mailboxes.get_mut(email).expect("token user exists"))
+    }
+
+    /// Like [`Caller::mailbox`], for `settings.*` methods that need the
+    /// `gmail.settings.basic` scope.
+    fn settings<T>(&self, f: impl FnOnce(&mut Mailbox) -> ApiResult<T>) -> ApiResult<T> {
+        let lacking = {
+            let world = self.state.world();
+            world
+                .access_tokens
+                .get(&self.token)
+                .is_some_and(|(email, _)| world.no_settings_scope.contains(email))
+        };
+        if lacking {
+            return Err(ApiError::InsufficientScope);
+        }
+        self.mailbox(f)
     }
 }
 
@@ -491,6 +518,63 @@ async fn send_draft(caller: Caller, body: Bytes) -> ApiResult {
     })
 }
 
+/// `settings.filters.list`.
+async fn list_filters(caller: Caller) -> ApiResult {
+    caller.settings(|mb| {
+        let filters: Vec<Value> = mb.filters.iter().map(Filter::json).collect();
+        Ok(Json(if filters.is_empty() {
+            json!({})
+        } else {
+            json!({ "filter": filters })
+        }))
+    })
+}
+
+/// `settings.filters.create`. Only `criteria.from` and the label actions are kept.
+async fn create_filter(caller: Caller, body: Bytes) -> ApiResult {
+    let body = json_body(&body)?;
+    caller.settings(|mb| {
+        let from = body["criteria"]["from"]
+            .as_str()
+            .filter(|f| !f.is_empty())
+            .ok_or_else(|| ApiError::BadRequest("Filter criteria must have from".into()))?;
+        let labels = |key: &str| -> Vec<String> {
+            body["action"][key]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|l| l.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let filter = Filter {
+            id: format!("ANe1Bm{}", mb.new_id()),
+            from: from.to_owned(),
+            add: labels("addLabelIds"),
+            remove: labels("removeLabelIds"),
+        };
+        let out = filter.json();
+        mb.filters.push(filter);
+        Ok(Json(out))
+    })
+}
+
+/// `settings.filters.delete`.
+async fn delete_filter(
+    caller: Caller,
+    Path((_, id)): Path<(String, String)>,
+) -> ApiResult<StatusCode> {
+    caller.settings(|mb| {
+        let before = mb.filters.len();
+        mb.filters.retain(|f| f.id != id);
+        if mb.filters.len() == before {
+            return Err(ApiError::NotFound);
+        }
+        Ok(StatusCode::NO_CONTENT)
+    })
+}
+
 /// `messages.send`: the message is stored in its own thread with `SENT`.
 async fn send_message(caller: Caller, body: Bytes) -> ApiResult {
     let body = json_body(&body)?;
@@ -568,6 +652,7 @@ async fn auth(
         code.clone(),
         AuthCode {
             email,
+            scope: params.get("scope").unwrap_or_default().to_owned(),
             redirect_uri: redirect_uri.to_owned(),
             code_challenge: challenge.to_owned(),
         },
@@ -610,15 +695,25 @@ async fn token(State(s): State<Arc<Shared>>, body: Bytes) -> Response {
                 return invalid_grant();
             }
             let refresh = world.issue_refresh_token(&code.email);
+            if code.scope.split_whitespace().any(|s| s == SETTINGS_SCOPE) {
+                world.no_settings_scope.remove(&code.email);
+            } else {
+                world.no_settings_scope.insert(code.email.clone());
+            }
             (code.email, Some(refresh))
         }
         _ => return oauth_error("unsupported_grant_type", "Invalid grant_type"),
     };
     let access = world.issue_access_token(&email);
+    let scope = if world.no_settings_scope.contains(&email) {
+        GMAIL_SCOPE.to_owned()
+    } else {
+        format!("{GMAIL_SCOPE} {SETTINGS_SCOPE}")
+    };
     let mut out = json!({
         "access_token": access,
         "expires_in": world.token_lifetime.as_secs(),
-        "scope": GMAIL_SCOPE,
+        "scope": scope,
         "token_type": "Bearer",
     });
     if let Some(refresh) = refresh {

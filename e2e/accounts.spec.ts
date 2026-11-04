@@ -133,7 +133,9 @@ test("ACC-01 first run adds the first account; its token goes to a file only the
   expect(auth.searchParams.get("redirect_uri")).toMatch(/^http:\/\/127\.0\.0\.1:\d+/);
   expect(auth.searchParams.get("code_challenge")).toBeTruthy();
   expect(auth.searchParams.get("code_challenge_method")).toBe("S256");
-  expect(auth.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/gmail.modify");
+  expect(auth.searchParams.get("scope")).toBe(
+    "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.settings.basic",
+  );
   expect(app.popups).toEqual([]);
   expect(await gmail.dbContains(stored[0]?.token ?? "missing")).toBe(false);
 });

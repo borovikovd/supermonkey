@@ -36,6 +36,19 @@ async function highlight(app: App, text: string): Promise<void> {
   await expect(app.highlighted).toContainText(text);
 }
 
+/** Opens the palette, runs the command matching `name`, then the choice matching `choice`. */
+async function choose(app: App, name: string, choice: string): Promise<void> {
+  await app.press("Meta+k");
+  await expect(app.palette).toBeVisible();
+  await app.type(name);
+  await expect(app.palette.locator("[cmdk-item]").first()).toContainText(name);
+  await app.press("Enter");
+  await app.type(choice);
+  await expect(app.palette.locator("[cmdk-item]").first()).toContainText(choice);
+  await app.press("Enter");
+  await expect(app.palette).toHaveCount(0);
+}
+
 async function labelsOf(gmail: Control, id: string): Promise<string[]> {
   return (await gmail.gmail(A)).messages.find((m) => m.id === id)?.labels ?? [];
 }
@@ -138,4 +151,96 @@ test("UNW-04 no unsubscribe link, or no network, says so; the archive still happ
   await unsubscribe(app, "Unsubscribe, and mark done all");
   await expect(app.row("No link here")).toHaveCount(0);
   await expect(app.page.getByText(/Couldn't unsubscribe/)).toBeVisible();
+});
+
+test("UNW-05 Block makes a Gmail filter to Trash, trashes the conversation, and keeps new mail out", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.empty(gmail, app);
+  const promo = await gmail.deliver({ account: A, from: NEWS, subject: "Big sale" });
+  await app.settle();
+  await choose(app, "Block", "Block news@news.test");
+  await expect(app.page.getByText("Blocked news@news.test")).toBeVisible();
+  await expect(app.row("Big sale")).toHaveCount(0);
+  await app.settle();
+  expect(await gmail.filters(A)).toEqual([
+    { id: expect.any(String), from: "news@news.test", add: ["TRASH"], remove: ["INBOX"] },
+  ]);
+  expect(await labelsOf(gmail, promo.id)).toContain("TRASH");
+
+  // Gmail applies the filter: new mail from the sender lands in Trash, not the Inbox.
+  const next = await gmail.deliver({ account: A, from: NEWS, subject: "Another sale" });
+  await app.settle();
+  expect(await labelsOf(gmail, next.id)).toEqual(expect.arrayContaining(["TRASH"]));
+  await expect(app.row("Another sale")).toHaveCount(0);
+
+  // Blocking a domain filters on @domain.
+  await gmail.deliver({ account: A, from: "Deals <deals@shop.test>", subject: "Deal" });
+  await app.settle();
+  await expect(app.highlighted).toContainText("Deal");
+  await choose(app, "Block", "Block everyone at shop.test");
+  await app.settle();
+  expect((await gmail.filters(A)).map((f) => f.from)).toEqual(["news@news.test", "@shop.test"]);
+});
+
+test("UNW-06 Blocked senders lists the blocks, and Unblock deletes the filter", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.empty(gmail, app);
+  await gmail.deliver({ account: A, from: NEWS, subject: "Big sale" });
+  await app.settle();
+  await choose(app, "Block", "Block news@news.test");
+  await app.settle();
+  expect(await gmail.filters(A)).toHaveLength(1);
+
+  await choose(app, "Blocked senders", "Unblock news@news.test");
+  await expect(app.page.getByText("Unblocked news@news.test")).toBeVisible();
+  await app.settle();
+  expect(await gmail.filters(A)).toEqual([]);
+  await app.press("Meta+k");
+  await app.type("Blocked senders");
+  await app.press("Enter");
+  await expect(app.palette.getByPlaceholder("No blocked senders")).toBeVisible();
+});
+
+test("UNW-07 an account signed in before filters were asked for is offered Sign in again", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.empty(gmail, app);
+  await gmail.settingsScope(A, false);
+  await gmail.deliver({ account: A, from: NEWS, subject: "Big sale" });
+  await app.settle();
+  await choose(app, "Block", "Block news@news.test");
+  const toast = app.page.locator("[data-sonner-toast]", {
+    hasText: "Blocking needs one more Google permission",
+  });
+  await expect(toast).toBeVisible();
+  // Nothing was blocked, so the conversation stays.
+  await expect(app.row("Big sale")).toHaveCount(1);
+  expect(await gmail.filters(A)).toEqual([]);
+
+  // Sign in again grants it, and Block then works.
+  await gmail.nextSignIn({ email: A });
+  await toast.getByRole("button", { name: "Sign in again" }).click();
+  await app.settle();
+  await choose(app, "Block", "Block news@news.test");
+  await expect(app.page.getByText("Blocked news@news.test")).toBeVisible();
+  await app.settle();
+  expect((await gmail.filters(A)).map((f) => f.from)).toEqual(["news@news.test"]);
+});
+
+test("UNW-08 Mark spam, and block the domain", async ({ app, gmail }) => {
+  await seeds.empty(gmail, app);
+  const junk = await gmail.deliver({ account: A, from: "Spammer <x@junk.test>", subject: "Win" });
+  await app.settle();
+  await choose(app, "Mark as spam", "Mark spam, and block everyone at junk.test");
+  await expect(app.row("Win")).toHaveCount(0);
+  await expect(app.page.getByText("Blocked @junk.test")).toBeVisible();
+  await app.settle();
+  expect(await labelsOf(gmail, junk.id)).toContain("SPAM");
+  expect(await labelsOf(gmail, junk.id)).not.toContain("TRASH");
+  expect((await gmail.filters(A)).map((f) => f.from)).toEqual(["@junk.test"]);
 });

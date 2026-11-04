@@ -4,6 +4,7 @@
 
 pub mod attachments;
 pub mod auth;
+pub mod block;
 pub mod contacts;
 #[cfg(feature = "fake")]
 pub mod demo;

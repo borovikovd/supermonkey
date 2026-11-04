@@ -16,6 +16,8 @@ import type {
   ListRow,
   MessageBody,
   NumberedAction,
+  BlockedSenders,
+  BlockResult,
   SnoozeChoice,
   SubKey,
   Unsubscribed,
@@ -285,6 +287,12 @@ export const unsubscribeFrom = (account: AccountId, thread: number) =>
   invoke<Unsubscribed>("unsubscribe", { account, thread });
 export const senderThreads = (account: AccountId, thread: number) =>
   invoke<number[]>("sender_threads", { account, thread });
+export const blockSender = (account: AccountId, thread: number, domain: boolean) =>
+  invoke<BlockResult>("block", { account, thread, domain });
+export const blockedSenders = (account: AccountId) =>
+  invoke<BlockedSenders>("blocked_senders", { account });
+export const unblockSender = (account: AccountId, id: string) =>
+  invoke<void>("unblock", { account, id });
 export const perfReport = (action: string, ms: number, budget: number) =>
   invoke<void>("perf_report", { action, ms, budget });
 export const snoozeOptions = (text: string) => invoke<SnoozeChoice[]>("snooze_options", { text });

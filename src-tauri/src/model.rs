@@ -809,3 +809,33 @@ pub enum Unsubscribed {
     /// The message offers no way to unsubscribe.
     NoLink { sender: String },
 }
+
+/// What Block did (SPEC: Unsubscribe and block).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[ts(export)]
+pub enum BlockResult {
+    /// A Gmail filter now sends mail from `from` (an address or `@domain`) to Trash.
+    Blocked { from: String },
+    /// The account's grant lacks Gmail filters; Sign in again adds it.
+    NeedsPermission,
+}
+
+/// A sender or domain a Gmail filter sends to Trash.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BlockedSender {
+    /// The Gmail filter id.
+    pub id: String,
+    /// An address, or `@domain`.
+    pub from: String,
+}
+
+/// The account's blocked senders.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[ts(export)]
+pub enum BlockedSenders {
+    List { senders: Vec<BlockedSender> },
+    NeedsPermission,
+}

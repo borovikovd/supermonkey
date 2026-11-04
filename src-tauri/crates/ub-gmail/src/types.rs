@@ -289,3 +289,45 @@ mod opt_string_u64 {
         Ok(Option::<Wrapper>::deserialize(d)?.map(|w| w.0))
     }
 }
+
+/// A Gmail filter (`users.settings.filters`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Filter {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub criteria: FilterCriteria,
+    #[serde(default)]
+    pub action: FilterAction,
+}
+
+/// What a filter matches. Only `from` is named; any other criteria are kept in
+/// `other`, so a filter that matches more than a sender can be told apart.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterCriteria {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(flatten)]
+    pub other: serde_json::Map<String, Value>,
+}
+
+/// What a filter does. Only the label changes are named.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilterAction {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub add_label_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remove_label_ids: Vec<String>,
+    #[serde(flatten)]
+    pub other: serde_json::Map<String, Value>,
+}
+
+/// `settings.filters.list`.
+#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+pub struct ListFiltersResponse {
+    #[serde(default)]
+    pub filter: Vec<Filter>,
+}

@@ -23,6 +23,9 @@ pub fn api_name(method: &str, path: &str) -> &'static str {
     match (method, segments.as_slice()) {
         ("GET", ["profile"]) => "getProfile",
         ("GET", ["settings", "sendAs"]) => "sendAs.list",
+        ("GET", ["settings", "filters"]) => "filters.list",
+        ("POST", ["settings", "filters"]) => "filters.create",
+        ("DELETE", ["settings", "filters", _]) => "filters.delete",
         ("GET", ["labels"]) => "labels.list",
         ("POST", ["labels"]) => "labels.create",
         ("GET", ["history"]) => "history.list",

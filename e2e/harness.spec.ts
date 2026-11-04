@@ -360,7 +360,7 @@ test("sign-in: a denial stores nothing; the token file lists tokens; no token in
   expect(await gmail.tokenFileMode(), "only the user can read the token file").toBe("600");
   const auth = (await gmail.platform()).openedUrls.at(-1) ?? "";
   expect(new URL(auth).searchParams.get("scope")).toBe(
-    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.settings.basic",
   );
   expect(await gmail.dbContains(stored[0]?.token ?? "missing")).toBe(false);
   expect(await gmail.dbContains("Q4 plan")).toBe(true);

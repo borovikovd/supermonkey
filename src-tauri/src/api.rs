@@ -6,6 +6,7 @@ use crate::model::{
     AccountId, AttachmentId, ContactSuggestion, DraftAttachment, DraftId, LaunchInfo, ListRow,
     MessageBody, MessageId, NumberedAction, SnoozeChoice, ThreadId, Unsubscribed,
 };
+use crate::model::{BlockResult, BlockedSenders};
 use std::sync::Arc;
 
 pub type CmdResult<T> = Result<T, String>;
@@ -83,6 +84,30 @@ pub fn sender_threads(
 ) -> CmdResult<Vec<ThreadId>> {
     e.reads
         .with(|c| crate::db::queries::sender_inbox_threads(c, account, thread))
+        .map_err(err)
+}
+
+/// Blocks the sender, or the sender's domain, of a conversation with a Gmail filter.
+pub async fn block(
+    e: &Arc<Engine>,
+    account: AccountId,
+    thread: ThreadId,
+    domain: bool,
+) -> CmdResult<BlockResult> {
+    crate::engine::block::block(e, account, thread, domain)
+        .await
+        .map_err(err)
+}
+
+/// The account's blocked senders.
+pub async fn blocked_senders(e: &Arc<Engine>, account: AccountId) -> CmdResult<BlockedSenders> {
+    crate::engine::block::blocked(e, account).await.map_err(err)
+}
+
+/// Unblocks a sender by deleting its Gmail filter.
+pub async fn unblock(e: &Arc<Engine>, account: AccountId, id: &str) -> CmdResult<()> {
+    crate::engine::block::unblock(e, account, id)
+        .await
         .map_err(err)
 }
 

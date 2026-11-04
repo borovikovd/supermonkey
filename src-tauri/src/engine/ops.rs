@@ -98,6 +98,7 @@ pub async fn run(e: Arc<Engine>, rt: Arc<AccountRt>) {
                 Outcome::Rejected {
                     status,
                     ref message,
+                    ..
                 } => {
                     attempt = 0;
                     reject(&e, rt.id, op, status, message).await;
@@ -369,5 +370,6 @@ pub fn bad(e: impl std::fmt::Display) -> GmailError {
     GmailError::new(Outcome::Rejected {
         status: 0,
         message: e.to_string(),
+        reason: None,
     })
 }

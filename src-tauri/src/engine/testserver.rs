@@ -282,6 +282,8 @@ fn control(server: Arc<Server>) -> Router {
             post(gmail_expire_history),
         )
         .route("/__test/invalid-grant", post(invalid_grant))
+        .route("/__test/settings-scope", post(settings_scope))
+        .route("/__test/gmail/{email}/filters", get(gmail_filters))
         .route("/__test/sign-in", post(next_sign_in))
         .route("/__test/tokens", get(tokens))
         .route("/__test/tokens/mode", get(tokens_mode))
@@ -1060,6 +1062,28 @@ async fn invalid_grant(State(s): State<Arc<Server>>, Json(req): Json<InvalidGran
         u.expire_access_tokens();
     }
     Ok(done())
+}
+
+#[derive(Deserialize)]
+struct SettingsScopeReq {
+    email: String,
+    granted: bool,
+}
+
+/// Whether the user's grant includes Gmail filters, until the next sign-in decides.
+async fn settings_scope(State(s): State<Arc<Server>>, Json(req): Json<SettingsScopeReq>) -> Ctl {
+    user(&s, &req.email)?.set_settings_scope(req.granted);
+    Ok(done())
+}
+
+/// The user's Gmail filters, as `{id, from, add, remove}`.
+async fn gmail_filters(State(s): State<Arc<Server>>, Path(email): Path<String>) -> Ctl {
+    let filters: Vec<Value> = user(&s, &email)?
+        .filters()
+        .into_iter()
+        .map(|f| json!({ "id": f.id, "from": f.from, "add": f.add, "remove": f.remove }))
+        .collect();
+    Ok(Json(json!(filters)))
 }
 
 #[derive(Deserialize)]

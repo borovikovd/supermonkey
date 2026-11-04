@@ -5,7 +5,15 @@
 import { undoSend } from "./compose/undo-send";
 import { toast } from "sonner";
 
-import { act, senderThreads, subIdFor, unsubscribeFrom } from "./ipc/bridge";
+import {
+  act,
+  blockSender,
+  senderThreads,
+  signInAgain,
+  subIdFor,
+  unsubscribeFrom,
+} from "./ipc/bridge";
+import { reportSignIn } from "./ui/signIn";
 import type { ModifyAction, ModifyKind, SubKey, View } from "./ipc/types";
 import { useChrome, type Where } from "./store/chrome";
 import { appHooks } from "./keyboard/refs";
@@ -302,10 +310,39 @@ export async function unsubscribe(then: UnsubscribeThen) {
   }
   try {
     const r = await unsubscribeFrom(account, thread);
-    if (r.kind === "noLink") toast("No unsubscribe link in this email");
-    else if (r.kind === "openedPage") toast(`Opened the unsubscribe page of ${r.sender}`);
+    if (r.kind === "noLink") {
+      toast("No unsubscribe link in this email", {
+        action: { label: "Block sender", onClick: () => appHooks.openPalette({ kind: "block" }) },
+      });
+    } else if (r.kind === "openedPage") toast(`Opened the unsubscribe page of ${r.sender}`);
     else toast(`Unsubscribed from ${r.sender}`);
   } catch (err: unknown) {
     toast.error(`Couldn't unsubscribe: ${String(err)}`);
+  }
+}
+
+/**
+ * Blocks the sender (or its domain) of `thread` with a Gmail filter that
+ * sends its mail to Trash, then trashes the conversation. With `asSpam`, the
+ * conversation is marked spam first instead (Superhuman's "Mark spam, and
+ * block"). An account signed in before filters were asked for is offered
+ * Sign in again.
+ */
+export async function block(thread: number, domain: boolean, asSpam = false) {
+  const account = useChrome.getState().account;
+  if (account === null) return;
+  if (asSpam) modify("spam", ["SPAM"], ["INBOX", "TRASH"], { threads: [thread] });
+  try {
+    const r = await blockSender(account, thread, domain);
+    if (r.kind === "needsPermission") {
+      toast("Blocking needs one more Google permission", {
+        action: { label: "Sign in again", onClick: () => reportSignIn(signInAgain(account)) },
+      });
+      return;
+    }
+    if (!asSpam) modify("trash", ["TRASH"], ["INBOX", "SPAM"], { threads: [thread] });
+    toast(`Blocked ${r.from}`);
+  } catch (err: unknown) {
+    toast.error(`Couldn't block: ${String(err)}`);
   }
 }
