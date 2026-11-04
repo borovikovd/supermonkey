@@ -283,7 +283,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 14      | 10      | 4      | 0      |
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 9       | 4       | 5      | 0      |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 5       | 3       | 2      | 0      |
-| `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 18      | 3       | 14     | 1      |
+| `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 19      | 4       | 14     | 1      |
 | `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 11      | 7       | 4      | 0      |
 | `undo.spec.ts`             | UND    | the `z` stack, partial revert, per-account history, persistence                              | `standard`                               | H15                         | 8       | 4       | 3      | 1      |
 | `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 8       | 2       | 6      | 0      |
@@ -304,7 +304,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **224** | **130** | **84** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **225** | **131** | **84** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -891,6 +891,14 @@ _EP · DEVIATIONS (Look: the conversation as Superhuman draws it), §Keyboard_
 - **Seed:** `standard`.
 - **Steps:** open `p1`, click Mark Done; then click Snooze.
 - **Expect:** `p2` opens and `p1` leaves Inbox in Gmail; the snooze picker opens.
+
+#### CONV-19 · P1 · A message's dark-mode styles stay off when macOS is in dark mode
+
+_EP · §Conversation (iframes), Look_
+
+- **Seed:** `standard`, with the page's `prefers-color-scheme` set to dark.
+- **Steps:** deliver a message whose `<style>` sets `.primary-text` to `#3c4043`, and to `#e8eaed !important` under `@media (prefers-color-scheme: dark)`, as Google Calendar invites do. Open it.
+- **Expect:** the text is `rgb(60, 64, 67)`. The card is always white, so the message's dark-mode colors would make it unreadable.
 
 ### 5.5 `triage-actions.spec.ts` (TRI)
 

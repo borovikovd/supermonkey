@@ -628,4 +628,30 @@ test.describe("conversation", () => {
     await app.conversation.getByRole("button", { name: "Snooze (H)" }).click();
     await expect(app.page.getByRole("dialog", { name: /^Snooze until/ })).toBeVisible();
   });
+
+  test("CONV-19 a message's dark-mode styles stay off when macOS is in dark mode", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    await app.page.emulateMedia({ colorScheme: "dark" });
+    // Google Calendar invites ship rules like these; on the white card they make the text vanish.
+    await gmail.deliver({
+      account: A,
+      from: "Calendar <calendar@corp.test>",
+      subject: "Updated invitation",
+      html:
+        "<style>.primary-text{color:#3c4043}" +
+        "@media (prefers-color-scheme: dark){.primary-text{color:#e8eaed !important}}</style>" +
+        '<p class="primary-text">Itinerary for Tuesday</p>',
+    });
+    await app.settle();
+    await app.row("Updated invitation").click();
+    const text = app.conversation
+      .locator("iframe[data-frame]")
+      .last()
+      .contentFrame()
+      .getByText("Itinerary for Tuesday");
+    await expect(text).toHaveCSS("color", "rgb(60, 64, 67)");
+  });
 });

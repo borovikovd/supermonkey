@@ -167,7 +167,9 @@ export function MessageFrame({
       sandbox="allow-same-origin allow-scripts"
       srcDoc={srcdoc(body, remoteImages, quoteOpen)}
       className="block w-full border-0"
-      style={{ height: 40 }}
+      // The card is always white, so a message never gets its dark-mode styles:
+      // WebKit answers prefers-color-scheme inside the frame from this property.
+      style={{ height: 40, colorScheme: "light" }}
     />
   );
 }
