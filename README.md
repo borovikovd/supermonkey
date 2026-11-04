@@ -1,8 +1,20 @@
 # Ubermensch
 
-A keyboard-first Gmail client for macOS, built from [SPEC.md](SPEC.md).
-Tauri 2 + React 19 + Rust/SQLite. Choices the spec left open are in
-[DEVIATIONS.md](DEVIATIONS.md).
+A fast, keyboard-first Gmail client for macOS, in the spirit of Superhuman.
+
+![Ubermensch Inbox, split into Important and Other](docs/screenshot.png)
+
+- **Every action from the keyboard.** `j`/`k` to move, `e` to mark done, `h` to
+  snooze, `r` to reply, `⌘K` for every command, `?` for the shortcut sheet.
+- **Instant.** Actions change the list at once and sync to Gmail in the
+  background. Mail stays readable offline, and actions taken offline go out when
+  the network returns.
+- **Split Inbox, snooze, undo.** Important and Other splits plus your own, snooze
+  to any time, undo send, and `z` to undo the last action.
+- **Several accounts.** Switch with `Ctrl+1`…`9`. Done, All Mail, labels, and
+  search list from Gmail as well as from what is on your Mac.
+- **Private.** Your mail is stored on your Mac. Messages render sandboxed with
+  scripts off, and Settings can block remote images.
 
 ## Install
 
@@ -15,7 +27,9 @@ flag once before the first launch:
 xattr -cr /Applications/Ubermensch.app
 ```
 
-## Run
+## Development
+
+### Run
 
 ```sh
 vp install
@@ -24,16 +38,17 @@ vp run demo            # no Google: in-process fake Gmail with demo mail and two
 ```
 
 Sign in from the first-run screen or `⌘K → Add account`. Google shows an
-"unverified app" warning; continue through it. While the consent screen is in
-Testing, Google asks you to sign in again every 7 days.
+"unverified app" warning; continue through it. While the app's Google consent
+screen is in Testing, only its test users can sign in, and Google asks them to
+sign in again every 7 days.
 
-## Build
+### Build
 
 ```sh
 vp run tauri build     # src-tauri/target/release/bundle/macos/Ubermensch.app
 ```
 
-## Release
+### Release
 
 Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org)
 (a commit-msg hook checks them). On each push to `main`, release-please updates a
@@ -42,7 +57,7 @@ the `feat`, `fix`, and `perf` subjects. Merging that pull request tags the versi
 builds the universal `.dmg` in GitHub Actions, and publishes the release. Running
 the Release workflow by hand builds the `.dmg` as an artifact without releasing.
 
-## Checks
+### Checks
 
 ```sh
 vp run gate             # every check: Rust tests, lints, type checks, bindings, then the E2E suite
@@ -77,10 +92,14 @@ budget. `UBERMENSCH_WEB_BRIDGE=1` serves the command surface on
 `127.0.0.1:1430`, so the UI can run in a browser at `http://localhost:5173`
 against the real core.
 
-## Layout
+### Layout
 
 - `src-tauri/src` — writer thread, subscriptions, mail actions, drafts,
   outbox, splits, and the async engine (sync, op queue, outbox runner).
 - `src-tauri/crates` — `ub-mime`, `ub-gmail`, `ub-fake-gmail`, `ub-rules`.
 - `src` — the React UI: mirror and chrome stores, keyboard, palette, list,
   conversation, composer. `src/bindings` is generated from Rust by ts-rs.
+- `e2e` — the end-to-end suite and its test plan, `COVERAGE.md`.
+
+How to work on the code, for people and coding agents, is in
+[AGENTS.md](AGENTS.md).
