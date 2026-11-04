@@ -253,3 +253,48 @@ fn the_pool_reads_what_was_committed() {
         .unwrap();
     assert_eq!(nested, (1, 1));
 }
+
+#[test]
+fn a_failed_savepoint_undoes_only_its_own_writes_and_changes() {
+    let h = Harness::start();
+    let (kept, failed) = h.write(|tx| {
+        let kept = tx.savepoint(|tx| tx.accounts().create("kept@example.com", "Kept"))?;
+        let failed: Result<ub_domain::AccountId, StoreError> = tx.savepoint(|tx| {
+            tx.accounts().create("gone@example.com", "Gone")?;
+            Err(StoreError::Invalid("refused on purpose".to_owned()))
+        });
+        Ok((kept, failed.is_err()))
+    });
+    assert!(failed);
+    let commit = h.last_commit();
+    assert_eq!(
+        commit.changes.accounts.iter().copied().collect::<Vec<_>>(),
+        [kept],
+        "the failed step's changes are gone from the commit"
+    );
+    assert_eq!(commit.rev, Rev(1), "a fresh database's first write");
+    let emails: Vec<String> = h
+        .read(|r| r.accounts().all())
+        .into_iter()
+        .map(|a| a.email)
+        .collect();
+    assert_eq!(emails, ["kept@example.com"]);
+}
+
+#[test]
+fn a_job_whose_only_writes_rolled_back_in_a_savepoint_does_not_move_rev() {
+    let h = Harness::start();
+    h.account("a@example.com");
+    let before = h.last_commit().rev;
+    h.write(|tx| {
+        let failed: Result<(), StoreError> = tx.savepoint(|tx| {
+            tx.accounts().create("gone@example.com", "Gone")?;
+            Err(StoreError::Invalid("refused on purpose".to_owned()))
+        });
+        assert!(failed.is_err());
+        Ok(())
+    });
+    let commit = h.last_commit();
+    assert_eq!(commit.rev, before);
+    assert!(commit.changes.is_empty());
+}

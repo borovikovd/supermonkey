@@ -137,6 +137,39 @@ impl<'c> WriteTx<'c> {
         SettingWrites::new(self)
     }
 
+    /// Runs `step` in a savepoint, so one step of a job can fail alone: on
+    /// `Err` its writes roll back, the transaction's [`Changes`] and `rev`
+    /// stamping go back to what they were before it, and the transaction
+    /// goes on as if `step` never ran. Core applies each UI action of a
+    /// batch this way, so a rejected action never undoes the others.
+    pub fn savepoint<T, E: From<StoreError>>(
+        &mut self,
+        step: impl FnOnce(&mut Self) -> Result<T, E>,
+    ) -> Result<T, E> {
+        self.db
+            .execute("open a savepoint", "SAVEPOINT ub_step", [])?;
+        let wrote = self.wrote;
+        let changes = self.changes.clone();
+        match step(self) {
+            Ok(value) => {
+                self.db
+                    .execute("release a savepoint", "RELEASE ub_step", [])?;
+                Ok(value)
+            }
+            Err(e) => {
+                self.db
+                    .execute("roll back a savepoint", "ROLLBACK TO ub_step", [])?;
+                self.db
+                    .execute("release a savepoint", "RELEASE ub_step", [])?;
+                self.wrote = wrote;
+                self.changes = changes;
+                // The step may have cached routing it then rolled back.
+                self.routing.clear();
+                Err(e)
+            }
+        }
+    }
+
     /// Makes this transaction's commit fail, as a full disk or a broken
     /// deferred constraint would, for tests of what follows a failed commit.
     #[cfg(any(test, feature = "test-hooks"))]
