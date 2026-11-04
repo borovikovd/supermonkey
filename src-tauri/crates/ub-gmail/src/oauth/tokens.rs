@@ -73,7 +73,10 @@ impl Tokens {
     }
 
     fn fresh(&self) -> Option<AccessToken> {
-        self.cached.lock().clone().filter(AccessToken::is_fresh)
+        // Copied out first: the freshness check reads the clock, which runs
+        // with no lock held.
+        let cached = self.cached.lock().clone();
+        cached.filter(AccessToken::is_fresh)
     }
 
     /// Fetches a new token and caches it. Call with `refreshing` held.

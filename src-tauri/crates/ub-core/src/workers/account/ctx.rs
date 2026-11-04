@@ -10,6 +10,7 @@ use ub_domain::AccountId;
 use ub_gmail::{Backoff, Gmail, GmailError, Outcome};
 use ub_store::{ReadPool, ReadTx, StoreError};
 
+use super::WorkerParts;
 use super::health::Health;
 use super::queue::FetchQueue;
 use crate::Error;
@@ -80,21 +81,16 @@ pub(crate) enum AfterError {
 }
 
 impl AccountCtx {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the worker's parts, built once by the registry"
-    )]
-    pub(crate) fn new(
-        account: AccountId,
-        id: WorkerId,
-        gmail: Gmail,
-        deps: Arc<WorkerDeps>,
-        tasks: Tasks,
-        health: Health,
-        queue: FetchQueue,
-        lane: Arc<OpsLane>,
-        sign_out: SignOutSender,
-    ) -> Self {
+    pub(crate) fn new(parts: WorkerParts, health: Health, queue: FetchQueue) -> Self {
+        let WorkerParts {
+            deps,
+            account,
+            id,
+            gmail,
+            tasks,
+            lane,
+            sign_out,
+        } = parts;
         Self {
             account,
             id,

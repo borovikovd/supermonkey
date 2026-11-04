@@ -32,7 +32,8 @@ mod resync;
 
 use std::sync::Arc;
 
-use ub_domain::{DraftId, ThreadId};
+use parking_lot::Mutex;
+use ub_domain::{AccountId, DraftId, ThreadId};
 use ub_gmail::Gmail;
 
 pub(crate) use ctx::{AccountCtx, OFFLINE_RETRY, SignOutSender, WorkerDeps, WorkerId};
@@ -51,6 +52,21 @@ use crate::workers::grants::Grant;
 use crate::workers::ops::{self, OpsLane};
 use crate::workers::{drafts, outbox};
 
+/// What the registry builds a worker from.
+pub(crate) struct WorkerParts {
+    pub(crate) deps: Arc<WorkerDeps>,
+    pub(crate) account: AccountId,
+    pub(crate) id: WorkerId,
+    /// The account's Gmail client, on the grant the worker runs on.
+    pub(crate) gmail: Gmail,
+    /// The worker's own task group.
+    pub(crate) tasks: Tasks,
+    /// The account's op lane: an op an older worker had sent finishes there
+    /// before this one's runner goes on.
+    pub(crate) lane: Arc<OpsLane>,
+    pub(crate) sign_out: SignOutSender,
+}
+
 /// A running account worker.
 #[derive(Clone)]
 pub(crate) struct AccountWorker {
@@ -59,57 +75,49 @@ pub(crate) struct AccountWorker {
     opened: Arc<OpenedReads>,
     /// The sign-in whose grant it runs on.
     grant: Grant,
+    /// The worker it replaced, until that one has stopped: stopping this
+    /// one waits for it too, so no two of an account's workers ever run at
+    /// once, however quickly they replace each other.
+    replaced: Arc<Mutex<Option<AccountWorker>>>,
 }
 
 impl AccountWorker {
-    /// Starts the worker's tasks in `tasks`, its own group. With `after`, they
-    /// start only once that worker, the one it replaces, has stopped, so the
-    /// two never poll or replay at once. `lane` is the account's: an op the
-    /// old worker had sent finishes there before this one's runner goes on.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the worker's parts, built once by the registry"
-    )]
-    pub(crate) fn spawn(
-        deps: Arc<WorkerDeps>,
-        account: ub_domain::AccountId,
-        id: WorkerId,
-        gmail: Gmail,
-        tasks: Tasks,
-        lane: Arc<OpsLane>,
-        sign_out: SignOutSender,
-        grant: Grant,
-        after: Option<Self>,
-    ) -> Self {
+    /// A worker on `grant` whose tasks have not started.
+    pub(crate) fn new(parts: WorkerParts, grant: Grant) -> Self {
         let health = Health::new(
-            account,
-            deps.writer.clone(),
-            Arc::clone(&deps.network),
-            Arc::clone(&deps.clock),
-            tasks.clone(),
+            parts.account,
+            parts.deps.writer.clone(),
+            Arc::clone(&parts.deps.network),
+            Arc::clone(&parts.deps.clock),
+            parts.tasks.clone(),
         );
-        let queue = FetchQueue::new(Arc::clone(tasks.activity()));
-        let ctx = Arc::new(AccountCtx::new(
-            account, id, gmail, deps, tasks, health, queue, lane, sign_out,
-        ));
-        let starting = Arc::clone(&ctx);
-        ctx.tasks.spawn("account start", async move {
-            if let Some(old) = after {
-                old.stop().await;
-            }
-            let tasks = &starting.tasks;
-            tasks.spawn("poller", poller::run(Arc::clone(&starting)));
-            tasks.spawn("ops", ops::run(Arc::clone(&starting)));
-            tasks.spawn("outbox", outbox::run(Arc::clone(&starting)));
-            for _ in 0..fetcher::FETCHERS {
-                tasks.spawn("fetcher", fetcher::run(Arc::clone(&starting)));
-            }
-        });
+        let queue = FetchQueue::new(Arc::clone(parts.tasks.activity()));
         Self {
-            ctx,
+            ctx: Arc::new(AccountCtx::new(parts, health, queue)),
             opened: Arc::default(),
             grant,
+            replaced: Arc::default(),
         }
+    }
+
+    /// Starts the worker's tasks. With `replaced`, they start only once that
+    /// worker has stopped, so the two never poll or replay at once.
+    pub(crate) fn start(&self, replaced: Option<Self>) {
+        self.replaced.lock().clone_from(&replaced);
+        let starting = self.clone();
+        self.ctx.tasks.spawn("account start", async move {
+            if let Some(old) = replaced {
+                old.stop().await;
+                starting.replaced.lock().take();
+            }
+            let (ctx, tasks) = (&starting.ctx, &starting.ctx.tasks);
+            tasks.spawn("poller", poller::run(Arc::clone(ctx)));
+            tasks.spawn("ops", ops::run(Arc::clone(ctx)));
+            tasks.spawn("outbox", outbox::run(Arc::clone(ctx)));
+            for _ in 0..fetcher::FETCHERS {
+                tasks.spawn("fetcher", fetcher::run(Arc::clone(ctx)));
+            }
+        });
     }
 
     /// The state its tasks share, for work started from outside: an opened
@@ -214,8 +222,13 @@ impl AccountWorker {
         self.ctx.tasks.cancel();
     }
 
-    /// Cancels every task and waits until they have ended.
+    /// Cancels every task and waits until they have ended, and until the
+    /// worker it replaced has stopped too.
     pub(crate) async fn stop(&self) {
         self.ctx.tasks.stop().await;
+        let replaced = self.replaced.lock().take();
+        if let Some(old) = replaced {
+            Box::pin(old.stop()).await;
+        }
     }
 }

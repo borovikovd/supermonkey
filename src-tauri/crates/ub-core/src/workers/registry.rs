@@ -14,7 +14,7 @@ use ub_domain::{AccountId, DraftId, ThreadId};
 use ub_gmail::{Gmail, HttpClient, RefreshToken, Scheduler, TokenStore, Tokens};
 use ub_store::Priority;
 
-use super::account::{AccountWorker, SignOutSender, WorkerDeps, WorkerId};
+use super::account::{AccountWorker, SignOutSender, WorkerDeps, WorkerId, WorkerParts};
 use super::files::{attachments_dir, draft_dir};
 use super::grants::{Grant, Grants};
 use super::ops::OpsLane;
@@ -276,24 +276,25 @@ impl AccountWorkers {
                 .entry(account)
                 .or_insert_with(|| OpsLane::new(self.tasks.child())),
         );
-        let mut workers = self.live.workers.lock();
-        let old = workers.remove(&account);
+        let worker = AccountWorker::new(
+            WorkerParts {
+                deps: Arc::clone(&self.deps),
+                account,
+                id,
+                gmail,
+                tasks: self.tasks.child(),
+                lane,
+                sign_out: self.sign_outs.clone(),
+            },
+            grant,
+        );
+        // Only the swap under the lock: cancelling the old worker and
+        // starting the new one's tasks run outside it.
+        let old = self.live.workers.lock().insert(account, worker.clone());
         if let Some(old) = &old {
             old.cancel();
         }
-        let worker = AccountWorker::spawn(
-            Arc::clone(&self.deps),
-            account,
-            id,
-            gmail,
-            self.tasks.child(),
-            lane,
-            self.sign_outs.clone(),
-            grant,
-            old,
-        );
-        workers.insert(account, worker);
-        drop(workers);
+        worker.start(old);
         tracing::info!(account = account.0, worker = id.0, "account worker started");
         Ok(())
     }
