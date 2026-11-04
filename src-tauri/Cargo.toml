@@ -1,6 +1,6 @@
 [package]
 name = "ubermensch"
-version = "0.3.0"
+version = "0.4.0"
 description = "A keyboard-first Gmail client for macOS"
 edition.workspace = true
 rust-version.workspace = true
