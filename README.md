@@ -103,3 +103,7 @@ against the real core.
 
 How to work on the code, for people and coding agents, is in
 [AGENTS.md](AGENTS.md).
+
+## License
+
+[MIT](LICENSE)
