@@ -387,3 +387,40 @@ test("SRC-08 a sent reply is found by local search", async ({ app, gmail }) => {
   await search(app, "zanzibar");
   await expect(app.row("Offsite venue")).toHaveCount(1);
 });
+
+test("SRC-09 search takes the header as in Superhuman, marks matches, and lists tips", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await app.press("/");
+  await expect(field(app)).toBeFocused();
+  // In line with the senders below, larger than a row, and hints that work while typing.
+  const left = (sel: string) =>
+    app.page
+      .locator(sel)
+      .first()
+      .evaluate((el) => Math.round(el.getBoundingClientRect().left));
+  expect(
+    Math.abs(
+      (await left("input[placeholder=Search]")) - (await left("[role=option] .w-\\[180px\\]")),
+    ),
+  ).toBeLessThanOrEqual(1);
+  await expect(field(app)).toHaveCSS("font-size", "16px");
+  await expect(app.page.getByText("Enter to see results")).toBeVisible();
+  await expect(app.page.getByRole("complementary", { name: "Search tips" })).toContainText("from:");
+
+  // Words are marked in the results; an operator's value is not.
+  await field(app).fill("from:dave plan");
+  await app.settle();
+  await expect(app.row("Q4 plan")).toHaveCount(1);
+  const marks = await app.row("Q4 plan").locator("mark").allTextContents();
+  expect(marks.length).toBeGreaterThan(0);
+  expect(marks.every((m) => m.toLowerCase() === "plan")).toBe(true);
+
+  // The close button ends the search.
+  await app.page.getByRole("button", { name: "Close search (Esc)" }).click();
+  await expect(field(app)).toHaveCount(0);
+  await expect(app.page.getByRole("complementary", { name: "Search tips" })).toHaveCount(0);
+  await expect(app.splitTitles().first()).toBeVisible();
+});

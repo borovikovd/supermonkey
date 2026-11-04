@@ -1,4 +1,4 @@
-import { ArrowLeft, ChevronDown, ChevronUp, Search } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import { closeSearch } from "../commands";
@@ -37,15 +37,20 @@ function SearchField() {
   }, []);
 
   if (!search) return null;
+  // As in Superhuman: the query takes the header, in line with the senders
+  // below, with the accent edge while it has focus and a close button.
   return (
-    <div className="flex items-center gap-2" data-tauri-drag-region="false">
-      <Search size={14} strokeWidth={1.5} className="text-text-3" />
+    <div className="flex min-w-0 flex-1 items-center gap-3" data-tauri-drag-region="false">
+      {search.focus === "field" && (
+        <span className="absolute top-0 bottom-0 left-0 w-[3px] bg-accent" />
+      )}
       <input
         ref={ref}
         // Focus moves into search because the user just pressed `/`.
         // oxlint-disable-next-line jsx-a11y/no-autofocus
         autoFocus
-        className="w-72 bg-transparent text-row outline-none placeholder:text-text-3"
+        aria-label="Search"
+        className="ml-[13px] min-w-0 flex-1 bg-transparent text-search text-text outline-none placeholder:text-text-3"
         placeholder="Search"
         value={search.query}
         onChange={(e) => {
@@ -75,7 +80,10 @@ function SearchField() {
           }
         }}
       />
-      {!online && <span className="text-hint text-text-3">Results from this Mac</span>}
+      {!online && <span className="shrink-0 text-hint text-text-3">Results from this Mac</span>}
+      <IconButton title="Close search (Esc)" onClick={closeSearch}>
+        <X size={16} strokeWidth={1.5} />
+      </IconButton>
     </div>
   );
 }
@@ -165,15 +173,20 @@ export function TopBar() {
   return (
     <div
       data-tauri-drag-region
-      className="flex h-12 shrink-0 items-center gap-6 border-b border-border-2 px-5"
+      className="relative flex h-12 shrink-0 items-center gap-6 border-b border-border-2 px-5"
     >
-      {!searchOpen && <ViewTitle />}
-      <div className="flex-1" data-tauri-drag-region />
-      <SearchField />
-      {!searchOpen && (
-        <IconButton title="Search (/)" onClick={() => appHooks.focusSearch()}>
-          <Search size={16} strokeWidth={1.5} />
-        </IconButton>
+      {searchOpen ? (
+        <SearchField />
+      ) : (
+        <>
+          <ViewTitle />
+          <div className="flex-1" data-tauri-drag-region />
+          {/* Renders nothing while closed; it registers what `/` opens. */}
+          <SearchField />
+          <IconButton title="Search (/)" onClick={() => appHooks.focusSearch()}>
+            <Search size={16} strokeWidth={1.5} />
+          </IconButton>
+        </>
       )}
     </div>
   );

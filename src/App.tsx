@@ -13,6 +13,7 @@ import { Prefetch } from "./ui/Prefetch";
 import { Rail } from "./ui/Rail";
 import { Sheets } from "./ui/Sheets";
 import { SendToasts } from "./ui/SendToasts";
+import { SearchTips } from "./ui/SearchTips";
 import { SignInAgain } from "./ui/SignInAgain";
 import { TopBar } from "./ui/TopBar";
 
@@ -31,6 +32,7 @@ export function App() {
     s.account === null ? null : (s.perAccount[s.account]?.screen ?? null),
   );
   const signedOut = useNeedsSignin(account);
+  const searchOpen = useChrome((s) => s.search !== null);
 
   // Pick an account on screen; follow removals.
   useEffect(() => {
@@ -75,6 +77,13 @@ export function App() {
                   />
                 ) : screen?.kind === "compose" ? (
                   <ComposeScreen draft={screen.draft} />
+                ) : searchOpen ? (
+                  <div className="flex min-h-0 flex-1">
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <ListView />
+                    </div>
+                    <SearchTips />
+                  </div>
                 ) : (
                   <ListView />
                 )}

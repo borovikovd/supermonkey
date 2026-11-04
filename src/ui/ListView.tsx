@@ -8,6 +8,7 @@ import { act, fetchRows } from "../ipc/bridge";
 import type { ListRow } from "../ipc/types";
 import { appHooks } from "../keyboard/refs";
 import { useChrome } from "../store/chrome";
+import { marked, searchTerms } from "./highlight";
 import { useCurrent } from "../store/hooks";
 import { useMirror } from "../store/mirror";
 import { useCurrentList, useSplitCounts } from "./current-list";
@@ -43,11 +44,14 @@ const Row = memo(function Row({
   selected,
   onClick,
   onHover,
+  terms,
 }: {
   row: ListRow | undefined;
   rowKey: string;
   highlighted: boolean;
   selected: boolean;
+  /** Search words to mark in the subject and snippet. */
+  terms: readonly string[];
   onClick: (key: string) => void;
   onHover: (key: string, e: React.MouseEvent) => void;
 }) {
@@ -87,8 +91,8 @@ const Row = memo(function Row({
           <Star size={12} strokeWidth={1.5} className="shrink-0 fill-[#E8B339] text-[#E8B339]" />
         )}
         <span className="truncate text-text">
-          {row?.subject || (row ? "(no subject)" : "")}
-          <span className="text-text-2">{row?.snippet ? ` — ${row.snippet}` : ""}</span>
+          <span>{row?.subject ? marked(row.subject, terms) : row ? "(no subject)" : ""}</span>
+          {row?.snippet && <span className="text-text-2"> — {marked(row.snippet, terms)}</span>}
         </span>
       </span>
       {row?.hasAttachments && (
@@ -284,6 +288,8 @@ export function ListView() {
   }, []);
 
   const selected = useMemo(() => new Set(selection), [selection]);
+  const query = cur?.where.kind === "search" ? cur.where.query : "";
+  const terms = useMemo(() => searchTerms(query), [query]);
 
   if (items.length === 0) {
     return (
@@ -330,6 +336,7 @@ export function ListView() {
                   selected={selected.has(it.key)}
                   onClick={onClick}
                   onHover={onHover}
+                  terms={terms}
                 />
               )}
             </div>

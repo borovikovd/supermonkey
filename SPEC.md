@@ -534,7 +534,7 @@ Changing a setting is an action, as in UI state. It is not an undo entry. Settin
 
 ## Search
 
-`/` focuses search for the account on screen. Results replace the list. `Enter` or `↓` moves focus from the field to the results, where the shortcut table applies. `Esc` in the field or on the results restores the previous view.
+`/` focuses search for the account on screen. As in Superhuman, the query takes the list header: left-aligned with the senders below, at 16px, with no box, the accent edge while the field has focus, and a close button (`Esc`) on the right. While the field has focus the hint bar reads `Enter to see results · Esc to close search`. Results replace the list, and their subjects and snippets mark the query's bare words and quoted phrases (not operator values) on `match`. When the window is wide enough, a Tips column on the right lists search operators. `Enter` or `↓` moves focus from the field to the results, where the shortcut table applies. `Esc` in the field or on the results restores the previous view.
 
 The first results come from local full-text search, and they appear immediately, including offline. Like Gmail search, local search skips threads with no message outside trash and spam. The local query language is the custom-rule language. A bare word matches the sender, the subject, or the body text. Local search ignores operators it does not support. Gmail applies the full query.
 

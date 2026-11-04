@@ -20,6 +20,8 @@
   /* Not `hint`: that name is the 11px text size, and a color of the same name would win. */
   --color-hintbar: #edeefa;
   --color-danger: #cd0037;
+  /* Search terms in result rows, as Superhuman marks them. */
+  --color-match: #fdf0c4;
 
   --color-palette-bg: #1f1e1d;
   --color-palette-text: #f2f0eb;
@@ -36,6 +38,8 @@
   --text-row--line-height: 18px;
   --text-body: 15px;
   --text-body--line-height: 26px;
+  --text-search: 16px;
+  --text-search--line-height: 24px;
   --text-subject: 24px;
   --text-subject--line-height: 32px;
   --text-zero: 15px;

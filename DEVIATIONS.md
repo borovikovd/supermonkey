@@ -137,7 +137,11 @@ written. Each keeps the spec's intent.
   sign in again once, when they first block. The filter trashes the mail (as
   Gmail's "Delete it"), and blocking also trashes the conversation it was
   done from, since the filter only acts on mail that arrives later.
-  `Enter to open draft · C to compose · ⌘K for
+- **Search looks like Superhuman's**: the query in the header in line with
+  the senders, marked matches in results, and a Tips column of operators.
+  Superhuman's Tips list includes Gmail-only operators; ours does too, and
+  those work through Gmail's results, so offline they find nothing.
+- In Drafts the hint bar reads `Enter to open draft · C to compose · ⌘K for
   commands`: the spec's example hints (`E`, `H`) do nothing there.
 
 ## Decided while designing the E2E suite
