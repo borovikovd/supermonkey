@@ -9,7 +9,7 @@ use ub_gmail::{Format, GmailError, Outcome, PageToken, Priority};
 use ub_mime::{InlinePart, OutAttachment, Outgoing};
 use ub_store::{Draft, Priority as WritePriority, StoreError};
 
-use super::{WriteFailure, local_rejection};
+use super::WriteFailure;
 use crate::Error;
 use crate::workers::account::{AccountCtx, parse};
 use crate::workers::attachments::{DownloadError, ensure};
@@ -244,7 +244,7 @@ async fn build_raw(ctx: &AccountCtx, draft: &Draft) -> Result<Vec<u8>, WriteFail
     })
     .await
     .map_err(Error::from)?;
-    built.map_err(|e| local_rejection(e.to_string()).into())
+    built.map_err(|e| WriteFailure::Local(format!("The message can't be built: {e}")))
 }
 
 /// The bytes of every attachment of the draft: a file added to it, or a
@@ -262,7 +262,10 @@ async fn attachment_bytes(
             }
             (_, Some(source)) => download(ctx, source).await?,
             (Some(_), None) => {
-                return Err(local_rejection(format!("The file {} is gone", a.filename)).into());
+                return Err(WriteFailure::Local(format!(
+                    "The file {} is gone",
+                    a.filename
+                )));
             }
             (None, None) => continue,
         };
@@ -327,11 +330,11 @@ pub(super) async fn download(
 ) -> Result<PathBuf, WriteFailure> {
     match ensure(ctx, attachment).await {
         Ok(path) => Ok(path),
-        Err(DownloadError::Gone) => Err(local_rejection("An attachment is gone").into()),
+        Err(DownloadError::Gone) => Err(WriteFailure::Local("An attachment is gone".to_owned())),
         Err(DownloadError::Stopped) => Err(GmailError::new(Outcome::Offline).into()),
-        Err(DownloadError::Gmail(e)) if *e.outcome() == Outcome::NotFound => {
-            Err(local_rejection("An attachment is gone from Gmail").into())
-        }
+        Err(DownloadError::Gmail(e)) if *e.outcome() == Outcome::NotFound => Err(
+            WriteFailure::Local("An attachment is gone from Gmail".to_owned()),
+        ),
         Err(DownloadError::Gmail(e)) => Err(e.into()),
         Err(DownloadError::Core(e)) => Err(e.into()),
     }
@@ -342,5 +345,5 @@ async fn read_file(path: PathBuf) -> Result<Vec<u8>, WriteFailure> {
     let read = tokio::task::spawn_blocking(move || std::fs::read(Path::new(&path)))
         .await
         .map_err(Error::from)?;
-    read.map_err(|e| local_rejection(format!("A file can't be read: {e}")).into())
+    read.map_err(|e| WriteFailure::Local(format!("A file can't be read: {e}")))
 }

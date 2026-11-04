@@ -12,7 +12,7 @@ mod parts;
 mod reconcile;
 mod write;
 
-use ub_gmail::{GmailError, Outcome};
+use ub_gmail::GmailError;
 
 use crate::Error;
 
@@ -28,32 +28,13 @@ pub(crate) enum WriteFailure {
     /// write rolls back. Any other leaves it to run again.
     #[error(transparent)]
     Gmail(#[from] GmailError),
+    /// A failure that is not Gmail's but is as final as a rejection: a file
+    /// gone, an attachment Gmail no longer has, a message that can't be
+    /// built. The write rolls back instead of retrying forever; the text
+    /// says why, for the toast.
+    #[error("{0}")]
+    Local(String),
     /// The database refused a read or write.
     #[error(transparent)]
     Store(#[from] Error),
-}
-
-impl WriteFailure {
-    /// Gmail's refusal, as its toast says it, when the write can never go
-    /// through as it is.
-    pub(crate) fn refusal(&self) -> Option<&str> {
-        match self {
-            Self::Gmail(e) => match e.outcome() {
-                Outcome::Rejected { message, .. } => Some(message),
-                _ => None,
-            },
-            Self::Store(_) => None,
-        }
-    }
-}
-
-/// A failure that is not Gmail's (a file gone, a draft id that can't be a
-/// header), surfaced as a rejection so the write rolls back instead of
-/// retrying forever.
-pub(crate) fn local_rejection(message: impl Into<String>) -> GmailError {
-    GmailError::new(Outcome::Rejected {
-        status: 0,
-        message: message.into(),
-        reason: None,
-    })
 }

@@ -136,8 +136,6 @@ pub struct OpRecord {
     pub gmail_draft: Option<GmailDraftId>,
     /// The payload's JSON; [`OpRecord::payload`] decodes it.
     pub payload_json: String,
-    /// Runs tried so far.
-    pub attempts: u32,
     /// When it was queued.
     pub created_at: Millis,
 }
@@ -158,7 +156,6 @@ fn op_row(r: &Row<'_>) -> rusqlite::Result<OpRecord> {
         draft: r.get("draft_id")?,
         gmail_draft: r.get("gmail_draft_id")?,
         payload_json: r.get("payload")?,
-        attempts: r.get("attempts")?,
         created_at: r.get("created_at")?,
     })
 }
@@ -178,7 +175,7 @@ impl<'c> OpReads<'c> {
     pub fn next(self, account: AccountId) -> Result<Option<OpRecord>, StoreError> {
         self.db.optional(
             "read the next op",
-            "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload, attempts,
+            "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload,
                     created_at
              FROM ops WHERE account_id = ?1 ORDER BY id LIMIT 1",
             [account],
@@ -190,7 +187,7 @@ impl<'c> OpReads<'c> {
     pub fn get(self, id: OpId) -> Result<Option<OpRecord>, StoreError> {
         self.db.optional(
             "read an op",
-            "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload, attempts,
+            "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload,
                     created_at
              FROM ops WHERE id = ?1",
             [id],
@@ -202,7 +199,7 @@ impl<'c> OpReads<'c> {
     pub fn of_kind(self, account: AccountId, kind: OpKind) -> Result<Vec<OpRecord>, StoreError> {
         self.db.all(
             "read queued ops",
-            "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload, attempts,
+            "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload,
                     created_at
              FROM ops WHERE account_id = ?1 AND kind = ?2 ORDER BY id",
             (account, kind),
@@ -271,17 +268,6 @@ impl<'t, 'c> OpWrites<'t, 'c> {
             "store an op's payload",
             "UPDATE ops SET payload = ?2 WHERE id = ?1",
             (id, to_json("payload", payload)?),
-        )?;
-        self.tx.stamp();
-        Ok(())
-    }
-
-    /// Counts a failed run.
-    pub fn add_attempt(&mut self, id: OpId) -> Result<(), StoreError> {
-        self.tx.db().execute(
-            "count an op's attempt",
-            "UPDATE ops SET attempts = attempts + 1 WHERE id = ?1",
-            [id],
         )?;
         self.tx.stamp();
         Ok(())

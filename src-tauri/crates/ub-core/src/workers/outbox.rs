@@ -156,17 +156,27 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
     let written = match write(ctx, &draft).await {
         Ok(written) => written,
         Err(failure) => {
-            if let Some(message) = failure.refusal() {
-                step(ctx, row, Event::Rejected(message.to_owned())).await?;
-                return Ok(());
-            }
-            // Gmail never got a send: it waits again, or a held undo
-            // resolves now.
-            step(ctx, row, Event::Unreached).await?;
-            return Err(match failure {
-                WriteFailure::Gmail(e) => Failure::Gmail(e),
-                WriteFailure::Store(e) => Failure::Store(e),
-            });
+            let retry = match failure {
+                WriteFailure::Gmail(e) => match e.outcome() {
+                    Outcome::Rejected { message, .. } => Err(message.clone()),
+                    _ => Ok(Failure::Gmail(e)),
+                },
+                WriteFailure::Local(message) => Err(message),
+                WriteFailure::Store(e) => Ok(Failure::Store(e)),
+            };
+            return match retry {
+                // It can never go through as it is.
+                Err(message) => {
+                    step(ctx, row, Event::Rejected(message)).await?;
+                    Ok(())
+                }
+                // Gmail never got a send: it waits again, or a held undo
+                // resolves now.
+                Ok(failure) => {
+                    step(ctx, row, Event::Unreached).await?;
+                    Err(failure)
+                }
+            };
         }
     };
     // The draft keeps the Gmail ids and the send its Gmail draft together.

@@ -247,6 +247,10 @@ async fn draft_upsert(
         )),
         Ok(Upserted::Busy) => Err(Failure::Busy),
         Err(WriteFailure::Gmail(e)) => Ok((refused(e)?, None)),
+        Err(WriteFailure::Local(message)) => Ok((
+            Answer::Rejected(format!("The draft can't be saved to Gmail: {message}")),
+            None,
+        )),
         Err(WriteFailure::Store(e)) => Err(Failure::Store(e)),
     }
 }

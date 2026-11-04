@@ -239,7 +239,6 @@ CREATE TABLE ops (
   draft_id       TEXT,                         -- the local draft it concerns
   gmail_draft_id TEXT,                         -- the Gmail draft it concerns
   payload        TEXT NOT NULL,                -- JSON, the caller's
-  attempts       INTEGER NOT NULL DEFAULT 0,
   created_at     INTEGER NOT NULL
 );
 CREATE INDEX ops_account ON ops (account_id, id);
