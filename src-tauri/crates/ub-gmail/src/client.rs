@@ -42,8 +42,20 @@ const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
 
 /// The base URL given to [`Gmail::new`] is not an `http` or `https` URL.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("the Gmail base URL {0:?} is not an http or https URL")]
-pub struct InvalidBaseUrl(pub String);
+pub enum InvalidBaseUrl {
+    /// It is not a URL.
+    #[error("the Gmail base URL {url:?} does not parse")]
+    Unparsable {
+        /// The URL as given.
+        url: String,
+        /// Why it does not parse.
+        #[source]
+        source: url::ParseError,
+    },
+    /// It is a URL of another scheme.
+    #[error("the Gmail base URL {0:?} is not an http or https URL")]
+    NotHttp(String),
+}
 
 /// A Gmail client for one account.
 ///
@@ -125,10 +137,12 @@ impl Gmail {
         tokens: Arc<Tokens>,
         scheduler: AccountScheduler,
     ) -> Result<Self, InvalidBaseUrl> {
-        let parsed =
-            url::Url::parse(base_url).map_err(|_bad| InvalidBaseUrl(base_url.to_owned()))?;
+        let parsed = url::Url::parse(base_url).map_err(|source| InvalidBaseUrl::Unparsable {
+            url: base_url.to_owned(),
+            source,
+        })?;
         if !matches!(parsed.scheme(), "http" | "https") {
-            return Err(InvalidBaseUrl(base_url.to_owned()));
+            return Err(InvalidBaseUrl::NotHttp(base_url.to_owned()));
         }
         let api = format!("{}/gmail/v1/users/me", base_url.trim_end_matches('/'));
         Ok(Self {

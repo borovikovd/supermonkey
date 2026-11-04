@@ -38,6 +38,9 @@ pub enum Error {
     /// A Gmail call failed.
     #[error("{0}")]
     Gmail(#[from] ub_gmail::GmailError),
+    /// The configured Gmail endpoint is not one.
+    #[error(transparent)]
+    GmailEndpoint(#[from] ub_gmail::InvalidBaseUrl),
     /// The HTTP client could not be built.
     #[error(transparent)]
     Http(#[from] ub_gmail::HttpClientError),

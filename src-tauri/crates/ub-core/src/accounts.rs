@@ -189,8 +189,7 @@ impl Accounts {
             http.clone(),
             Arc::clone(&tokens),
             Scheduler::new(config.quota).account("sign-in"),
-        )
-        .map_err(|e| Error::Invalid(e.to_string()))?;
+        )?;
         let profile = probe.get_profile(Priority::P1).await?;
         Ok(SignedIn {
             email: profile.email_address,

@@ -262,8 +262,7 @@ impl AccountWorkers {
             self.http.clone(),
             tokens,
             self.scheduler.account(email),
-        )
-        .map_err(|e| Error::Invalid(e.to_string()))?;
+        )?;
         let id = WorkerId(self.next_id.fetch_add(1, Ordering::SeqCst));
         let lane = Arc::clone(
             self.lanes
