@@ -111,7 +111,8 @@ fn tune_writer(conn: &Connection) -> Result<(), StoreError> {
                  PRAGMA synchronous = NORMAL;
                  PRAGMA foreign_keys = ON;
                  PRAGMA temp_store = MEMORY;
-                 PRAGMA cache_size = -32000;",
+                 PRAGMA cache_size = -32000;
+                 PRAGMA mmap_size = 268435456;",
             )
         })
         .map_err(StoreError::sql("tune the write connection"))?;
