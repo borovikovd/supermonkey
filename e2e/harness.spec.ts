@@ -40,7 +40,7 @@ test("hold parks a request; settle does not wait for it; the log records it", as
   expect(held?.body).toEqual({
     ids: [s.message("p3", 1).id],
     addLabelIds: [],
-    removeLabelIds: ["INBOX"],
+    removeLabelIds: ["INBOX", "UNREAD"],
   });
   expect(await hold.release()).toBe(1);
   await app.settle();

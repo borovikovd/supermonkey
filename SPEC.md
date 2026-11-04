@@ -161,6 +161,7 @@ A thread's views come from its messages' labels. It is in Trash or Spam when any
 |---|---|
 | Inbox | Threads with `INBOX` by the rule above, not snoozed, grouped into splits |
 | Done | Gmail's archive: threads not in Inbox and not snoozed that have at least one message that is not a draft and not in trash or spam. Nothing is stored for it, so Done is the same on every device |
+| All Mail | Gmail's All Mail: every thread that has at least one message that is not a draft and not in trash or spam, snoozed ones included. There is no rail icon; `g` then `a` or the palette opens it, as in Superhuman |
 | Snoozed | Threads with `snooze_until` set, whether or not it has passed |
 | Starred | Gmail `STARRED` by the rule above |
 | Sent | Gmail `SENT` by the rule above |
@@ -169,9 +170,9 @@ A thread's views come from its messages' labels. It is in Trash or Spam when any
 | Search | Local matches, then Gmail matches while online |
 | Trash, Spam | Threads in Trash or Spam by the rule above |
 
-Most archived, labeled, trashed, and spam mail is older than the first sync. Opening Done, a Label, Trash, or Spam view while online therefore also runs `threads.list` and merges the results the way Search does: Done with `q=-in:inbox -in:draft`, the others with that label's id. Trash and Spam set `includeSpamTrash=true`.
+Most archived, labeled, trashed, and spam mail is older than the first sync. Opening Done, All Mail, a Label, Trash, or Spam view while online therefore also runs `threads.list` and merges the results the way Search does: Done with `q=-in:inbox -in:draft`, All Mail with `q=-in:draft`, the others with that label's id. Trash and Spam set `includeSpamTrash=true`.
 
-`g` then a letter jumps to a view: `e` done, `h` snoozed, `s` starred, `t` sent, `d` drafts, `l` label picker, `#` trash, `!` spam. From any view, `g` then `i` and `g` then `o` open Inbox on the Important and Other splits. The header stays `Inbox`. If that split is hidden because it is empty, the jump shows its header. If Important is turned off, `g` then `i` opens Inbox and does not show that split.
+`g` then a letter jumps to a view: `e` done, `a` All Mail, `h` snoozed, `s` starred, `t` sent, `d` drafts, `l` label picker, `#` trash, `!` spam. From any view, `g` then `i` and `g` then `o` open Inbox on the Important and Other splits. The header stays `Inbox`. If that split is hidden because it is empty, the jump shows its header. If Important is turned off, `g` then `i` opens Inbox and does not show that split.
 
 ## Accounts
 
@@ -225,7 +226,7 @@ The palette lists actions and views. Each row shows its shortcut on the right. `
 | `j` / `k` | Next / previous conversation, across split boundaries |
 | `Tab` / `Shift+Tab` | Next / previous split. In the conversation view, cycle links. In compose, move fields |
 | `Enter` | Open the conversation. Inside it, reply all. On a link reached with `Tab`, open the link |
-| `e` | Mark done (archive) |
+| `e` | Mark done (archive and mark read) |
 | `Shift+E` | Return to inbox, and clear a snooze |
 | `h` | Snooze |
 | `c` | Compose |
@@ -411,7 +412,7 @@ The delay is a fixed ten seconds, as in Superhuman, which does not let users cha
 
 ## Archive, trash, star, read
 
-Archive removes the `INBOX` label. On a snoozed thread it also clears `snooze_until`. The thread stays in All Mail and appears in Done. A later reply from someone else puts it back in the inbox, which is ordinary Gmail behavior.
+Archive removes the `INBOX` label and marks the thread read: it removes `UNREAD` from its messages, as Superhuman's Mark Done does. `z` puts both back, `UNREAD` only on the messages that had it. On a snoozed thread it also clears `snooze_until`. The thread stays in All Mail and appears in Done. A later reply from someone else puts it back in the inbox, which is ordinary Gmail behavior.
 
 Trash adds `TRASH` and removes `INBOX` and `SPAM`. Spam adds `SPAM` and removes `INBOX` and `TRASH`. Star toggles `STARRED`. Read state toggles `UNREAD`. Return to inbox adds `INBOX`.
 

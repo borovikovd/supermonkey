@@ -41,6 +41,12 @@ pub fn list_ids(
              ORDER BY t.sort_time DESC, t.id DESC",
             None,
         ),
+        View::AllMail => (
+            "SELECT t.id, NULL FROM threads t
+             WHERE t.account_id = ?1 AND t.has_live = 1
+             ORDER BY t.sort_time DESC, t.id DESC",
+            None,
+        ),
         View::Snoozed => (
             "SELECT t.id, NULL FROM threads t
              WHERE t.account_id = ?1 AND t.snooze_until IS NOT NULL

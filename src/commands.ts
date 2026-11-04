@@ -140,9 +140,12 @@ export function modify(
 
 const isSnoozed = (threads: number[]) => threads.some((t) => rowOf(String(t))?.snoozeUntil != null);
 
+/** Archives and marks read, as Superhuman's Mark Done does; z restores both. */
 export const markDone = () => {
   if (currentView()?.kind === "done") return;
-  modify("done", [], ["INBOX"], { snooze: isSnoozed(targets()) ? { kind: "clear" } : null });
+  modify("done", [], ["INBOX", "UNREAD"], {
+    snooze: isSnoozed(targets()) ? { kind: "clear" } : null,
+  });
 };
 
 export const returnToInbox = () => {

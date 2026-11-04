@@ -83,6 +83,8 @@ pub enum GmailListQuery {
     Search(String),
     /// The Done view: every thread outside Inbox (SPEC Views).
     Done,
+    /// The All Mail view: every thread outside Trash and Spam.
+    AllMail,
     Label {
         label_gmail_id: String,
         include_spam_trash: bool,

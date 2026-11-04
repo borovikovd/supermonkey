@@ -282,9 +282,9 @@ Files are independent and can be written in parallel. Each depends only on the s
 | -------------------------- | ------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | ------- | ------- | ------ | ------ |
 | `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 14      | 10      | 4      | 0      |
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 9       | 4       | 5      | 0      |
-| `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 5       | 3       | 2      | 0      |
+| `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 6       | 4       | 2      | 0      |
 | `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 19      | 4       | 14     | 1      |
-| `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 11      | 7       | 4      | 0      |
+| `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 12      | 8       | 4      | 0      |
 | `undo.spec.ts`             | UND    | the `z` stack, partial revert, per-account history, persistence                              | `standard`                               | H15                         | 8       | 4       | 3      | 1      |
 | `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 8       | 2       | 6      | 0      |
 | `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 8       | 3       | 4      | 1      |
@@ -304,7 +304,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **225** | **131** | **84** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **227** | **133** | **84** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -685,6 +685,18 @@ _EP · §Views ("Opening a Label, Trash, or Spam view while online also runs `th
   - The opened thread shows its body, fetched on open.
   - Offline, Projects shows the cached rows and no error.
 
+#### VIEW-06 · P1 · All Mail lists every thread outside Trash and Spam, from Gmail too
+
+_ST · §Views (All Mail), §Keyboard (`g a`)_
+
+- **Seed:** `standard`.
+- **Steps:** `g a`. Highlight `p1` and press `e`, then `#`. Then `g e`, `Cmd+K`, type "Go to All Mail", `Enter`.
+- **Expect:**
+  - The header reads All Mail. `p1` and `Archived before` are listed; `Old trash` and `Old spam` are not.
+  - `threads.list` ran with `q=-in:draft`, `maxResults=15`, and no `includeSpamTrash`.
+  - After `e`, `p1` stays, read. After `#`, it is gone.
+  - The palette command opens All Mail.
+
 ### 5.4 `conversation.spec.ts` (CONV)
 
 Decision table used by CONV-01, CONV-02, and CONV-03 (§Reading):
@@ -928,7 +940,7 @@ _ST, BVA · §Archive, trash, star, read; §Keyboard · Done when 4, 6_
   3. Press `j` until the last row, then `e`.
 - **Expect:**
   - While the request is held, the 3rd row is gone and the former 4th row sits in 3rd place, highlighted.
-  - After release, `gmail(A)` shows the thread's messages without `INBOX`. The body of `req(messages.batchModify)` lists exactly the thread's message ids. The thread is listed in Done.
+  - After release, `gmail(A)` shows the thread's messages without `INBOX` or `UNREAD`. The body of `req(messages.batchModify)` lists exactly the thread's message ids and removes `INBOX` and `UNREAD`. The thread is listed in Done.
   - Archiving the last row moves the highlight to the new last row.
 
 #### TRI-02 · P1 · `e` in an open conversation opens the next one, or the previous one, or returns to the empty list
@@ -1064,6 +1076,16 @@ _EG · §Archive, trash, star, read ("A reply that arrives while an archive is q
   - In Gmail, m1 has no `INBOX` and m2 still has `INBOX`.
   - Locally, `p1` is back in Inbox, unread, with m2 as its latest message.
 
+#### TRI-12 · P1 · `e` marks the conversation read, and `z` makes the same messages unread again
+
+_ST · §Archive, trash, star, read; DEVIATIONS (`e` marks read)_
+
+- **Seed:** `empty`, then deliver a thread of two messages: the first read, the second unread.
+- **Steps:** press `e`, then `g e`. Press `z`, then `g i`.
+- **Expect:**
+  - After `e`, neither message has `INBOX` in Gmail, the second has lost `UNREAD`, and the row in Done is read.
+  - After `z`, both are back in Inbox, only the second is `UNREAD` again, and the row is unread.
+
 ### 5.6 `undo.spec.ts` (UND)
 
 Which actions make an undo entry (§Undo, §Settings, §Reading):
@@ -1102,10 +1124,10 @@ _EG · §Undo ("Undo reverts only those, so later changes … stay")_
 - **Seed:** `standard`.
 - **Steps:**
   1. Press `e` on `p1`, which is unread.
-  2. `other(modify p1 −UNREAD +STARRED)`, then `poll()`.
+  2. `other(modify p1 +STARRED)`, then `poll()`.
   3. Press `z`.
 - **Expect:**
-  - `p1` is back in Inbox, still read and starred, both locally and in Gmail.
+  - `p1` is back in Inbox, unread again (`e` had marked it read), and still starred, both locally and in Gmail.
 - **Second partition:** press `s` on `p2`, then `other(modify p2 +Travel)`, `poll()`, `z`. `p2` loses `STARRED` but keeps Travel.
 
 #### UND-03 · P1 · Actions that make no entry are skipped by `z`
@@ -3042,15 +3064,15 @@ _DT · §Notifications, §Settings_
 
 _DT, BVA · §Notifications_
 
-| Change                               | `badge()`                        |
-| ------------------------------------ | -------------------------------- |
-| a thread with 3 unread messages      | counts as 1                      |
-| open an unread thread (read on open) | −1                               |
-| `u` on a read Inbox thread           | +1                               |
-| archive an unread thread             | −1                               |
-| snooze an unread thread              | −1                               |
-| an unread thread that is in Done     | not counted                      |
-| every Inbox thread read, and B muted | 0: the badge is cleared (`null`) |
+| Change                                       | `badge()`                        |
+| -------------------------------------------- | -------------------------------- |
+| a thread with 3 unread messages              | counts as 1                      |
+| open an unread thread (read on open)         | −1                               |
+| `u` on a read Inbox thread                   | +1                               |
+| archive an unread thread (`e` marks it read) | −1                               |
+| snooze an unread thread                      | −1                               |
+| an unread thread that is in Done             | not counted                      |
+| every Inbox thread read, and B muted         | 0: the badge is cleared (`null`) |
 
 #### NOT-06 · P2 · Clicking a notification opens that account's Inbox on the thread
 

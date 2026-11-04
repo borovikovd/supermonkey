@@ -129,6 +129,8 @@ export const viewTitle = (view: View, labelName?: string): string => {
       return "Inbox";
     case "done":
       return "Done";
+    case "allMail":
+      return "All Mail";
     case "snoozed":
       return "Snoozed";
     case "starred":

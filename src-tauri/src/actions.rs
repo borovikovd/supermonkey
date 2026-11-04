@@ -146,6 +146,10 @@ fn gmail_query(tx: &Connection, key: &SubKey) -> Option<(AccountId, GmailListQue
             account,
             view: View::Done,
         } => Some((*account, GmailListQuery::Done)),
+        SubKey::List {
+            account,
+            view: View::AllMail,
+        } => Some((*account, GmailListQuery::AllMail)),
         SubKey::Search { account, query } if !query.trim().is_empty() => Some((
             *account,
             GmailListQuery::Search(ub_rules::strip_is_list(query)),

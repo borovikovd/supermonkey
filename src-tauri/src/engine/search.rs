@@ -139,6 +139,13 @@ fn thread_list_query(query: GmailListQuery, page: Option<String>) -> ThreadListQ
             max_results: Some(PAGE),
             ..Default::default()
         },
+        // Gmail's All Mail: threads.list leaves out Trash and Spam by default.
+        GmailListQuery::AllMail => ThreadListQuery {
+            q: Some("-in:draft".into()),
+            page_token: page,
+            max_results: Some(PAGE),
+            ..Default::default()
+        },
         GmailListQuery::Label {
             label_gmail_id,
             include_spam_trash,

@@ -122,6 +122,11 @@ written. Each keeps the spec's intent.
   as Superhuman's is, holding one faceted mark: Zarathustra's mountain, a
   peak lit on one face, with the sun rising in its notch and a low dawn
   glow behind.
+- **`e` marks read, and All Mail exists, as in Superhuman.** Mark Done also
+  removes `UNREAD` (Superhuman's docs are silent on it; this follows how the
+  app behaves), and `z` restores it only where it was. All Mail is `g a` and
+  the palette's "Go to All Mail", with no rail icon, as in Superhuman's
+  shortcut sheet.
 - In Drafts the hint bar reads `Enter to open draft · C to compose · ⌘K for
   commands`: the spec's example hints (`E`, `H`) do nothing there.
 

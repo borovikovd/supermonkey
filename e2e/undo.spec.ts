@@ -136,18 +136,18 @@ test("UND-02 undo reverts only the labels the action changed", async ({ app, gma
   await app.press("e");
   await expect(app.row("Person 1")).toHaveCount(0);
   await app.settle();
-  await gmail.modify(A, s.message("p1", 1).id, ["STARRED"], ["UNREAD"], { poll: true });
+  // Another client stars it meanwhile; e changed INBOX and UNREAD, not STARRED.
+  await gmail.modify(A, s.message("p1", 1).id, ["STARRED"], [], { poll: true });
   await app.settle();
   await app.press("z");
 
   const p1 = app.row("Person 1");
   await expect(p1).toHaveCount(1);
   await app.settle();
-  await expect(p1).not.toHaveAttribute("data-unread");
+  await expect(p1).toHaveAttribute("data-unread", "true");
   await expect(p1).toHaveAttribute("data-starred", "true");
   const m1 = (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p1", 1).id);
-  expect(m1?.labels).toEqual(expect.arrayContaining(["INBOX", "STARRED"]));
-  expect(m1?.labels).not.toContain("UNREAD");
+  expect(m1?.labels).toEqual(expect.arrayContaining(["INBOX", "STARRED", "UNREAD"]));
 
   // Second partition: a star, then Travel from another client.
   const travel = s.label(A, "Travel");

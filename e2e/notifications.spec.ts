@@ -259,14 +259,14 @@ test.describe("notifications", () => {
     await app.settle();
     expect(await badge(gmail)).toBe(11);
 
-    // Archive an unread thread; it stays unread in Done and is not counted.
+    // Archive an unread thread: e marks it read, and it is no longer counted.
     await app.press("j");
     await expect(app.highlighted).toContainText("Person 3");
     await app.press("e");
     await app.settle();
     expect(await badge(gmail)).toBe(10);
     const p3 = (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p3", 1).id);
-    expect(p3?.labels).toContain("UNREAD");
+    expect(p3?.labels).not.toContain("UNREAD");
     expect(p3?.labels).not.toContain("INBOX");
 
     // Snooze an unread thread.

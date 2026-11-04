@@ -136,6 +136,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           run: () => goSplit("other", appHooks.splitIdOf),
         },
         { id: "g-done", label: "Go to Done", keys: "G E", run: view({ kind: "done" }) },
+        { id: "g-all", label: "Go to All Mail", keys: "G A", run: view({ kind: "allMail" }) },
         { id: "g-snoozed", label: "Go to Snoozed", keys: "G H", run: view({ kind: "snoozed" }) },
         { id: "g-starred", label: "Go to Starred", keys: "G S", run: view({ kind: "starred" }) },
         { id: "g-sent", label: "Go to Sent", keys: "G T", run: view({ kind: "sent" }) },

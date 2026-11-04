@@ -23,13 +23,17 @@ pub type Millis = i64;
 pub enum View {
     Inbox,
     Done,
+    /// Every thread outside Trash and Spam, as Gmail's All Mail.
+    AllMail,
     Snoozed,
     Starred,
     Sent,
     Drafts,
     Trash,
     Spam,
-    Label { label: String },
+    Label {
+        label: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]

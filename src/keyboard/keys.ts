@@ -49,6 +49,7 @@ const isTyping = (el: EventTarget | null) => {
 /** `g` then one of these keys opens that view. */
 const G_VIEWS: Partial<Record<string, Exclude<View, { kind: "label" }>["kind"]>> = {
   e: "done",
+  a: "allMail",
   h: "snoozed",
   s: "starred",
   t: "sent",

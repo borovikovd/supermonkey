@@ -378,3 +378,37 @@ test("VIEW-05 Label, Trash, and Spam views also list from Gmail", async ({ app, 
   await expect(app.row("Project gamma")).toHaveCount(1);
   await expect(app.errorToasts).toHaveCount(0);
 });
+
+test("VIEW-06 All Mail lists every thread outside Trash and Spam, from Gmail too", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await go(app, "a", "All Mail");
+  // Inbox mail, and the archive from before the first connect, listed from Gmail.
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await expect(app.row("Archived before")).toHaveCount(1);
+  await expect(app.row(/Old trash|Old spam/)).toHaveCount(0);
+  const all = (await gmail.requests("threads.list", { account: A })).filter(
+    (r) => r.params.q === "-in:draft",
+  );
+  expect(all.length).toBeGreaterThanOrEqual(1);
+  expect(all[0]?.params.maxResults).toBe("15");
+  expect(all[0]?.params.includeSpamTrash).toBeUndefined();
+
+  // Archived mail is still All Mail: e marks the row read and keeps it. # takes it out.
+  await highlight(app, "Person 1");
+  await app.press("e");
+  await app.settle();
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await expect(app.row("Person 1")).not.toHaveAttribute("data-unread");
+  await app.press("#");
+  await expect(app.row("Person 1")).toHaveCount(0);
+
+  // The palette goes there too.
+  await go(app, "e", "Done");
+  await app.press("Meta+k");
+  await app.type("Go to All Mail");
+  await app.press("Enter");
+  await expect(app.page.locator("div:has(> button[title='Search (/)'])")).toHaveText("All Mail");
+});

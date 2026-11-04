@@ -169,7 +169,7 @@ test("TRI-01 e on a long thread archives every one of its messages", async ({ ap
   await app.settle();
 
   const [req] = await gmail.requests("messages.batchModify");
-  expect(req?.body).toMatchObject({ ids, removeLabelIds: ["INBOX"] });
+  expect(req?.body).toMatchObject({ ids, removeLabelIds: ["INBOX", "UNREAD"] });
   const msgs = threadMessages(await gmail.gmail(A), fold.threadId);
   expect(msgs).toHaveLength(11);
   expect(msgs.filter((m) => m.labels.includes("INBOX"))).toEqual([]);
@@ -699,4 +699,43 @@ test("TRI-11 an action changes only the messages it recorded; a reply arriving m
   await expect(row).toHaveAttribute("data-unread", "true");
   await expect(row).toContainText("Carol Chen");
   await expect(row).toContainText("A reply while the archive waits.");
+});
+
+test("TRI-12 e marks the conversation read, and z makes the same messages unread again", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.empty(gmail, app);
+  const [first, second] = await gmail.deliverMany([
+    { account: A, from: "Rae Read <rae@corp.test>", subject: "Half read", labels: ["INBOX"] },
+    {
+      account: A,
+      from: "Una Unread <una@corp.test>",
+      subject: "Re: Half read",
+      labels: ["INBOX", "UNREAD"],
+      after: 0,
+    },
+  ]);
+  await app.settle();
+  const labels = async (id: string | undefined) =>
+    (await gmail.gmail(A)).messages.find((m) => m.id === id)?.labels ?? [];
+  await expect(app.row("Half read")).toHaveAttribute("data-unread", "true");
+
+  await app.press("e");
+  await app.settle();
+  expect(await labels(first?.id)).not.toContain("INBOX");
+  expect(await labels(second?.id)).not.toContain("INBOX");
+  expect(await labels(second?.id)).not.toContain("UNREAD");
+  await app.press("g");
+  await app.press("e");
+  await expect(app.row("Half read")).not.toHaveAttribute("data-unread");
+
+  await app.press("z");
+  await app.settle();
+  expect(await labels(first?.id)).toEqual(expect.arrayContaining(["INBOX"]));
+  expect(await labels(first?.id)).not.toContain("UNREAD");
+  expect(await labels(second?.id)).toEqual(expect.arrayContaining(["INBOX", "UNREAD"]));
+  await app.press("g");
+  await app.press("i");
+  await expect(app.row("Half read")).toHaveAttribute("data-unread", "true");
 });

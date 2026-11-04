@@ -220,6 +220,7 @@ export const viewLabel = (view: View): string | null => {
       return view.label;
     // Views not backed by one Gmail label.
     case "done":
+    case "allMail":
     case "drafts":
     case "snoozed":
       return null;
