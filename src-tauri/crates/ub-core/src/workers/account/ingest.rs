@@ -86,6 +86,35 @@ pub(crate) fn store_thread(
     })
 }
 
+/// Stores the message of a Gmail draft read with `drafts.get` into its
+/// thread, adding the thread if new, and leaves the thread's other messages
+/// as they are. Its labels need no local changes on top: no action changes
+/// a draft's. Returns the thread, or `None` when it is gone.
+pub(crate) fn store_draft_message(
+    tx: &mut WriteTx<'_>,
+    state: &mut WriterState,
+    account: AccountId,
+    gmail_thread: &GmailThreadId,
+    read: &ReadMessage,
+) -> Result<Option<ThreadId>, StoreError> {
+    let labels = Labels::load(tx.read(), account)?;
+    let mut unknown = false;
+    let mut message = read.message.clone();
+    message.labels = labels.local(&message.labels, &mut unknown);
+    let stored = tx.threads().store(&FetchedThread {
+        account,
+        gmail_id: gmail_thread.clone(),
+        history_id: None,
+        messages: vec![message],
+        complete: false,
+    })?;
+    store_bodies(tx, account, std::slice::from_ref(read))?;
+    if unknown {
+        state.effect(Effect::RefreshLabels(account));
+    }
+    Ok(stored.thread)
+}
+
 /// Drops a thread Gmail no longer has: a 404 on a read of it.
 pub(crate) fn drop_thread(
     tx: &mut WriteTx<'_>,

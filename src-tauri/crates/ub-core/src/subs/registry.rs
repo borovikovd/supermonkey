@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use ub_domain::{SubId, ThreadId};
+use ub_domain::{DraftId, SubId, ThreadId};
 use ub_gmail::PageToken;
 use ub_ipc::{ListEntry, SubKey, SubUpdate};
 use ub_store::{Changes, Reads};
@@ -84,6 +84,31 @@ impl Registry {
         all.into_iter().map(|(id, _)| id).collect()
     }
 
+    /// Whether a composer has `draft` open (SPEC Drafts: Rust treats a
+    /// draft open in a composer differently).
+    pub(crate) fn has_composer(&self, draft: &DraftId) -> bool {
+        self.subs.values().any(|s| is_composer_of(&s.key, draft))
+    }
+
+    /// The drafts open in composers, in open order.
+    pub(crate) fn composer_drafts(&self) -> Vec<DraftId> {
+        let mut open: Vec<(&Sub, &DraftId)> = self
+            .subs
+            .values()
+            .filter_map(|s| match &s.key {
+                SubKey::Composer { draft } => Some((s, draft)),
+                _ => None,
+            })
+            .collect();
+        open.sort_by_key(|(s, _)| s.opened);
+        open.into_iter().map(|(_, d)| d.clone()).collect()
+    }
+
+    /// Closes the composers of `draft`: it was sent, discarded, or closed.
+    pub(crate) fn close_composers(&mut self, draft: &DraftId) {
+        self.subs.retain(|_, s| !is_composer_of(&s.key, draft));
+    }
+
     /// One subscription.
     pub(crate) fn get_mut(&mut self, id: &SubId) -> Option<&mut Sub> {
         self.subs.get_mut(id)
@@ -154,4 +179,8 @@ impl Registry {
         }
         out
     }
+}
+
+fn is_composer_of(key: &SubKey, draft: &DraftId) -> bool {
+    matches!(key, SubKey::Composer { draft: d } if d == draft)
 }

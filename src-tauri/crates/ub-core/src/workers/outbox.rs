@@ -1,2 +1,294 @@
-//! The outbox runner, filled by the compose slice: waits out each send's
-//! undo window, then `drafts.send` (SPEC Send and undo).
+//! The outbox runner (SPEC Send and undo): one task per account worker.
+//!
+//! When a send's `send_after` passes, it becomes sending, and the runner
+//! downloads any parts not cached, builds the MIME, writes the Gmail draft,
+//! and calls `drafts.send`. Gmail unreachable before `drafts.send` puts it
+//! back to waiting, or, with an undo held on it, resolves it as not sent. No
+//! clear answer from `drafts.send` keeps it sending until `drafts.get`
+//! settles it: a 404 means it was sent. Each step goes through the state
+//! machine in `crate::outbox`.
+
+use std::sync::Arc;
+use std::time::Duration;
+
+use ub_domain::{GmailDraftId, GmailMessageId, GmailThreadId, Millis, OutboxState, SystemLabel};
+use ub_gmail::{Backoff, Format, GmailError, Outcome, Priority};
+use ub_store::{Outbox, Priority as WritePriority, StoreError};
+
+use super::account::{AccountCtx, OFFLINE_RETRY, fetch_thread};
+use super::drafts::{WriteFailure, load, write};
+use crate::Error;
+use crate::drafts::store_ids;
+use crate::outbox::{Event, resolve};
+
+/// How long the runner waits, at most, before it looks at the outbox again.
+const IDLE_WAIT: Duration = Duration::from_secs(30);
+/// The shortest wait for a send's time, so a send due now never spins.
+const MIN_WAIT: Duration = Duration::from_millis(50);
+/// A send that starts this long after its time missed it: `Email delayed`.
+const LATE_AFTER: i64 = 5_000;
+
+/// Sends the account's due rows until the worker stops.
+pub(crate) async fn run(ctx: Arc<AccountCtx>) {
+    let mut backoff = Backoff::new();
+    loop {
+        let pass = pass(&ctx).await;
+        let wait = match pass {
+            Ok(next_due) => {
+                backoff.reset();
+                next_due.map_or(IDLE_WAIT, |due| until(&ctx, due))
+            }
+            Err(Failure::Gmail(e)) => {
+                ctx.health.failed(&e);
+                match e.outcome() {
+                    Outcome::InvalidGrant => {
+                        ctx.signed_out();
+                        return;
+                    }
+                    Outcome::Offline => OFFLINE_RETRY,
+                    _ => backoff.next_delay(&e),
+                }
+            }
+            Err(Failure::Store(e)) => {
+                tracing::warn!(account = ctx.account.0, error = %e, "the outbox couldn't read or write; trying again");
+                OFFLINE_RETRY
+            }
+        };
+        let network = &ctx.deps.network;
+        tokio::select! {
+            () = ctx.outbox.wait(ctx.clock(), wait) => {}
+            () = network.wait(ctx.clock(), wait) => {}
+        }
+    }
+}
+
+/// Why a pass stopped before its last row.
+#[derive(Debug)]
+enum Failure {
+    /// Gmail did not answer clearly.
+    Gmail(GmailError),
+    /// The database refused a read or write.
+    Store(Error),
+}
+
+impl From<GmailError> for Failure {
+    fn from(e: GmailError) -> Self {
+        Self::Gmail(e)
+    }
+}
+
+impl From<Error> for Failure {
+    fn from(e: Error) -> Self {
+        Self::Store(e)
+    }
+}
+
+impl From<StoreError> for Failure {
+    fn from(e: StoreError) -> Self {
+        Self::Store(e.into())
+    }
+}
+
+/// How long until `due`, within the runner's bounds.
+fn until(ctx: &AccountCtx, due: Millis) -> Duration {
+    let ms = u64::try_from(due.0.saturating_sub(ctx.clock().now().0)).unwrap_or(0);
+    Duration::from_millis(ms).clamp(MIN_WAIT, IDLE_WAIT)
+}
+
+/// One look at the outbox: settles each sending row and sends each due
+/// waiting one, oldest first. Returns when the next waiting row is due.
+async fn pass(ctx: &AccountCtx) -> Result<Option<Millis>, Failure> {
+    let account = ctx.account;
+    let rows = ctx.read(move |r| r.outbox().unsent(account)).await?;
+    let now = ctx.clock().now();
+    let mut next_due: Option<Millis> = None;
+    for record in rows {
+        let row = record.outbox;
+        if row.state == OutboxState::Sending {
+            settle(ctx, &row).await?;
+        } else if row.send_after <= now {
+            send(ctx, &row).await?;
+        } else {
+            next_due = Some(next_due.map_or(row.send_after, |d| d.min(row.send_after)));
+        }
+    }
+    Ok(next_due)
+}
+
+/// Writes a step of the row's state machine. Returns whether it applied:
+/// the row was where the event expects it.
+async fn step(ctx: &AccountCtx, row: &Outbox, event: Event) -> Result<bool, Failure> {
+    let (id, now) = (row.id, ctx.clock().now());
+    Ok(ctx
+        .writer()
+        .call(WritePriority::Sync, move |tx, state| {
+            resolve(tx, state, id, event, now)
+        })
+        .await?)
+}
+
+/// The row as stored now, or `None` when it is gone.
+async fn current(ctx: &AccountCtx, row: &Outbox) -> Result<Option<Outbox>, Failure> {
+    let id = row.id;
+    Ok(ctx
+        .read(move |r| r.outbox().get(id))
+        .await?
+        .map(|r| r.outbox))
+}
+
+/// Sends a due waiting row: steps 1 to 4 of SPEC Send and undo.
+async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
+    // An upsert of the draft is still in flight: it wakes the outbox once it
+    // lands, and this send writes after it.
+    let Some(_writing) = ctx.lane.writing.begin(&row.draft) else {
+        return Ok(());
+    };
+    let late = ctx.clock().now().0 > row.send_after.0.saturating_add(LATE_AFTER);
+    // Undone meanwhile (the row is gone), or already taken.
+    if !step(ctx, row, Event::Start { late }).await? {
+        return Ok(());
+    }
+    let Some(draft) = load(ctx, &row.draft).await? else {
+        return Ok(());
+    };
+    // 1 to 3: parts, MIME, and the Gmail draft. Failing here, Gmail never
+    // got a send.
+    let written = match write(ctx, &draft).await {
+        Ok(written) => written,
+        Err(failure) => {
+            if let Some(message) = failure.refusal() {
+                step(ctx, row, Event::Rejected(message.to_owned())).await?;
+                return Ok(());
+            }
+            // Gmail never got a send: it waits again, or a held undo
+            // resolves now.
+            step(ctx, row, Event::Unreached).await?;
+            return Err(match failure {
+                WriteFailure::Gmail(e) => Failure::Gmail(e),
+                WriteFailure::Store(e) => Failure::Store(e),
+            });
+        }
+    };
+    // The draft keeps the Gmail ids and the send its Gmail draft together.
+    let (id, now, local, stored) = (
+        row.id,
+        ctx.clock().now(),
+        row.draft.clone(),
+        written.clone(),
+    );
+    ctx.writer()
+        .call(WritePriority::Sync, move |tx, state| {
+            let ids = (&stored.id, &stored.message.id, &stored.message.thread_id);
+            store_ids(tx, state, &local, ids, None, now)?;
+            resolve(tx, state, id, Event::Written(stored.id.clone()), now)
+        })
+        .await?;
+    // 4: drafts.send.
+    send_draft(ctx, row, &written.id).await
+}
+
+/// `drafts.send`, unless an undo is held on the row: then it is not sent.
+async fn send_draft(ctx: &AccountCtx, row: &Outbox, gmail: &GmailDraftId) -> Result<(), Failure> {
+    if current(ctx, row).await?.is_some_and(|r| r.undo_requested) {
+        step(ctx, row, Event::Held).await?;
+        return Ok(());
+    }
+    match ctx.gmail.send_draft(Priority::P1, gmail).await {
+        Ok(message) => sent(ctx, row, Some(message.id), Some(message.thread_id)).await,
+        Err(e) => match e.outcome() {
+            // The request never left: back to waiting.
+            Outcome::Offline => {
+                step(ctx, row, Event::Unreached).await?;
+                Err(e.into())
+            }
+            // The draft is gone: the row stays sending, and the next pass
+            // settles it.
+            Outcome::NotFound => {
+                ctx.outbox.kick();
+                Ok(())
+            }
+            Outcome::Rejected { message, .. } => {
+                step(ctx, row, Event::Rejected(message.clone())).await?;
+                Ok(())
+            }
+            // No clear answer: it stays sending, and `drafts.get` settles it.
+            _ => Err(e.into()),
+        },
+    }
+}
+
+/// A sending row with no clear answer yet: `drafts.get` finds its draft,
+/// which is sent again, or Gmail no longer has it, which means it was sent.
+async fn settle(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
+    let Some(gmail) = current(ctx, row).await?.and_then(|r| r.gmail_draft_id) else {
+        // It never reached Gmail: the next pass sends it from the start.
+        step(ctx, row, Event::Unreached).await?;
+        ctx.outbox.kick();
+        return Ok(());
+    };
+    match ctx
+        .gmail
+        .get_draft(Priority::P1, &gmail, Format::Minimal)
+        .await
+    {
+        Ok(_) => send_draft(ctx, row, &gmail).await,
+        Err(e) if *e.outcome() == Outcome::NotFound => {
+            let id = row.id;
+            let thread = ctx.read(move |r| r.outbox().gmail_thread(id)).await?;
+            let Some(thread) = thread else {
+                return sent(ctx, row, None, None).await;
+            };
+            let message = newest_sent(ctx, &thread).await?;
+            sent(ctx, row, message, Some(thread)).await
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// The newest message this account sent on the thread: a send that
+/// resolved as sent with no message id in hand.
+async fn newest_sent(
+    ctx: &AccountCtx,
+    thread: &GmailThreadId,
+) -> Result<Option<GmailMessageId>, Failure> {
+    let read = ctx
+        .gmail
+        .get_thread(Priority::P1, thread, Format::Minimal, &[])
+        .await?;
+    let sent = SystemLabel::Sent.label_id();
+    Ok(read
+        .messages
+        .into_iter()
+        .filter(|m| m.label_ids.contains(&sent))
+        .max_by_key(|m| m.internal_date.unwrap_or(Millis(0)))
+        .map(|m| m.id))
+}
+
+/// Gmail accepted the send. The sent message is fetched and stored at once,
+/// so the reply never leaves its thread while waiting for the next poll.
+async fn sent(
+    ctx: &AccountCtx,
+    row: &Outbox,
+    message: Option<GmailMessageId>,
+    thread: Option<GmailThreadId>,
+) -> Result<(), Failure> {
+    if !step(ctx, row, Event::Accepted(message)).await? {
+        return Ok(());
+    }
+    let Some(thread) = thread else {
+        return Ok(());
+    };
+    if let Err(e) = fetch_thread(ctx, &thread, Format::Full, Priority::P1).await {
+        // The next poll brings it.
+        tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "couldn't fetch a sent message yet");
+        return Ok(());
+    }
+    let account = ctx.account;
+    let stored = ctx
+        .read(move |r| r.threads().by_gmail_id(account, &thread))
+        .await?;
+    if let Some(stored) = stored {
+        step(ctx, row, Event::Stored(stored)).await?;
+    }
+    Ok(())
+}

@@ -3,9 +3,8 @@
 //! handler reads and writes through the store's repositories, decides with
 //! `ub_domain` rules, and records effects on the writer state.
 //!
-//! One module per group of actions. Compose actions, undoing a send, and
-//! the splits sheet reject with [`ActionError::NotYetImplemented`] until
-//! their slice lands.
+//! One module per group of actions. The splits sheet rejects with
+//! [`ActionError::NotYetImplemented`] until its slice lands.
 
 mod accounts;
 mod batch;

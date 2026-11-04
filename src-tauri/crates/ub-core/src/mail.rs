@@ -1,10 +1,10 @@
 //! The `Mail` handle (ARCHITECTURE.md, section 8.1): links, attachments,
 //! unsubscribe, and block (SPEC Reading, Unsubscribe and block, Compose).
 //!
-//! Extension points: the compose slice fills in [`Mail::add_attachment`],
-//! and the unwanted-mail slice [`Mail::unsubscribe`], [`Mail::block`],
-//! [`Mail::blocked_senders`], and [`Mail::unblock`].
+//! Extension points: the unwanted-mail slice fills in [`Mail::unsubscribe`],
+//! [`Mail::block`], [`Mail::blocked_senders`], and [`Mail::unblock`].
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use ub_domain::{AccountId, AttachmentId, DraftId, ThreadId};
@@ -12,7 +12,7 @@ use ub_ipc::{BlockResult, BlockedSenders, DraftAttachment, Unsubscribed};
 use ub_store::ReadPool;
 use url::Url;
 
-use crate::workers::{AccountWorkers, open_attachment};
+use crate::workers::{AccountWorkers, open_attachment, safe_name};
 use crate::{Error, Platform};
 
 /// Links, attachments, unsubscribe, and block.
@@ -67,19 +67,37 @@ impl Mail {
         open_attachment(&self.workers, &self.pool, &*self.platform, attachment).await
     }
 
-    /// Keeps a file the user attached to a draft with the draft's files.
-    #[expect(
-        clippy::unused_async,
-        clippy::unused_async_trait_impl,
-        reason = "an extension point: the compose slice writes the file here"
-    )]
+    /// Keeps a file the user attached to a draft with the draft's files,
+    /// until the draft is sent or discarded (SPEC Compose: attachments).
+    /// The composer then saves it as one of the draft's attachments.
     pub async fn add_attachment(
         &self,
         draft: DraftId,
         file: NewAttachment,
     ) -> Result<DraftAttachment, Error> {
-        drop((draft, file));
-        Err(Error::NotYetImplemented("attaching files"))
+        let dir = self.workers.draft_dir(&draft);
+        let NewAttachment {
+            filename,
+            mime_type,
+            data,
+        } = file;
+        let size = i64::try_from(data.len())
+            .map_err(|e| Error::Invalid(format!("The file is too large: {e}")))?;
+        let name = safe_name(&filename);
+        let (id, path) =
+            tokio::task::spawn_blocking(move || keep_file(&dir, &name, &data)).await??;
+        Ok(DraftAttachment {
+            id,
+            filename,
+            mime_type: if mime_type.is_empty() {
+                OCTET_STREAM.to_owned()
+            } else {
+                mime_type
+            },
+            size,
+            path: Some(path.to_string_lossy().into_owned()),
+            source: None,
+        })
     }
 
     /// Unsubscribes from the list `thread`'s latest message came from.
@@ -145,4 +163,28 @@ impl Mail {
         tracing::debug!(account = account.0, filter, "unblock asked for");
         Err(Error::NotYetImplemented("unblocking senders"))
     }
+}
+
+/// The type of a file the system has no type for.
+const OCTET_STREAM: &str = "application/octet-stream";
+
+/// Writes a draft's file into its own numbered folder inside `dir`, so its
+/// name stays as the user picked it. Making the folder reserves the number,
+/// so two files added at once never share one. Returns the file's id within
+/// the draft and its path.
+fn keep_file(dir: &Path, name: &str, data: &[u8]) -> Result<(String, PathBuf), std::io::Error> {
+    std::fs::create_dir_all(dir)?;
+    for n in 1u32.. {
+        let slot = dir.join(n.to_string());
+        match std::fs::create_dir(&slot) {
+            Ok(()) => {
+                let path = slot.join(name);
+                std::fs::write(&path, data)?;
+                return Ok((format!("file-{n}"), path));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Err(std::io::Error::other("no free slot for the file"))
 }

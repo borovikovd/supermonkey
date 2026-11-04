@@ -214,3 +214,19 @@ the spec's wording:
 - **A label made here that merges into one Gmail already had** (a refresh
   stored Gmail's copy before the create answered) is renamed in queued ops
   and undo entries too, so they keep naming a label that exists.
+
+## Decided in the rewrite: compose
+
+- **A draft's files are read only from the app's own folders.** The paths
+  in a save come from the webview, which is not trusted: a file added to a
+  draft is read only from that draft's folder in the app's data folder, and
+  an attachment a draft carries only from the account's downloads (else it
+  is downloaded again). A file that is gone, or outside those folders,
+  rejects the write with a toast instead of sending without it.
+- **Files added to a draft** are kept as `drafts/<draft>/<n>/<name>` in the
+  app's data folder, with the id `file-<n>`, so the file keeps the name the
+  user picked and two files added at once never share one. The folder goes
+  when the draft is sent, discarded, or its account removed.
+- **A poll that sees a draft change** reconciles the drafts only. The
+  connect sync and the full resync also queue each Gmail draft's thread for
+  metadata and bodies, as SPEC Sync lists them.

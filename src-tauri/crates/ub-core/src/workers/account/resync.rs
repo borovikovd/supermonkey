@@ -9,8 +9,9 @@ use ub_store::{Priority as WritePriority, ThreadSyncState};
 
 use super::ctx::AccountCtx;
 use super::ingest::drop_thread;
-use super::poller::{queue_drafts, queue_starred_and_sent, store_cursor};
+use super::poller::{queue_starred_and_sent, store_cursor};
 use super::queue::{INBOX_BODIES, INBOX_META, LATE, Work};
+use crate::workers::drafts::{Occasion, reconcile};
 
 /// Threads per resync `threads.list` page: about 10 units per 500 threads.
 const RESYNC_PAGE: u32 = 500;
@@ -66,7 +67,7 @@ pub(crate) async fn full_resync(ctx: &AccountCtx) -> Result<(), GmailError> {
     // Of the threads not cached, those the connect sync would read.
     queue_starred_and_sent(ctx);
     // 5. Drafts.
-    queue_drafts(ctx).await?;
+    reconcile(ctx, Occasion::Sync).await?;
     // 6. The snooze rule runs as each thread is stored.
     Ok(())
 }

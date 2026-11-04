@@ -18,6 +18,7 @@ use super::queue::{BACKFILL, INBOX_BODIES, INBOX_META, LATE, Listing, OTHER_META
 use super::read::read_thread;
 use super::resync::full_resync;
 use crate::Error;
+use crate::workers::drafts::{Occasion, reconcile};
 
 /// How often history is polled while Gmail answers.
 const POLL_EVERY: Duration = Duration::from_secs(45);
@@ -126,7 +127,7 @@ async fn connect(ctx: &AccountCtx) -> Result<(), GmailError> {
     }
     queue_inbox(ctx);
     queue_starred_and_sent(ctx);
-    queue_drafts(ctx).await?;
+    reconcile(ctx, Occasion::Sync).await?;
     ctx.queue.push(BACKFILL, Work::Backfill { page: None });
     let connected = ctx
         .writer()
@@ -177,31 +178,6 @@ pub(crate) fn queue_starred_and_sent(ctx: &AccountCtx) {
     );
 }
 
-/// Every Gmail draft, from `drafts.list`: its thread's metadata, then bodies.
-///
-/// Extension point: the compose slice reconciles the local draft rows with
-/// the list here (SPEC Drafts).
-pub(crate) async fn queue_drafts(ctx: &AccountCtx) -> Result<(), GmailError> {
-    let mut page: Option<PageToken> = None;
-    loop {
-        let listed = ctx.gmail.list_drafts(Priority::P4, page.as_ref()).await?;
-        for draft in listed.drafts {
-            ctx.queue.push(
-                OTHER_META,
-                Work::Meta {
-                    thread: draft.message.thread_id,
-                    history: None,
-                    body: Some(LATE),
-                },
-            );
-        }
-        match listed.next_page_token {
-            Some(next) => page = Some(next),
-            None => return Ok(()),
-        }
-    }
-}
-
 /// One poll from the stored cursor. A cursor Gmail no longer keeps runs the
 /// full resync.
 async fn poll(ctx: &AccountCtx) -> Result<(), GmailError> {
@@ -230,6 +206,7 @@ async fn poll(ctx: &AccountCtx) -> Result<(), GmailError> {
         return Ok(());
     }
     let batch = HistoryBatch::new(records);
+    let drafts_changed = batch.drafts_changed;
     let named: Vec<GmailMessageId> = batch.labels.keys().cloned().collect();
     let known: BTreeSet<GmailMessageId> = ctx
         .read(move |r| {
@@ -282,8 +259,10 @@ async fn poll(ctx: &AccountCtx) -> Result<(), GmailError> {
             tracing::warn!(account = account.0, error = %e, "couldn't apply a poll's history");
         }
     }
-    // Extension point: when `batch.drafts_changed`, the compose slice
-    // reconciles drafts here (SPEC Drafts).
+    // A draft was added or an old version deleted: reconcile the drafts.
+    if drafts_changed {
+        reconcile(ctx, Occasion::Poll).await?;
+    }
     Ok(())
 }
 

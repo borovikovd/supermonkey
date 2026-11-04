@@ -1,6 +1,7 @@
 //! What an account worker's tasks share (ARCHITECTURE.md, section 8.2), and
 //! how each of them handles a failed Gmail call.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -24,6 +25,8 @@ pub(crate) const OFFLINE_RETRY: Duration = Duration::from_secs(10);
 
 /// What every account worker uses and no worker owns.
 pub(crate) struct WorkerDeps {
+    /// The app's data folder: attachment and draft files.
+    pub(crate) data_dir: PathBuf,
     pub(crate) writer: CoreWriter,
     pub(crate) pool: Arc<ReadPool>,
     pub(crate) clock: Arc<dyn Clock>,
@@ -51,6 +54,8 @@ pub(crate) struct AccountCtx {
     pub(crate) poll: Kick,
     /// Wakes the ops runner: ops were queued.
     pub(crate) ops: Kick,
+    /// Wakes the outbox runner: a send was queued, undone, or unblocked.
+    pub(crate) outbox: Kick,
     /// What the account's op replay keeps across worker replacements.
     pub(crate) lane: Arc<OpsLane>,
     pub(crate) health: Health,
@@ -94,6 +99,7 @@ impl AccountCtx {
             queue,
             poll: Kick::new(Arc::clone(tasks.activity())),
             ops: Kick::new(Arc::clone(tasks.activity())),
+            outbox: Kick::new(Arc::clone(tasks.activity())),
             lane,
             health,
             deps,

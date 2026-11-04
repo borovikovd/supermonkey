@@ -1,4 +1,5 @@
-//! What one account's op replay keeps when its worker is replaced.
+//! What one account's op replay and draft writes keep when its worker is
+//! replaced.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -6,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::activity::Tasks;
+use crate::drafts::DraftsWriting;
 use crate::ops::Landed;
 
 /// The account's op lane: one op runs at a time, and a run outlives the
@@ -25,6 +27,9 @@ pub(crate) struct OpsLane {
     tasks: Tasks,
     /// Ops that landed while reads were in flight.
     pub(crate) landed: Arc<Landed>,
+    /// The account's drafts being written to Gmail, by an upsert or the
+    /// outbox: a write outlives a replaced worker too.
+    pub(crate) writing: Arc<DraftsWriting>,
     /// How many labels made here got their Gmail id: a label list read
     /// before one did cannot know it yet.
     labels_mapped: AtomicU64,
@@ -37,6 +42,7 @@ impl OpsLane {
             turn: Arc::default(),
             tasks,
             landed: Arc::default(),
+            writing: Arc::default(),
             labels_mapped: AtomicU64::new(0),
         })
     }

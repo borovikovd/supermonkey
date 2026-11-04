@@ -7,8 +7,8 @@ use ub_gmail::PageToken;
 /// writer state; the writer releases them to the router only once the
 /// commit has landed, and drops them when it rolls back.
 ///
-/// Each later slice adds the variants its workers consume (the op queue,
-/// the outbox, notifications, the snooze timer).
+/// Each later slice adds the variants its workers consume (notifications,
+/// the snooze timer).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Effect {
     /// A conversation was subscribed: fetch its bodies if any are missing
@@ -33,17 +33,27 @@ pub enum Effect {
     },
     /// A subscription closed: cancel its queued Gmail work.
     CancelSub(SubId),
-    /// A draft read from Gmail opened in a composer and needs its parts
-    /// downloaded. Filled by the compose slice.
+    /// A draft read from Gmail opened in a composer and needs its
+    /// attachments downloaded before its first upsert (SPEC Addressing).
     DraftParts {
         /// The draft's account.
         account: AccountId,
         /// The draft.
         draft: DraftId,
     },
-    /// A draft's row is gone: delete its attachment files. Filled by the
-    /// compose slice.
+    /// A draft's row is gone: delete its attachment files.
     DraftFilesGone(DraftId),
+    /// A composer closed without edits on a draft whose Gmail change was
+    /// skipped while it was open: read that change now (SPEC Drafts).
+    ReadDraft {
+        /// The draft's account.
+        account: AccountId,
+        /// The draft.
+        draft: DraftId,
+    },
+    /// The account's outbox changed: its runner looks again (SPEC Send and
+    /// undo).
+    Outbox(AccountId),
     /// The UI is showing this account. Its Gmail requests need no head
     /// start: each account has its own slots and budget (DEVIATIONS).
     OnScreen(AccountId),
@@ -74,6 +84,8 @@ impl Effect {
             Self::CancelSub(_) => "cancel sub",
             Self::DraftParts { .. } => "draft parts",
             Self::DraftFilesGone(_) => "draft files gone",
+            Self::ReadDraft { .. } => "read draft",
+            Self::Outbox(_) => "outbox",
             Self::OnScreen(_) => "on screen",
             Self::RefreshLabels(_) => "refresh labels",
             Self::AccountRemoved { .. } => "account removed",

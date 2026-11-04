@@ -25,10 +25,7 @@ pub(crate) struct ActionCtx<'a, 'c> {
 /// Applies one action.
 pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), ActionError> {
     match action {
-        Action::Reset => {
-            subscriptions::reset(ctx);
-            Ok(())
-        }
+        Action::Reset => subscriptions::reset(ctx),
         Action::Subscribe { sub, key } => subscriptions::subscribe(ctx, sub, key),
         Action::Unsubscribe { sub } => {
             subscriptions::unsubscribe(ctx, sub);
@@ -50,10 +47,10 @@ pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), A
             name,
             apply,
         } => labels::create_label(ctx, account, &id, &name, apply),
-        Action::SaveDraft { .. } => compose::save_draft(),
-        Action::CloseComposer { .. } => compose::close_composer(),
-        Action::SendDraft { .. } => compose::send_draft(),
-        Action::DiscardDraft { .. } => compose::discard_draft(),
+        Action::SaveDraft { draft, save } => compose::save_draft(ctx, &draft, save),
+        Action::CloseComposer { draft } => compose::close_composer(ctx, &draft),
+        Action::SendDraft { draft } => compose::send_draft(ctx, &draft),
+        Action::DiscardDraft { draft } => compose::discard_draft(ctx, &draft),
         Action::Pin {
             account,
             kind,

@@ -6,7 +6,9 @@ use ub_domain::{
     AccountId, ActionNo, Addr, DraftId, DraftKind, MessageId, Millis, NoticeKind, OutboxState,
     SubId, ThreadId, View,
 };
-use ub_ipc::{Action, ChannelMessage, ModifyAction, NumberedAction, SubKey, SubUpdate};
+use ub_ipc::{
+    Action, ChannelMessage, DraftFields, DraftSave, ModifyAction, NumberedAction, SubKey, SubUpdate,
+};
 use ub_store::{Draft, NewBody, NewNotice, NewOutbox, Priority, StoreError};
 
 use super::{ACCOUNT_EMAIL, Harness, eventually, seed};
@@ -473,5 +475,63 @@ async fn a_conversation_lists_its_messages_and_marks_the_accounts_own() {
             ("person1@example.org".to_owned(), false),
             (ACCOUNT_EMAIL.to_owned(), true)
         ]
+    );
+}
+
+#[tokio::test]
+async fn a_save_that_arrives_after_the_send_is_dropped() {
+    let mut h = Harness::start().await;
+    let (account, _) = h.write(seed).await;
+    let draft = DraftId::from("d1");
+    let save = |body: &str| Action::SaveDraft {
+        draft: draft.clone(),
+        save: DraftSave::Update {
+            fields: DraftFields {
+                from: None,
+                to: vec![ub_ipc::Addr {
+                    name: None,
+                    email: "b@example.com".to_owned(),
+                }],
+                cc: Vec::new(),
+                bcc: Vec::new(),
+                subject: "Hi".to_owned(),
+                body_html: body.to_owned(),
+                attachments: Vec::new(),
+            },
+        },
+    };
+    h.act(vec![
+        Action::SaveDraft {
+            draft: draft.clone(),
+            save: DraftSave::Create {
+                account,
+                kind: DraftKind::New,
+                reply_all: false,
+                thread: None,
+                target: None,
+                started_on_latest: false,
+            },
+        },
+        save("<p>final</p>"),
+        Action::SendDraft {
+            draft: draft.clone(),
+        },
+    ])
+    .await;
+    h.act(vec![save("<p>late</p>")]).await;
+    let d = draft.clone();
+    let body = h
+        .write(move |tx| {
+            Ok(tx
+                .read()
+                .drafts()
+                .get(&d)?
+                .map(|r| (r.in_outbox, r.draft.body_html)))
+        })
+        .await;
+    assert_eq!(
+        body,
+        Some((true, "<p>final</p>".to_owned())),
+        "the outbox sends what was sent"
     );
 }

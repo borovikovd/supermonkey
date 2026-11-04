@@ -1,9 +1,8 @@
 //! The `Lifecycle` handle: connecting a page, the online flag, and quitting
 //! (ARCHITECTURE.md, sections 4 and 8.1).
 //!
-//! Extension points: later slices add to [`Lifecycle::launch`] (wake due
-//! snoozes, settle the outbox, apply the untouched rule to drafts still
-//! started fresh), and the notifications slice to [`Lifecycle::focus`] (a
+//! Extension points: the snooze slice adds to [`Lifecycle::launch`] (wake
+//! due snoozes), and the notifications slice to [`Lifecycle::focus`] (a
 //! click-through on the last notification).
 
 use std::sync::Arc;
@@ -14,6 +13,7 @@ use ub_store::{Priority, StoreError};
 
 use crate::actions::Received;
 use crate::activity::Tasks;
+use crate::clock::Clock;
 use crate::workers::{AccountWorkers, Network};
 use crate::writer::{ChannelSink, CoreWriter};
 use crate::{Error, Notification};
@@ -26,6 +26,7 @@ pub const QUIT_DEADLINE: Duration = Duration::from_secs(5);
 pub struct Lifecycle {
     writer: CoreWriter,
     received: Arc<Received>,
+    clock: Arc<dyn Clock>,
     tasks: Tasks,
     workers: Arc<AccountWorkers>,
     network: Arc<Network>,
@@ -36,6 +37,7 @@ impl Lifecycle {
     pub(crate) fn new(
         writer: CoreWriter,
         received: Arc<Received>,
+        clock: Arc<dyn Clock>,
         tasks: Tasks,
         workers: Arc<AccountWorkers>,
         network: Arc<Network>,
@@ -44,6 +46,7 @@ impl Lifecycle {
         Self {
             writer,
             received,
+            clock,
             tasks,
             workers,
             network,
@@ -77,12 +80,28 @@ impl Lifecycle {
     }
 
     /// Starts the work that talks to Gmail, once, after
-    /// [`App::start`](crate::App::start): each signed-in account's worker
-    /// (SPEC Accounts: one with no stored token shows Sign in again). The
-    /// E2E server seeds accounts between the two.
+    /// [`App::start`](crate::App::start). First the outbox is settled (sends
+    /// already sent lose their undo entries, sends that missed their time
+    /// show `Email delayed`) and the untouched rule runs for drafts whose
+    /// first composer never closed; then each signed-in account's worker
+    /// starts (SPEC Accounts: one with no stored token shows Sign in again).
+    /// The E2E server seeds accounts between the two.
     pub fn launch(&self) {
-        self.workers.launch();
-        tracing::info!("launched");
+        let (writer, workers) = (self.writer.clone(), Arc::clone(&self.workers));
+        let now = self.clock.now();
+        self.tasks.spawn("launch", async move {
+            let settled = writer
+                .call(Priority::Ui, move |tx, state| {
+                    crate::outbox::on_launch(tx, state, now)?;
+                    crate::drafts::on_launch(tx, state, now)
+                })
+                .await;
+            if let Err(e) = settled {
+                tracing::error!(error = %e, "couldn't settle the outbox and drafts at launch");
+            }
+            workers.launch();
+            tracing::info!("launched");
+        });
     }
 
     /// The main window gained or lost focus. Focus polls every account and

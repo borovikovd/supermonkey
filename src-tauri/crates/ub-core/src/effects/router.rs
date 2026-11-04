@@ -68,11 +68,22 @@ impl Router {
             // Requests of different accounts never wait on each other, so
             // the account on screen needs no head start (DEVIATIONS).
             Effect::OnScreen(_) => {}
-            // Extension points: the compose slice downloads draft parts and
-            // deletes draft files.
-            Effect::DraftParts { .. } | Effect::DraftFilesGone(_) => {
-                tracing::debug!(effect = effect.name(), "no worker for this effect yet");
+            Effect::Outbox(account) => {
+                if let Some(worker) = self.workers.get(account) {
+                    worker.kick_outbox();
+                }
             }
+            Effect::DraftParts { account, draft } => {
+                if let Some(worker) = self.workers.get(account) {
+                    worker.download_parts(draft);
+                }
+            }
+            Effect::ReadDraft { account, draft } => {
+                if let Some(worker) = self.workers.get(account) {
+                    worker.read_draft(draft);
+                }
+            }
+            Effect::DraftFilesGone(draft) => self.workers.delete_draft_files(&draft),
         }
     }
 

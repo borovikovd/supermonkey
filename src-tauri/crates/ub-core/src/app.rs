@@ -133,6 +133,7 @@ impl App {
         let network = Arc::new(Network::new(writer.clone(), Arc::clone(&activity)));
         let workers = AccountWorkers::new(
             Arc::new(WorkerDeps {
+                data_dir: config.data_dir.clone(),
                 writer: writer.clone(),
                 pool: Arc::clone(&pool),
                 clock: Arc::clone(&clock),
@@ -142,7 +143,6 @@ impl App {
             HttpClient::new()?,
             tokens,
             tasks.clone(),
-            config.data_dir.clone(),
         );
         let router = Router {
             pool: Arc::clone(&pool),
@@ -161,10 +161,11 @@ impl App {
                 Arc::clone(&clock),
                 tasks.clone(),
             ),
-            queries: Queries::new(Arc::clone(&pool), clock),
+            queries: Queries::new(Arc::clone(&pool), Arc::clone(&clock)),
             lifecycle: Lifecycle::new(
                 writer.clone(),
                 received,
+                clock,
                 tasks,
                 Arc::clone(&workers),
                 network,

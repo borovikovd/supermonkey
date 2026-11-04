@@ -156,11 +156,10 @@ pub(crate) fn reject(
                 tracing::warn!(op = %id, error = %e, "a rejected op does not parse; nothing to roll back");
             }
         },
-        // Extension point: the compose slice rolls back rejected draft and
-        // trash ops (SPEC Drafts, Send and undo).
-        OpKind::DraftUpsert | OpKind::DraftDelete | OpKind::TrashMessage => {
-            tracing::warn!(op = %id, kind = op.kind.as_str(), "no rollback for this op kind yet");
-        }
+        // Nothing here to roll back: a draft keeps its text when Gmail
+        // refuses it, and a sent message trashed by an undo stays trashed
+        // here; the notice says Gmail refused.
+        OpKind::DraftUpsert | OpKind::DraftDelete | OpKind::TrashMessage => {}
     }
     if let Some(action) = op.action {
         tx.undo().delete(UndoEntryId(action.0))?;

@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use ub_domain::{Addr, GmailMessageId, GmailThreadId, LabelSet, Millis, SystemLabel};
 use ub_gmail::{Format, GmailAttachmentId, GmailError, HistoryId, Message, Outcome, Priority};
-use ub_mime::{ParsedMessage, Part};
+use ub_mime::{CidImages, DraftBody, ParsedMessage, Part};
 use ub_store::{NewAttachment, NewBody, NewMessage};
 
 use super::ctx::AccountCtx;
@@ -171,6 +171,32 @@ async fn body(
         is_plain: rendered.is_plain,
         attachments,
     })
+}
+
+/// A Gmail draft's message, parsed and sanitized for storing, and its HTML
+/// split at the `gmail_quote` element: the editor's part and the quote
+/// block (SPEC Addressing). Its inline images are not fetched: the composer
+/// shows only the text above the quote. Slow on a big draft: call it off
+/// the async threads.
+pub(crate) fn draft_message(m: &Message) -> (ReadMessage, DraftBody) {
+    let parsed = parse(m);
+    let message = new_message(m, &parsed);
+    let rendered = parsed.body.clone().render(&CidImages::new());
+    let body = NewBody {
+        html: Some(rendered.html),
+        quote_html: rendered.quote,
+        text: Some(rendered.text),
+        is_plain: rendered.is_plain,
+        attachments: parsed.parts.iter().map(new_attachment).collect(),
+    };
+    let draft = parsed.body.into_draft();
+    (
+        ReadMessage {
+            message,
+            body: Some(body),
+        },
+        draft,
+    )
 }
 
 fn new_attachment(part: &Part) -> NewAttachment {

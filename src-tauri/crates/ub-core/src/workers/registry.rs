@@ -10,19 +10,16 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use parking_lot::Mutex;
 use tokio::sync::{RwLock, mpsc};
-use ub_domain::AccountId;
+use ub_domain::{AccountId, DraftId};
 use ub_gmail::{Gmail, HttpClient, RefreshToken, Scheduler, TokenStore, Tokens};
 use ub_store::Priority;
 
 use super::account::{AccountWorker, SignOutSender, WorkerDeps, WorkerId};
+use super::files::{attachments_dir, draft_dir};
 use super::ops::OpsLane;
 use crate::activity::{Tasks, Tracked, parked};
 use crate::writer::CoreWriter;
 use crate::{Error, GmailConfig};
-
-/// The folder, in the app's data folder, that holds downloaded attachments,
-/// one folder per account.
-pub(crate) const ATTACHMENTS_DIR: &str = "attachments";
 
 /// Every running account worker, and what starting one takes.
 pub(crate) struct AccountWorkers {
@@ -32,7 +29,6 @@ pub(crate) struct AccountWorkers {
     scheduler: Scheduler,
     tokens: Arc<dyn TokenStore>,
     tasks: Tasks,
-    data_dir: PathBuf,
     live: Arc<Live>,
     /// Each account's op lane. It outlives the account's workers, so an op
     /// a replaced worker had sent lands before the next one replays.
@@ -72,7 +68,6 @@ impl AccountWorkers {
         http: HttpClient,
         tokens: Arc<dyn TokenStore>,
         tasks: Tasks,
-        data_dir: PathBuf,
     ) -> Arc<Self> {
         let live = Arc::new(Live {
             workers: Mutex::new(HashMap::new()),
@@ -87,7 +82,6 @@ impl AccountWorkers {
             http,
             tokens,
             tasks,
-            data_dir,
             live,
             lanes: Mutex::default(),
             sign_outs,
@@ -122,11 +116,27 @@ impl AccountWorkers {
         &self.deps.writer
     }
 
-    /// The folder of an account's downloaded attachments.
-    pub(crate) fn attachments_dir(&self, account: AccountId) -> PathBuf {
-        self.data_dir
-            .join(ATTACHMENTS_DIR)
-            .join(account.0.to_string())
+    /// The folder of a draft's added files.
+    pub(crate) fn draft_dir(&self, draft: &DraftId) -> PathBuf {
+        draft_dir(&self.deps.data_dir, draft)
+    }
+
+    /// Deletes a draft's added files: its row is gone.
+    pub(crate) fn delete_draft_files(&self, draft: &DraftId) {
+        let dir = self.draft_dir(draft);
+        self.tasks.spawn("delete draft files", async move {
+            let deleted =
+                tokio::task::spawn_blocking(move || match std::fs::remove_dir_all(&dir) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+                    _ => Ok(()),
+                })
+                .await;
+            match deleted {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::warn!(error = %e, "couldn't delete a draft's files"),
+                Err(e) => tracing::warn!(error = %e, "deleting a draft's files failed"),
+            }
+        });
     }
 
     /// The account's running worker.
@@ -318,7 +328,7 @@ impl AccountWorkers {
                 }
             }
             let tokens = Arc::clone(&workers.tokens);
-            let dir = workers.attachments_dir(account);
+            let dir = attachments_dir(&workers.deps.data_dir, account);
             let cleaned = tokio::task::spawn_blocking(move || {
                 if let Err(e) = tokens.delete(&email) {
                     tracing::warn!(account = account.0, error = %e, "couldn't delete a removed account's token");

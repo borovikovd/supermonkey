@@ -3,13 +3,16 @@
 use std::sync::Arc;
 
 use futures_util::future::join_all;
-use ub_domain::{LabelId, LabelSet};
+use ub_domain::{DraftId, GmailMessageId, LabelId, LabelSet};
 use ub_gmail::{Format, GmailError, Outcome, Priority};
 use ub_store::{OpId, OpKind, OpRecord, Priority as WritePriority, StoreError};
 
 use crate::Error;
+use crate::drafts::store_ids;
+use crate::effects::Effect;
 use crate::ops::{LabelCreateOp, ModifyOp, reject, relabel};
 use crate::workers::account::AccountCtx;
+use crate::workers::drafts::{Upserted, WriteFailure, delete_draft, upsert};
 
 /// The most ids one `messages.batchModify` takes.
 const BATCH_MODIFY_MAX: usize = 1000;
@@ -22,8 +25,8 @@ pub(super) enum Failure {
     Gmail(GmailError),
     /// The database refused a read or write.
     Store(Error),
-    /// No runner handles this kind of op yet.
-    NotYet(&'static str),
+    /// The outbox is writing the op's draft: run it again once it is done.
+    Busy,
 }
 
 /// What Gmail said, as the op's result to write.
@@ -46,6 +49,14 @@ enum Landing {
     Modify(ModifyOp),
     /// A label made here, and Gmail's id for it.
     Label { local: LabelId, gmail: LabelId },
+    /// A draft written to Gmail, and Gmail's ids for it; `None` when there
+    /// was nothing to write.
+    Draft {
+        draft: DraftId,
+        written: Option<Box<ub_gmail::Draft>>,
+    },
+    /// Nothing more to write.
+    Plain,
 }
 
 /// Runs `op` once and writes what came of it. Nothing is written when Gmail
@@ -66,11 +77,32 @@ pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure
                 Answer::Unreadable
             }
         },
-        // Extension point: the compose slice runs draft upserts, deletes,
-        // and the trash of a sent message (SPEC Drafts, Send and undo).
-        OpKind::DraftUpsert | OpKind::DraftDelete | OpKind::TrashMessage => {
-            return Err(Failure::NotYet(op.kind.as_str()));
+        OpKind::DraftUpsert => {
+            if let Some(draft) = &op.draft {
+                draft_upsert(ctx, draft).await?
+            } else {
+                tracing::error!(op = %op.id, "a draft upsert names no draft; dropping it");
+                Answer::Unreadable
+            }
         }
+        OpKind::DraftDelete => {
+            if let Some(gmail) = &op.gmail_draft {
+                match delete_draft(ctx, gmail).await {
+                    Ok(()) => Answer::Done(Landing::Plain),
+                    Err(e) => refused(e)?,
+                }
+            } else {
+                tracing::error!(op = %op.id, "a draft delete names no Gmail draft; dropping it");
+                Answer::Unreadable
+            }
+        }
+        OpKind::TrashMessage => match op.payload::<GmailMessageId>() {
+            Ok(message) => trash_message(ctx, &message).await?,
+            Err(e) => {
+                tracing::error!(op = %op.id, error = %e, "a queued op does not parse; dropping it");
+                Answer::Unreadable
+            }
+        },
     };
     ctx.health.succeeded();
     write(ctx, op.id, answer).await.map_err(Failure::Store)
@@ -172,6 +204,48 @@ async fn create_label(ctx: &AccountCtx, op: LabelCreateOp) -> Result<Answer, Fai
     }))
 }
 
+/// A draft upsert (SPEC Drafts). Whatever came of it, a send of the draft
+/// waiting for this write to end looks again.
+async fn draft_upsert(ctx: &AccountCtx, draft: &DraftId) -> Result<Answer, Failure> {
+    let upserted = upsert(ctx, draft).await;
+    if !matches!(upserted, Ok(Upserted::Written(_))) {
+        let (account, draft) = (ctx.account, draft.clone());
+        ctx.writer().queue(
+            WritePriority::Sync,
+            "wake the outbox after an upsert",
+            move |tx, state| {
+                if tx.read().drafts().get(&draft)?.is_some_and(|d| d.in_outbox) {
+                    state.effect(Effect::Outbox(account));
+                }
+                Ok(())
+            },
+        );
+    }
+    match upserted {
+        Ok(Upserted::Written(written)) => Ok(Answer::Done(Landing::Draft {
+            draft: draft.clone(),
+            written: Some(written),
+        })),
+        Ok(Upserted::Nothing) => Ok(Answer::Done(Landing::Draft {
+            draft: draft.clone(),
+            written: None,
+        })),
+        Ok(Upserted::Busy) => Err(Failure::Busy),
+        Err(WriteFailure::Gmail(e)) => refused(e),
+        Err(WriteFailure::Store(e)) => Err(Failure::Store(e)),
+    }
+}
+
+/// `messages.trash` of a sent message whose send was undone. One Gmail no
+/// longer has is gone already.
+async fn trash_message(ctx: &AccountCtx, message: &GmailMessageId) -> Result<Answer, Failure> {
+    match ctx.gmail.trash_message(Priority::P1, message).await {
+        Ok(_) => Ok(Answer::Done(Landing::Plain)),
+        Err(e) if *e.outcome() == Outcome::NotFound => Ok(Answer::Done(Landing::Plain)),
+        Err(e) => refused(e),
+    }
+}
+
 /// A failed call: a rejection is an answer; anything else leaves the op
 /// queued (SPEC Gmail errors: only a rejection rolls an action back).
 fn refused(e: GmailError) -> Result<Answer, Failure> {
@@ -199,15 +273,29 @@ fn refused(e: GmailError) -> Result<Answer, Failure> {
 async fn write(ctx: &AccountCtx, id: OpId, answer: Answer) -> Result<(), Error> {
     let (account, now, lane) = (ctx.account, ctx.clock().now(), Arc::clone(&ctx.lane));
     ctx.writer()
-        .call(WritePriority::Sync, move |tx, _| match answer {
+        .call(WritePriority::Sync, move |tx, state| match answer {
             Answer::Rejected(message) => reject(tx, id, &message, now),
             Answer::Unreadable => tx.ops().delete(id),
+            // Stored even when a newer save replaced the op: the next write
+            // updates this Gmail draft instead of making another.
+            Answer::Done(Landing::Draft { draft, written }) => {
+                if let Some(written) = &written {
+                    let ids = (&written.id, &written.message.id, &written.message.thread_id);
+                    store_ids(tx, state, &draft, ids, Some(account), now)?;
+                }
+                if tx.read().drafts().get(&draft)?.is_some_and(|d| d.in_outbox) {
+                    // Sent meanwhile: the outbox waited for this write to end.
+                    state.effect(Effect::Outbox(account));
+                }
+                tx.ops().delete(id)
+            }
             _ if tx.read().ops().get(id)?.is_none() => Ok::<_, StoreError>(()),
             Answer::Narrowed(op) => tx.ops().set_payload(id, &op),
             Answer::Done(Landing::Modify(op)) => {
                 lane.landed.push(op);
                 tx.ops().delete(id)
             }
+            Answer::Done(Landing::Plain) => tx.ops().delete(id),
             Answer::Done(Landing::Label { local, gmail }) => {
                 let used = tx.labels().assign_gmail_id(account, &local, &gmail)?;
                 if used != local {

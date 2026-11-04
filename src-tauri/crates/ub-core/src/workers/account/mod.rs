@@ -6,6 +6,8 @@
 //! - the fetchers: the fetch queue's metadata and body reads, in priority
 //!   order, and the contacts backfill;
 //! - the ops runner (`workers::ops`): queued Gmail mutations, in order;
+//! - the outbox runner (`workers::outbox`): sends, once their undo window
+//!   passes;
 //! - one-off reads: a thread the user opens, a label refresh, a Gmail
 //!   listing for a list subscription.
 //!
@@ -28,17 +30,21 @@ mod resync;
 
 use std::sync::Arc;
 
-use ub_domain::ThreadId;
+use ub_domain::{DraftId, ThreadId};
 use ub_gmail::Gmail;
 
 pub(crate) use ctx::{AccountCtx, OFFLINE_RETRY, SignOutSender, WorkerDeps, WorkerId};
 pub(crate) use fetcher::{fetch_thread, is_current, needs_bodies};
+pub(crate) use ingest::store_draft_message;
+pub(crate) use queue::OTHER_META;
 pub(crate) use queue::{LATE, Work};
+pub(crate) use read::{ReadMessage, draft_message, parse};
 
 use self::health::Health;
 use self::queue::FetchQueue;
 use crate::activity::Tasks;
 use crate::workers::ops::{self, OpsLane};
+use crate::workers::{drafts, outbox};
 
 /// A running account worker.
 #[derive(Clone)]
@@ -84,6 +90,7 @@ impl AccountWorker {
             let tasks = &starting.tasks;
             tasks.spawn("poller", poller::run(Arc::clone(&starting)));
             tasks.spawn("ops", ops::run(Arc::clone(&starting)));
+            tasks.spawn("outbox", outbox::run(Arc::clone(&starting)));
             for _ in 0..fetcher::FETCHERS {
                 tasks.spawn("fetcher", fetcher::run(Arc::clone(&starting)));
             }
@@ -110,6 +117,31 @@ impl AccountWorker {
     /// Wakes the ops runner: ops were queued.
     pub(crate) fn kick_ops(&self) {
         self.ctx.ops.kick();
+    }
+
+    /// Wakes the outbox runner: a send was queued or undone.
+    pub(crate) fn kick_outbox(&self) {
+        self.ctx.outbox.kick();
+    }
+
+    /// Downloads the parts of a draft read from Gmail, now open in a
+    /// composer (SPEC Addressing).
+    pub(crate) fn download_parts(&self, draft: DraftId) {
+        let ctx = Arc::clone(&self.ctx);
+        self.ctx.tasks.spawn("draft parts", async move {
+            if let Err(e) = drafts::download_parts(&ctx, &draft).await {
+                tracing::info!(account = ctx.account.0, error = %e, "couldn't download a draft's parts yet");
+            }
+        });
+    }
+
+    /// Reads a Gmail change to a draft that was skipped while a composer
+    /// had it open (SPEC Drafts).
+    pub(crate) fn read_draft(&self, draft: DraftId) {
+        let ctx = Arc::clone(&self.ctx);
+        self.ctx.tasks.spawn("read draft", async move {
+            drafts::read_skipped(&ctx, &draft).await;
+        });
     }
 
     /// Reads `sendAs` and the labels again (SPEC Sync: on focus).

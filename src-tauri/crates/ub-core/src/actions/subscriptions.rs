@@ -10,13 +10,16 @@ use super::{ActionCtx, ActionError};
 use crate::effects::{Effect, GmailQuery};
 
 /// A reloaded page's first action: closes every subscription of the
-/// previous page.
-pub(super) fn reset(ctx: &mut ActionCtx<'_, '_>) {
-    // Extension point: the compose slice first closes each open composer
-    // here, as a second Esc would (SPEC UI state, Subscriptions).
+/// previous page. An open composer among them closes first, as a second
+/// `Esc` would close it (SPEC UI state, Subscriptions).
+pub(super) fn reset(ctx: &mut ActionCtx<'_, '_>) -> Result<(), ActionError> {
+    for draft in ctx.state.subs.composer_drafts() {
+        crate::drafts::close(ctx.tx, ctx.state, &draft, ctx.now)?;
+    }
     for id in ctx.state.subs.close_all() {
         ctx.state.effect(Effect::CancelSub(id));
     }
+    Ok(())
 }
 
 /// Opens a subscription, and asks for the work that showing it needs: the

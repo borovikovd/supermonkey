@@ -26,6 +26,9 @@ use crate::workers::account::{AccountCtx, OFFLINE_RETRY};
 /// How long the runner waits for a kick before it looks at the queue
 /// again anyway.
 const IDLE_WAIT: Duration = Duration::from_secs(60);
+/// How long an op whose draft the outbox is writing waits before it looks
+/// again.
+const BUSY_WAIT: Duration = Duration::from_secs(1);
 
 /// Replays the account's ops until the worker stops.
 pub(crate) async fn run(ctx: Arc<AccountCtx>) {
@@ -88,13 +91,8 @@ async fn wait_after(ctx: &AccountCtx, failure: &Failure, backoff: &mut Backoff) 
             tracing::warn!(account = ctx.account.0, error = %e, "couldn't run an op; trying again");
             draining(ctx, network.wait(ctx.clock(), OFFLINE_RETRY)).await;
         }
-        Failure::NotYet(kind) => {
-            tracing::warn!(
-                account = ctx.account.0,
-                kind,
-                "no runner for this op kind yet; it stays queued"
-            );
-            ctx.ops.wait(ctx.clock(), IDLE_WAIT).await;
+        Failure::Busy => {
+            draining(ctx, network.wait(ctx.clock(), BUSY_WAIT)).await;
         }
         Failure::Gmail(err) => {
             ctx.health.failed(err);

@@ -120,9 +120,8 @@ pub(super) fn undo(
             split: _,
             replaced,
         } => splits::undo_pin(ctx, account, pin_kind, &value, replaced),
-        // Extension point: the compose slice undoes a send (SPEC Send and
-        // undo): back to a draft while it waits, else a held undo or a
-        // trash of the sent message.
-        UndoAction::Send { .. } => Err(ActionError::NotYetImplemented("undoing a send")),
+        UndoAction::Send { outbox } => {
+            crate::outbox::undo_send(ctx.tx, ctx.state, account, outbox, ctx.now)
+        }
     }
 }
