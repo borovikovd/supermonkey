@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/borovikovd/ubermensch/compare/v0.2.0...v0.2.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* open Settings when clicking the account already on screen ([bae859c](https://github.com/borovikovd/ubermensch/commit/bae859c65d36f1bb9b9cdf2d203b9491543d445f))
+
 ## [0.2.0](https://github.com/borovikovd/ubermensch/compare/v0.1.2...v0.2.0) (2026-11-04)
 
 
