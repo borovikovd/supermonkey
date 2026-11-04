@@ -150,12 +150,27 @@ pub async fn busy_scope<F: Future>(
 /// Awaits `fut` without counting the current task as busy. Only for waits
 /// whose wake-up carries its own activity: a [`Kick`](super::Kick), a timer,
 /// a [`Tracked`](super::Tracked) item.
+///
+/// The task parks only once `fut` has been polled and is pending, so the
+/// wait is registered (a timer with the clock, a waiter with its signal)
+/// before the core can look idle: a test that advances the clock to the
+/// next timer once the core is idle then always finds it.
 pub async fn parked<F: Future>(fut: F) -> F::Output {
-    let _unpark = TASK.try_with(Arc::clone).ok().map(|task| {
-        task.park();
-        Unpark(task)
-    });
-    fut.await
+    let task = TASK.try_with(Arc::clone).ok();
+    let mut unpark: Option<Unpark> = None;
+    let mut fut = std::pin::pin!(fut);
+    std::future::poll_fn(|cx| {
+        let poll = fut.as_mut().poll(cx);
+        if poll.is_pending()
+            && unpark.is_none()
+            && let Some(task) = &task
+        {
+            task.park();
+            unpark = Some(Unpark(Arc::clone(task)));
+        }
+        poll
+    })
+    .await
 }
 
 struct Unpark(Arc<TaskActivity>);
