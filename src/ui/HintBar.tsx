@@ -1,10 +1,12 @@
 import { useChrome } from "../store/chrome";
+import { useNeedsSignin } from "../store/hooks";
 
 export function HintBar() {
   const screen = useChrome((s) =>
     s.account === null ? null : s.perAccount[s.account]?.screen.kind,
   );
   const inline = useChrome((s) => s.inline !== null);
+  const signedOut = useNeedsSignin(useChrome((s) => s.account));
   const drafts = useChrome((s) => {
     const where = s.account === null ? undefined : s.perAccount[s.account]?.where;
     return where?.kind === "view" && where.view.kind === "drafts";
@@ -12,12 +14,14 @@ export function HintBar() {
   const hints =
     screen === "compose" || inline
       ? ["⌘Enter to Send", "Esc to close", "⌘K for commands"]
-      : screen === "conversation"
-        ? ["E to Mark Done", "R to Reply", "Enter to Reply all", "⌘K for commands"]
-        : drafts
-          ? // Mail actions do nothing in Drafts.
-            ["Enter to open draft", "C to compose", "⌘K for commands"]
-          : ["E to Mark Done", "H to snooze", "⌘K for commands"];
+      : signedOut
+        ? ["Enter to sign in", "⌘K for commands"]
+        : screen === "conversation"
+          ? ["E to Mark Done", "R to Reply", "Enter to Reply all", "⌘K for commands"]
+          : drafts
+            ? // Mail actions do nothing in Drafts.
+              ["Enter to open draft", "C to compose", "⌘K for commands"]
+            : ["E to Mark Done", "H to snooze", "⌘K for commands"];
   return (
     <div className="flex h-hintbar shrink-0 items-center justify-center gap-2 bg-hintbar text-hint font-medium text-text-2">
       {hints.map((h, i) => (

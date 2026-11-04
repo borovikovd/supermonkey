@@ -481,10 +481,10 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app);
-  await gmail.invalidGrant(A, true);
-  await gmail.expireAccessTokens(A);
   const errors = await app.errorToasts.count();
 
+  // Offline, so the archive and the reply are still waiting when Google revokes the grant.
+  await gmail.offline(true);
   await expect(app.highlighted).toContainText("Person 1");
   await app.press("e");
   await expect(app.highlighted).toContainText("Person 2");
@@ -495,27 +495,26 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
   await app.type("Waiting for sign-in");
   await app.settle();
   await app.press("Meta+Enter");
+  await gmail.invalidGrant(A, true);
+  await gmail.expireAccessTokens(A);
+  await gmail.offline(false);
   await app.advance(11_000);
   await app.settle();
 
-  // Signed out: the marker and its tooltip.
+  // Signed out: the marker and its tooltip, and the panel says so in place of the mail.
   await expect(app.signInMarker(A)).toBeVisible();
   await expect(app.account(A)).toHaveAttribute("title", /Sign in again/);
   await expect(app.signInMarker(B)).toHaveCount(0);
-  // Cached mail stays readable.
-  await app.press("Escape");
-  await app.row("Q4 plan").click();
-  await expect(app.conversationTitle).toHaveText("Q4 plan");
-  await expect(
-    app.conversation
-      .locator("iframe[data-frame]")
-      .last()
-      .contentFrame()
-      .getByText("Plan message 12."),
-  ).toBeVisible();
-  await app.press("Escape");
+  await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
+  await expect(app.page.getByRole("button", { name: "Sign in with Google" })).toBeVisible();
+  await expect(app.rows).toHaveCount(0);
+  await expect(app.conversationTitle).toHaveCount(0);
+  await expect(app.page.getByText("Enter to sign in")).toBeVisible();
+  // Mail keys do nothing there.
+  await app.press("j");
+  await app.press("c");
+  await expect(app.editor).toHaveCount(0);
   // Nothing reached Gmail, and nothing was rejected.
-  await expect(app.row("Person 1")).toHaveCount(0);
   expect(await labelsOf(gmail, A, s.latest("p1").id)).toContain("INBOX");
   const sentOf = async () =>
     (await gmail.gmail(A)).messages.filter(
@@ -539,14 +538,18 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
   expect(await labelsOf(gmail, B, s.latest("b1").id)).not.toContain("INBOX");
   await app.press("Control+1");
 
-  // Sign in again: the queue and the outbox go out, once.
-  await app.press("Meta+,");
+  // Enter signs in again; the mail is back, and the queue and the outbox go out, once.
+  await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
   await gmail.nextSignIn({ email: A });
-  await settingsBlock(app, A).getByRole("button", { name: "Sign in again" }).click();
   await gmail.invalidGrant(A, false);
+  await app.press("Enter");
   await app.settle();
-  await expect(settings.getByRole("button", { name: "Sign in again" })).toHaveCount(0);
   await expect(app.signInMarker(A)).toHaveCount(0);
+  await expect(app.page.getByText(`You're signed out of ${A}.`)).toHaveCount(0);
+  await expect(app.row("Q4 plan")).toBeVisible();
+  await app.press("Meta+,");
+  await expect(settings.getByRole("button", { name: "Sign in again" })).toHaveCount(0);
+  await app.press("Escape");
   await app.advance(10_000);
   await app.settle();
   expect(await labelsOf(gmail, A, s.latest("p1").id)).not.toContain("INBOX");
@@ -748,23 +751,19 @@ test("ACC-14 an account with no stored token at launch shows Sign in again", asy
   await expect(app.signInMarker(A)).toBeVisible();
   await expect(app.account(A)).toHaveAttribute("title", /Sign in again/);
   await expect(app.signInMarker(B)).toHaveCount(0);
-  // An archive waits for the sign-in, and A's cached mail stays readable.
-  await expect(app.highlighted).toContainText("Person 1");
-  await app.press("e");
-  await app.settle();
-  expect(await labelsOf(gmail, A, s.latest("p1").id)).toContain("INBOX");
-  await app.row("Q4 plan").click();
-  await expect(app.conversationTitle).toHaveText("Q4 plan");
-  await app.press("Escape");
+  // The sign-in screen is in place of A's mail.
+  await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
+  await expect(app.rows).toHaveCount(0);
 
-  await app.press("Meta+,");
   await gmail.nextSignIn({ email: A });
-  await settingsBlock(app, A).getByRole("button", { name: "Sign in again" }).click();
+  await app.page.getByRole("button", { name: "Sign in with Google" }).click();
   await app.settle();
   await expect(app.signInMarker(A)).toHaveCount(0);
+  await expect(app.row("Q4 plan")).toBeVisible();
   expect((await gmail.tokens()).map((t) => t.account).toSorted()).toEqual([A, B].toSorted());
-  await app.press("Escape");
-  await app.advance(10_000);
+  // A syncs again: an archive reaches Gmail.
+  await expect(app.highlighted).toContainText("Person 1");
+  await app.press("e");
   await app.settle();
   expect(await labelsOf(gmail, A, s.latest("p1").id)).not.toContain("INBOX");
 });

@@ -18,6 +18,8 @@ export const appHooks: {
   headerToTop: () => void;
   /** Closes the composer on screen as a second Esc would (set by main, to avoid an import cycle). */
   closeComposer: () => void;
+  /** Starts Sign in again on the signed-out account's screen (set by that screen). */
+  signInAgain: () => void;
 } = {
   switchAccount: () => {},
   splitIdOf: () => null,
@@ -26,4 +28,5 @@ export const appHooks: {
   linkKey: () => false,
   closeComposer: () => {},
   headerToTop: () => {},
+  signInAgain: () => {},
 };

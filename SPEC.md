@@ -183,7 +183,7 @@ Refresh tokens go into `tokens.json` in the app's data folder, keyed by email ad
 
 An account whose token is missing at launch shows Sign in again, as for `invalid_grant`.
 
-If Google rejects the refresh token (`invalid_grant`), the account shows Sign in again. Its cached mail stays readable. Its queue and outbox wait until sign-in succeeds.
+If Google rejects the refresh token (`invalid_grant`), the account is signed out. Its rail avatar shows a Sign in again marker, and its screen shows a sign-in screen in place of its mail: "You're signed out of <email>" and a Sign in with Google button, which `Enter` also presses. Only `Enter`, `Cmd+K`, and account switching work there; a composer already open stays until closed. Its queue and outbox wait until sign-in succeeds, then go out.
 
 Removing an account deletes its refresh token and its rows from the local database. If it was on screen, the next account in the rail takes its place.
 

@@ -422,27 +422,28 @@ _DT · §Settings, §Accounts_
 - **Then** re-add `A` through Add account. A's Inbox matches Gmail again. `z` does nothing, because the undo history is gone with the old rows.
 - **Open question Q8:** revoking while offline.
 
-#### ACC-08 · P1 · `invalid_grant` shows Sign in again; the queue and outbox wait, then recover
+#### ACC-08 · P1 · `invalid_grant` signs the account out; the queue and outbox wait, then recover
 
 _ST · §Accounts, §Gmail errors (401)_
 
 - **Seed:** `standard`.
 - **Steps:**
-  1. `invalidGrant(A, true)` and `expireAccessTokens(A)`.
-  2. On A, press `e` on `p1`. Reply to `p2`, then `Cmd+Enter`.
-  3. `app.advance(11_000)`, then `settle()`.
-  4. Open `plan`.
-  5. Open Settings, then click **Sign in again** on A's block. The fake approves. `invalidGrant(A, false)`, then `settle()`.
+  1. `offline(true)`. On A, press `e` on `p1`. Reply to `p2`, then `Cmd+Enter`.
+  2. `invalidGrant(A, true)`, `expireAccessTokens(A)`, `offline(false)`. `app.advance(11_000)`, then `settle()`.
+  3. Press `j` and `c`.
+  4. Open Settings, then close it. Switch to B and archive b1, then back to A.
+  5. The fake approves the next sign-in; `invalidGrant(A, false)`. Press `Enter`, then `settle()`.
 - **Expect while signed out:**
   - A's avatar shows the needs-sign-in marker, and its tooltip includes "Sign in again".
+  - The panel shows "You're signed out of ana@acme.test." and **Sign in with Google** in place of the list; no row or conversation shows. The hint bar reads "Enter to sign in · ⌘K for commands".
+  - `j` and `c` do nothing: no composer opens.
   - Settings shows **Sign in again** on A's block only.
-  - `plan` opens with its bodies; cached mail is readable.
-  - `p1` stays out of the local Inbox. `gmail(A)` `p1` still has `INBOX`. No reply was sent.
+  - `gmail(A)` `p1` still has `INBOX`. No reply was sent.
   - No error toast appears, because this is not a rejection.
   - B keeps working: `e` on b1 reaches Gmail.
 - **Expect after sign-in:**
+  - The sign-in screen and the marker are gone, and A's list is back.
   - `p1` is archived on Gmail, and the reply is sent once.
-  - The marker is gone.
 
 #### ACC-09 · P2 · A failed sign-in adds nothing
 
@@ -501,9 +502,9 @@ _EG · §Accounts, §Offline (replay)_
 _ST · §Accounts_
 
 - **Seed:** `standard`.
-- **Steps:** `restart()`, calling `forgetToken(A)` while the app is down, then `settle()`. On A, press `e` on `p1` and open `plan`. Open Settings and click **Sign in again** on A's block; the fake approves. `advance(10_000)`, then `settle()`.
-- **Expect before sign-in:** A's avatar shows the needs-sign-in marker; B's does not. `plan` opens. `gmail(A)` `p1` still has `INBOX`.
-- **Expect after sign-in:** the marker is gone, `tokens()` holds A and B, and `p1` is archived on Gmail.
+- **Steps:** `restart()`, calling `forgetToken(A)` while the app is down, then `settle()`. Click **Sign in with Google**; the fake approves. Then `settle()`, and press `e` on `p1`.
+- **Expect before sign-in:** A's avatar shows the needs-sign-in marker; B's does not. The panel shows "You're signed out of ana@acme.test." and no rows.
+- **Expect after sign-in:** the marker is gone, A's list is back, `tokens()` holds A and B, and `p1` is archived on Gmail.
 - **Why:** tokens moved from the Keychain to the token file, so accounts signed in before that start without one.
 
 ### 5.2 `inbox-navigation.spec.ts` (NAV)

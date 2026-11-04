@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Toaster } from "sonner";
 
 import { useChrome } from "./store/chrome";
-import { listKey, useAppState, useSubscription } from "./store/hooks";
+import { listKey, useAppState, useNeedsSignin, useSubscription } from "./store/hooks";
 import { ConversationView } from "./ui/ConversationView";
 import { ComposeScreen } from "./ui/ComposeScreen";
 import { FirstRun } from "./ui/FirstRun";
@@ -13,6 +13,7 @@ import { Prefetch } from "./ui/Prefetch";
 import { Rail } from "./ui/Rail";
 import { Sheets } from "./ui/Sheets";
 import { SendToasts } from "./ui/SendToasts";
+import { SignInAgain } from "./ui/SignInAgain";
 import { TopBar } from "./ui/TopBar";
 
 /** Keeps each account's summary and last list subscribed, so switching back paints at once. */
@@ -29,6 +30,7 @@ export function App() {
   const screen = useChrome((s) =>
     s.account === null ? null : (s.perAccount[s.account]?.screen ?? null),
   );
+  const signedOut = useNeedsSignin(account);
 
   // Pick an account on screen; follow removals.
   useEffect(() => {
@@ -53,20 +55,32 @@ export function App() {
         <Rail accounts={app.accounts} />
         {/* The white panel on the off-white canvas, as in Superhuman. */}
         <div className="relative mr-2 mb-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-border-2 bg-bg shadow-[0_1px_2px_rgb(20_20_19/0.04)]">
-          <TopBar />
-          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-            {screen?.kind === "conversation" ? (
-              <ConversationView
-                key={`${screen.thread}:${screen.trashMode}`}
-                thread={screen.thread}
-                trashMode={screen.trashMode}
+          {signedOut && screen?.kind !== "compose" ? (
+            // A composer already open stays, so nothing typed is lost.
+            <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+              <SignInAgain
+                account={account ?? 0}
+                email={app.accounts.find((a) => a.id === account)?.email ?? ""}
               />
-            ) : screen?.kind === "compose" ? (
-              <ComposeScreen draft={screen.draft} />
-            ) : (
-              <ListView />
-            )}
-          </main>
+            </main>
+          ) : (
+            <>
+              <TopBar />
+              <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+                {screen?.kind === "conversation" ? (
+                  <ConversationView
+                    key={`${screen.thread}:${screen.trashMode}`}
+                    thread={screen.thread}
+                    trashMode={screen.trashMode}
+                  />
+                ) : screen?.kind === "compose" ? (
+                  <ComposeScreen draft={screen.draft} />
+                ) : (
+                  <ListView />
+                )}
+              </main>
+            </>
+          )}
           <HintBar />
         </div>
       </div>

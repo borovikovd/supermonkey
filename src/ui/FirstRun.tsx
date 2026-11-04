@@ -1,25 +1,8 @@
-import { useRef, useState } from "react";
-
 import { addAccount } from "../ipc/bridge";
+import { useSignIn } from "./signIn";
 
 export function FirstRun() {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  // A click while waiting starts over: the core cancels the sign-in left in
-  // the browser, and only the latest attempt reports back.
-  const attempt = useRef(0);
-  const start = () => {
-    const mine = ++attempt.current;
-    setBusy(true);
-    setError(null);
-    addAccount()
-      .catch((e: unknown) => {
-        if (attempt.current === mine) setError(String(e));
-      })
-      .finally(() => {
-        if (attempt.current === mine) setBusy(false);
-      });
-  };
+  const { busy, error, start } = useSignIn(addAccount);
   return (
     <div
       data-tauri-drag-region
@@ -33,12 +16,20 @@ export function FirstRun() {
       >
         Add a Gmail account
       </button>
+      <SignInStatus busy={busy} error={error} />
+    </div>
+  );
+}
+
+export function SignInStatus({ busy, error }: { busy: boolean; error: string | null }) {
+  return (
+    <>
       {busy && (
         <div className="text-row text-text-2">
           Waiting for Google in your browser… Click again to start over.
         </div>
       )}
       {error && <div className="max-w-md text-center text-row text-danger">{error}</div>}
-    </div>
+    </>
   );
 }

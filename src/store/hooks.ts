@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { keyString, subscribe, unsubscribe } from "../ipc/bridge";
 import type { AccountSummary, AppState, ConversationData, DraftState, SubKey } from "../ipc/types";
 import { useChrome, type Where } from "./chrome";
-import { accountSummary, appState, viewList, type ListView } from "./mirror-core";
+import { accountSummary, appState, viewList, type ListView, type MirrorState } from "./mirror-core";
 import { useMirror } from "./mirror";
 
 /**
@@ -35,6 +35,19 @@ export function useSubscription(key: SubKey | null): string | undefined {
 
 export function useAppState(): AppState | null {
   return useMirror(appState);
+}
+
+/** The account needs Sign in again: its screen shows that, not its mail. */
+export function needsSignin(account: number | null): boolean {
+  return signedOut(useMirror.getState(), account);
+}
+
+export function useNeedsSignin(account: number | null): boolean {
+  return useMirror((s) => signedOut(s, account));
+}
+
+function signedOut(s: MirrorState, account: number | null): boolean {
+  return appState(s)?.accounts.find((a) => a.id === account)?.needsSignin ?? false;
 }
 
 export function useSummary(account: number | null): AccountSummary | null {

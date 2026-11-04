@@ -20,6 +20,7 @@ import {
 import { startCompose, startReply, typeAhead } from "../compose/start";
 import type { View } from "../ipc/types";
 import { useChrome } from "../store/chrome";
+import { needsSignin } from "../store/hooks";
 import { measure } from "./meter";
 import {
   extendSelection,
@@ -141,6 +142,14 @@ export function onKeyDown(e: KeyboardEvent) {
     return;
   }
   if (e.metaKey || e.altKey || (e.ctrlKey && e.key !== "Tab")) return;
+  // A signed-out account's screen only signs in; its mail is not on screen.
+  if (needsSignin(c.account)) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      appHooks.signInAgain();
+    }
+    return;
+  }
 
   if (c.gPending) {
     e.preventDefault();
