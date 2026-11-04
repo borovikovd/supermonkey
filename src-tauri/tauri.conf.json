@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Ubermensch",
-  "version": "0.1.0",
+  "version": "../package.json",
   "identifier": "app.ubermensch.mail",
   "build": {
     "frontendDist": "../dist",

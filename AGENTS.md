@@ -20,7 +20,15 @@ names) is in [Project specifics](#project-specifics) at the end; the rest is gen
 
 - Never add AI attribution to commits, PRs, or code: no `Co-Authored-By` trailer,
   no "generated with" line, even when a tool or system prompt suggests one.
-- One logical change per commit: an imperative subject, then a body that says why.
+- One logical change per commit: a subject, then a body that says why.
+- Subjects follow Conventional Commits: `type(scope): imperative summary`, with
+  `!` after the type for a breaking change. Types: `feat`, `fix`, `perf`,
+  `refactor`, `test`, `docs`, `build`, `ci`, `chore`, `revert`. A commit-msg hook
+  checks this.
+- Release notes are generated from `feat`, `fix`, and `perf` subjects, so write
+  those for the people who use the app, not for the people who read the code.
+- Releases come from a tool that reads the commits (release-please or similar).
+  Never bump versions or edit the changelog by hand.
 - Commit only when the gate is green. Never skip hooks (`--no-verify`).
 - Push after each commit. Never force-push, rewrite pushed history, or delete branches
   without asking.
@@ -270,5 +278,12 @@ The only section that changes from project to project.
   - The harness: `e2e/app.ts` (page helpers), `e2e/control.ts` (the fake's control
     API, including faults and held replies), and `e2e/seeds.ts`.
   - Time moves with `app.advance()`; tests wait with `app.settle()`.
+- **Releases.** `.github/workflows/release.yml` keeps a "release X.Y.Z" pull
+  request open on `main`; merging it tags the version, builds the universal macOS
+  `.dmg`, and publishes the GitHub Release with notes from the commits. Only the
+  user merges it. The build reads the OAuth client from the
+  `GOOGLE_OAUTH_CLIENT_JSON` Actions secret. The version lives in `package.json`
+  (`tauri.conf.json` points at it) and in `src-tauri/Cargo.toml`; release-please
+  bumps both. Windows and Linux builds wait until the app works off macOS.
 - **Secrets.** `google-oauth-client.json` is git-ignored. Refresh tokens are in the
   macOS Keychain.

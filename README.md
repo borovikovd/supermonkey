@@ -4,6 +4,17 @@ A keyboard-first Gmail client for macOS, built from [SPEC.md](SPEC.md).
 Tauri 2 + React 19 + Rust/SQLite. Choices the spec left open are in
 [DEVIATIONS.md](DEVIATIONS.md).
 
+## Install
+
+Download the `.dmg` from the latest
+[release](https://github.com/borovikovd/ubermensch/releases/latest), open it, and
+drag Ubermensch to Applications. The app is not signed yet, so clear the download
+flag once before the first launch:
+
+```sh
+xattr -cr /Applications/Ubermensch.app
+```
+
 ## Run
 
 ```sh
@@ -22,13 +33,22 @@ Testing, Google asks you to sign in again every 7 days.
 vp run tauri build     # src-tauri/target/release/bundle/macos/Ubermensch.app
 ```
 
+## Release
+
+Commit subjects follow [Conventional Commits](https://www.conventionalcommits.org)
+(a commit-msg hook checks them). On each push to `main`, release-please updates a
+"release X.Y.Z" pull request with the next version and the changelog, built from
+the `feat`, `fix`, and `perf` subjects. Merging that pull request tags the version,
+builds the universal `.dmg` in GitHub Actions, and publishes the release. Running
+the Release workflow by hand builds the `.dmg` as an artifact without releasing.
+
 ## Checks
 
 ```sh
 vp run gate             # every check: Rust tests, lints, type checks, bindings, then the E2E suite
 vp run lint:rust        # one step (tasks are in vite.config.ts): test:rust, lint:rust, lint:ts, typecheck, bindings, e2e
 vp exec playwright test # E2E suite alone (Playwright + WebKit; `vp exec playwright install webkit` once)
-vp config --hooks       # once per clone: pre-commit runs `vp staged` (format and lint staged files)
+vp config --hooks       # once per clone: pre-commit runs `vp staged`, commit-msg runs commitlint
 ```
 
 Lint setup:

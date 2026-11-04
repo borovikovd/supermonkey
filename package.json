@@ -34,6 +34,8 @@
     "zustand": "^5.0.16"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
     "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "^4.3.3",
     "@tauri-apps/cli": "^2.12.4",
@@ -46,6 +48,35 @@
     "typescript": "7.0.2",
     "vite": "catalog:",
     "vite-plus": "catalog:"
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ],
+    "rules": {
+      "body-max-line-length": [
+        0
+      ],
+      "subject-case": [
+        0
+      ],
+      "type-enum": [
+        2,
+        "always",
+        [
+          "feat",
+          "fix",
+          "perf",
+          "refactor",
+          "test",
+          "docs",
+          "build",
+          "ci",
+          "chore",
+          "revert"
+        ]
+      ]
+    }
   },
   "devEngines": {
     "packageManager": {
