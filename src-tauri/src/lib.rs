@@ -1,5 +1,275 @@
-//! The Tauri shell (ARCHITECTURE.md, section 3): plugins, the window and Dock,
-//! the platform port, and commands that call `ub-ipc`. Rewritten slice by slice.
+//! The Tauri shell (ARCHITECTURE.md, section 3): plugins, the window and
+//! Dock, the [`Platform`](ub_core::Platform) port, and commands that call
+//! `ub_bridge`. No logic beyond wiring: the core decides.
+//!
+//! - Closing the window hides it; the app keeps syncing in the Dock, and a
+//!   Dock click shows it again.
+//! - Cmd+Q asks the page to close an open composer first, then the page
+//!   calls `quit_now`; quitting waits for the user's last actions to commit
+//!   (SPEC Undo send), then exits.
+//! - Debug builds with the `web` feature serve the web bridge on
+//!   127.0.0.1:1430 when `UBERMENSCH_WEB_BRIDGE=1`, for the UI in a browser.
+
+mod commands;
+mod logging;
+mod platform;
+
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use serde_json::json;
+use tauri::{AppHandle, Emitter as _, Manager as _, RunEvent, WindowEvent};
+use ub_core::activity::{Activity, Tasks};
+use ub_core::clock::SystemClock;
+use ub_core::{App, Config, Deps, GmailConfig};
+use ub_gmail::{OAuthConfig, QuotaConfig, TokenFile, TokenStore, Units};
+
+pub use crate::logging::init_logging;
+use crate::platform::TauriPlatform;
+
+/// The main window's label (`tauri.conf.json`).
+pub(crate) const MAIN_WINDOW: &str = "main";
+
+/// Quota units a minute per account when the build sets no usable
+/// `UBERMENSCH_QUOTA_PER_MIN` (SPEC Sync).
+const DEFAULT_QUOTA_PER_MIN: u32 = 5800;
+
+/// What the commands and window events share.
+pub(crate) struct Shell {
+    pub(crate) core: Arc<App>,
+    /// The shell's own tasks (the debug web bridge), stopped on quit.
+    tasks: Tasks,
+    /// Set by the first quit, so a second Cmd+Q doesn't quit twice.
+    quitting: AtomicBool,
+}
 
 /// Starts the app.
-pub fn run() {}
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    init_logging();
+    let built = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_main(app);
+        }))
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .setup(|app| {
+            let shell = start_core(app.handle())?;
+            app.manage(shell);
+            Ok(())
+        })
+        .on_window_event(|window, event| match event {
+            // Closing the window hides it; the app keeps syncing in the Dock.
+            WindowEvent::CloseRequested { api, .. } if window.label() == MAIN_WINDOW => {
+                api.prevent_close();
+                if let Err(e) = window.hide() {
+                    tracing::warn!(error = %e, "couldn't hide the main window");
+                }
+            }
+            WindowEvent::Focused(focused) => on_focus(window.app_handle(), *focused),
+            _ => {}
+        })
+        .invoke_handler(tauri::generate_handler![
+            commands::connect,
+            commands::submit,
+            commands::fetch_rows,
+            commands::get_bodies,
+            commands::autocomplete,
+            commands::add_account,
+            commands::sign_in_again,
+            commands::open_attachment,
+            commands::open_url,
+            commands::unsubscribe,
+            commands::block,
+            commands::blocked_senders,
+            commands::unblock,
+            commands::sender_threads,
+            commands::add_attachment,
+            commands::quit_now,
+            commands::quit,
+            commands::perf_report,
+            commands::snooze_options,
+        ])
+        .build(tauri::generate_context!());
+    let app = match built {
+        Ok(app) => app,
+        Err(e) => {
+            tracing::error!(error = %e, "couldn't start Ubermensch");
+            std::process::exit(1);
+        }
+    };
+    app.run(|app, event| match event {
+        // Clicking the Dock icon shows the window again.
+        RunEvent::Reopen { .. } => show_main(app),
+        // Cmd+Q: let the page close an open composer first; it then calls
+        // `quit_now`. A hidden window has no composer on screen.
+        RunEvent::ExitRequested {
+            code: None, api, ..
+        } => {
+            api.prevent_exit();
+            let visible = app
+                .get_webview_window(MAIN_WINDOW)
+                .and_then(|w| w.is_visible().ok())
+                .unwrap_or(false);
+            if !visible {
+                quit(app);
+            } else if let Err(e) = app.emit("quit-requested", ()) {
+                tracing::warn!(error = %e, "couldn't ask the page to quit; quitting");
+                quit(app);
+            }
+        }
+        _ => {}
+    });
+}
+
+/// Opens the core in the app's data folder and launches it.
+fn start_core(app: &AppHandle) -> anyhow::Result<Shell> {
+    #[cfg(feature = "fake")]
+    if std::env::var_os("UBERMENSCH_FAKE").is_some() {
+        anyhow::bail!("demo mode (UBERMENSCH_FAKE) is not rebuilt yet");
+    }
+    let data_dir = app.path().app_data_dir()?;
+    std::fs::create_dir_all(&data_dir)?;
+    let mut config = Config::in_data_dir(&data_dir, cfg!(debug_assertions), gmail_config());
+    if let Some(path) = std::env::var_os("UBERMENSCH_DB") {
+        config.db_path = PathBuf::from(path);
+    }
+    let runtime = tauri::async_runtime::handle().inner().clone();
+    // The core spawns its tasks on the runtime it starts in.
+    let _in_runtime = runtime.enter();
+    let activity = Activity::new();
+    let deps = Deps {
+        platform: Arc::new(TauriPlatform(app.clone())),
+        clock: Arc::new(SystemClock),
+        tokens: token_store(&data_dir),
+        activity: Arc::clone(&activity),
+    };
+    let core = Arc::new(App::start(&config, deps)?);
+    core.lifecycle().launch();
+    let tasks = Tasks::new(runtime.clone(), activity);
+    start_web_bridge(&core, &tasks);
+    Ok(Shell {
+        core,
+        tasks,
+        quitting: AtomicBool::new(false),
+    })
+}
+
+/// Google's Gmail with the OAuth client and budget the build baked in
+/// (`build.rs`). Debug builds may point every endpoint elsewhere, such as at
+/// a fake.
+fn gmail_config() -> GmailConfig {
+    let per_minute = env!("UBERMENSCH_QUOTA_PER_MIN")
+        .parse()
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "UBERMENSCH_QUOTA_PER_MIN is not a number; using the default");
+            DEFAULT_QUOTA_PER_MIN
+        });
+    let oauth = OAuthConfig::google(env!("GOOGLE_CLIENT_ID"), env!("GOOGLE_CLIENT_SECRET"));
+    #[cfg_attr(
+        not(debug_assertions),
+        expect(unused_mut, reason = "only debug builds take endpoint overrides")
+    )]
+    let mut gmail = GmailConfig::google(oauth, QuotaConfig::for_budget(Units(per_minute)));
+    #[cfg(debug_assertions)]
+    {
+        let set = |name: &str, field: &mut String| {
+            if let Ok(value) = std::env::var(name) {
+                *field = value;
+            }
+        };
+        set("UBERMENSCH_GMAIL_BASE", &mut gmail.base_url);
+        set("UBERMENSCH_OAUTH_AUTH_URL", &mut gmail.oauth.auth_url);
+        set("UBERMENSCH_OAUTH_TOKEN_URL", &mut gmail.oauth.token_url);
+        set("UBERMENSCH_OAUTH_REVOKE_URL", &mut gmail.oauth.revoke_url);
+    }
+    gmail
+}
+
+/// The refresh-token file in the data folder. A debug build pointed at
+/// another Gmail keeps its tokens in memory, away from the user's.
+fn token_store(data_dir: &Path) -> Arc<dyn TokenStore> {
+    if cfg!(debug_assertions) && std::env::var_os("UBERMENSCH_GMAIL_BASE").is_some() {
+        return Arc::new(ub_gmail::MemoryTokenStore::default());
+    }
+    Arc::new(TokenFile::new(data_dir.join(Config::TOKEN_FILE)))
+}
+
+/// Whether `UBERMENSCH_WEB_BRIDGE=1` asks for the debug web bridge.
+fn wants_web_bridge() -> bool {
+    std::env::var("UBERMENSCH_WEB_BRIDGE").as_deref() == Ok("1")
+}
+
+/// Serves the debug web bridge when asked for, in debug builds with the
+/// `web` feature.
+#[cfg(all(debug_assertions, feature = "web"))]
+fn start_web_bridge(core: &Arc<App>, tasks: &Tasks) {
+    if !wants_web_bridge() {
+        return;
+    }
+    let bridge = ub_bridge::WebBridge::new(Some(Arc::clone(core)), Arc::clone(tasks.activity()));
+    tasks.spawn("web bridge", async move {
+        if let Err(e) = ub_bridge::serve_local(bridge).await {
+            tracing::warn!(error = %e, "the web bridge stopped");
+        }
+    });
+}
+
+/// Builds without the bridge only say why it isn't there.
+#[cfg(not(all(debug_assertions, feature = "web")))]
+fn start_web_bridge(_core: &Arc<App>, _tasks: &Tasks) {
+    if wants_web_bridge() {
+        tracing::warn!(
+            "UBERMENSCH_WEB_BRIDGE=1 needs a debug build with the `web` feature (--features web)"
+        );
+    }
+}
+
+/// Shows, unhides, and focuses the main window.
+pub(crate) fn show_main(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return;
+    };
+    for (what, done) in [
+        ("show", window.show()),
+        ("unminimize", window.unminimize()),
+        ("focus", window.set_focus()),
+    ] {
+        if let Err(e) = done {
+            tracing::warn!(error = %e, step = what, "couldn't bring the main window forward");
+        }
+    }
+}
+
+/// The window gained or lost focus. A focus that counts as a click on the
+/// last notification shows its thread.
+fn on_focus(app: &AppHandle, focused: bool) {
+    let Some(shell) = app.try_state::<Shell>() else {
+        return;
+    };
+    let Some(clicked) = shell.core.lifecycle().focus(focused) else {
+        return;
+    };
+    let payload = json!({ "account": clicked.account, "thread": clicked.thread });
+    if let Err(e) = app.emit("notification-open", payload) {
+        tracing::warn!(error = %e, "couldn't open a clicked notification");
+    }
+}
+
+/// Exits once the core has committed the UI actions queued so far, so the
+/// last ones the page sent are not lost; queued sync work is dropped.
+pub(crate) fn quit(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Some(shell) = app.try_state::<Shell>() {
+            if shell.quitting.swap(true, Ordering::AcqRel) {
+                return;
+            }
+            shell.tasks.stop().await;
+            shell.core.lifecycle().quit().await;
+        }
+        app.exit(0);
+    });
+}

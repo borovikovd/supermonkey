@@ -2,8 +2,19 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, lazyPlugins } from "vite-plus";
 
-/** E2E specs the rewrite has turned green so far; `gate:slice` runs only these. */
-const SLICE_SPECS = ["e2e/plan.spec.ts"];
+/**
+ * E2E specs the rewrite has turned green so far; `gate:slice` runs only these.
+ * A `file:line` entry is one test of a spec not yet green as a whole.
+ */
+const SLICE_SPECS = [
+  "e2e/plan.spec.ts",
+  "e2e/harness.spec.ts:369",
+  "e2e/recipients.spec.ts:230",
+  "e2e/recipients.spec.ts:414",
+  "e2e/recipients.spec.ts:434",
+  "e2e/settings.spec.ts:49",
+  "e2e/settings.spec.ts:223",
+];
 
 export default defineConfig({
   // Tauri expects a fixed port and does not need the browser opened.

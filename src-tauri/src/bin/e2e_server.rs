@@ -1,7 +1,39 @@
-//! The E2E server: the real core against the fake Gmail, behind the web bridge
-//! and the `/__test` control API (`ub-testkit`). Until the testkit slice lands
-//! it only exits, so E2E specs that need it fail while `plan.spec.ts` runs.
+//! The E2E server (`ub_testkit::run`): the real core against the fake Gmail,
+//! behind the web bridge and the `/__test` control API.
+//!
+//! `e2e-server [--port N] [--dist PATH] [--now MS]`: port 0 picks a free
+//! one; the UI comes from `dist/` (build it with `vp build`); app time starts
+//! at `MS` (Unix milliseconds, default the system clock). Set `TZ` for the
+//! local time zone.
 
-fn main() {
-    std::process::exit(2);
+use std::path::PathBuf;
+
+use anyhow::Context as _;
+use ub_core::clock::{Clock as _, SystemClock};
+use ub_domain::Millis;
+
+/// The value after `--name` on the command line.
+fn arg(name: &str) -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        if a == name {
+            return args.next();
+        }
+    }
+    None
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    ubermensch_lib::init_logging();
+    let port = arg("--port").map_or(Ok(0), |p| p.parse().context("--port"))?;
+    let dist = arg("--dist").map_or_else(
+        || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist"),
+        PathBuf::from,
+    );
+    let now = match arg("--now") {
+        Some(ms) => Millis(ms.parse().context("--now")?),
+        None => SystemClock.now(),
+    };
+    ub_testkit::run(port, dist, now).await
 }
