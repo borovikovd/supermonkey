@@ -118,16 +118,20 @@ pub(crate) async fn ensure(
     Ok(path)
 }
 
-/// Writes the file aside, then renames it into place, so two downloads of
-/// one attachment at once never leave a half-written file at its path.
+/// Writes an attachment of the message whose folder is `message_dir` into
+/// its own folder there, so two parts with one name (`image.png`,
+/// `ATT00001.htm`) never share a file and the name stays as sent. Writes
+/// aside, then renames into place, so two downloads of one attachment at
+/// once never leave a half-written file at its path.
 fn write_file(
-    dir: &Path,
+    message_dir: &Path,
     name: &str,
     attachment: AttachmentId,
     bytes: &[u8],
 ) -> Result<PathBuf, std::io::Error> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
-    std::fs::create_dir_all(dir)?;
+    let dir = message_dir.join(attachment.0.to_string());
+    std::fs::create_dir_all(&dir)?;
     let path = dir.join(name);
     let part = dir.join(format!(
         ".{}-{}.part",
@@ -137,4 +141,24 @@ fn write_file(
     std::fs::write(&part, bytes)?;
     std::fs::rename(&part, &path)?;
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn two_attachments_with_one_name_keep_their_own_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = write_file(dir.path(), "image.png", AttachmentId(1), b"first").unwrap();
+        let second = write_file(dir.path(), "image.png", AttachmentId(2), b"second").unwrap();
+        assert_ne!(first, second);
+        assert_eq!(
+            first.file_name(),
+            second.file_name(),
+            "the name stays as sent"
+        );
+        assert_eq!(std::fs::read(&first).unwrap(), b"first");
+        assert_eq!(std::fs::read(&second).unwrap(), b"second");
+    }
 }
