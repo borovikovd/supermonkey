@@ -10,8 +10,8 @@ use crate::ops::LabelCreateOp;
 
 /// `createLabel`: a user label under the UI's id, at once, with a queued
 /// `labels.create` that gives it Gmail's id when it replays. `apply`, the
-/// label's first use, goes in the same action. A label the account already
-/// has by that name is used instead.
+/// label's first use, goes in the same action. A user label the account
+/// already has by that name is used instead.
 pub(super) fn create_label(
     ctx: &mut ActionCtx<'_, '_>,
     account: AccountId,
@@ -30,7 +30,9 @@ pub(super) fn create_label(
     if reads.labels().get(account, id)?.is_some() {
         return Err(ActionError::Invalid("the label id is taken"));
     }
-    let label = if let Some(existing) = reads.labels().by_name(account, name)? {
+    // A system label's name is Gmail's to refuse, as a rejection.
+    let existing = reads.labels().by_name(account, name)?.filter(|l| !l.system);
+    let label = if let Some(existing) = existing {
         existing.id
     } else {
         ctx.tx.labels().create_local(account, id, name)?;

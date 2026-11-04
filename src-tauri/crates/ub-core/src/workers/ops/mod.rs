@@ -17,11 +17,10 @@ use std::time::Duration;
 use tokio::sync::oneshot;
 use ub_gmail::{Backoff, Outcome};
 
-use crate::activity::parked;
-
 pub(crate) use lane::OpsLane;
 use run::{Failure, run_op};
 
+use crate::activity::parked;
 use crate::workers::account::{AccountCtx, OFFLINE_RETRY};
 
 /// How long the runner waits for a kick before it looks at the queue
