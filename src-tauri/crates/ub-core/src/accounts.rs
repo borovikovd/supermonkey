@@ -11,7 +11,7 @@ use ub_domain::AccountId;
 use ub_gmail::{Gmail, Priority, RefreshToken, SignIn, Tokens};
 use ub_store::{Priority as WritePriority, StoreError};
 
-use crate::workers::AccountWorkers;
+use crate::workers::{AccountWorkers, Grant};
 use crate::writer::CoreWriter;
 use crate::{Error, Platform};
 
@@ -54,8 +54,8 @@ impl Accounts {
     pub async fn add(&self) -> Result<AccountId, Error> {
         let SignedIn { email, tokens } = self.sign_in().await?;
         self.keep_token(&email, tokens.refresh_token()).await?;
-        let id = self.signed_in_row(&email).await?;
-        self.workers.signed_in(id, &email, tokens)?;
+        let (id, grant) = self.signed_in_row(&email).await?;
+        self.workers.signed_in(id, &email, tokens, grant)?;
         self.platform.focus_window();
         tracing::info!(account = id.0, "account added");
         Ok(id)
@@ -78,8 +78,8 @@ impl Accounts {
             )));
         }
         self.keep_token(&expected, tokens.refresh_token()).await?;
-        self.signed_in_row(&expected).await?;
-        self.workers.signed_in(account, &expected, tokens)?;
+        let (_, grant) = self.signed_in_row(&expected).await?;
+        self.workers.signed_in(account, &expected, tokens, grant)?;
         tracing::info!(account = account.0, "signed in again");
         Ok(())
     }
@@ -89,8 +89,8 @@ impl Accounts {
     /// the app already has is marked signed in again. Its worker starts once
     /// the core has launched. Returns its id.
     pub async fn register(&self, email: &str) -> Result<AccountId, Error> {
-        let id = self.signed_in_row(email).await?;
-        self.workers.registered(id, email).await?;
+        let (id, grant) = self.signed_in_row(email).await?;
+        self.workers.registered(id, email, grant).await?;
         Ok(id)
     }
 
@@ -107,20 +107,25 @@ impl Accounts {
     }
 
     /// The account row for a finished sign-in: a new one, or the existing
-    /// one, no longer signed out.
-    async fn signed_in_row(&self, email: &str) -> Result<AccountId, Error> {
-        let email = email.to_owned();
-        let id = self
+    /// one, no longer signed out. Its grant is renewed in the same job, so a
+    /// sign-out reported for the old grant, whenever its job runs, changes
+    /// nothing.
+    async fn signed_in_row(&self, email: &str) -> Result<(AccountId, Grant), Error> {
+        let (email, grants) = (email.to_owned(), Arc::clone(self.workers.grants()));
+        let signed_in = self
             .writer
             .call(WritePriority::Ui, move |tx, _| {
-                if let Some(id) = tx.read().accounts().by_email(&email)? {
-                    tx.accounts().set_needs_signin(id, false)?;
-                    return Ok::<_, StoreError>(id);
-                }
-                tx.accounts().create(&email, &email)
+                let id = match tx.read().accounts().by_email(&email)? {
+                    Some(id) => {
+                        tx.accounts().set_needs_signin(id, false)?;
+                        id
+                    }
+                    None => tx.accounts().create(&email, &email)?,
+                };
+                Ok::<_, StoreError>((id, grants.renew(id)))
             })
             .await?;
-        Ok(id)
+        Ok(signed_in)
     }
 
     /// Stores the account's refresh token for the next launch, once no

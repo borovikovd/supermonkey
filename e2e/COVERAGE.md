@@ -298,14 +298,14 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `undo-send.spec.ts`        | SND    | the outbox state machine, held undo, rejection, no clear answer, restart                     | `standard`                               | H8a, H8b, H9, H13, H15      | 18      | 15      | 3      | 0      |
 | `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 8       | 6       | 2      | 0      |
 | `gmail-errors.spec.ts`     | ERR    | the outcome matrix for actions and `drafts.create`, back-off, 401, 404                       | `standard`                               | H6, H8, H9, H10, H13        | 9       | 5       | 3      | 1      |
-| `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 10      | 5       | 3      | 2      |
+| `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 11      | 5       | 4      | 2      |
 | `notifications.spec.ts`    | NOT    | when to notify, summary, mute, Dock badge, click                                             | `standard`                               | H17, H18                    | 6       | 5       | 1      | 0      |
 | `settings.spec.ts`         | SET    | the sheet, remote images                                                                     | `standard`                               | H15, H20                    | 4       | 1       | 2      | 1      |
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 8       | 6       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **243** | **144** | **89** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **244** | **144** | **90** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -3074,6 +3074,15 @@ _EG · §Sync (bodies), §Performance (stored bodies never change)_
 - **Steps:** count `req(attachments.get)`; deliver a reply into `fwd`; `settle()`; open it.
 - **Expect:** a `format=full` fetch of `fwd` ran for the reply's body, `req(attachments.get)` did not grow, and the reply shows expanded with its body.
 
+#### SYN-11 · P2 · A slower label or `sendAs` read never undoes a newer one
+
+_EG · §Sync (`sendAs` and labels refresh on focus), AGENTS.md (stale answers)_
+
+- **Steps:**
+  1. `holdAnswer` on the next `labels.list`, then `focus(false)`, `focus(true)`: a refresh reads the labels and its answer parks. `gmail.label(A, "Newer")`, focus again, `settle()`. Release, `settle()`.
+  2. The same with `sendAs.list`, adding the alias `ana@new.dev` between the two reads.
+- **Expect:** `g` `l` lists Newer, and the composer's From picker lists `ana@new.dev`: the answer read first and stored last is dropped.
+
 ### 5.20 `notifications.spec.ts` (NOT)
 
 When a new message raises a notification (§Notifications):
@@ -3557,6 +3566,7 @@ Also kept, because they test logic the E2E suite can't observe:
 - `crates/ub-store/src/open.rs`: a database of another schema version, or a file that is not one, is moved aside with its WAL and a fresh one created (there is no migration code).
 - `crates/ub-core/src/outbox/machine.rs`: the send state machine's every event in every state.
 - `crates/ub-core/src/tests/actions.rs`: a draft save that arrives after its send is dropped, and a split whose rule does not parse is not saved (the sheet checks rules before it saves).
+- `crates/ub-core/src/tests/accounts.rs`: a sign-out reported for a grant older than the last sign-in changes nothing, even when its writer job runs after the sign-in's (the sign-in's job has the UI's priority; E2E can't hold the writer between the two).
 - `crates/ub-core/src/tests/notify.rs`: a poll that reads a whole thread for one changed message notifies only for the mail history reported added.
 - `crates/ub-core/src/tests/snooze.rs`: a new snooze time re-arms the snooze timer (the E2E clock fires every due timer on an advance, so it can't tell).
 - `crates/ub-core/src/workers/unwanted.rs`: Blocked senders lists only filters that trash one sender (the fake has no other kind).

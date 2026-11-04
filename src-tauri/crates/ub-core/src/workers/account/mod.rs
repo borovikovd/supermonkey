@@ -19,6 +19,7 @@
 mod contacts;
 mod ctx;
 mod fetcher;
+mod freshness;
 mod health;
 mod history;
 mod ingest;
@@ -36,6 +37,7 @@ use ub_gmail::Gmail;
 
 pub(crate) use ctx::{AccountCtx, OFFLINE_RETRY, SignOutSender, WorkerDeps, WorkerId};
 pub(crate) use fetcher::{fetch_thread, is_current, needs_bodies};
+pub(crate) use freshness::Freshness;
 pub(crate) use ingest::store_draft_message;
 pub(crate) use queue::OTHER_META;
 pub(crate) use queue::{LATE, Work};
@@ -45,6 +47,7 @@ use self::health::Health;
 use self::opened::OpenedReads;
 use self::queue::FetchQueue;
 use crate::activity::Tasks;
+use crate::workers::grants::Grant;
 use crate::workers::ops::{self, OpsLane};
 use crate::workers::{drafts, outbox};
 
@@ -54,6 +57,8 @@ pub(crate) struct AccountWorker {
     ctx: Arc<AccountCtx>,
     /// Reads of conversations' bodies in flight.
     opened: Arc<OpenedReads>,
+    /// The sign-in whose grant it runs on.
+    grant: Grant,
 }
 
 impl AccountWorker {
@@ -73,6 +78,7 @@ impl AccountWorker {
         tasks: Tasks,
         lane: Arc<OpsLane>,
         sign_out: SignOutSender,
+        grant: Grant,
         after: Option<Self>,
     ) -> Self {
         let health = Health::new(
@@ -102,6 +108,7 @@ impl AccountWorker {
         Self {
             ctx,
             opened: Arc::default(),
+            grant,
         }
     }
 
@@ -114,6 +121,11 @@ impl AccountWorker {
     /// The worker's id.
     pub(crate) fn id(&self) -> WorkerId {
         self.ctx.id
+    }
+
+    /// The sign-in whose grant it runs on.
+    pub(crate) fn grant(&self) -> Grant {
+        self.grant
     }
 
     /// Polls history now.

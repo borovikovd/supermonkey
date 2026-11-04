@@ -16,6 +16,7 @@ use ub_store::Priority;
 
 use super::account::{AccountWorker, SignOutSender, WorkerDeps, WorkerId};
 use super::files::{attachments_dir, draft_dir};
+use super::grants::{Grant, Grants};
 use super::ops::OpsLane;
 use crate::activity::{Tasks, Tracked, parked};
 use crate::writer::CoreWriter;
@@ -46,6 +47,8 @@ pub(crate) struct AccountWorkers {
 struct Live {
     workers: Mutex<HashMap<AccountId, AccountWorker>>,
     writer: CoreWriter,
+    /// Which sign-in each account's grant is from.
+    grants: Arc<Grants>,
 }
 
 impl Live {
@@ -72,6 +75,7 @@ impl AccountWorkers {
         let live = Arc::new(Live {
             workers: Mutex::new(HashMap::new()),
             writer: deps.writer.clone(),
+            grants: Arc::default(),
         });
         let (sign_outs, reports) = mpsc::unbounded_channel();
         tasks.spawn("sign outs", sign_out_reports(Arc::clone(&live), reports));
@@ -114,6 +118,12 @@ impl AccountWorkers {
     /// The writer.
     pub(crate) fn writer(&self) -> &CoreWriter {
         &self.deps.writer
+    }
+
+    /// Which sign-in each account's grant is from: a sign-in renews it in
+    /// the writer job that marks the account signed in.
+    pub(crate) fn grants(&self) -> &Arc<Grants> {
+        &self.live.grants
     }
 
     /// The folder of a draft's added files.
@@ -172,7 +182,8 @@ impl AccountWorkers {
                 }
             };
             for record in accounts.into_iter().filter(|a| !a.needs_signin) {
-                if let Err(e) = workers.start_stored(record.id, &record.email).await {
+                let grant = workers.live.grants.current(record.id);
+                if let Err(e) = workers.start_stored(record.id, &record.email, grant).await {
                     tracing::warn!(account = record.id.0, error = %e, "couldn't start the account");
                 }
             }
@@ -180,47 +191,58 @@ impl AccountWorkers {
     }
 
     /// An account was added or signed in again with the refresh token in
-    /// the store: starts its worker, if the core has launched.
-    pub(crate) async fn registered(&self, account: AccountId, email: &str) -> Result<(), Error> {
+    /// the store, as `grant`: starts its worker, if the core has launched.
+    pub(crate) async fn registered(
+        &self,
+        account: AccountId,
+        email: &str,
+        grant: Grant,
+    ) -> Result<(), Error> {
         if self.launched.load(Ordering::SeqCst) {
-            self.start_stored(account, email).await?;
+            self.start_stored(account, email, grant).await?;
         }
         Ok(())
     }
 
-    /// A sign-in finished with `tokens`: starts the account's worker on
-    /// them, if the core has launched.
+    /// A sign-in finished with `tokens`, as `grant`: starts the account's
+    /// worker on them, if the core has launched.
     pub(crate) fn signed_in(
         &self,
         account: AccountId,
         email: &str,
         tokens: Arc<Tokens>,
+        grant: Grant,
     ) -> Result<(), Error> {
         if self.launched.load(Ordering::SeqCst) {
-            self.start(account, email, tokens)?;
+            self.start(account, email, tokens, grant)?;
         }
         Ok(())
     }
 
     /// Starts the account on its stored refresh token, or marks it signed
     /// out when there is none.
-    async fn start_stored(&self, account: AccountId, email: &str) -> Result<(), Error> {
+    async fn start_stored(
+        &self,
+        account: AccountId,
+        email: &str,
+        grant: Grant,
+    ) -> Result<(), Error> {
         match self.load_token(email).await {
             Ok(Some(token)) => {
                 let tokens = Tokens::new(self.gmail.oauth.clone(), self.http.clone(), token);
-                self.start(account, email, Arc::new(tokens))
+                self.start(account, email, Arc::new(tokens), grant)
             }
             Ok(None) => {
                 tracing::info!(
                     account = account.0,
                     "no refresh token; the account needs a sign-in"
                 );
-                self.mark_signed_out(account);
+                self.mark_signed_out(account, grant);
                 Ok(())
             }
             Err(e) => {
                 tracing::warn!(account = account.0, error = %e, "couldn't read the refresh token; the account needs a sign-in");
-                self.mark_signed_out(account);
+                self.mark_signed_out(account, grant);
                 Ok(())
             }
         }
@@ -233,7 +255,13 @@ impl AccountWorkers {
 
     /// Starts the account's worker on `tokens`. A worker it already has is
     /// replaced: the new one's tasks start once the old one's have ended.
-    fn start(&self, account: AccountId, email: &str, tokens: Arc<Tokens>) -> Result<(), Error> {
+    fn start(
+        &self,
+        account: AccountId,
+        email: &str,
+        tokens: Arc<Tokens>,
+        grant: Grant,
+    ) -> Result<(), Error> {
         let gmail = Gmail::new(
             &self.gmail.base_url,
             self.http.clone(),
@@ -261,6 +289,7 @@ impl AccountWorkers {
             self.tasks.child(),
             lane,
             self.sign_outs.clone(),
+            grant,
             old,
         );
         workers.insert(account, worker);
@@ -269,8 +298,10 @@ impl AccountWorkers {
         Ok(())
     }
 
-    fn mark_signed_out(&self, account: AccountId) {
-        mark_signed_out(&self.deps.writer, account);
+    /// Marks the account signed out, unless a sign-in renewed its grant
+    /// since `grant`.
+    pub(crate) fn mark_signed_out(&self, account: AccountId, grant: Grant) {
+        mark_signed_out(&self.live, account, grant);
     }
 
     /// Polls every account now.
@@ -381,11 +412,21 @@ impl Drop for Removal {
 }
 
 /// Marks the account signed out: it shows Sign in again (SPEC Accounts).
-fn mark_signed_out(writer: &CoreWriter, account: AccountId) {
-    writer.queue(
+/// A sign-in that renewed its grant since `grant` was refused wins, even
+/// when its job ran first.
+fn mark_signed_out(live: &Live, account: AccountId, grant: Grant) {
+    let grants = Arc::clone(&live.grants);
+    live.writer.queue(
         Priority::Sync,
         "mark an account signed out",
         move |tx, _| {
+            if grants.current(account) != grant {
+                tracing::debug!(
+                    account = account.0,
+                    "an older grant was refused; the account signed in since"
+                );
+                return Ok(());
+            }
             if tx.read().accounts().get(account)?.is_some() {
                 tx.accounts().set_needs_signin(account, true)?;
             }
@@ -410,6 +451,6 @@ async fn sign_out_reports(
             continue;
         };
         worker.cancel();
-        mark_signed_out(&live.writer, account);
+        mark_signed_out(&live, account, worker.grant());
     }
 }

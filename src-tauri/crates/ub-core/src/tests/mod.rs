@@ -1,5 +1,6 @@
 //! Tests over the whole core: a started [`App`] on a temporary database.
 
+mod accounts;
 mod actions;
 mod clock;
 mod notify;

@@ -11,8 +11,11 @@ use ub_store::{GmailLabel, Priority as WritePriority, StoreError};
 use super::ctx::AccountCtx;
 
 /// Reads `sendAs` and stores every address; the display name comes from the
-/// primary entry. Writes only when something changed.
+/// primary entry. Writes only when something changed, and never over the
+/// answer of a read that started later.
 pub(crate) async fn refresh_send_as(ctx: &AccountCtx) -> Result<(), GmailError> {
+    let lane = Arc::clone(&ctx.lane);
+    let read = lane.send_as_reads.start();
     let listed = ctx.gmail.list_send_as(Priority::P3).await?;
     let send_as: Vec<SendAsAddress> = listed
         .into_iter()
@@ -33,6 +36,9 @@ pub(crate) async fn refresh_send_as(ctx: &AccountCtx) -> Result<(), GmailError> 
         WritePriority::Sync,
         "store sendAs addresses",
         move |tx, _| {
+            if !lane.send_as_reads.store(read) {
+                return Ok(());
+            }
             let Some(record) = tx.read().accounts().get(account)? else {
                 return Ok(());
             };
@@ -50,10 +56,12 @@ pub(crate) async fn refresh_send_as(ctx: &AccountCtx) -> Result<(), GmailError> 
 /// new labels, and labels deleted on Gmail. Writes only when something
 /// changed. When a label made here got its Gmail id after the list was
 /// read (LAB-08), no label made here is dropped: the list may not know it
-/// yet, and the next refresh settles it.
+/// yet, and the next refresh settles it. A list read before another that
+/// was stored first is dropped.
 pub(crate) async fn refresh_labels(ctx: &AccountCtx) -> Result<(), GmailError> {
     let lane = Arc::clone(&ctx.lane);
     let mapped = lane.labels_mapped();
+    let read = lane.label_reads.start();
     let listed = ctx.gmail.list_labels(Priority::P3).await?;
     let mut labels: Vec<GmailLabel> = listed
         .into_iter()
@@ -66,7 +74,7 @@ pub(crate) async fn refresh_labels(ctx: &AccountCtx) -> Result<(), GmailError> {
     let account = ctx.account;
     ctx.writer()
         .queue(WritePriority::Sync, "store the label list", move |tx, _| {
-            if tx.read().accounts().get(account)?.is_none() {
+            if !lane.label_reads.store(read) || tx.read().accounts().get(account)?.is_none() {
                 return Ok(());
             }
             let all = tx.read().labels().all(account)?;
