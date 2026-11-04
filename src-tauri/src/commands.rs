@@ -87,6 +87,11 @@ pub async fn open_attachment(
     api::open_attachment(&engine, attachment).await
 }
 
+#[tauri::command]
+pub fn open_url(engine: State<'_, Arc<Engine>>, url: String) -> CmdResult<()> {
+    api::open_url(&engine, &url)
+}
+
 #[tauri::command(async)]
 pub fn add_attachment(
     draft: DraftId,

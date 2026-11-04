@@ -70,8 +70,8 @@ pub async fn open_attachment(e: &Engine, attachment: AttachmentId) -> CmdResult<
         .map_err(err)
 }
 
-/// Opens a link from a message in the default browser or mail app: the web
-/// build's stand-in for the opener plugin, which the app's webview calls itself.
+/// Opens a link from a message in the default browser or mail app. The scheme
+/// is checked here because the webview is not trusted.
 pub fn open_url(e: &Engine, url: &str) -> CmdResult<()> {
     let parsed = reqwest::Url::parse(url).map_err(err)?;
     if !matches!(parsed.scheme(), "http" | "https" | "mailto") {

@@ -15,7 +15,6 @@
     "@tanstack/react-virtual": "^3.14.25",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-notification": "^2.8.0",
-    "@tauri-apps/plugin-opener": "^2.7.2",
     "@tauri-apps/plugin-window-state": "^2.5.0",
     "@tiptap/extension-hard-break": "^3.32.2",
     "@tiptap/extension-link": "^3.32.2",

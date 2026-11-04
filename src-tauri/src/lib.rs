@@ -113,6 +113,7 @@ pub fn run() {
             commands::add_account,
             commands::sign_in_again,
             commands::open_attachment,
+            commands::open_url,
             commands::quit_now,
             commands::perf_report,
             commands::snooze_options,
