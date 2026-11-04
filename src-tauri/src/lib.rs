@@ -6,7 +6,7 @@
 //!   Dock click shows it again.
 //! - Cmd+Q asks the page to close an open composer first, then the page
 //!   calls `quit_now`; quitting waits for the user's last actions to commit
-//!   (SPEC Undo send), then exits.
+//!   (SPEC Send and undo), then exits.
 //! - Debug builds with the `web` feature serve the web bridge on
 //!   127.0.0.1:1430 when `UBERMENSCH_WEB_BRIDGE=1`, for the UI in a browser.
 //! - Debug builds with the `fake` feature run demo mode when
@@ -17,7 +17,7 @@ mod commands;
 mod logging;
 mod platform;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -33,6 +33,19 @@ use crate::platform::TauriPlatform;
 
 /// The main window's label (`tauri.conf.json`).
 pub(crate) const MAIN_WINDOW: &str = "main";
+
+// Demo mode and the E2E server link the fake Gmail and the test control
+// server: never into a release build.
+#[cfg(all(feature = "fake", not(debug_assertions)))]
+compile_error!("the `fake` feature is for debug builds only");
+
+/// Endpoint overrides a debug build takes (`gmail_config`).
+const ENDPOINT_OVERRIDES: [&str; 4] = [
+    "UBERMENSCH_GMAIL_BASE",
+    "UBERMENSCH_OAUTH_AUTH_URL",
+    "UBERMENSCH_OAUTH_TOKEN_URL",
+    "UBERMENSCH_OAUTH_REVOKE_URL",
+];
 
 /// Quota units a minute per account when the build sets no usable
 /// `UBERMENSCH_QUOTA_PER_MIN` (SPEC Sync).
@@ -185,9 +198,15 @@ fn setup(app: &AppHandle) -> anyhow::Result<Setup> {
     }
     let data_dir = app.path().app_data_dir()?;
     std::fs::create_dir_all(&data_dir)?;
+    #[cfg_attr(
+        not(debug_assertions),
+        expect(unused_mut, reason = "only debug builds take a database override")
+    )]
     let mut config = Config::in_data_dir(&data_dir, cfg!(debug_assertions), gmail_config());
+    // Debug only: a perf fixture or other test database (`perf-fixture`).
+    #[cfg(debug_assertions)]
     if let Some(path) = std::env::var_os("UBERMENSCH_DB") {
-        config.db_path = PathBuf::from(path);
+        config.db_path = std::path::PathBuf::from(path);
     }
     Ok(Setup {
         config,
@@ -220,18 +239,24 @@ fn gmail_config() -> GmailConfig {
                 *field = value;
             }
         };
-        set("UBERMENSCH_GMAIL_BASE", &mut gmail.base_url);
-        set("UBERMENSCH_OAUTH_AUTH_URL", &mut gmail.oauth.auth_url);
-        set("UBERMENSCH_OAUTH_TOKEN_URL", &mut gmail.oauth.token_url);
-        set("UBERMENSCH_OAUTH_REVOKE_URL", &mut gmail.oauth.revoke_url);
+        let [base, auth, token, revoke] = ENDPOINT_OVERRIDES;
+        set(base, &mut gmail.base_url);
+        set(auth, &mut gmail.oauth.auth_url);
+        set(token, &mut gmail.oauth.token_url);
+        set(revoke, &mut gmail.oauth.revoke_url);
     }
     gmail
 }
 
-/// The refresh-token file in the data folder. A debug build pointed at
-/// another Gmail keeps its tokens in memory, away from the user's.
+/// The refresh-token file in the data folder. A debug build with any
+/// endpoint pointed elsewhere keeps its tokens in memory, so the user's
+/// refresh tokens are never sent to another token or revoke endpoint.
 fn token_store(data_dir: &Path) -> Arc<dyn TokenStore> {
-    if cfg!(debug_assertions) && std::env::var_os("UBERMENSCH_GMAIL_BASE").is_some() {
+    if cfg!(debug_assertions)
+        && ENDPOINT_OVERRIDES
+            .iter()
+            .any(|name| std::env::var_os(name).is_some())
+    {
         return Arc::new(ub_gmail::MemoryTokenStore::default());
     }
     Arc::new(TokenFile::new(data_dir.join(Config::TOKEN_FILE)))
