@@ -10,6 +10,10 @@
 //! The debug app serves it on [`LOCAL_ADDR`] when `UBERMENSCH_WEB_BRIDGE=1`;
 //! the E2E server mounts [`WebBridge::router`] on its own origin. Release
 //! builds never enable the `web` feature.
+//!
+//! The bridge serves real mail in a debug app, so it answers only requests
+//! addressed to a loopback host (no DNS rebinding) from its own origin or
+//! the Vite dev server's: any other page in the browser gets `403`.
 
 use std::convert::Infallible;
 use std::pin::Pin;
@@ -17,8 +21,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
-use axum::extract::{Path, State};
-use axum::http::{HeaderValue, StatusCode};
+use axum::extract::{Path, Request, State};
+use axum::http::header::{HOST, ORIGIN};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -38,6 +44,10 @@ use crate::{Reply, dispatch, is_sign_in};
 
 /// Where the debug app serves the bridge, for `vp dev` in a browser.
 pub const LOCAL_ADDR: &str = "127.0.0.1:1430";
+
+/// The Vite dev server's origins (`vite.config.ts`), whose page calls the
+/// bridge across origins.
+const DEV_ORIGINS: [&str; 2] = ["http://localhost:5173", "http://127.0.0.1:5173"];
 
 /// The bridge's state: the core it serves, which the E2E server swaps when
 /// it restarts the core, and the pages it streams to.
@@ -127,6 +137,7 @@ impl WebBridge {
         Router::new()
             .route("/events", get(events))
             .route("/invoke/{cmd}", post(invoke).options(preflight))
+            .layer(middleware::from_fn(local_only))
             .with_state(self.clone())
     }
 }
@@ -138,32 +149,66 @@ pub async fn serve_local(bridge: WebBridge) -> std::io::Result<()> {
     axum::serve(listener, bridge.router()).await
 }
 
-fn cors(mut response: Response) -> Response {
-    let headers = response.headers_mut();
-    headers.insert("access-control-allow-origin", HeaderValue::from_static("*"));
-    headers.insert(
-        "access-control-allow-headers",
-        HeaderValue::from_static("content-type"),
-    );
-    headers.insert(
-        "access-control-allow-methods",
-        HeaderValue::from_static("POST, GET, OPTIONS"),
-    );
+/// Whether a request may reach the bridge: addressed to a loopback host,
+/// and from no page (`curl`, a same-origin `EventSource`), the bridge's own
+/// origin, or the dev server's.
+fn is_allowed(host: Option<&str>, origin: Option<&str>) -> bool {
+    let Some(host) = host else {
+        return false;
+    };
+    let name = host.rsplit_once(':').map_or(host, |(name, _port)| name);
+    if !matches!(name, "127.0.0.1" | "localhost") {
+        return false;
+    }
+    origin.is_none_or(|origin| {
+        DEV_ORIGINS.contains(&origin) || origin.strip_prefix("http://") == Some(host)
+    })
+}
+
+/// Refuses requests [`is_allowed`] does not let in, and answers the dev
+/// server's page with CORS headers for its own origin.
+async fn local_only(request: Request, next: Next) -> Response {
+    let headers = request.headers();
+    let (host, origin) = (header(headers, HOST), header(headers, ORIGIN));
+    if !is_allowed(host.as_deref(), origin.as_deref()) {
+        tracing::warn!("the web bridge refused a request from another page or host");
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let mut response = next.run(request).await;
+    if let Some(origin) = origin.and_then(|o| HeaderValue::from_str(&o).ok()) {
+        let headers = response.headers_mut();
+        headers.insert("access-control-allow-origin", origin);
+        headers.insert("vary", HeaderValue::from_static("origin"));
+        headers.insert(
+            "access-control-allow-headers",
+            HeaderValue::from_static("content-type"),
+        );
+        headers.insert(
+            "access-control-allow-methods",
+            HeaderValue::from_static("POST, GET, OPTIONS"),
+        );
+    }
     response
 }
 
+/// A request header's value as text.
+fn header(headers: &HeaderMap, name: HeaderName) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+}
+
 async fn preflight() -> Response {
-    cors(StatusCode::NO_CONTENT.into_response())
+    StatusCode::NO_CONTENT.into_response()
 }
 
 fn down() -> Response {
-    cors(
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!("the core is not running")),
-        )
-            .into_response(),
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        Json(json!("the core is not running")),
     )
+        .into_response()
 }
 
 /// Streams channel messages and app events to one page. A page whose stream
@@ -185,7 +230,7 @@ async fn events(State(bridge): State<WebBridge>) -> Response {
         return down();
     }
     bridge.0.streams.lock().push(page);
-    cors(Sse::new(PushStream(stream)).into_response())
+    Sse::new(PushStream(stream)).into_response()
 }
 
 /// An event stream's pushes as server-sent events.
@@ -226,14 +271,14 @@ async fn invoke(
     };
     let _signing_in = is_sign_in(&cmd).then(|| SignIn::new(&bridge.0.sign_ins));
     let result = busy_scope(&bridge.0.activity, "bridge", dispatch(&app, &cmd, args)).await;
-    cors(match result {
+    match result {
         Ok(Reply::Value(value)) => Json(value).into_response(),
         Ok(Reply::Quit) => {
             bridge.0.quit.notify_waiters();
             Json(Value::Null).into_response()
         }
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!(e))).into_response(),
-    })
+    }
 }
 
 /// Counts a sign-in while its command runs.
@@ -249,5 +294,45 @@ impl<'a> SignIn<'a> {
 impl Drop for SignIn<'_> {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_allowed;
+
+    #[test]
+    fn only_loopback_hosts_and_known_origins_reach_the_bridge() {
+        // The dev server's page, and the E2E server's page on its own origin.
+        assert!(is_allowed(
+            Some("127.0.0.1:1430"),
+            Some("http://localhost:5173")
+        ));
+        assert!(is_allowed(
+            Some("127.0.0.1:1430"),
+            Some("http://127.0.0.1:5173")
+        ));
+        assert!(is_allowed(
+            Some("127.0.0.1:41234"),
+            Some("http://127.0.0.1:41234")
+        ));
+        assert!(is_allowed(Some("localhost:1430"), None));
+        // Any other page in the browser.
+        assert!(!is_allowed(
+            Some("127.0.0.1:1430"),
+            Some("https://evil.test")
+        ));
+        assert!(!is_allowed(
+            Some("127.0.0.1:1430"),
+            Some("http://127.0.0.1:9999")
+        ));
+        assert!(!is_allowed(Some("127.0.0.1:1430"), Some("null")));
+        // DNS rebinding: a hostile name that resolves to 127.0.0.1.
+        assert!(!is_allowed(Some("evil.test:1430"), None));
+        assert!(!is_allowed(
+            Some("evil.test:1430"),
+            Some("http://evil.test:1430")
+        ));
+        assert!(!is_allowed(None, None));
     }
 }
