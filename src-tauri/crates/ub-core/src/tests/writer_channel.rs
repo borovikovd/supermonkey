@@ -522,3 +522,26 @@ async fn a_first_load_lost_to_a_failed_commit_is_sent_again() {
         .collect();
     assert_eq!(firsts, [sub("app")], "one first load, after the failure");
 }
+
+/// A commit whose updates can't be sent (the sink panicked) still releases
+/// its effects and lets the core go idle: `settle()` would wait forever
+/// otherwise, and the effects would leave with some later commit.
+#[tokio::test]
+async fn a_panic_after_a_commit_still_releases_its_work() {
+    let mut h = Harness::start().await;
+    let (account, _) = h.write(seed).await;
+    h.act(vec![Action::Subscribe {
+        sub: sub("app"),
+        key: SubKey::App,
+    }])
+    .await;
+    h.app
+        .lifecycle()
+        .connect(Box::new(|_| panic!("the page's channel is gone")))
+        .await
+        .unwrap();
+    // A commit with a patch to send, and an effect (the badge).
+    h.write(move |tx| tx.accounts().set_needs_signin(account, true))
+        .await;
+    eventually("the core goes idle", || h.activity.is_idle()).await;
+}

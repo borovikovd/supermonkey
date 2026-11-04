@@ -9,8 +9,12 @@ use super::WriterState;
 use crate::effects::Effect;
 
 /// `on_commit`: builds the commit's updates from its snapshot and sends
-/// them, then releases the job's effects.
+/// them, then releases the job's effects. The commit has landed, so they go
+/// out and the job goes idle even if building or sending the updates
+/// panics; held, they would keep the core busy and `settle()` waiting.
 pub(crate) fn on_commit(state: &mut WriterState, snapshot: &Snapshot<'_>, commit: &Commit) {
+    let releasing = Releasing(state);
+    let state = &mut *releasing.0;
     let ack = match snapshot.meta().last_action() {
         Ok(ack) => ack,
         Err(e) => {
@@ -42,7 +46,16 @@ pub(crate) fn on_commit(state: &mut WriterState, snapshot: &Snapshot<'_>, commit
     if commit.changes.app || !commit.changes.settings.is_empty() {
         state.effect(Effect::Badge);
     }
-    state.release();
+}
+
+/// Releases the committed job's effects and activity when dropped, however
+/// `on_commit` ends.
+struct Releasing<'s>(&'s mut WriterState);
+
+impl Drop for Releasing<'_> {
+    fn drop(&mut self) {
+        self.0.release();
+    }
 }
 
 /// `on_rollback`: the job's effects and activity go with its transaction.
