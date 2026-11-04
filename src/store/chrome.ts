@@ -18,6 +18,7 @@ export type PaletteMode =
   | { kind: "labels" }
   | { kind: "goLabel" }
   | { kind: "snooze" }
+  | { kind: "unsubscribe" }
   | { kind: "switchAccount" }
   | { kind: "addToSplit"; preset?: "important" | "other" }
   | { kind: "from"; draft: string };

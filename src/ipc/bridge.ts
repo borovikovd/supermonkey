@@ -18,6 +18,7 @@ import type {
   NumberedAction,
   SnoozeChoice,
   SubKey,
+  Unsubscribed,
 } from "./bridge-types";
 
 /** Inside the Tauri webview; otherwise the debug web bridge on 127.0.0.1:1430. */
@@ -280,6 +281,10 @@ export const openAttachment = (attachment: number) =>
 export const quitNow = () => invoke<void>("quit_now");
 /** Web mode: a link from a message, opened by the core as the opener plugin would. */
 export const openUrlInCore = (url: string) => invoke<void>("open_url", { url });
+export const unsubscribeFrom = (account: AccountId, thread: number) =>
+  invoke<Unsubscribed>("unsubscribe", { account, thread });
+export const senderThreads = (account: AccountId, thread: number) =>
+  invoke<number[]>("sender_threads", { account, thread });
 export const perfReport = (action: string, ms: number, budget: number) =>
   invoke<void>("perf_report", { action, ms, budget });
 export const snoozeOptions = (text: string) => invoke<SnoozeChoice[]>("snooze_options", { text });

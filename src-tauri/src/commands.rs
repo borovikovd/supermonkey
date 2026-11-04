@@ -14,7 +14,8 @@ use crate::api::{self, CmdResult};
 use crate::engine::Engine;
 use crate::model::{
     AccountId, AttachmentId, ChannelMessage, ContactSuggestion, DraftAttachment, DraftId,
-    LaunchInfo, ListRow, MessageBody, MessageId, NumberedAction, SnoozeChoice,
+    LaunchInfo, ListRow, MessageBody, MessageId, NumberedAction, SnoozeChoice, ThreadId,
+    Unsubscribed,
 };
 
 // Commands that read SQLite or files are `async`: a plain command runs on
@@ -90,6 +91,24 @@ pub async fn open_attachment(
 #[tauri::command]
 pub fn open_url(engine: State<'_, Arc<Engine>>, url: String) -> CmdResult<()> {
     api::open_url(&engine, &url)
+}
+
+#[tauri::command]
+pub async fn unsubscribe(
+    engine: State<'_, Arc<Engine>>,
+    account: AccountId,
+    thread: ThreadId,
+) -> CmdResult<Unsubscribed> {
+    api::unsubscribe(&engine, account, thread).await
+}
+
+#[tauri::command(async)]
+pub fn sender_threads(
+    engine: State<'_, Arc<Engine>>,
+    account: AccountId,
+    thread: ThreadId,
+) -> CmdResult<Vec<ThreadId>> {
+    api::sender_threads(&engine, account, thread)
 }
 
 #[tauri::command(async)]

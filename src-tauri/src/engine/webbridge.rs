@@ -234,6 +234,14 @@ async fn run(bridge: &Bridge, e: &Arc<Engine>, cmd: &str, args: &Value) -> Resul
             api::sign_in_again(e, arg(args, "account")?).await?;
             Value::Null
         }
+        "unsubscribe" => {
+            json!(api::unsubscribe(e, arg(args, "account")?, arg(args, "thread")?).await?)
+        }
+        "sender_threads" => json!(api::sender_threads(
+            e,
+            arg(args, "account")?,
+            arg(args, "thread")?,
+        )?),
         "open_attachment" => {
             api::open_attachment(e, arg(args, "attachment")?).await?;
             Value::Null

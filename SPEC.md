@@ -229,6 +229,7 @@ The palette lists actions and views. Each row shows its shortcut on the right. `
 | `e` | Mark done (archive and mark read) |
 | `Shift+E` | Return to inbox, and clear a snooze |
 | `h` | Snooze |
+| `Cmd+U` | Unsubscribe: plain, or with mark done all or trash all |
 | `c` | Compose |
 | `r` | Reply |
 | `f` | Forward |
@@ -419,6 +420,18 @@ Trash adds `TRASH` and removes `INBOX` and `SPAM`. Spam adds `SPAM` and removes 
 Archive, trash, spam, snooze, and a snooze wake act on the thread's non-draft messages at the time of the action, through `messages.batchModify` with those ids. Gmail does not label drafts, and a draft's message id changes on every update. The op stores the ids, so a delayed replay or retry never touches messages that arrived later. A reply that arrives while an archive is queued still lands in the inbox.
 
 Every one of these updates the list in the same frame, writes SQLite, then calls Gmail. Label changes and snooze do the same. If Gmail cannot be reached, the local change stays and the action queues. If Gmail rejects it, as defined in Gmail errors, the row rolls back and a toast shows the error.
+
+## Unsubscribe and block
+
+`Cmd+U`, or the palette's `Unsubscribe`, opens three choices, as in Superhuman: *Unsubscribe*, *Unsubscribe, and mark done all*, and *Unsubscribe, and trash all*. The "all" choices first archive or trash, as ordinary undoable actions, the conversation and every Inbox conversation with a message from the sender of its latest message.
+
+Rust then reads the `List-Unsubscribe` and `List-Unsubscribe-Post` headers of the conversation's latest list message with `messages.get` and uses, in this order:
+
+1. one-click (RFC 8058): when `List-Unsubscribe-Post` is `List-Unsubscribe=One-Click`, a `POST` of that body to the `https` URI, with a 10 s timeout and no Gmail credentials;
+2. an email: a plain message from the account to the `mailto:` address, with its subject and body or "Unsubscribe", sent with `messages.send`;
+3. the list's web page, opened in the browser.
+
+A toast says which happened, "No unsubscribe link in this email" when there is none, or "Couldn't unsubscribe" with the reason. Unsubscribing needs the network and is not queued.
 
 ## Labels
 

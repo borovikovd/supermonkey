@@ -18,6 +18,7 @@ pub mod snooze;
 pub mod sync;
 #[cfg(feature = "fake")]
 pub mod testserver;
+pub mod unsubscribe;
 pub mod webbridge;
 pub mod work;
 

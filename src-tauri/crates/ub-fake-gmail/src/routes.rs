@@ -40,6 +40,7 @@ pub(crate) fn router(state: Arc<Shared>) -> Router {
         .route("/threads", get(list_threads))
         .route("/threads/{id}", get(get_thread))
         .route("/messages/batchModify", post(batch_modify))
+        .route("/messages/send", post(send_message))
         .route("/messages/{id}", get(get_message))
         .route("/messages/{id}/trash", post(trash_message))
         .route(
@@ -487,6 +488,22 @@ async fn send_draft(caller: Caller, body: Bytes) -> ApiResult {
         };
         let sent = mb.send_draft(id, raw, now)?;
         Ok(Json(mb.messages[&sent].json("minimal", &[])))
+    })
+}
+
+/// `messages.send`: the message is stored in its own thread with `SENT`.
+async fn send_message(caller: Caller, body: Bytes) -> ApiResult {
+    let body = json_body(&body)?;
+    let now = caller.state.clock_ms();
+    caller.mailbox(|mb| {
+        let raw = body["raw"]
+            .as_str()
+            .ok_or_else(|| ApiError::BadRequest("Missing message raw".into()))?;
+        let raw = BASE64URL_LENIENT
+            .decode(raw.trim())
+            .map_err(|e| ApiError::BadRequest(format!("Invalid value for ByteString: {e}")))?;
+        let id = mb.insert_raw(raw, None, vec!["SENT".into()], now);
+        Ok(Json(mb.messages[&id].json("minimal", &[])))
     })
 }
 

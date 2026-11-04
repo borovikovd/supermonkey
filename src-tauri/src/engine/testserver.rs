@@ -146,6 +146,8 @@ enum Core {
 struct Hit {
     method: String,
     path: String,
+    /// The request body as text; empty for GETs.
+    body: String,
     at: i64,
 }
 
@@ -1498,10 +1500,11 @@ const PIXEL: &[u8] = &[
     0, 0, 0, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
 ];
 
-fn hit(s: &Server, method: &Method, uri: &axum::http::Uri) {
+fn hit(s: &Server, method: &Method, uri: &axum::http::Uri, body: &[u8]) {
     s.hits.lock().push(Hit {
         method: method.to_string(),
         path: uri.path().to_owned(),
+        body: String::from_utf8_lossy(body).into_owned(),
         at: crate::clock::now_ms(),
     });
 }
@@ -1512,7 +1515,7 @@ async fn remote_image(
     method: Method,
     uri: axum::http::Uri,
 ) -> Response {
-    hit(&s, &method, &uri);
+    hit(&s, &method, &uri, &[]);
     (
         [
             (header::CONTENT_TYPE, "image/png"),
@@ -1524,8 +1527,13 @@ async fn remote_image(
 }
 
 /// A sink for hostile destinations (`/sink/evil.test/...`): logs and answers blank.
-async fn sink(State(s): State<Arc<Server>>, method: Method, uri: axum::http::Uri) -> Response {
-    hit(&s, &method, &uri);
+async fn sink(
+    State(s): State<Arc<Server>>,
+    method: Method,
+    uri: axum::http::Uri,
+    body: axum::body::Bytes,
+) -> Response {
+    hit(&s, &method, &uri, &body);
     (
         [
             (header::CONTENT_TYPE, "text/html"),

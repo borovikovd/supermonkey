@@ -114,6 +114,8 @@ pub fn run() {
             commands::sign_in_again,
             commands::open_attachment,
             commands::open_url,
+            commands::unsubscribe,
+            commands::sender_threads,
             commands::quit_now,
             commands::perf_report,
             commands::snooze_options,

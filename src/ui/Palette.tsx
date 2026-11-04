@@ -10,6 +10,7 @@ import {
   returnToInbox,
   rowOf,
   snooze,
+  unsubscribe,
   spam,
   targets,
   toggleRead,
@@ -107,6 +108,13 @@ function useCommands(mode: PaletteMode, query: string): Commands {
         { id: "trash", label: "Trash", keys: "#", run: trash },
         { id: "spam", label: "Mark as spam", keys: "!", run: spam },
         { id: "star", label: "Star or unstar", keys: "S", run: toggleStar },
+        {
+          id: "unsubscribe",
+          label: "Unsubscribe",
+          keys: "⌘ U",
+          run: () => appHooks.openPalette({ kind: "unsubscribe" }),
+          keep: true,
+        },
         { id: "read", label: "Mark read or unread", keys: "U", run: toggleRead },
         { id: "select-all", label: "Select all", keys: "⌘ ⇧ A", run: () => selectAll(false) },
         {
@@ -263,6 +271,23 @@ function useCommands(mode: PaletteMode, query: string): Commands {
         })),
         placeholder: "Snooze until… (try “fri 9am”)",
         stale: snoozes?.query !== query,
+      };
+    case "unsubscribe":
+      return {
+        items: [
+          { id: "keep", label: "Unsubscribe", run: () => void unsubscribe("keep") },
+          {
+            id: "done",
+            label: "Unsubscribe, and mark done all",
+            run: () => void unsubscribe("done"),
+          },
+          {
+            id: "trash",
+            label: "Unsubscribe, and trash all",
+            run: () => void unsubscribe("trash"),
+          },
+        ],
+        placeholder: "Unsubscribe from this sender",
       };
     case "switchAccount":
       return {

@@ -99,6 +99,7 @@ export type ApiMethod =
   | "messages.batchModify"
   | "messages.get"
   | "messages.trash"
+  | "messages.send"
   | "attachments.get"
   | "drafts.list"
   | "drafts.create"
@@ -518,7 +519,7 @@ export class Control {
    * Fetches of the remote image host (`<url>/img/*`) and the hostile sink
    * (`<url>/sink/*`, where `App` routes `evil.test`).
    */
-  hits(): Promise<{ method: string; path: string; at: number }[]> {
+  hits(): Promise<{ method: string; path: string; body: string; at: number }[]> {
     return this.call("GET", "/__test/hits");
   }
 

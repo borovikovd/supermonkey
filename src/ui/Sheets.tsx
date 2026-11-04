@@ -19,6 +19,7 @@ const SHORTCUTS: [string, [string, string][]][] = [
       ["⇧O", "Expand everything"],
       ["X", "Select · ⇧J / ⇧K extend"],
       ["⌘A", "Select all from here"],
+      ["⌘U", "Unsubscribe"],
       ["⌘⇧A", "Select all"],
       ["/", "Search"],
       ["⌘K", "Commands"],

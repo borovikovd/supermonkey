@@ -102,6 +102,28 @@ pub fn build_mime(o: &Outgoing) -> Vec<u8> {
         .expect("writing to a Vec cannot fail")
 }
 
+/// A plain-text message from one address to another, such as a list's
+/// unsubscribe request. No draft header: it is not one of the app's drafts.
+#[expect(clippy::expect_used, reason = "writing to a Vec cannot fail")]
+pub fn build_plain(
+    from: &Addr,
+    to: &Addr,
+    subject: &str,
+    text: &str,
+    date_ms: i64,
+    message_id_domain: &str,
+) -> Vec<u8> {
+    MessageBuilder::new()
+        .from(address(from))
+        .to(address(to))
+        .subject(subject)
+        .date(Date::new(date_ms.div_euclid(1000)))
+        .message_id(format!("ub.unsubscribe.{date_ms}@{message_id_domain}"))
+        .text_body(text)
+        .write_to_vec()
+        .expect("writing to a Vec cannot fail")
+}
+
 /// The body tree described on [`build_mime`].
 fn body(o: &Outgoing) -> MimePart<'_> {
     let mut body = MimePart::new(

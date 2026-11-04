@@ -304,7 +304,8 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **230** | **135** | **85** | **10** |
+| `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 4       | 3       | 1      | 0      |
+| **Total**                  |        |                                                                                              |                                          |                             | **234** | **138** | **86** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -3333,6 +3334,42 @@ _EG · §UI state (Actions: "`Cmd+Q` first closes an open composer as a second `
 
 ---
 
+### 5.25 `unwanted.spec.ts` (UNW)
+
+#### UNW-01 · P1 · `Cmd+U` unsubscribes with one click when the list offers it
+
+_ST · §Unsubscribe and block_
+
+- **Seed:** `empty`, then deliver a newsletter with `List-Unsubscribe: <mailto:…>, <sink URL>` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`.
+- **Steps:** `Cmd+U`, choose Unsubscribe.
+- **Expect:** the sink gets one `POST` with body `List-Unsubscribe=One-Click`; the toast reads "Unsubscribed from News Co"; no `messages.send`; the thread stays in Inbox.
+
+#### UNW-02 · P1 · An email unsubscribes, and "mark done all" archives the sender's Inbox mail
+
+_ST · §Unsubscribe and block_
+
+- **Seed:** `empty`, then two newsletters from news@news.test with `List-Unsubscribe: <mailto:leave@news.test?subject=unsubscribe-me>`, and one mail from someone else.
+- **Steps:** highlight a newsletter, `Cmd+U`, choose "Unsubscribe, and mark done all". Then `z`.
+- **Expect:** one sent message to leave@news.test with subject unsubscribe-me; both newsletters lose `INBOX` in Gmail and leave the list, the other mail keeps it; `z` brings both back.
+
+#### UNW-03 · P1 · A list with only a web page opens it, and "trash all" trashes the sender's mail
+
+_ST · §Unsubscribe and block_
+
+- **Seed:** `empty`, then two newsletters whose only link is an `https` page.
+- **Steps:** `Cmd+U`, choose "Unsubscribe, and trash all".
+- **Expect:** `openedUrls` is that page, the toast says the page opened, both threads are in Trash in Gmail, and no `messages.send`.
+
+#### UNW-04 · P2 · No unsubscribe link, or no network, says so; the archive still happens
+
+_EG · §Unsubscribe and block_
+
+- **Seed:** `empty`, then a mail from news@news.test with no list headers.
+- **Steps:** `Cmd+U`, Unsubscribe. Then `offline(true)`, `Cmd+U`, "Unsubscribe, and mark done all".
+- **Expect:** the toast reads "No unsubscribe link in this email" and nothing changes; offline, the row leaves the Inbox at once and a "Couldn't unsubscribe" toast shows.
+
+---
+
 ## 6. Done-when traceability
 
 | #   | Done-when item (SPEC)                                                                                                               | Cases                                                                                 |
@@ -3429,6 +3466,7 @@ Also kept, because they test logic the E2E suite can't observe:
 - `crates/ub-gmail/tests/scheduler.rs`: priorities, concurrency, quota, and back-off.
 - `crates/ub-gmail/tests/oauth.rs`: the `state` check, token caching and early refresh, one refresh shared by concurrent 401s, and secrets kept out of debug output.
 - `src-tauri/src/clock.rs`: the activity tracking `settle()` relies on, and that closing a `Kick` (an account stopping) wakes a loop even between its last check and its wait.
+- `ub-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser: several URIs, mailto subject and body, a `+` in the address, junk, spacing, and when one-click applies.
 - `src-tauri/tests/logging.rs`: the stderr logger drops the HTML parser's warnings and keeps ours (logs are not visible to the E2E suite).
 - `src-tauri/src/db/mod.rs`: older databases get `AUTOINCREMENT` on `notices`, `outbox`, and `ops` without losing rows or the `ops` index.
 

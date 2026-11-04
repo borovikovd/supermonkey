@@ -4,7 +4,7 @@
 use crate::engine::Engine;
 use crate::model::{
     AccountId, AttachmentId, ContactSuggestion, DraftAttachment, DraftId, LaunchInfo, ListRow,
-    MessageBody, MessageId, NumberedAction, SnoozeChoice,
+    MessageBody, MessageId, NumberedAction, SnoozeChoice, ThreadId, Unsubscribed,
 };
 use std::sync::Arc;
 
@@ -60,6 +60,29 @@ pub async fn add_account(e: &Arc<Engine>) -> CmdResult<AccountId> {
 pub async fn sign_in_again(e: &Arc<Engine>, account: AccountId) -> CmdResult<()> {
     crate::engine::auth::sign_in_again(e, account)
         .await
+        .map_err(err)
+}
+
+/// Unsubscribes from the list a conversation came from (SPEC: Unsubscribe and block).
+pub async fn unsubscribe(
+    e: &Arc<Engine>,
+    account: AccountId,
+    thread: ThreadId,
+) -> CmdResult<Unsubscribed> {
+    crate::engine::unsubscribe::unsubscribe(e, account, thread)
+        .await
+        .map_err(err)
+}
+
+/// Inbox conversations with a message from the sender of `thread`'s latest
+/// message, `thread` included: what Unsubscribe's "all" choices act on.
+pub fn sender_threads(
+    e: &Engine,
+    account: AccountId,
+    thread: ThreadId,
+) -> CmdResult<Vec<ThreadId>> {
+    e.reads
+        .with(|c| crate::db::queries::sender_inbox_threads(c, account, thread))
         .map_err(err)
 }
 

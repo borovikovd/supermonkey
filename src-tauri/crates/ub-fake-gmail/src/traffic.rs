@@ -29,6 +29,7 @@ pub fn api_name(method: &str, path: &str) -> &'static str {
         ("GET", ["threads"]) => "threads.list",
         ("GET", ["threads", _]) => "threads.get",
         ("POST", ["messages", "batchModify"]) => "messages.batchModify",
+        ("POST", ["messages", "send"]) => "messages.send",
         ("GET", ["messages", _]) => "messages.get",
         ("POST", ["messages", _, "trash"]) => "messages.trash",
         ("GET", ["messages", _, "attachments", _]) => "attachments.get",

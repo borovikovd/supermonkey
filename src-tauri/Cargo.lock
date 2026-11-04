@@ -5115,9 +5115,11 @@ dependencies = [
  "html-escape",
  "mail-builder",
  "mail-parser",
+ "percent-encoding",
  "regex",
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]

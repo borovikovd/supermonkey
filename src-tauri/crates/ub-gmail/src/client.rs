@@ -177,6 +177,24 @@ impl Gmail {
             .await
     }
 
+    /// `users.messages.get` with `format=metadata` and only the named headers. Cost 20.
+    pub async fn get_message_headers(
+        &self,
+        id: &str,
+        headers: &[&str],
+    ) -> Result<Message, GmailError> {
+        let mut query = vec![("format", Format::Metadata.as_str())];
+        query.extend(headers.iter().map(|&header| ("metadataHeaders", header)));
+        self.get(&format!("messages/{id}"), &query).await
+    }
+
+    /// `users.messages.send` from RFC 822 bytes, outside any draft. Cost 100.
+    pub async fn send_message(&self, raw_rfc822: &[u8]) -> Result<Message, GmailError> {
+        let body = json!({ "raw": URL_SAFE.encode(raw_rfc822) });
+        self.json(Method::POST, "messages/send", &[], Some(&body))
+            .await
+    }
+
     /// `users.messages.attachments.get`, decoded to bytes. Cost 20.
     pub async fn get_attachment(
         &self,

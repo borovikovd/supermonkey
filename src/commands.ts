@@ -3,7 +3,9 @@
 // when rows leave the list (SPEC Keyboard).
 
 import { undoSend } from "./compose/undo-send";
-import { act, subIdFor } from "./ipc/bridge";
+import { toast } from "sonner";
+
+import { act, senderThreads, subIdFor, unsubscribeFrom } from "./ipc/bridge";
 import type { ModifyAction, ModifyKind, SubKey, View } from "./ipc/types";
 import { useChrome, type Where } from "./store/chrome";
 import { appHooks } from "./keyboard/refs";
@@ -275,4 +277,35 @@ export function markReadOnOpenWhenLoaded(thread: number) {
   const unsubChrome = useChrome.subscribe(() => {
     if (!onScreen()) stop();
   });
+}
+
+/** What Unsubscribe does to the mail already in the Inbox, as in Superhuman. */
+export type UnsubscribeThen = "keep" | "done" | "trash";
+
+/**
+ * Unsubscribes from the list the conversation on screen came from. "done"
+ * and "trash" first archive or trash every Inbox conversation from that
+ * sender, as ordinary undoable actions.
+ */
+export async function unsubscribe(then: UnsubscribeThen) {
+  const account = useChrome.getState().account;
+  const [thread] = targets();
+  if (account === null || thread === undefined) return;
+  if (then !== "keep") {
+    const same: number[] = await senderThreads(account, thread).catch((err: unknown) => {
+      console.warn("conversations from the same sender", err);
+      return [];
+    });
+    const threads = same.includes(thread) ? same : [thread, ...same];
+    if (then === "done") modify("done", [], ["INBOX", "UNREAD"], { threads });
+    else modify("trash", ["TRASH"], ["INBOX", "SPAM"], { threads });
+  }
+  try {
+    const r = await unsubscribeFrom(account, thread);
+    if (r.kind === "noLink") toast("No unsubscribe link in this email");
+    else if (r.kind === "openedPage") toast(`Opened the unsubscribe page of ${r.sender}`);
+    else toast(`Unsubscribed from ${r.sender}`);
+  } catch (err: unknown) {
+    toast.error(`Couldn't unsubscribe: ${String(err)}`);
+  }
 }

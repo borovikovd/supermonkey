@@ -52,9 +52,10 @@ mod encoding;
 mod gmail;
 mod html;
 mod quote;
+mod unsubscribe;
 
 pub use address::{Addr, format_addr, format_addr_list, is_valid_email, parse_address_list};
-pub use build::{InlinePart, OutAttachment, Outgoing, build_mime};
+pub use build::{InlinePart, OutAttachment, Outgoing, build_mime, build_plain};
 pub use encoding::decode_encoded_words;
 pub use gmail::{ParsedMessage, PartInfo, parse_gmail_payload};
 pub use html::{data_images_to_cid, data_uri, html_to_text, sanitize_html, text_to_html};
@@ -62,6 +63,7 @@ pub use quote::{
     QuoteSource, forward_quote_html, forward_subject, reply_quote_html, reply_subject,
     split_gmail_quote, split_quoted_history,
 };
+pub use unsubscribe::{ListUnsubscribe, Mailto, list_unsubscribe};
 
 /// `s` with every run of whitespace turned into one space and the ends trimmed.
 pub(crate) fn collapse_whitespace(s: &str) -> String {

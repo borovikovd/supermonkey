@@ -137,6 +137,17 @@ export function onKeyDown(e: KeyboardEvent) {
     }
     return;
   }
+  if (
+    e.metaKey &&
+    !e.shiftKey &&
+    e.key.toLowerCase() === "u" &&
+    (cur?.screen.kind === "list" || cur?.screen.kind === "conversation") &&
+    !needsSignin(c.account)
+  ) {
+    e.preventDefault();
+    appHooks.openPalette({ kind: "unsubscribe" });
+    return;
+  }
   if (e.metaKey && e.key.toLowerCase() === "k") {
     e.preventDefault();
     appHooks.openPalette({ kind: "commands" });

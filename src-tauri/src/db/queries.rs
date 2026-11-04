@@ -133,6 +133,26 @@ fn thread_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ListRow> {
 }
 
 /// Rows for thread ids, in no particular order. Unknown ids are skipped.
+/// Inbox threads with a message from the sender of `thread`'s latest message.
+pub fn sender_inbox_threads(
+    conn: &Connection,
+    account: AccountId,
+    thread: ThreadId,
+) -> anyhow::Result<Vec<ThreadId>> {
+    let mut stmt = conn.prepare_cached(
+        "WITH s AS (
+           SELECT lower(from_email) AS email FROM messages
+           WHERE thread_id = ?2 AND is_draft = 0 AND from_email <> ''
+           ORDER BY internal_date DESC, id DESC LIMIT 1)
+         SELECT DISTINCT t.id FROM threads t JOIN messages m ON m.thread_id = t.id
+         WHERE t.account_id = ?1 AND t.in_inbox = 1 AND m.is_draft = 0
+           AND lower(m.from_email) = (SELECT email FROM s)
+         ORDER BY t.id",
+    )?;
+    let ids = stmt.query_map(params![account, thread], |r| r.get(0))?;
+    Ok(ids.collect::<Result<_, _>>()?)
+}
+
 pub fn thread_rows(conn: &Connection, ids: &[ThreadId]) -> anyhow::Result<Vec<ListRow>> {
     let mut out = Vec::with_capacity(ids.len());
     for chunk in ids.chunks(400) {

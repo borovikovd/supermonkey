@@ -35,6 +35,7 @@ pub mod cost {
     pub const DRAFTS_CREATE: u32 = 10;
     pub const DRAFTS_UPDATE: u32 = 15;
     pub const DRAFTS_SEND: u32 = 100;
+    pub const MESSAGES_SEND: u32 = 100;
     pub const DRAFTS_DELETE: u32 = 10;
 
     /// `threads.get`: 40, or 120 with `format=full`.

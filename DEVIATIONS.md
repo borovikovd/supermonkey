@@ -127,6 +127,11 @@ written. Each keeps the spec's intent.
   app behaves), and `z` restores it only where it was. All Mail is `g a` and
   the palette's "Go to All Mail", with no rail icon, as in Superhuman's
   shortcut sheet.
+- **Unsubscribe** reads the unsubscribe headers when `Cmd+U` runs rather than
+  storing them, so no migration was needed. It needs the network and is not
+  queued: a queued unsubscribe could fire long after the user stopped caring.
+  Debug builds also allow a one-click `POST` to loopback `http`, where the E2E
+  server stands in for a list.
 - In Drafts the hint bar reads `Enter to open draft · C to compose · ⌘K for
   commands`: the spec's example hints (`E`, `H`) do nothing there.
 

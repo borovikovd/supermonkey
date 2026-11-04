@@ -794,3 +794,18 @@ pub struct LaunchInfo {
     pub last_action: i64,
     pub debug: bool,
 }
+
+/// What an unsubscribe did (SPEC: Unsubscribe and block).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[ts(export)]
+pub enum Unsubscribed {
+    /// The list's one-click URL accepted the request.
+    OneClick { sender: String },
+    /// An unsubscribe email went to the list.
+    Emailed { sender: String },
+    /// The list's unsubscribe page opened in the browser.
+    OpenedPage { sender: String },
+    /// The message offers no way to unsubscribe.
+    NoLink { sender: String },
+}

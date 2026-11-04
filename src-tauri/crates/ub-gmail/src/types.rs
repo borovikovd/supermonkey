@@ -105,6 +105,21 @@ pub struct Message {
     pub raw: Option<String>,
 }
 
+impl Message {
+    /// The first value of a top-level header, by case-insensitive name.
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.payload.as_ref()?["headers"]
+            .as_array()?
+            .iter()
+            .find(|h| {
+                h["name"]
+                    .as_str()
+                    .is_some_and(|n| n.eq_ignore_ascii_case(name))
+            })?["value"]
+            .as_str()
+    }
+}
+
 /// A Gmail thread. In `threads.list` results only `id`, `snippet` and `history_id` are set.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
