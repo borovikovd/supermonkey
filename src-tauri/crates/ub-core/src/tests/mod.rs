@@ -10,13 +10,13 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use tempfile::TempDir;
 use ub_domain::{AccountId, Addr, GmailMessageId, GmailThreadId, LabelSet, Millis, ThreadId};
-use ub_gmail::MemoryTokenStore;
+use ub_gmail::{MemoryTokenStore, OAuthConfig, QuotaConfig};
 use ub_ipc::{Action, ChannelMessage, NumberedAction};
 use ub_store::{FetchedThread, NewMessage, Priority, StoreError, WriteTx};
 
 use crate::activity::Activity;
 use crate::clock::SystemClock;
-use crate::{App, Config, Deps, Notification, Platform, PlatformError};
+use crate::{App, Config, Deps, GmailConfig, Notification, Platform, PlatformError};
 
 /// A platform that records what the core asked of it.
 #[derive(Default)]
@@ -66,7 +66,11 @@ impl Harness {
         let activity = Activity::new();
         let platform = Arc::new(Recorder::default());
         let app = App::start(
-            &Config::in_data_dir(dir.path(), true),
+            &Config::in_data_dir(
+                dir.path(),
+                true,
+                GmailConfig::google(OAuthConfig::google("", ""), QuotaConfig::default()),
+            ),
             Deps {
                 platform: Arc::<Recorder>::clone(&platform),
                 clock: Arc::new(SystemClock),

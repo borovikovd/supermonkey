@@ -6,39 +6,74 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
-use ub_gmail::TokenStore;
+use ub_gmail::{GMAIL_BASE_URL, OAuthConfig, QuotaConfig, TokenStore};
 use ub_store::{Priority, ReadPool, StoreError};
 
+use crate::accounts::Accounts;
 use crate::actions::{Actions, Received};
 use crate::activity::{Activity, Tasks};
 use crate::clock::Clock;
 use crate::effects::{Effect, Router};
 use crate::lifecycle::Lifecycle;
+use crate::mail::Mail;
 use crate::queries::Queries;
 use crate::writer::CoreWriter;
 use crate::{Error, Platform};
 
-/// Where the core keeps its data, and how it runs.
+/// Where the core keeps its data, how it runs, and which Gmail it talks to.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// The app's data folder: the database, and the files of attachments
+    /// and drafts.
+    pub data_dir: PathBuf,
     /// The SQLite file. Created, or moved aside for a new one, if needed.
     pub db_path: PathBuf,
     /// Read-only connections for window fetches, bodies, and autocomplete.
     pub read_connections: NonZeroUsize,
     /// A debug build: the UI shows its keydown-to-paint meter.
     pub debug: bool,
+    /// Gmail's endpoints, the OAuth client, and the request budget.
+    pub gmail: GmailConfig,
 }
 
 impl Config {
     /// The database's name in the app's data folder.
     pub const DB_FILE: &str = "ubermensch.db";
+    /// The refresh-token file's name in the app's data folder, for a
+    /// [`ub_gmail::TokenFile`].
+    pub const TOKEN_FILE: &str = "tokens.json";
 
     /// The app's database in `data_dir`, with four read connections.
-    pub fn in_data_dir(data_dir: &Path, debug: bool) -> Self {
+    pub fn in_data_dir(data_dir: &Path, debug: bool, gmail: GmailConfig) -> Self {
         Self {
+            data_dir: data_dir.to_path_buf(),
             db_path: data_dir.join(Self::DB_FILE),
             read_connections: NonZeroUsize::new(4).unwrap_or(NonZeroUsize::MIN),
             debug,
+            gmail,
+        }
+    }
+}
+
+/// Which Gmail the core talks to: Google's, or the fake in tests and demo
+/// mode, and how fast it may.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GmailConfig {
+    /// The REST API's base URL.
+    pub base_url: String,
+    /// The OAuth client and its endpoints.
+    pub oauth: OAuthConfig,
+    /// The request budget per account.
+    pub quota: QuotaConfig,
+}
+
+impl GmailConfig {
+    /// Google's Gmail with this OAuth client and budget.
+    pub fn google(oauth: OAuthConfig, quota: QuotaConfig) -> Self {
+        Self {
+            base_url: GMAIL_BASE_URL.to_owned(),
+            oauth,
+            quota,
         }
     }
 }
@@ -63,11 +98,8 @@ pub struct App {
     actions: Actions,
     queries: Queries,
     lifecycle: Lifecycle,
-    #[expect(
-        dead_code,
-        reason = "the accounts slice starts each account's worker with it"
-    )]
-    tokens: Arc<dyn TokenStore>,
+    accounts: Accounts,
+    mail: Mail,
     #[cfg(test)]
     writer: CoreWriter,
 }
@@ -75,7 +107,8 @@ pub struct App {
 impl App {
     /// Opens the database and starts the core: the writer thread, the read
     /// pool, and the effect router. Call it inside a tokio runtime; the
-    /// core's tasks run on it.
+    /// core's tasks run on it. Nothing talks to Gmail until
+    /// [`Lifecycle::launch`], so the E2E server can seed accounts first.
     pub fn start(config: &Config, deps: Deps) -> Result<Self, Error> {
         let runtime = tokio::runtime::Handle::try_current()?;
         let Deps {
@@ -98,7 +131,7 @@ impl App {
         }));
         let router = Router {
             pool: Arc::clone(&pool),
-            platform,
+            platform: Arc::clone(&platform),
         };
         tasks.spawn("effects", router.run(from_writers));
         // The Dock badge as the database has it at launch. The router is
@@ -108,7 +141,8 @@ impl App {
             actions: Actions::new(writer.clone(), Arc::clone(&received), tasks.clone()),
             queries: Queries::new(pool, clock),
             lifecycle: Lifecycle::new(writer.clone(), received, tasks, config.debug),
-            tokens,
+            accounts: Accounts::new(writer.clone(), tokens, config.gmail.clone()),
+            mail: Mail::new(platform),
             #[cfg(test)]
             writer,
         })
@@ -124,9 +158,19 @@ impl App {
         &self.queries
     }
 
-    /// Connecting pages, the online flag, and quitting.
+    /// Connecting pages, launch, focus, the online flag, and quitting.
     pub fn lifecycle(&self) -> &Lifecycle {
         &self.lifecycle
+    }
+
+    /// Signing accounts in, and waking their workers.
+    pub fn accounts(&self) -> &Accounts {
+        &self.accounts
+    }
+
+    /// Links, attachments, unsubscribe, and block.
+    pub fn mail(&self) -> &Mail {
+        &self.mail
     }
 
     /// The writer, for tests that write as sync would.

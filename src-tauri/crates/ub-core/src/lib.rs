@@ -2,12 +2,13 @@
 //! subscriptions and patches, and the per-account workers. Takes `ub_ipc`
 //! actions in and gives `ub_ipc` read models and channel messages out.
 //!
-//! Start a core with [`App::start`], then:
+//! Start a core with [`App::start`] and [`Lifecycle::launch`] it, then:
 //! - [`Lifecycle::connect`] a page's [`ChannelSink`]: one
 //!   [`ub_ipc::ChannelMessage`] per commit goes there, and each batch of
 //!   first loads as its own message;
 //! - [`Actions::submit`] the page's numbered actions;
 //! - read with [`Queries`];
+//! - sign in with [`Accounts`], and open links and attachments with [`Mail`];
 //! - [`Lifecycle::quit`] to stop.
 //!
 //! Inside, one writer thread applies every write (`writer`), the
@@ -19,10 +20,12 @@ pub mod activity;
 pub mod clock;
 pub mod effects;
 
+mod accounts;
 mod actions;
 mod app;
 mod error;
 mod lifecycle;
+mod mail;
 mod platform;
 mod queries;
 mod subs;
@@ -33,10 +36,12 @@ mod writer;
 #[cfg(test)]
 mod tests;
 
+pub use accounts::Accounts;
 pub use actions::Actions;
-pub use app::{App, Config, Deps};
+pub use app::{App, Config, Deps, GmailConfig};
 pub use error::Error;
 pub use lifecycle::{Lifecycle, QUIT_DEADLINE};
+pub use mail::{Mail, NewAttachment};
 pub use platform::{Notification, Platform, PlatformError};
 pub use queries::Queries;
 pub use writer::ChannelSink;

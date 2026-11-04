@@ -234,3 +234,4 @@ The slices from the plan, each green on the slice gate (`vp run gate:slice`) bef
 2. **Logging uses `tracing`**, with spans around Gmail calls and writer jobs.
 3. **The `e2e-server` binary stays in the root package**, as a thin `main` over `testkit`, so `e2e/global-setup.ts` builds it as before.
 4. **`ipc` sits below `core`** and holds only the contract types, so `core` takes and returns them directly instead of mirroring 47 types with conversions. `domain`'s `sqlite` and `ts` features add trait impls for its newtypes and small enums, since the orphan rule keeps those impls out of `store` and `ipc`.
+5. **Starting and launching are two steps.** `App::start` opens the database and the read pool and starts the writer; nothing talks to Gmail until `Lifecycle::launch`. The E2E server seeds accounts between the two, as the old server did before its engine ran. The Gmail endpoints, OAuth client, and request budget are part of `core::Config`.

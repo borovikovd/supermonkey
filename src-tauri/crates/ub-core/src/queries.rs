@@ -7,7 +7,7 @@ use std::sync::Arc;
 use chrono::{DateTime, Local};
 use ub_domain::contacts::{MatchField, contact_matches};
 use ub_domain::snooze::snooze_picker;
-use ub_domain::{AccountId, MessageId, ThreadId};
+use ub_domain::{AccountId, GmailThreadId, MessageId, ThreadId};
 use ub_ipc::{ContactSuggestion, ListRow, MessageBody, SnoozeChoice};
 use ub_store::{ReadPool, ReadTx, StoreError};
 
@@ -139,6 +139,12 @@ impl Queries {
         thread: ThreadId,
     ) -> Result<Vec<ThreadId>, Error> {
         self.read(move |r| r.threads().sender_inbox_threads(account, thread))
+            .await
+    }
+
+    /// Gmail's id for a thread, if the app has the thread.
+    pub async fn gmail_thread(&self, thread: ThreadId) -> Result<Option<GmailThreadId>, Error> {
+        self.read(move |r| Ok(r.threads().row(thread)?.map(|row| row.gmail_id)))
             .await
     }
 }

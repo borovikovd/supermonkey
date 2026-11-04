@@ -15,5 +15,5 @@ mod tasks;
 mod tracker;
 
 pub use kick::{DEFERRED_KICK, Kick};
-pub use tasks::{Tasks, parked, waiting_on_person};
+pub use tasks::{Tasks, busy_scope, parked, waiting_on_person};
 pub use tracker::{Activity, Busy, Tracked};

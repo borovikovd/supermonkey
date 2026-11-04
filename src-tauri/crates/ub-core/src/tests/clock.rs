@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use ub_domain::Millis;
 
-use crate::activity::{Activity, Kick, Tasks};
+use crate::activity::{Activity, Kick, Tasks, busy_scope, waiting_on_person};
 use crate::clock::{Clock, ManualClock, SystemClock, sleep};
 
 fn busy(activity: &Activity, label: &str) -> usize {
@@ -152,4 +152,28 @@ async fn a_cancelled_group_ends_its_tasks_and_starts_no_more() {
     assert!(activity.is_idle());
     group.spawn("late", async {});
     assert!(activity.is_idle(), "nothing starts after the group stopped");
+}
+
+#[tokio::test]
+async fn a_busy_scope_counts_until_it_waits_on_the_person() {
+    let activity = Activity::new();
+    let (to_scope, from_test) = tokio::sync::oneshot::channel::<()>();
+    let (a, b) = (Arc::clone(&activity), Arc::clone(&activity));
+    let scope = tokio::spawn(async move {
+        busy_scope(&a, "test-scope", async move {
+            let before = busy(&b, "test-scope");
+            waiting_on_person();
+            let after = busy(&b, "test-scope");
+            from_test.await.unwrap();
+            (before, after)
+        })
+        .await
+    });
+    to_scope.send(()).unwrap();
+    assert_eq!(
+        scope.await.unwrap(),
+        (1, 0),
+        "busy inside the scope, parked once waiting on the person"
+    );
+    assert!(activity.is_idle());
 }

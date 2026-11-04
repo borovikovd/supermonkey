@@ -134,6 +134,19 @@ impl Tasks {
     }
 }
 
+/// Runs `fut` in the current task, busy as `label` until it ends or parks:
+/// for work that runs outside the core's tasks but must count, such as a
+/// debug web bridge command. Inside it, [`parked`] and [`waiting_on_person`]
+/// work as in a spawned task.
+pub async fn busy_scope<F: Future>(
+    activity: &Arc<Activity>,
+    label: &'static str,
+    fut: F,
+) -> F::Output {
+    TASK.scope(TaskActivity::new(Arc::clone(activity), label), fut)
+        .await
+}
+
 /// Awaits `fut` without counting the current task as busy. Only for waits
 /// whose wake-up carries its own activity: a [`Kick`](super::Kick), a timer,
 /// a [`Tracked`](super::Tracked) item.

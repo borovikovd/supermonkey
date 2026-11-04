@@ -1,9 +1,11 @@
 //! The `Lifecycle` handle: connecting a page, the online flag, and quitting
 //! (ARCHITECTURE.md, sections 4 and 8.1).
 //!
-//! Extension points: the accounts and sync slices add launch (start each
-//! signed-in account's worker, wake due snoozes, settle the outbox, apply
-//! the untouched rule to drafts still started fresh), and focus and wake.
+//! Extension points: the accounts and sync slices fill in
+//! [`Lifecycle::launch`] (start each signed-in account's worker, wake due
+//! snoozes, settle the outbox, apply the untouched rule to drafts still
+//! started fresh), and the notifications slice [`Lifecycle::focus`] (poll on
+//! focus, and a click-through on the last notification).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,10 +13,10 @@ use std::time::Duration;
 use ub_ipc::LaunchInfo;
 use ub_store::{Priority, StoreError};
 
-use crate::Error;
 use crate::actions::Received;
 use crate::activity::Tasks;
 use crate::writer::{ChannelSink, CoreWriter};
+use crate::{Error, Notification};
 
 /// How long quitting waits for work the user already did to commit.
 pub const QUIT_DEADLINE: Duration = Duration::from_secs(5);
@@ -54,10 +56,34 @@ impl Lifecycle {
                 Ok::<_, StoreError>(())
             })
             .await?;
-        Ok(LaunchInfo {
+        Ok(self.launch_info())
+    }
+
+    /// Where a page's action numbers continue, and whether this is a debug
+    /// build: what [`Lifecycle::connect`] returns, for a page whose channel
+    /// was connected apart from its first call (the debug web bridge's event
+    /// stream).
+    pub fn launch_info(&self) -> LaunchInfo {
+        LaunchInfo {
             last_action: self.received.last(),
             debug: self.debug,
-        })
+        }
+    }
+
+    /// Starts the work that talks to Gmail, once, after
+    /// [`App::start`](crate::App::start): each signed-in account's worker,
+    /// due snoozes, the outbox, and drafts left untouched. The E2E server
+    /// seeds accounts between the two.
+    pub fn launch(&self) {
+        tracing::info!("launched");
+    }
+
+    /// The main window gained or lost focus. On focus, returns the
+    /// notification the focus counts as a click on, if any: the shell then
+    /// shows that thread.
+    pub fn focus(&self, focused: bool) -> Option<Notification> {
+        tracing::debug!(focused, "window focus changed");
+        None
     }
 
     /// Records whether Gmail is reachable; the app subscription shows it.
