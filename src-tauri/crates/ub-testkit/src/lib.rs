@@ -42,8 +42,10 @@ use crate::platform::RecordingPlatform;
 use crate::server::{Core, Server, fast_quota};
 
 /// Runs the E2E server on 127.0.0.1:`port` (0 picks a free one) until the
-/// process is killed, serving the UI from `dist`. App time starts at `now`.
-/// Prints `READY <url>` on stdout once listening.
+/// process is told to stop (`SIGTERM` or `SIGINT`), serving the UI from
+/// `dist`. App time starts at `now`. Prints `READY <url>` on stdout once
+/// listening. Its temporary data folder is deleted on the way out: a test
+/// run starts hundreds of servers, and each folder holds a database.
 pub async fn run(port: u16, dist: PathBuf, now: Millis) -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let data_dir = dir.path().to_path_buf();
@@ -89,7 +91,23 @@ pub async fn run(port: u16, dist: PathBuf, now: Millis) -> anyhow::Result<()> {
     {
         println!("READY http://{addr}");
     }
-    axum::serve(listener, routes).await?;
-    drop(dir);
+    // Not a graceful shutdown: the page's event stream never ends on its own.
+    tokio::select! {
+        result = axum::serve(listener, routes).into_future() => result?,
+        signal = told_to_stop() => signal?,
+    }
+    dir.close()?;
+    Ok(())
+}
+
+/// Waits for `SIGTERM` (how the test runner stops a server) or `SIGINT`.
+async fn told_to_stop() -> std::io::Result<()> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let mut terminate = signal(SignalKind::terminate())?;
+    let mut interrupt = signal(SignalKind::interrupt())?;
+    tokio::select! {
+        _ = terminate.recv() => {}
+        _ = interrupt.recv() => {}
+    }
     Ok(())
 }
