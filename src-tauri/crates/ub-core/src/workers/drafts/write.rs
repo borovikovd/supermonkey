@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use ub_domain::{Addr, DraftId, GmailDraftId, GmailThreadId};
 use ub_gmail::{Format, GmailError, Outcome, PageToken, Priority};
 use ub_mime::{InlinePart, OutAttachment, Outgoing};
-use ub_store::Draft;
+use ub_store::{Draft, Priority as WritePriority, StoreError};
 
 use super::{WriteFailure, local_rejection};
 use crate::Error;
@@ -30,18 +30,25 @@ pub(crate) async fn load(ctx: &AccountCtx, id: &DraftId) -> Result<Option<Draft>
 
 /// Writes the draft to Gmail: an update of its Gmail draft, or a create
 /// when it has none or Gmail no longer has it (sent or deleted elsewhere).
-/// Every write carries all of the draft's attachments: `drafts.update`
-/// replaces the whole message.
+/// A draft whose last create never got its answer stored (the app quit, or
+/// the write was cancelled) may have a Gmail draft already: it is looked
+/// for by its header first, and updated if found. Every write carries all
+/// of the draft's attachments: `drafts.update` replaces the whole message.
 pub(crate) async fn write(
     ctx: &AccountCtx,
     draft: &Draft,
 ) -> Result<ub_gmail::Draft, WriteFailure> {
     let raw = build_raw(ctx, draft).await?;
     let thread = gmail_thread(ctx, draft).await?;
-    if let Some(id) = &draft.gmail_draft_id {
+    let existing = match &draft.gmail_draft_id {
+        Some(id) => Some(id.clone()),
+        None if draft.create_sent => recover_create(ctx, &draft.id).await?.map(|d| d.id),
+        None => None,
+    };
+    if let Some(id) = existing {
         match ctx
             .gmail
-            .update_draft(Priority::P1, id, &raw, thread.as_ref())
+            .update_draft(Priority::P1, &id, &raw, thread.as_ref())
             .await
         {
             Ok(written) => return Ok(written),
@@ -67,14 +74,17 @@ async fn gmail_thread(
         .or_else(|| draft.gmail_thread_id.clone()))
 }
 
-/// `drafts.create`, which is unsafe to repeat: after one with no clear
-/// answer, looks for the draft it may have made before trying again.
+/// `drafts.create`, which is unsafe to repeat: the draft is marked as sent
+/// to create first, so a create whose answer is lost to a quit is
+/// recovered on the next write, and after one with no clear answer, it
+/// looks for the draft it may have made before trying again.
 async fn create(
     ctx: &AccountCtx,
     local: &DraftId,
     raw: &[u8],
     thread: Option<&GmailThreadId>,
 ) -> Result<ub_gmail::Draft, WriteFailure> {
+    mark_create_sent(ctx, local).await?;
     for _ in 0..CREATE_TRIES {
         match ctx.gmail.create_draft(Priority::P1, raw, thread).await {
             Ok(created) => return Ok(created),
@@ -92,6 +102,25 @@ async fn create(
         }
     }
     Err(GmailError::new(Outcome::NoResponse).into())
+}
+
+/// Records, before a `drafts.create` goes out, that one did: committed
+/// first, so no answer can be lost without the next write knowing.
+async fn mark_create_sent(ctx: &AccountCtx, local: &DraftId) -> Result<(), Error> {
+    let local = local.clone();
+    ctx.writer()
+        .call(WritePriority::Sync, move |tx, _| {
+            if let Some(record) = tx.read().drafts().get(&local)?
+                && !record.draft.create_sent
+            {
+                let mut draft = record.draft;
+                draft.create_sent = true;
+                tx.drafts().put(&draft)?;
+            }
+            Ok::<_, StoreError>(())
+        })
+        .await?;
+    Ok(())
 }
 
 /// After a `drafts.create` with no clear answer (SPEC Gmail errors): if

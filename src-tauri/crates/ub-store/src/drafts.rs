@@ -88,6 +88,10 @@ pub struct Draft {
     pub pending_gmail_read: bool,
     /// Read from Gmail; its parts are not downloaded yet.
     pub needs_parts: bool,
+    /// A `drafts.create` was sent for it and its answer never stored (the
+    /// app quit, or the write was cancelled): Gmail may have the draft, so
+    /// the next write looks for it by its `X-Ubermensch-Draft` header first.
+    pub create_sent: bool,
     /// The last edit; the Drafts list sorts by it.
     pub updated_at: Millis,
 }
@@ -121,6 +125,7 @@ impl Draft {
             gmail_thread_id: None,
             pending_gmail_read: false,
             needs_parts: false,
+            create_sent: false,
             updated_at: now,
         }
     }
@@ -179,6 +184,7 @@ fn draft_row(r: &Row<'_>) -> rusqlite::Result<DraftRecord> {
             gmail_thread_id: r.get("gmail_thread_id")?,
             pending_gmail_read: r.get("pending_gmail_read")?,
             needs_parts: r.get("needs_parts")?,
+            create_sent: r.get("gmail_create_sent")?,
             updated_at: r.get("updated_at")?,
         },
         rev: r.get("rev")?,
@@ -319,11 +325,11 @@ impl<'t, 'c> DraftWrites<'t, 'c> {
                  started_on_latest, started_fresh, from_addr, to_addrs, cc_addrs, bcc_addrs,
                  subject, body_html, snippet, quote_html, attachments, defaults, in_reply_to,
                  references_hdr, gmail_draft_id, gmail_message_id, gmail_thread_id,
-                 pending_gmail_read, needs_parts, updated_at, rev)
+                 pending_gmail_read, needs_parts, gmail_create_sent, updated_at, rev)
              VALUES (:id, :account, :kind, :reply_all, :thread, :target, :on_latest, :fresh,
                  :from, :to, :cc, :bcc, :subject, :body, :snippet, :quote, :attachments,
                  :defaults, :in_reply_to, :references, :gmail_draft, :gmail_message,
-                 :gmail_thread, :pending_read, :needs_parts, :updated_at, :rev)
+                 :gmail_thread, :pending_read, :needs_parts, :create_sent, :updated_at, :rev)
              ON CONFLICT (id) DO UPDATE SET
                  kind = excluded.kind, reply_all = excluded.reply_all,
                  thread_id = excluded.thread_id, target_message_id = excluded.target_message_id,
@@ -339,7 +345,9 @@ impl<'t, 'c> DraftWrites<'t, 'c> {
                  gmail_message_id = excluded.gmail_message_id,
                  gmail_thread_id = excluded.gmail_thread_id,
                  pending_gmail_read = excluded.pending_gmail_read,
-                 needs_parts = excluded.needs_parts, updated_at = excluded.updated_at,
+                 needs_parts = excluded.needs_parts,
+                 gmail_create_sent = excluded.gmail_create_sent,
+                 updated_at = excluded.updated_at,
                  rev = excluded.rev",
             named_params! {
                 ":id": draft.id,
@@ -367,6 +375,7 @@ impl<'t, 'c> DraftWrites<'t, 'c> {
                 ":gmail_thread": draft.gmail_thread_id,
                 ":pending_read": draft.pending_gmail_read,
                 ":needs_parts": draft.needs_parts,
+                ":create_sent": draft.create_sent,
                 ":updated_at": draft.updated_at,
                 ":rev": rev,
             },

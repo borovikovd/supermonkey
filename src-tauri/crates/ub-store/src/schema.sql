@@ -201,6 +201,7 @@ CREATE TABLE drafts (
   gmail_thread_id    TEXT,
   pending_gmail_read INTEGER NOT NULL,         -- a Gmail change skipped while a composer had it open
   needs_parts        INTEGER NOT NULL,         -- read from Gmail; parts not downloaded yet
+  gmail_create_sent  INTEGER NOT NULL,         -- a drafts.create went out; its answer is not stored
   updated_at         INTEGER NOT NULL,
   rev                INTEGER NOT NULL
 );

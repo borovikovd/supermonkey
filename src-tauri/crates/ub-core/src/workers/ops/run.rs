@@ -8,7 +8,7 @@ use ub_gmail::{Format, GmailError, Outcome, Priority};
 use ub_store::{OpId, OpKind, OpRecord, Priority as WritePriority, StoreError};
 
 use crate::Error;
-use crate::drafts::store_ids;
+use crate::drafts::{WritingDraft, store_ids};
 use crate::effects::Effect;
 use crate::ops::{LabelCreateOp, ModifyOp, reject, relabel};
 use crate::workers::account::AccountCtx;
@@ -62,6 +62,8 @@ enum Landing {
 /// Runs `op` once and writes what came of it. Nothing is written when Gmail
 /// gave no clear answer: the op stays as it was, to run again.
 pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure> {
+    // A draft write stays in progress until its Gmail ids are stored.
+    let mut writing: Option<WritingDraft> = None;
     let answer = match op.kind {
         OpKind::Modify => match op.payload::<ModifyOp>() {
             Ok(payload) => modify(ctx, payload).await?,
@@ -79,7 +81,9 @@ pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure
         },
         OpKind::DraftUpsert => {
             if let Some(draft) = &op.draft {
-                draft_upsert(ctx, draft).await?
+                let (answer, guard) = draft_upsert(ctx, draft).await?;
+                writing = guard;
+                answer
             } else {
                 tracing::error!(op = %op.id, "a draft upsert names no draft; dropping it");
                 Answer::Unreadable
@@ -105,7 +109,14 @@ pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure
         },
     };
     ctx.health.succeeded();
-    write(ctx, op.id, answer).await.map_err(Failure::Store)
+    let written = write(ctx, op.id, answer).await.map_err(Failure::Store);
+    if let Some(writing) = writing {
+        let draft = writing.draft().clone();
+        drop(writing);
+        // A send of the draft waited for this write to end.
+        wake_outbox_if_sending(ctx, draft);
+    }
+    written
 }
 
 /// `messages.batchModify`, in chunks Gmail takes. A 404 narrows the op to
@@ -204,36 +215,57 @@ async fn create_label(ctx: &AccountCtx, op: LabelCreateOp) -> Result<Answer, Fai
     }))
 }
 
-/// A draft upsert (SPEC Drafts). Whatever came of it, a send of the draft
-/// waiting for this write to end looks again.
-async fn draft_upsert(ctx: &AccountCtx, draft: &DraftId) -> Result<Answer, Failure> {
+/// A draft upsert (SPEC Drafts), and the write in progress to end once its
+/// answer is stored. Whatever came of it, a send of the draft waiting for
+/// this write to end looks again.
+async fn draft_upsert(
+    ctx: &AccountCtx,
+    draft: &DraftId,
+) -> Result<(Answer, Option<WritingDraft>), Failure> {
     let upserted = upsert(ctx, draft).await;
-    if !matches!(upserted, Ok(Upserted::Written(_))) {
-        let (account, draft) = (ctx.account, draft.clone());
-        ctx.writer().queue(
-            WritePriority::Sync,
-            "wake the outbox after an upsert",
-            move |tx, state| {
-                if tx.read().drafts().get(&draft)?.is_some_and(|d| d.in_outbox) {
-                    state.effect(Effect::Outbox(account));
-                }
-                Ok(())
-            },
-        );
+    // A written draft's write ends once its ids are stored (`run_op`).
+    if !matches!(upserted, Ok(Upserted::Written { .. })) {
+        wake_outbox_if_sending(ctx, draft.clone());
     }
     match upserted {
-        Ok(Upserted::Written(written)) => Ok(Answer::Done(Landing::Draft {
-            draft: draft.clone(),
-            written: Some(written),
-        })),
-        Ok(Upserted::Nothing) => Ok(Answer::Done(Landing::Draft {
-            draft: draft.clone(),
-            written: None,
-        })),
+        Ok(Upserted::Written {
+            draft: written,
+            writing,
+        }) => Ok((
+            Answer::Done(Landing::Draft {
+                draft: draft.clone(),
+                written: Some(written),
+            }),
+            Some(writing),
+        )),
+        Ok(Upserted::Nothing) => Ok((
+            Answer::Done(Landing::Draft {
+                draft: draft.clone(),
+                written: None,
+            }),
+            None,
+        )),
         Ok(Upserted::Busy) => Err(Failure::Busy),
-        Err(WriteFailure::Gmail(e)) => refused(e),
+        Err(WriteFailure::Gmail(e)) => Ok((refused(e)?, None)),
         Err(WriteFailure::Store(e)) => Err(Failure::Store(e)),
     }
+}
+
+/// Wakes the account's outbox if `draft` is being sent: its send waits for
+/// the draft's write to end. Through the writer, so it reaches the account's
+/// current worker even if this one was replaced.
+fn wake_outbox_if_sending(ctx: &AccountCtx, draft: DraftId) {
+    let account = ctx.account;
+    ctx.writer().queue(
+        WritePriority::Sync,
+        "wake the outbox after an upsert",
+        move |tx, state| {
+            if tx.read().drafts().get(&draft)?.is_some_and(|d| d.in_outbox) {
+                state.effect(Effect::Outbox(account));
+            }
+            Ok(())
+        },
+    );
 }
 
 /// `messages.trash` of a sent message whose send was undone. One Gmail no
@@ -282,10 +314,6 @@ async fn write(ctx: &AccountCtx, id: OpId, answer: Answer) -> Result<(), Error> 
                 if let Some(written) = &written {
                     let ids = (&written.id, &written.message.id, &written.message.thread_id);
                     store_ids(tx, state, &draft, ids, Some(account), now)?;
-                }
-                if tx.read().drafts().get(&draft)?.is_some_and(|d| d.in_outbox) {
-                    // Sent meanwhile: the outbox waited for this write to end.
-                    state.effect(Effect::Outbox(account));
                 }
                 tx.ops().delete(id)
             }

@@ -80,6 +80,7 @@ pub(crate) fn store_ids(
     d.gmail_draft_id = Some(draft.clone());
     d.gmail_message_id = Some(message.clone());
     d.gmail_thread_id = Some(thread.clone());
+    d.create_sent = false;
     tx.drafts().put(&d)
 }
 
@@ -215,6 +216,7 @@ pub(crate) fn apply_gmail_draft(
                     adopted.gmail_draft_id = Some(gmail.id);
                     adopted.gmail_message_id = Some(gmail.message.message.gmail_id);
                     adopted.gmail_thread_id = Some(gmail.thread);
+                    adopted.create_sent = false;
                     tx.drafts().put(&adopted)
                 }
             };
@@ -252,6 +254,7 @@ pub(crate) fn apply_gmail_draft(
     draft.gmail_draft_id = Some(gmail.id);
     draft.gmail_message_id = Some(message.gmail_id.clone());
     draft.gmail_thread_id = Some(gmail.thread);
+    draft.create_sent = false;
     draft.pending_gmail_read = false;
     draft.updated_at = message.date;
     tx.drafts().put(&draft)

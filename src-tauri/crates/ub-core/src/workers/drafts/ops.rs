@@ -7,6 +7,7 @@ use ub_gmail::{GmailError, Outcome, Priority};
 use super::WriteFailure;
 use super::parts::download_parts;
 use super::write::{load, write};
+use crate::drafts::WritingDraft;
 use crate::workers::account::AccountCtx;
 
 /// What an upsert did.
@@ -14,8 +15,13 @@ use crate::workers::account::AccountCtx;
 pub(crate) enum Upserted {
     /// Nothing to write: the draft is gone, or the outbox writes it.
     Nothing,
-    /// Written: Gmail's draft for it.
-    Written(Box<ub_gmail::Draft>),
+    /// Written: Gmail's draft for it. The write stays in progress until
+    /// `writing` is dropped: hold it until Gmail's ids are stored, or a send
+    /// or reconcile in between would see the draft with none.
+    Written {
+        draft: Box<ub_gmail::Draft>,
+        writing: WritingDraft,
+    },
     /// The outbox is writing it now and the draft is not in the outbox:
     /// run again once that write ends.
     Busy,
@@ -25,7 +31,7 @@ pub(crate) enum Upserted {
 /// (it writes the final version itself). A draft read from Gmail gets its
 /// parts first. Two writes of one draft never overlap.
 pub(crate) async fn upsert(ctx: &AccountCtx, id: &DraftId) -> Result<Upserted, WriteFailure> {
-    let Some(_writing) = ctx.lane.writing.begin(id) else {
+    let Some(writing) = ctx.lane.writing.begin(id) else {
         let taken = load_record(ctx, id)
             .await?
             .is_none_or(|in_outbox| in_outbox);
@@ -47,7 +53,10 @@ pub(crate) async fn upsert(ctx: &AccountCtx, id: &DraftId) -> Result<Upserted, W
     let Some(draft) = load(ctx, id).await? else {
         return Ok(Upserted::Nothing);
     };
-    Ok(Upserted::Written(Box::new(write(ctx, &draft).await?)))
+    Ok(Upserted::Written {
+        draft: Box::new(write(ctx, &draft).await?),
+        writing,
+    })
 }
 
 /// Whether the draft is in the outbox, or `None` when it is gone.

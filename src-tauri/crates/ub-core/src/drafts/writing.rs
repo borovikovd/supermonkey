@@ -37,6 +37,13 @@ pub(crate) struct WritingDraft {
     draft: DraftId,
 }
 
+impl WritingDraft {
+    /// The draft being written.
+    pub(crate) fn draft(&self) -> &DraftId {
+        &self.draft
+    }
+}
+
 impl Drop for WritingDraft {
     fn drop(&mut self) {
         self.writing.0.lock().remove(&self.draft);

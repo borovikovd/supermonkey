@@ -20,4 +20,4 @@ pub(crate) use gmail::{
     GmailDraft, Reconcile, apply_gmail_draft, defer_if_open, drop_gone, store_ids,
 };
 pub(crate) use save::{queue_upsert, update};
-pub(crate) use writing::DraftsWriting;
+pub(crate) use writing::{DraftsWriting, WritingDraft};

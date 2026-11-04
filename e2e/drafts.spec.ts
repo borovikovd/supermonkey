@@ -269,6 +269,36 @@ test("DRF-17 a Gmail draft read before its thread's messages is aimed at the thr
   await expect(app.editor).toContainText("dTwoB");
 });
 
+test("DRF-18 a crash after drafts.create reached Gmail, before its ids were stored, leaves one draft", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const thread = s.thread("p3").threadId;
+  // Gmail makes the draft, and its answer is still on the way when the app dies.
+  const create = await gmail.holdAnswer("drafts.create");
+  await openThread(app, "Person 3");
+  await app.reply();
+  await app.type("before the crash");
+  await expect.poll(async () => (await creates(gmail)).some((r) => r.held)).toBe(true);
+  const [made] = await draftsIn(gmail, thread);
+  expect(made).toBeDefined();
+  await app.crashAndRelaunch(async () => {
+    // The crash dropped the parked answer; end the hold.
+    await create.release(undefined, { min: 0 });
+  });
+  await app.settle();
+
+  // The replayed upsert found the draft by its header instead of making another.
+  expect(await creates(gmail)).toHaveLength(1);
+  const now = await draftsIn(gmail, thread);
+  expect(now.map((d) => d.id)).toEqual([made?.id]);
+  expect(bodyOf(now[0])).toContain("before the crash");
+  await goDrafts(app);
+  await expect(app.rows).toHaveCount(1);
+  await expect(app.row("before the crash")).toHaveCount(1);
+});
+
 test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app, gmail }) => {
   await seeds.drafts(gmail, app);
   await goDrafts(app);
