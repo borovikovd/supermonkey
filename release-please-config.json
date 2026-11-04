@@ -26,7 +26,7 @@
         {
           "type": "toml",
           "path": "src-tauri/Cargo.lock",
-          "jsonpath": "$.package[?(@.name=='ubermensch')].version"
+          "jsonpath": "$.package[?(@.name.value=='ubermensch')].version"
         }
       ]
     }
