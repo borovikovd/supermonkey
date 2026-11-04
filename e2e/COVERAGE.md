@@ -3519,6 +3519,7 @@ Also kept, because they test logic the E2E suite can't observe:
 - `crates/ub-core/src/workers/unwanted.rs`: Blocked senders lists only filters that trash one sender (the fake has no other kind).
 - `crates/ub-core/src/workers/attachments.rs`: two attachments of one message with one name keep their own files (the fake's seeds never repeat a name).
 - `crates/ub-gmail/tests/gmail/client.rs`: one-click unsubscribe posts only to `https` (or loopback in debug) and follows no redirect, so a list can't bounce the POST to a local address (the E2E list server never redirects).
+- `crates/ub-core/src/workers/account/ingest.rs`: a poll whose history is older than a thread read stored meanwhile leaves that read's labels (the race needs a fetch to land between `history.list` and its commit).
 - `crates/ub-core/src/tests/perf.rs` (ignored; needs `UBERMENSCH_PERF_DB`): local search and autocomplete per keystroke against SPEC Performance on the perf fixture.
 - `tests/layers.rs`: the crate layering of ARCHITECTURE.md, section 3.
 
