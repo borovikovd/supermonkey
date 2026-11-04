@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/borovikovd/ubermensch/compare/v0.1.2...v0.2.0) (2026-11-04)
+
+
+### Features
+
+* mark read on Mark Done and add All Mail (g a), as in Superhuman ([01eec7f](https://github.com/borovikovd/ubermensch/commit/01eec7f5ae7d47dfa933e33473a9b5e7b565bce6))
+* show a sign-in screen for a signed-out account ([94f7fd5](https://github.com/borovikovd/ubermensch/commit/94f7fd5ebc9945db7efcd65bc302cb3e7b4c5b86))
+
 ## [0.1.2](https://github.com/borovikovd/ubermensch/compare/v0.1.1...v0.1.2) (2026-11-04)
 
 
