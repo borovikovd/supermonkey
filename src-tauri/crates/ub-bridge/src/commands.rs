@@ -3,7 +3,7 @@
 //! these directly; [`crate::dispatch`] calls them by name.
 
 use base64::Engine as _;
-use ub_core::{App, ChannelSink, NewAttachment};
+use ub_core::{App, ChannelSink, MAX_ATTACHMENT_BYTES, NewAttachment, attachment_too_large};
 use ub_domain::{AccountId, AttachmentId, DraftId, MessageId, ThreadId};
 use ub_ipc::{
     BlockResult, BlockedSenders, ContactSuggestion, DraftAttachment, LaunchInfo, ListRow,
@@ -154,9 +154,7 @@ pub async fn add_attachment(
     mime_type: String,
     data: &str,
 ) -> CmdResult<DraftAttachment> {
-    let data = base64::engine::general_purpose::STANDARD
-        .decode(data)
-        .map_err(|e| format!("the file's content is not base64: {e}"))?;
+    let data = decode_file(data)?;
     let file = NewAttachment {
         filename,
         mime_type,
@@ -166,6 +164,19 @@ pub async fn add_attachment(
         .add_attachment(draft, file)
         .await
         .map_err(|e| err(&e))
+}
+
+/// A picked file's base64 content, decoded. One too large to attach is
+/// refused before it is decoded: the webview is not trusted with memory.
+fn decode_file(data: &str) -> CmdResult<Vec<u8>> {
+    // Base64 holds 3 bytes in every 4 characters; the padding of the last
+    // group is the slack.
+    if base64::decoded_len_estimate(data.len()) > MAX_ATTACHMENT_BYTES + 2 {
+        return Err(err(&attachment_too_large()));
+    }
+    base64::engine::general_purpose::STANDARD
+        .decode(data)
+        .map_err(|e| format!("the file's content is not base64: {e}"))
 }
 
 /// Debug builds: the keydown-to-paint meter reports how long an action took.
@@ -180,4 +191,26 @@ pub fn perf_report(action: &str, ms: f64, budget: f64) {
 /// The snooze picker's choices for what the user typed.
 pub fn snooze_options(app: &App, text: &str) -> Vec<SnoozeChoice> {
     app.queries().snooze_options(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_file_over_the_attachment_limit_is_refused_before_it_is_decoded() {
+        let encode = |n: usize| base64::engine::general_purpose::STANDARD.encode(vec![7u8; n]);
+        assert_eq!(
+            decode_file(&encode(MAX_ATTACHMENT_BYTES)).map(|d| d.len()),
+            Ok(MAX_ATTACHMENT_BYTES)
+        );
+        let over = decode_file(&encode(MAX_ATTACHMENT_BYTES + 3));
+        assert_eq!(
+            over,
+            Err("The file is too large: attachments can be at most 25 MB".to_owned())
+        );
+        // Not even base64: refused for its size, never read.
+        let junk = "!".repeat(MAX_ATTACHMENT_BYTES / 3 * 4 + 8);
+        assert_eq!(decode_file(&junk), over);
+    }
 }

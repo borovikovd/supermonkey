@@ -36,8 +36,17 @@ pub(super) enum Redirect {
     Code(String),
     /// The consent page gave an error code, such as `access_denied`.
     Error(String),
-    /// The `state` did not match this sign-in.
-    StateMismatch,
+}
+
+/// What a request to the port is.
+enum Request {
+    /// This sign-in's redirect.
+    Redirect(Redirect),
+    /// A redirect whose `state` is not this sign-in's: forged, or from an
+    /// older tab.
+    ForeignState,
+    /// Anything else, such as `/favicon.ico`.
+    Other,
 }
 
 impl Loopback {
@@ -53,9 +62,12 @@ impl Loopback {
         format!("http://127.0.0.1:{}/", self.port)
     }
 
-    /// Serves the port until a request carrying `code` or `error` arrives,
-    /// answers it with a page for the user, and returns what it carried.
-    /// Other requests, such as `/favicon.ico`, get a 404.
+    /// Serves the port until this sign-in's redirect (a `code` or `error`
+    /// with its `state`) arrives, answers it with a page for the user, and
+    /// returns what it carried. A redirect with another `state` gets a 400
+    /// and changes nothing: a page that sends a forged one cannot end the
+    /// sign-in the user is in the middle of. Other requests, such as
+    /// `/favicon.ico`, get a 404.
     pub(super) async fn wait(&self, expected_state: &str) -> Redirect {
         let mut reading = JoinSet::new();
         loop {
@@ -74,16 +86,23 @@ impl Loopback {
                     let Ok(Some((mut stream, target))) = read else {
                         continue;
                     };
-                    let Some(redirect) = parse(&target, expected_state) else {
-                        respond(&mut stream, "404 Not Found", "").await;
-                        continue;
+                    let redirect = match parse(&target, expected_state) {
+                        Request::Redirect(redirect) => redirect,
+                        Request::ForeignState => {
+                            tracing::warn!("a sign-in redirect with another state; ignoring it");
+                            respond(&mut stream, "400 Bad Request", FAILED_PAGE).await;
+                            continue;
+                        }
+                        Request::Other => {
+                            respond(&mut stream, "404 Not Found", "").await;
+                            continue;
+                        }
                     };
-                    let (status, page) = match &redirect {
-                        Redirect::Code(_) => ("200 OK", DONE_PAGE),
-                        Redirect::Error(_) => ("200 OK", FAILED_PAGE),
-                        Redirect::StateMismatch => ("400 Bad Request", FAILED_PAGE),
+                    let page = match &redirect {
+                        Redirect::Code(_) => DONE_PAGE,
+                        Redirect::Error(_) => FAILED_PAGE,
                     };
-                    respond(&mut stream, status, page).await;
+                    respond(&mut stream, "200 OK", page).await;
                     return redirect;
                 }
             }
@@ -115,9 +134,11 @@ async fn read_target(mut stream: TcpStream) -> Option<(TcpStream, String)> {
     Some((stream, target))
 }
 
-/// What a request target carries, or `None` if it is not the redirect.
-fn parse(target: &str, expected_state: &str) -> Option<Redirect> {
-    let url = url::Url::parse(&format!("http://127.0.0.1{target}")).ok()?;
+/// What a request target is.
+fn parse(target: &str, expected_state: &str) -> Request {
+    let Ok(url) = url::Url::parse(&format!("http://127.0.0.1{target}")) else {
+        return Request::Other;
+    };
     let param = |name: &str| {
         url.query_pairs()
             .find(|(k, _)| k == name)
@@ -126,12 +147,12 @@ fn parse(target: &str, expected_state: &str) -> Option<Redirect> {
     let answer = match (param("code"), param("error")) {
         (_, Some(error)) => Redirect::Error(error),
         (Some(code), None) => Redirect::Code(code),
-        (None, None) => return None,
+        (None, None) => return Request::Other,
     };
     if param("state").as_deref() == Some(expected_state) {
-        Some(answer)
+        Request::Redirect(answer)
     } else {
-        Some(Redirect::StateMismatch)
+        Request::ForeignState
     }
 }
 

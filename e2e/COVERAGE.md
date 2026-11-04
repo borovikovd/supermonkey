@@ -304,8 +304,8 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
-| `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 8       | 6       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **244** | **144** | **90** | **10** |
+| `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
+| **Total**                  |        |                                                                                              |                                          |                             | **245** | **145** | **90** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -3463,6 +3463,20 @@ _ST · §Unsubscribe and block_
 - **Steps:** palette Mark as spam, "Mark spam, and block everyone at junk.test".
 - **Expect:** the message has `SPAM` (not `TRASH`) in Gmail, the row leaves the list, and `filters(A)` has one filter on `@junk.test`.
 
+#### UNW-09 · P1 · Unsubscribe, block, and unblock act only on the account's own thread and block filter
+
+_EG · AGENTS.md (validate every command's input in Rust; the webview is not trusted), §Unsubscribe and block_
+
+- **Seed:** `standard`.
+- **Steps:** call the commands as a page could, through the web bridge:
+  1. `block` and `unsubscribe` with A's account and one of B's threads.
+  2. `block` A's `p1` sender. Then `unblock` with A and a made-up filter id, and with B and A's filter id.
+  3. `unblock` with A and its filter id.
+- **Expect:**
+  - Step 1 is refused: no `filters.create`, and nothing of B's is trashed.
+  - In step 2, the block makes one filter, and both unblocks are refused with no `filters.delete`.
+  - Step 3 deletes the filter.
+
 ---
 
 ## 6. Done-when traceability
@@ -3559,7 +3573,7 @@ These stay, and the E2E suite deliberately does not repeat their partitions. Pat
 Also kept, because they test logic the E2E suite can't observe:
 
 - `crates/ub-gmail/tests/gmail/scheduler.rs`: priorities, concurrency, quota, and back-off, and that a forgotten (removed) account starts afresh instead of staying in the map.
-- `crates/ub-gmail/tests/gmail/oauth.rs`: the `state` check, token caching and early refresh, one refresh shared by concurrent 401s, and secrets kept out of debug output.
+- `crates/ub-gmail/tests/gmail/oauth.rs`: the `state` check (a redirect with another state gets a 400 and the sign-in goes on), token caching and early refresh, one refresh shared by concurrent 401s, and secrets kept out of debug output.
 - `crates/ub-core/src/tests/clock.rs`: the activity tracking `settle()` relies on, that closing a `Kick` (an account stopping) wakes a loop even between its last check and its wait, and that stopping a task group (quit) waits for the tasks of the groups inside it, such as the account workers' (a task mid-step at the stop can't be timed from E2E).
 - `crates/ub-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser: several URIs, mailto subject and body, a `+` in the address, junk, spacing, and when one-click applies.
 - `src/logging.rs`: the stderr logger drops the HTML parser's warnings and keeps ours (logs are not visible to the E2E suite).
@@ -3575,6 +3589,9 @@ Also kept, because they test logic the E2E suite can't observe:
 - `crates/ub-core/src/workers/attachments.rs`: two attachments of one message with one name keep their own files (the fake's seeds never repeat a name).
 - `crates/ub-gmail/tests/gmail/client.rs`: one-click unsubscribe posts only to `https` (or loopback in debug) and follows no redirect, so a list can't bounce the POST to a local address (the E2E list server never redirects).
 - `crates/ub-core/src/workers/account/ingest.rs`: a poll whose history is older than a thread read stored meanwhile leaves that read's labels (the race needs a fetch to land between `history.list` and its commit).
+- `crates/ub-bridge/src/commands.rs`: a file over the 25 MB attachment limit is refused before its base64 is decoded (the web bridge's own body limit is lower, so E2E can't send one).
+- `crates/ub-core/src/tests/actions.rs` (also): the core refuses a file over the limit and keeps nothing.
+- `crates/ub-core/src/tests/writer_channel.rs` (also): `ack` never moves back when a batch queued behind a failed one commits first.
 - `crates/ub-bridge/src/web.rs`: the debug web bridge answers only loopback hosts and its own or the dev server's origin (the E2E page is always same-origin).
 - `crates/ub-core/src/tests/perf.rs` (ignored; needs `UBERMENSCH_PERF_DB`): local search and autocomplete per keystroke against SPEC Performance on the perf fixture.
 - `tests/layers.rs`: the crate layering of ARCHITECTURE.md, section 3.

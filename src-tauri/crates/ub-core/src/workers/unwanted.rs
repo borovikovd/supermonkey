@@ -136,8 +136,20 @@ pub(crate) async fn blocked_senders(ctx: &AccountCtx) -> Result<BlockedSenders, 
     }
 }
 
-/// Unblocks a sender by deleting its filter.
+/// Unblocks a sender by deleting its filter. The id comes from the webview,
+/// which is not trusted: only one of the account's block filters (as
+/// Blocked senders lists them) is deleted, never another filter.
 pub(crate) async fn unblock(ctx: &AccountCtx, filter: FilterId) -> Result<(), Error> {
+    let listed = ctx.gmail.list_filters(Priority::P1).await;
+    ctx.note(&listed);
+    let is_block = listed?
+        .into_iter()
+        .filter(|f| f.id == filter)
+        .find_map(blocked_sender)
+        .is_some();
+    if !is_block {
+        return Err(Error::Invalid("That sender is not blocked".to_owned()));
+    }
     let deleted: Result<(), GmailError> = ctx.gmail.delete_filter(Priority::P1, &filter).await;
     ctx.note(&deleted);
     deleted?;

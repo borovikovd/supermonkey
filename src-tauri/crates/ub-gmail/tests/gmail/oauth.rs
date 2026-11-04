@@ -22,27 +22,35 @@ fn redirect_uri(consent_url: &str) -> String {
 }
 
 #[tokio::test]
-async fn sign_in_rejects_a_wrong_state() {
+async fn a_wrong_state_is_refused_and_the_sign_in_goes_on() {
     let fake = FakeGmail::start();
     fake.add_user(ME);
     let http = HttpClient::new().unwrap();
     let sign_in = SignIn::start(&oauth_config(&fake)).await.unwrap();
-    let redirect = redirect_uri(sign_in.consent_url());
-    let attacker = reqwest::Client::new();
-    let forged = tokio::spawn(async move {
-        attacker
-            .get(format!("{redirect}?code=stolen&state=forged"))
-            .send()
-            .await
-            .map(|r| r.status().as_u16())
-    });
-    let result = sign_in.finish(&http).await;
+    let consent = sign_in.consent_url().to_owned();
+    let redirect = redirect_uri(&consent);
+    let finishing = tokio::spawn(async move { sign_in.finish(&http).await });
+
+    // A page that knows the port sends a forged redirect first.
+    let forged = reqwest::get(format!("{redirect}?code=stolen&state=forged"))
+        .await
+        .unwrap();
+    assert_eq!(forged.status().as_u16(), 400);
     assert!(
-        matches!(result, Err(SignInError::StateMismatch)),
-        "{result:?}"
+        !finishing.is_finished(),
+        "the forged state ended the sign-in"
     );
-    assert_eq!(forged.await.unwrap().unwrap(), 400);
     assert_eq!(fake.count("POST", "/token"), 0);
+
+    // The user's own consent still completes it.
+    assert!(reqwest::get(consent).await.unwrap().status().is_success());
+    let grant = tokio::time::timeout(Duration::from_secs(5), finishing)
+        .await
+        .expect("the sign-in finishes")
+        .unwrap()
+        .unwrap();
+    assert_ne!(grant.refresh_token.secret(), "");
+    assert_eq!(fake.count("POST", "/token"), 1);
 }
 
 #[tokio::test]

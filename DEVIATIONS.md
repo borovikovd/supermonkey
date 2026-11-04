@@ -235,3 +235,20 @@ the spec's wording:
 - **A poll that sees a draft change** reconciles the drafts only. The
   connect sync and the full resync also queue each Gmail draft's thread for
   metadata and bodies, as SPEC Sync lists them.
+- **A file added to a draft is at most 25 MB**, Gmail's own limit for
+  attachments; SPEC sets none. A larger one is refused with a toast before
+  its content is decoded or written.
+
+## Decided in the review of the rewrite
+
+- **Files from mail are quarantined.** Every attachment the app writes to
+  disk gets `com.apple.quarantine` (flags `0081`, the time, `Ubermensch`,
+  an event UUID) before it can be opened, so Gatekeeper checks it as it
+  checks a browser download. SPEC Reading says only "open with the default
+  app".
+- **A sign-in redirect with another `state`** is answered 400 and ignored;
+  the sign-in keeps waiting for its own. A page that finds the loopback
+  port can no longer end the sign-in the user is in the middle of.
+- **Unblock deletes only a block.** The filter id comes from the webview:
+  the core lists the account's filters and deletes it only if it is one of
+  the blocks Blocked senders shows.

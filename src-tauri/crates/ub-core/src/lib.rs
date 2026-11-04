@@ -49,7 +49,7 @@ pub use actions::Actions;
 pub use app::{App, Config, Deps, GmailConfig};
 pub use error::Error;
 pub use lifecycle::Lifecycle;
-pub use mail::{Mail, NewAttachment};
+pub use mail::{MAX_ATTACHMENT_BYTES, Mail, NewAttachment, attachment_too_large};
 pub use platform::{Notification, Platform, PlatformError};
 pub use queries::Queries;
 pub use writer::ChannelSink;

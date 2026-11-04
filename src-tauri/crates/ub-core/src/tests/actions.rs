@@ -568,3 +568,35 @@ async fn a_split_whose_rule_does_not_parse_is_not_saved() {
     assert!(names.contains(&"Lists".to_owned()), "{names:?}");
     assert!(!names.contains(&"Broken".to_owned()), "{names:?}");
 }
+
+#[tokio::test]
+async fn a_file_over_the_attachment_limit_is_refused_and_nothing_is_kept() {
+    let h = Harness::start().await;
+    let draft = DraftId::from("d-big");
+    let file = |n: usize| crate::NewAttachment {
+        filename: "big.bin".to_owned(),
+        mime_type: String::new(),
+        data: vec![0; n],
+    };
+    let refused = h
+        .app
+        .mail()
+        .add_attachment(draft.clone(), file(crate::MAX_ATTACHMENT_BYTES + 1))
+        .await;
+    assert!(
+        matches!(&refused, Err(crate::Error::Invalid(m)) if m.contains("25 MB")),
+        "{refused:?}"
+    );
+    assert!(!h.dir.path().join("drafts").join("d-big").exists());
+    // At the limit it is kept.
+    let kept = h
+        .app
+        .mail()
+        .add_attachment(draft, file(crate::MAX_ATTACHMENT_BYTES))
+        .await
+        .unwrap();
+    assert_eq!(
+        usize::try_from(kept.size).unwrap(),
+        crate::MAX_ATTACHMENT_BYTES
+    );
+}

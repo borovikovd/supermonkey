@@ -545,3 +545,43 @@ async fn a_panic_after_a_commit_still_releases_its_work() {
         .await;
     eventually("the core goes idle", || h.activity.is_idle()).await;
 }
+
+/// A batch whose commit failed is rejected by a later job that moves `ack`
+/// past it. A batch queued behind the failed one commits first, with higher
+/// numbers: `ack` must not then go back to the failed batch's last number.
+#[tokio::test]
+async fn ack_never_moves_back_after_a_failed_batch() {
+    let h = Harness::start().await;
+    let (account, _) = h.write(seed).await;
+    h.app
+        .writer()
+        .call(Priority::Ui, |_, state| {
+            state.fail_next_commit = true;
+            Ok::<_, StoreError>(())
+        })
+        .await
+        .unwrap();
+    let start = h.app.actions().last_received().0;
+    let batch = |from: i64| -> Vec<NumberedAction> {
+        (from..from + 2)
+            .map(|n| NumberedAction {
+                n: ActionNo(n),
+                action: Action::Subscribe {
+                    sub: sub(&format!("s{n}")),
+                    key: SubKey::Account { account },
+                },
+            })
+            .collect()
+    };
+    // The second batch is queued before the first one's failure is seen.
+    h.app.actions().submit(batch(start + 1));
+    h.app.actions().submit(batch(start + 3));
+    eventually("the failed batch is rejected", || h.activity.is_idle()).await;
+    h.app.actions().drained().await.unwrap();
+    let acks: Vec<i64> = h.take().iter().map(|m| m.ack.0).collect();
+    assert!(
+        acks.windows(2).all(|w| w[0] <= w[1]),
+        "ack went back: {acks:?}"
+    );
+    assert_eq!(acks.last(), Some(&(start + 4)));
+}

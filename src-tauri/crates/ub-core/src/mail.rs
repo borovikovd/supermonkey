@@ -22,6 +22,10 @@ pub struct Mail {
     pool: Arc<ReadPool>,
 }
 
+/// The largest file a draft takes: Gmail's own limit for attachments
+/// (DEVIATIONS). Checked before a file is decoded or written.
+pub const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
+
 /// What a file the user attaches to a draft is: its name, type, and bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewAttachment {
@@ -56,7 +60,8 @@ impl Mail {
                 parsed.scheme()
             )));
         }
-        self.platform.open_url(url)?;
+        // The URL as parsed, so what opens is what was checked.
+        self.platform.open_url(parsed.as_str())?;
         Ok(())
     }
 
@@ -80,6 +85,9 @@ impl Mail {
             mime_type,
             data,
         } = file;
+        if data.len() > MAX_ATTACHMENT_BYTES {
+            return Err(attachment_too_large());
+        }
         let size = i64::try_from(data.len())
             .map_err(|e| Error::Invalid(format!("The file is too large: {e}")))?;
         let name = safe_name(&filename);
@@ -141,6 +149,11 @@ impl Mail {
             .get(account)
             .ok_or_else(|| Error::Invalid("The account is not signed in".to_owned()))
     }
+}
+
+/// Why a file over [`MAX_ATTACHMENT_BYTES`] is refused.
+pub fn attachment_too_large() -> Error {
+    Error::Invalid("The file is too large: attachments can be at most 25 MB".to_owned())
 }
 
 /// The type of a file the system has no type for.

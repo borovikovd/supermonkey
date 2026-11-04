@@ -25,9 +25,6 @@ pub enum SignInError {
     /// The config's consent URL is not a URL.
     #[error("the OAuth consent URL is not valid")]
     InvalidConfig,
-    /// The redirect's `state` was not this sign-in's: a forged or stale request.
-    #[error("the sign-in answer did not match this sign-in")]
-    StateMismatch,
     /// The consent page answered with an error code, such as `access_denied`.
     #[error("Google did not authorize the app: {0}")]
     Denied(String),
@@ -105,7 +102,6 @@ impl SignIn {
         let code = match self.loopback.wait(self.state.secret()).await {
             Redirect::Code(code) => code,
             Redirect::Error(error) => return Err(SignInError::Denied(error)),
-            Redirect::StateMismatch => return Err(SignInError::StateMismatch),
         };
         let form = [
             ("grant_type", "authorization_code"),
