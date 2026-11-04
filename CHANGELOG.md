@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/borovikovd/ubermensch/compare/v0.2.1...v0.3.0) (2026-11-04)
+
+
+### Features
+
+* make the list highlight follow the mouse, as in Superhuman ([56ed2b0](https://github.com/borovikovd/ubermensch/commit/56ed2b02a07b25a68ccfd609338c106599efb85a))
+
 ## [0.2.1](https://github.com/borovikovd/ubermensch/compare/v0.2.0...v0.2.1) (2026-11-04)
 
 
