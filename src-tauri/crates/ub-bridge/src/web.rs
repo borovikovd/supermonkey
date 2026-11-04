@@ -7,7 +7,7 @@
 //!   message as a plain event, and each app event (Tauri's `emit` in the app)
 //!   as a named one. A new stream takes the channel from the page before.
 //!
-//! The debug app serves it on [`LOCAL_ADDR`] when `UBERMENSCH_WEB_BRIDGE=1`;
+//! The debug app serves it on `LOCAL_ADDR` when `UBERMENSCH_WEB_BRIDGE=1`;
 //! the E2E server mounts [`WebBridge::router`] on its own origin. Release
 //! builds never enable the `web` feature.
 //!
@@ -43,7 +43,7 @@ use ub_ipc::ChannelMessage;
 use crate::{Reply, dispatch, is_sign_in};
 
 /// Where the debug app serves the bridge, for `vp dev` in a browser.
-pub const LOCAL_ADDR: &str = "127.0.0.1:1430";
+pub(crate) const LOCAL_ADDR: &str = "127.0.0.1:1430";
 
 /// The Vite dev server's origins (`vite.config.ts`), whose page calls the
 /// bridge across origins.
@@ -142,7 +142,8 @@ impl WebBridge {
     }
 }
 
-/// Serves the bridge on [`LOCAL_ADDR`] until the future is dropped.
+/// Serves the bridge on 127.0.0.1:1430 (`LOCAL_ADDR`) until the future is
+/// dropped.
 pub async fn serve_local(bridge: WebBridge) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(LOCAL_ADDR).await?;
     tracing::info!(addr = LOCAL_ADDR, "web bridge listening");

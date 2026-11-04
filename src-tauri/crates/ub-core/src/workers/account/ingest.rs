@@ -127,6 +127,21 @@ pub(crate) fn drop_thread(
     Ok(())
 }
 
+/// What one poll read, for [`apply_history`].
+pub(crate) struct Polled<'a> {
+    pub(crate) account: AccountId,
+    /// Its history records, gathered.
+    pub(crate) batch: &'a HistoryBatch,
+    /// The threads read for messages the app did not know; `None` when the
+    /// thread is gone.
+    pub(crate) read: Vec<(GmailThreadId, Option<ReadThread>)>,
+    /// Where the account's history cursor moves.
+    pub(crate) cursor: HistoryId,
+    pub(crate) now: Millis,
+    /// The poll's, taken before it read history.
+    pub(crate) ticket: &'a ReadTicket,
+}
+
 /// One poll's history, applied in one transaction (SPEC Sync): deletes, the
 /// threads read for messages the app did not know (`None` when the thread
 /// is gone), then label changes for the messages it knows, with this app's
@@ -134,22 +149,21 @@ pub(crate) fn drop_thread(
 /// read newer than every record naming it keeps its labels. Then each
 /// thread's history moves
 /// up to the newest record that named it, so an older read counts as
-/// older; the snooze rule runs; and the cursor moves to `cursor`. `ticket`
-/// is the poll's, taken before it read history. Returns the messages added.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one poll's parts, gathered by the poller"
-)]
+/// older; the snooze rule runs; and the account's cursor moves. Returns the
+/// messages added.
 pub(crate) fn apply_history(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
-    account: AccountId,
-    batch: &HistoryBatch,
-    read: Vec<(GmailThreadId, Option<ReadThread>)>,
-    cursor: HistoryId,
-    now: Millis,
-    ticket: &ReadTicket,
+    polled: Polled<'_>,
 ) -> Result<Vec<MessageId>, StoreError> {
+    let Polled {
+        account,
+        batch,
+        read,
+        cursor,
+        now,
+        ticket,
+    } = polled;
     let local = LocalChanges::load(tx.read(), account, ticket.landed())?;
     let mut touched = BTreeSet::new();
     let mut gone = Vec::new();
@@ -320,7 +334,7 @@ mod tests {
     use ub_gmail::{HistoryId, HistoryLabelChange, HistoryRecord, Message};
     use ub_store::{FetchedThread, Priority, StoreError};
 
-    use super::{HistoryBatch, apply_history};
+    use super::{HistoryBatch, Polled, apply_history};
     use crate::ops::Landed;
     use crate::tests::{Harness, message};
 
@@ -376,12 +390,14 @@ mod tests {
                 apply_history(
                     tx,
                     state,
-                    account,
-                    &back_to_inbox(polled),
-                    Vec::new(),
-                    HistoryId(polled),
-                    Millis(0),
-                    &ticket,
+                    Polled {
+                        account,
+                        batch: &back_to_inbox(polled),
+                        read: Vec::new(),
+                        cursor: HistoryId(polled),
+                        now: Millis(0),
+                        ticket: &ticket,
+                    },
                 )?;
                 let m1 = tx
                     .read()

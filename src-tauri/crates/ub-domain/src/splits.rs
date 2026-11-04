@@ -40,7 +40,7 @@ const NON_PERSONAL: [SystemLabel; 4] = [
 /// Important: not list mail, none of `CATEGORY_PROMOTIONS`, `_SOCIAL`,
 /// `_UPDATES`, `_FORUMS`, and either `CATEGORY_PERSONAL` or no category at
 /// all. Ids compare ignoring ASCII case.
-pub fn is_person_to_person(labels: &LabelSet, is_list: bool) -> bool {
+pub(crate) fn is_person_to_person(labels: &LabelSet, is_list: bool) -> bool {
     if is_list {
         return false;
     }

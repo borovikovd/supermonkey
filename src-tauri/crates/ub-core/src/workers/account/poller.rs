@@ -12,7 +12,7 @@ use ub_store::Priority as WritePriority;
 
 use super::ctx::{AccountCtx, OFFLINE_RETRY};
 use super::history::HistoryBatch;
-use super::ingest::apply_history;
+use super::ingest::{Polled, apply_history};
 use super::profile::{refresh_labels, refresh_send_as};
 use super::queue::{BACKFILL, INBOX_BODIES, INBOX_META, LATE, Listing, OTHER_META, Work};
 use super::read::read_thread;
@@ -245,7 +245,15 @@ async fn poll(ctx: &AccountCtx) -> Result<(), GmailError> {
     let applied = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
-            let added = apply_history(tx, state, account, &batch, read, latest, now, &ticket)?;
+            let polled = Polled {
+                account,
+                batch: &batch,
+                read,
+                cursor: latest,
+                now,
+                ticket: &ticket,
+            };
+            let added = apply_history(tx, state, polled)?;
             let focused = notifier.is_focused();
             crate::notify::new_mail(tx.read(), state, account, &added, &batch.added, focused)
         })

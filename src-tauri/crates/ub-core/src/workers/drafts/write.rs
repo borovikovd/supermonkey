@@ -20,8 +20,7 @@ use crate::workers::files::{attachments_dir, draft_dir, is_inside};
 const CREATE_TRIES: usize = 3;
 
 /// The draft as stored, or `None` when it is gone.
-pub(crate) async fn load(ctx: &AccountCtx, id: &DraftId) -> Result<Option<Draft>, Error> {
-    let id = id.clone();
+pub(crate) async fn load(ctx: &AccountCtx, id: DraftId) -> Result<Option<Draft>, Error> {
     Ok(ctx
         .read(move |r| r.drafts().get(&id))
         .await?
@@ -84,7 +83,7 @@ async fn create(
     raw: &[u8],
     thread: Option<&GmailThreadId>,
 ) -> Result<ub_gmail::Draft, WriteFailure> {
-    mark_create_sent(ctx, local).await?;
+    mark_create_sent(ctx, local.clone()).await?;
     for _ in 0..CREATE_TRIES {
         match ctx.gmail.create_draft(Priority::P1, raw, thread).await {
             Ok(created) => return Ok(created),
@@ -106,8 +105,7 @@ async fn create(
 
 /// Records, before a `drafts.create` goes out, that one did: committed
 /// first, so no answer can be lost without the next write knowing.
-async fn mark_create_sent(ctx: &AccountCtx, local: &DraftId) -> Result<(), Error> {
-    let local = local.clone();
+async fn mark_create_sent(ctx: &AccountCtx, local: DraftId) -> Result<(), Error> {
     ctx.writer()
         .call(WritePriority::Sync, move |tx, _| {
             if let Some(record) = tx.read().drafts().get(&local)?
@@ -132,7 +130,10 @@ async fn recover_create(
     ctx: &AccountCtx,
     local: &DraftId,
 ) -> Result<Option<ub_gmail::Draft>, WriteFailure> {
-    if let Some(stored) = load(ctx, local).await?.and_then(|d| d.gmail_draft_id) {
+    if let Some(stored) = load(ctx, local.clone())
+        .await?
+        .and_then(|d| d.gmail_draft_id)
+    {
         let found = ctx
             .gmail
             .get_draft(Priority::P1, &stored, Format::Metadata)

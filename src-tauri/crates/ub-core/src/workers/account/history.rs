@@ -41,7 +41,7 @@ impl HistoryBatch {
             }
             for deleted in record.messages_deleted {
                 let m = deleted.message;
-                batch.touch(record.id, &m.thread_id);
+                batch.touch(record.id, m.thread_id.clone());
                 batch.deleted.insert(m.id);
             }
         }
@@ -50,13 +50,13 @@ impl HistoryBatch {
     }
 
     fn note(&mut self, at: HistoryId, m: Message) {
-        self.touch(at, &m.thread_id);
+        self.touch(at, m.thread_id.clone());
         let labels = m.label_ids.into_iter().collect();
         self.labels.insert(m.id, (m.thread_id, labels));
     }
 
-    fn touch(&mut self, at: HistoryId, thread: &GmailThreadId) {
-        let newest = self.newest.entry(thread.clone()).or_insert(at);
+    fn touch(&mut self, at: HistoryId, thread: GmailThreadId) {
+        let newest = self.newest.entry(thread).or_insert(at);
         *newest = (*newest).max(at);
     }
 

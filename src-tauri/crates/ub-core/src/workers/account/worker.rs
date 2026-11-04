@@ -121,7 +121,7 @@ impl AccountWorker {
     pub(crate) fn download_parts(&self, draft: DraftId) {
         let ctx = Arc::clone(&self.ctx);
         self.ctx.tasks.spawn("draft parts", async move {
-            if let Err(e) = drafts::download_parts(&ctx, &draft).await {
+            if let Err(e) = drafts::download_parts(&ctx, draft).await {
                 tracing::info!(account = ctx.account.0, error = %e, "couldn't download a draft's parts yet");
             }
         });

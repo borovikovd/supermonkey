@@ -155,7 +155,7 @@ async fn run_one(ctx: &AccountCtx, slot: Slot, work: &Work) -> Result<(), GmailE
             Ok(())
         }
         Work::Body { thread } => {
-            if needs_bodies(ctx, thread).await {
+            if needs_bodies(ctx, thread.clone()).await {
                 fetch_thread(ctx, thread, Format::Full, slot.priority).await?;
             }
             Ok(())
@@ -246,8 +246,8 @@ pub(crate) async fn is_current(
 }
 
 /// Whether the thread is not stored, or a message of it lacks its body.
-pub(crate) async fn needs_bodies(ctx: &AccountCtx, thread: &GmailThreadId) -> bool {
-    let (account, id) = (ctx.account, thread.clone());
+pub(crate) async fn needs_bodies(ctx: &AccountCtx, id: GmailThreadId) -> bool {
+    let account = ctx.account;
     ctx.read(move |r| r.messages().thread_needs_bodies(account, &id))
         .await
         .unwrap_or_else(|e| {

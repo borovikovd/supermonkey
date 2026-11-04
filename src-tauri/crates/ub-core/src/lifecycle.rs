@@ -16,7 +16,7 @@ use crate::writer::{ChannelSink, CoreWriter};
 use crate::{Error, Notification};
 
 /// How long quitting waits for work the user already did to commit.
-pub const QUIT_DEADLINE: Duration = Duration::from_secs(5);
+pub(crate) const QUIT_DEADLINE: Duration = Duration::from_secs(5);
 
 /// Connecting pages, the online flag, and quitting.
 #[derive(Clone)]
@@ -141,7 +141,8 @@ impl Lifecycle {
 
     /// Quits: nothing new starts, the writer commits the UI jobs already
     /// queued (the user's last actions) and drops queued sync work, then
-    /// every task ends. Gives up after [`QUIT_DEADLINE`] and returns anyway.
+    /// every task ends. Gives up after five seconds (`QUIT_DEADLINE`) and
+    /// returns anyway.
     /// The E2E server restarts the core in-process this way.
     pub async fn quit(&self) {
         let deadline = tokio::time::Instant::now() + QUIT_DEADLINE;

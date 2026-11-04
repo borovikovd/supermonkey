@@ -140,7 +140,7 @@ async fn current(ctx: &AccountCtx, row: &Outbox) -> Result<Option<Outbox>, Failu
 async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
     // An upsert of the draft is still in flight: it wakes the outbox once it
     // lands, and this send writes after it.
-    let Some(_writing) = ctx.lane.writing.begin(&row.draft) else {
+    let Some(_writing) = ctx.lane.writing.begin(row.draft.clone()) else {
         return Ok(());
     };
     let late = ctx.clock().now().0 > row.send_after.0.saturating_add(LATE_AFTER);
@@ -148,7 +148,7 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
     if !step(ctx, row, Event::Start { late }).await? {
         return Ok(());
     }
-    let Some(draft) = load(ctx, &row.draft).await? else {
+    let Some(draft) = load(ctx, row.draft.clone()).await? else {
         return Ok(());
     };
     // 1 to 3: parts, MIME, and the Gmail draft. Failing here, Gmail never

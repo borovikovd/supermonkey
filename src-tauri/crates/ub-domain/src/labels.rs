@@ -115,14 +115,14 @@ impl fmt::Display for SystemLabel {
 }
 
 /// Whether `id` starts with `CATEGORY_`, ignoring ASCII case.
-pub fn is_category_id(id: &str) -> bool {
+pub(crate) fn is_category_id(id: &str) -> bool {
     id.get(..CATEGORY_PREFIX.len())
         .is_some_and(|p| p.eq_ignore_ascii_case(CATEGORY_PREFIX))
 }
 
 /// Whether `id` names a Gmail system label or any category, ignoring case and
 /// surrounding spaces. Everything else is a user label's id or name.
-pub fn is_system_label_id(id: &str) -> bool {
+pub(crate) fn is_system_label_id(id: &str) -> bool {
     let id = id.trim();
     is_category_id(id)
         || SystemLabel::ALL

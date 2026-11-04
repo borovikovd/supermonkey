@@ -4,6 +4,7 @@
 
 use crate::query::MatchTarget;
 use crate::query::Query;
+use crate::splits::is_person_to_person;
 use crate::test_support::{message, set};
 use crate::*;
 

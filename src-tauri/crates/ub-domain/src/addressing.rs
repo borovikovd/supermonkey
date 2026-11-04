@@ -30,7 +30,7 @@ pub struct Addressing {
 
 /// The addressing a fresh composer of `kind` starts with. New mail and
 /// forwards send from the default with no recipients; replies follow
-/// [`reply_addressing`]. A reply with no target starts like new mail.
+/// `reply_addressing`. A reply with no target starts like new mail.
 pub fn addressing(
     kind: DraftKind,
     target: Option<ReplyTarget<'_>>,
@@ -57,7 +57,11 @@ pub fn addressing(
 ///   Cc, minus this account's addresses and anyone already on To.
 ///
 /// Cc never repeats an address (ignoring case); the first one is kept.
-pub fn reply_addressing(target: ReplyTarget<'_>, me: &Identity, reply_all: bool) -> Addressing {
+pub(crate) fn reply_addressing(
+    target: ReplyTarget<'_>,
+    me: &Identity,
+    reply_all: bool,
+) -> Addressing {
     if me.is_mine(&target.from.email) {
         let cc = if reply_all {
             distinct(target.cc, me, HashSet::new())

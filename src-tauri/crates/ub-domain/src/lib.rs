@@ -10,7 +10,7 @@
 //!   [`ThreadChange`], [`snooze_after`].
 //! - Compose: [`addressing`], [`DraftContent`], [`gmail_draft_kind`],
 //!   [`gmail_draft_aim`].
-//! - Split Inbox: [`Router`], [`is_person_to_person`], [`STARTER_SPLITS`].
+//! - Split Inbox: [`Router`], [`STARTER_SPLITS`].
 //! - The query language: [`query`].
 //! - Snooze times: [`snooze`].
 //! - Autocomplete: [`contacts`].
@@ -40,7 +40,7 @@ mod test_support;
 mod tests;
 
 pub use addr::Addr;
-pub use addressing::{Addressing, ReplyTarget, addressing, reply_addressing};
+pub use addressing::{Addressing, ReplyTarget, addressing};
 pub use drafts::{DraftAim, DraftContent, gmail_draft_aim, gmail_draft_kind};
 pub use hue::{AVATAR_HUES, avatar_hue};
 pub use identity::{Identity, SendAsAddress};
@@ -52,7 +52,7 @@ pub use kinds::{
     DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SplitKind, SyncStatus, UndoKind, View,
 };
 pub use kinds_text::UnknownKind;
-pub use labels::{LabelSet, SystemLabel, is_category_id, is_system_label_id};
+pub use labels::{LabelSet, SystemLabel};
 pub use message::MessageFacts;
 pub use modify::{
     LabelDelta, MessageChange, ModifyError, SnoozeEdit, ThreadChange, ThreadModify, plan_modify,
@@ -61,7 +61,7 @@ pub use modify::{
 pub use query::{Query, RuleError};
 pub use splits::{
     IMPORTANT_POSITION, OTHER_POSITION, Pin, Router, STARTER_SPLITS, Split, StarterSplit,
-    email_domain, is_person_to_person, split_position,
+    email_domain, split_position,
 };
 pub use thread::{Thread, ThreadDigest};
 pub use time::Millis;

@@ -17,10 +17,10 @@ pub(crate) struct DraftsWriting(Mutex<HashSet<DraftId>>);
 
 impl DraftsWriting {
     /// Starts writing `draft`, or `None` while another write of it runs.
-    pub(crate) fn begin(self: &Arc<Self>, draft: &DraftId) -> Option<WritingDraft> {
+    pub(crate) fn begin(self: &Arc<Self>, draft: DraftId) -> Option<WritingDraft> {
         self.0.lock().insert(draft.clone()).then(|| WritingDraft {
             writing: Arc::clone(self),
-            draft: draft.clone(),
+            draft,
         })
     }
 

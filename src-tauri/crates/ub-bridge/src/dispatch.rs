@@ -21,7 +21,7 @@ pub enum Reply {
 
 /// Whether a command runs a sign-in, which may wait on the person in the
 /// browser for as long as they take.
-pub fn is_sign_in(command: &str) -> bool {
+pub(crate) fn is_sign_in(command: &str) -> bool {
     matches!(command, "add_account" | "sign_in_again")
 }
 

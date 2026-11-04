@@ -105,7 +105,7 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
             if defer(ctx, local).await {
                 continue;
             }
-        } else if !has_mail(ctx, &listed.message.thread_id).await {
+        } else if !has_mail(ctx, listed.message.thread_id.clone()).await {
             // A draft new to the app gets its kind and target from its
             // thread's messages, once: they must be stored first.
             fetch_thread(
@@ -133,7 +133,7 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
 /// it open: its composer closed without edits.
 pub(crate) async fn read_skipped(ctx: &AccountCtx, id: &DraftId) {
     let account = ctx.account;
-    let draft = super::write::load(ctx, id).await;
+    let draft = super::write::load(ctx, id.clone()).await;
     let gmail = match draft {
         Ok(Some(draft)) => draft.gmail_draft_id,
         Ok(None) => None,
@@ -193,8 +193,8 @@ async fn defer(ctx: &AccountCtx, id: DraftId) -> bool {
 }
 
 /// Whether the Gmail thread's messages other than drafts are stored.
-async fn has_mail(ctx: &AccountCtx, thread: &ub_domain::GmailThreadId) -> bool {
-    let (account, thread) = (ctx.account, thread.clone());
+async fn has_mail(ctx: &AccountCtx, thread: ub_domain::GmailThreadId) -> bool {
+    let account = ctx.account;
     let read = ctx
         .read(move |r| {
             let Some(id) = r.threads().by_gmail_id(account, &thread)? else {

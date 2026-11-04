@@ -107,7 +107,7 @@ async fn list_page(ctx: &AccountCtx, sub: SubId, query: GmailQuery, page: Option
     }
     let hits: Vec<GmailThreadId> = threads.into_iter().map(|t| t.id).collect();
     for hit in &hits {
-        if needs_bodies(ctx, hit).await {
+        if needs_bodies(ctx, hit.clone()).await {
             ctx.queue.push(
                 LATE,
                 Work::Body {

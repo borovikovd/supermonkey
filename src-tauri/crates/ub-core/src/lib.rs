@@ -48,7 +48,7 @@ pub use accounts::Accounts;
 pub use actions::Actions;
 pub use app::{App, Config, Deps, GmailConfig};
 pub use error::Error;
-pub use lifecycle::{Lifecycle, QUIT_DEADLINE};
+pub use lifecycle::Lifecycle;
 pub use mail::{Mail, NewAttachment};
 pub use platform::{Notification, Platform, PlatformError};
 pub use queries::Queries;

@@ -31,8 +31,8 @@ pub(crate) enum Upserted {
 /// (it writes the final version itself). A draft read from Gmail gets its
 /// parts first. Two writes of one draft never overlap.
 pub(crate) async fn upsert(ctx: &AccountCtx, id: &DraftId) -> Result<Upserted, WriteFailure> {
-    let Some(writing) = ctx.lane.writing.begin(id) else {
-        let taken = load_record(ctx, id)
+    let Some(writing) = ctx.lane.writing.begin(id.clone()) else {
+        let taken = load_record(ctx, id.clone())
             .await?
             .is_none_or(|in_outbox| in_outbox);
         return Ok(if taken {
@@ -41,16 +41,16 @@ pub(crate) async fn upsert(ctx: &AccountCtx, id: &DraftId) -> Result<Upserted, W
             Upserted::Busy
         });
     };
-    if load_record(ctx, id)
+    if load_record(ctx, id.clone())
         .await?
         .is_none_or(|in_outbox| in_outbox)
     {
         return Ok(Upserted::Nothing);
     }
-    if load(ctx, id).await?.is_some_and(|d| d.needs_parts) {
-        download_parts(ctx, id).await?;
+    if load(ctx, id.clone()).await?.is_some_and(|d| d.needs_parts) {
+        download_parts(ctx, id.clone()).await?;
     }
-    let Some(draft) = load(ctx, id).await? else {
+    let Some(draft) = load(ctx, id.clone()).await? else {
         return Ok(Upserted::Nothing);
     };
     Ok(Upserted::Written {
@@ -60,8 +60,7 @@ pub(crate) async fn upsert(ctx: &AccountCtx, id: &DraftId) -> Result<Upserted, W
 }
 
 /// Whether the draft is in the outbox, or `None` when it is gone.
-async fn load_record(ctx: &AccountCtx, id: &DraftId) -> Result<Option<bool>, WriteFailure> {
-    let id = id.clone();
+async fn load_record(ctx: &AccountCtx, id: DraftId) -> Result<Option<bool>, WriteFailure> {
     Ok(ctx
         .read(move |r| r.drafts().get(&id))
         .await?
