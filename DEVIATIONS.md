@@ -16,6 +16,10 @@ written. Each keeps the spec's intent.
   never start it.
 - **Perf measurements** were taken on this Mac in Chrome through the web
   bridge, not on an M1 MacBook Air in WKWebView.
+- The local search and autocomplete bench (`ub-core`'s ignored `perf` tests)
+  times the core's part of a keystroke on a copy of the perf fixture that the
+  system already has cached, as it has a running app's database. Reading a
+  cold disk is part of the cold-launch budget, not a keystroke's.
 
 ## Data
 
@@ -79,7 +83,8 @@ written. Each keeps the spec's intent.
   the local draft; the local text is kept, since the copy holds text this app
   wrote and the local draft is never older.
 - Demo mode: debug builds with `--features fake` and `UBERMENSCH_FAKE=1`
-  (`pnpm demo`) run an in-process fake Gmail with demo mail and two accounts.
+  (`vp run demo`) run an in-process fake Gmail with demo mail and two accounts,
+  on a data folder in the system's temporary directory emptied at each launch.
 
 ## Snooze, offline, notifications (step 6)
 

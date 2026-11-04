@@ -1,4 +1,4 @@
-//! Cases ported from the old `ub-rules` query tests (spec-tests/ub-rules/query.rs).
+//! Cases ported from the old `ub-rules` query tests.
 
 use super::*;
 use crate::test_support::message;

@@ -1,6 +1,6 @@
 //! Unit tests for the mail model rules that span modules: threads and views,
 //! label changes, split routing (with the cases ported from the old
-//! `ub-rules` splits tests, spec-tests/ub-rules/splits.rs), and Gmail drafts.
+//! `ub-rules` splits tests), and Gmail drafts.
 
 use crate::query::MatchTarget;
 use crate::query::Query;

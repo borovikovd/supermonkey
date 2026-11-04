@@ -1,8 +1,8 @@
 # Ubermensch core: architecture
 
-The design for the rewrite of the Rust side, on branch `rewrite`. It says how the
-code is split, how data and control flow, and the rules every module follows.
-SPEC.md says what the app does; this says how the Rust is built to do it.
+The design of the Rust side, as rewritten from scratch on branch `rewrite`. It
+says how the code is split, how data and control flow, and the rules every module
+follows. SPEC.md says what the app does; this says how the Rust is built to do it.
 
 ## 1. Goals
 
@@ -44,7 +44,7 @@ Crates live under `src-tauri/crates/` with a `ub-` prefix (`ub-domain`, `ub-mime
 ```
                  app (src-tauri: Tauri shell, binary `ubermensch`)
                   │        │
-                  │     testkit (debug + `fake`: /__test server, e2e-server, demo)
+                  │     testkit (debug + `fake`: /__test server, e2e-server, demo, perf fixture)
                   │        │
                  bridge ───┘   command dispatch for Tauri and the debug web bridge
                   │
@@ -63,7 +63,7 @@ Crates live under `src-tauri/crates/` with a `ub-` prefix (`ub-domain`, `ub-mime
 | `ipc`     | The contract: every type exported to TypeScript (`src/bindings`), with serde and ts-rs derives                                                                                                                                                                                   | `domain` (`ts`), `serde`, `ts-rs`                                                        | Behavior                                    |
 | `core`    | The application: action handlers, queries, subscriptions and patches, the per-account workers (sync, fetch, ops, outbox, drafts, contacts), notifications, snooze timer, launch and shutdown. Takes `ipc` actions in and gives `ipc` read models and channel messages out        | `domain`, `mime`, `gmail`, `store`, `ipc`, `tokio`, `tokio-util`                         | Tauri, HTTP servers                         |
 | `bridge`  | One `dispatch(command, args)` over `core`, used by the Tauri commands and by the debug web bridge (`axum`, behind a `web` feature)                                                                                                                                               | `core`, `ipc`, `axum` (optional)                                                         | Business rules                              |
-| `testkit` | The `/__test` control server, the `e2e-server` code, demo seeding, the recording `Platform`                                                                                                                                                                                      | `core`, `bridge`, `ipc`, `ub-fake-gmail`                                                 | Being linked into release builds            |
+| `testkit` | The `/__test` control server, the `e2e-server` code, demo mode, the perf fixture (written through `store`), the recording `Platform`                                                                                                                                             | `core`, `bridge`, `ipc`, `store`, `ub-fake-gmail`                                        | Being linked into release builds            |
 | `app`     | Tauri setup, plugins, window and Dock, the Tauri `Platform`, command handlers that call `bridge::dispatch`                                                                                                                                                                       | `bridge`, `core`, `ipc`, `tauri*`                                                        | Logic beyond wiring                         |
 
 `rusqlite` is used only in `store` (and in `domain`'s `sqlite` impls), `reqwest` only in `gmail` (the one-click unsubscribe POST goes through `gmail`'s HTTP client too), and `tauri` only in `app`. A workspace test (`tests/layers.rs`, reading `cargo metadata`) fails on any other dependency edge, so the layering can't drift.
@@ -84,7 +84,7 @@ Crates live under `src-tauri/crates/` with a `ub-` prefix (`ub-domain`, `ub-mime
 
   Removing or signing out an account cancels the token and waits for the group to stop.
 
-- **App-wide tasks:** the snooze timer, the focus and wake detector, and notification click-through.
+- **App-wide tasks:** the effect router (section 8.4) and the snooze timer. Wake from sleep is a poller noticing a gap in app time of more than three poll intervals; notification click-through is a focus within 30 s of a notification shown in the background (DEVIATIONS).
 - **Shutdown:** quitting waits up to 5 s for pending UI actions to commit (SPEC), then cancels the root token and exits.
 
 ## 5. Data flow
@@ -156,6 +156,8 @@ A worker fetches from Gmail, parses and sanitizes the result off the writer thre
 | `Mail`      | Attachments, open URL, unsubscribe, block and blocked senders                    |
 | `Lifecycle` | Launch (wake snoozes, settle the outbox, untouched drafts), focus and wake, quit |
 
+`Lifecycle::launch` queues one writer job before any page can connect: due snoozes wake, the outbox settles, and untouched drafts go. Then the snooze timer and the account workers start. `Lifecycle::focus` polls every account and returns the notification a focus counts as a click on, which the shell opens.
+
 Each handle holds only the `Arc`s it needs. A handle is a struct with methods, not a trait: there is one implementation.
 
 ### 8.2 Account worker
@@ -172,6 +174,14 @@ Each handle holds only the `Arc`s it needs. A handle is a struct with methods, n
 
 Each has exactly two implementations. AGENTS.md forbids traits with one.
 
+### 8.4 Writer-side modules and effects
+
+Rules that write live in modules the writer runs, each a set of functions over `&mut WriteTx` and the writer state: `actions` (one module per group of UI actions), `ops` (queueing, revert, rejection), `outbox` (a pure send state machine and its steps), `drafts`, `snooze` (waking due threads, as the same label change as Return to inbox), and `notify` (which new mail notifies, decided in the poll's own transaction so open conversations and stored messages agree). They record `Effect`s; the writer releases them to the router only after the commit lands.
+
+The router (`effects::Router`) is one task that hands each effect to its worker: fetches, Gmail listings, ops, outbox and draft work go to the account's worker; `Notify` goes to the `Notifier`, which posts it and remembers it for click-through; `Snoozes` re-arms the snooze timer; `Badge` recounts unread mail. Each account's ops run in an `OpsLane` that outlives its worker, so a replaced worker's in-flight op lands before the next one replays.
+
+Every task, timer, kick, and queued job counts in one `Activity`, so the E2E server's `settle()` can tell when the core is idle, and its manual clock moves app time.
+
 ## 9. Errors and logging
 
 - Each crate has its own `thiserror` enum: `domain::RuleError`, `store::StoreError`, `gmail::GmailError` (carrying an `Outcome`), `core::Error`.
@@ -182,10 +192,12 @@ Each has exactly two implementations. AGENTS.md forbids traits with one.
 ## 10. Testing
 
 - **E2E** (unchanged) is the main judge, through `testkit`'s `e2e-server`.
-- **Pure unit tests**, ported from `spec-tests/` with the same cases:
+- **Pure unit tests**, ported from the old code with the same cases (COVERAGE section 9):
   - `domain`: query language, splits, snooze;
   - `mime`: sanitize, no-panic fuzz, unsubscribe header;
   - `gmail`: scheduler, OAuth.
+- **Core tests** (`ub-core/src/tests`) for what E2E can't observe: a started `App` on a temporary database.
+- **Perf bench:** the ignored `perf` tests in `ub-core` time local search and autocomplete per keystroke on the perf fixture (`perf-fixture`, fake feature) against SPEC Performance.
 - **Property test:** the writer/channel invariants (`store` + `core`), replacing `tests/writer_channel.rs`.
 - **Layering test** (section 3), and a test that no crate but `store` names `rusqlite`.
 - **Mutation probes** for every new guard, per AGENTS.md.
@@ -205,28 +217,14 @@ Each has exactly two implementations. AGENTS.md forbids traits with one.
 
 ## 12. Order of work
 
-The slices from the plan, each green on the slice gate (`vp run gate:slice`) before the next starts:
+The rewrite landed in slices, each green on its own E2E specs before the next started:
 
-1. **Skeleton:**
-   - `domain` ids;
-   - `store` schema and writer;
-   - subscriptions and channel;
-   - `ipc` types and the `bridge` with its web bridge;
-   - `testkit` minimal;
-   - `app` shell.
-
-   Specs: `plan`, `harness`, `ui-consistency`.
-
-2. **Accounts, sync, reading.** Specs: `accounts`, `sync`, `views`, `inbox-navigation`, `conversation`, `gmail-errors`, `security`.
-3. **Actions.** Specs: `triage-actions`, `undo`, `labels`, `offline`.
-4. **Compose.** Specs: `compose-reply`, `compose-new`, `drafts`, `undo-send`, `recipients`, `attachments`.
-5. **The rest.** Specs: `search`, `splits`, `snooze`, `notifications`, `settings`, `palette`, `unwanted`.
-6. **Finish:**
-   - demo mode;
-   - perf fixture and bench;
-   - release build;
-   - the full gate;
-   - fresh-agent reviews.
+1. **Skeleton:** `domain` ids, the `store` schema and writer, subscriptions and the channel, the `ipc` types, the `bridge` with its web bridge, a minimal `testkit`, and the `app` shell.
+2. **Accounts, sync, reading.**
+3. **Actions:** triage, undo, labels, offline.
+4. **Compose:** replies, new mail, drafts, undo send, recipients, attachments.
+5. **The rest:** search, splits, snooze, notifications, settings, palette, unsubscribe and block.
+6. **Finish:** demo mode, the perf fixture and bench, and the full gate (`vp run gate`), which is now the only gate.
 
 ## 13. Decisions from review
 

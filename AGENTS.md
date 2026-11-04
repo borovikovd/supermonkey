@@ -288,9 +288,5 @@ The only section that changes from project to project.
   `GOOGLE_OAUTH_CLIENT_JSON` Actions secret. The version lives in `package.json`
   (`tauri.conf.json` points at it) and in `src-tauri/Cargo.toml`; release-please
   bumps both. Windows and Linux builds wait until the app works off macOS.
-- **Rewrite branch.** On `rewrite` (see ARCHITECTURE.md), commit when
-  `vp run gate:slice` is green: the full gate with only the E2E specs listed in
-  `SLICE_SPECS` (`vite.config.ts`). Add a slice's specs there when it lands.
-  `main` keeps the full gate; this note goes away when the rewrite merges.
 - **Secrets.** `google-oauth-client.json` is git-ignored. Refresh tokens are in
   `tokens.json` (mode 0600) in the app's data folder, not the Keychain.
