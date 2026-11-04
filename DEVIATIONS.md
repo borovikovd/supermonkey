@@ -5,11 +5,11 @@ written. Each keeps the spec's intent.
 
 ## Build and tooling
 
-- **Workspace crates.** Pure logic lives in separate crates under
-  `src-tauri/crates/`: `ub-mime` (MIME parse, sanitize, build), `ub-gmail`
-  (Gmail client, OAuth, quota scheduler, token file), `ub-fake-gmail` (the fake
-  Gmail server for tests), `ub-rules` (rule/search language, snooze times,
-  contact ranking).
+- **Workspace crates.** The Rust side is split into crates under
+  `src-tauri/crates/` by layer (`ub-domain`, `ub-mime`, `ub-gmail`,
+  `ub-store`, `ub-ipc`, `ub-core`, `ub-bridge`, `ub-testkit`, and
+  `ub-fake-gmail`, the fake Gmail for tests); ARCHITECTURE.md, section 3,
+  says what each holds.
 - **Debug web bridge.** Debug builds started with `UBERMENSCH_WEB_BRIDGE=1`
   serve the same command surface on `127.0.0.1:1430`, so the UI can run in a
   browser against the real Rust core for automated checks. Release builds

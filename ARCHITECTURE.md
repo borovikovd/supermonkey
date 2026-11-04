@@ -72,7 +72,7 @@ Crates live under `src-tauri/crates/` with a `ub-` prefix (`ub-domain`, `ub-mime
 
 - **Tauri main thread:** windows, menus, and plugin callbacks only. Commands that read or wait are `async`, so nothing blocks it.
 - **One tokio runtime** (Tauri's) for all async work.
-- **The writer:** one OS thread that owns the only write connection and runs jobs in priority order: UI actions and first loads, then sync results, then background work (SPEC UI state, Ordering). Callers send it jobs over a bounded channel and await a oneshot reply. See section 6.
+- **The writer:** one OS thread that owns the only write connection and runs jobs in priority order: UI actions and first loads, then sync results, then background work (SPEC UI state, Ordering). Callers put jobs in one of three lanes (a mutex and a condvar, not a channel: a channel can't take the highest lane first, and a bounded one would block an async caller's thread when full) and await a oneshot reply; a sync write nothing waits on (`CoreWriter::queue`) drops its reply. The queue is unbounded: callers that await their reply hold it to one job each, and the fire-and-forget writes are a fixed few per Gmail answer. See section 6.
 - **The read pool:** a few read-only WAL connections behind `spawn_blocking`, for window fetches, bodies, autocomplete, and search.
 - **Per account:** one `AccountWorker`, a supervised task group owned by a `CancellationToken`. Its tasks:
   - poller (`history.list` every 45 s, on focus and wake);
@@ -80,12 +80,13 @@ Crates live under `src-tauri/crates/` with a `ub-` prefix (`ub-domain`, `ub-mime
   - ops runner (queued Gmail mutations, replayed in order);
   - outbox runner (undo send, `drafts.send`);
   - draft reconciler;
-  - contacts backfill.
+  - contacts backfill;
+  - the body reads of opened and prefetched conversations: at most one per thread, stopped once no subscription shows the thread.
 
   Removing or signing out an account cancels the token and waits for the group to stop.
 
 - **App-wide tasks:** the effect router (section 8.4), the snooze timer, and the Dock badge count. Wake from sleep is a poller noticing a gap in app time of more than three poll intervals; notification click-through is a focus within 30 s of a notification shown in the background (DEVIATIONS).
-- **Shutdown:** quitting waits up to 5 s for pending UI actions to commit (SPEC), then cancels the root token and exits.
+- **Shutdown:** quitting waits up to 5 s for pending UI actions to commit (SPEC), then cancels the root token and, within the same deadline, waits for every task to end, the account workers' and op lanes' included (a child task group is tracked by its parents), and exits.
 
 ## 5. Data flow
 
@@ -162,7 +163,7 @@ Each handle holds only the `Arc`s it needs. A handle is a struct with methods, n
 
 ### 8.2 Account worker
 
-`AccountWorker::spawn(deps, account, tokens, cancel)` starts the task group of section 4. Its tasks share an `AccountCtx`: the account id, its `Gmail`, its scheduler slot, its `Kicks` (`tokio::sync::Notify` for ops, outbox, poll, and online), and the writer handle. Tasks talk to each other only through kicks and the database.
+`AccountWorker::new(parts, grant)` builds a worker from its `WorkerParts` (its Gmail client on the sign-in's grant, its task group, the account's op lane), and `start(replaced)` starts the task group of section 4 once the worker it replaces has stopped. Its tasks share an `AccountCtx`: the account id, its `Gmail`, its scheduler slot, its `Kicks` (`tokio::sync::Notify` for ops, outbox, poll, and online), and the writer handle. Tasks talk to each other only through kicks and the database.
 
 ### 8.3 Ports
 

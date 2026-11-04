@@ -5,8 +5,9 @@
 //!
 //! The queue is a mutex over three lanes plus a condvar, not a channel: a
 //! channel can't take the highest lane first, and a bounded one would block
-//! an async caller's thread when full. Every caller waits for its reply, so
-//! the queue is no deeper than the number of callers waiting.
+//! an async caller's thread when full. It is unbounded: a caller that awaits
+//! its reply has one job queued at a time, and the core's fire-and-forget
+//! writes are a fixed few per Gmail answer.
 
 use std::any::Any;
 use std::collections::VecDeque;
