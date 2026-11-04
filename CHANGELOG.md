@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/borovikovd/ubermensch/compare/v0.1.0...v0.1.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* keep email text readable when macOS is in dark mode ([4cc5fc4](https://github.com/borovikovd/ubermensch/commit/4cc5fc4c39a3805e7f9f461df035c06d4f35dd51))
+* stop asking for the Mac login password at launch ([94f89c8](https://github.com/borovikovd/ubermensch/commit/94f89c81226b2c5fba8cc41799b13cabd8b50d05))
+
 ## 0.1.0 (2026-11-04)
 
 
