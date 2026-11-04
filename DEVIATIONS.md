@@ -178,8 +178,8 @@ the spec's wording:
   row: it and the row moved to are both selected.
 - **"Requests for the account on screen go first."** Request slots and the
   quota bucket are per account, so requests of different accounts never wait
-  on each other. The scheduler still orders waiters by the account on screen,
-  but that order has no effect anyone can observe.
+  on each other, and there is no ordering by the account on screen: it
+  would have no effect anyone could observe.
 - **A file still attaching** shows as a dashed chip. `Cmd+Enter` meanwhile
   waits for it and then sends; if it fails to attach, nothing is sent and the
   composer stays. Closing meanwhile takes the composer off screen at once and

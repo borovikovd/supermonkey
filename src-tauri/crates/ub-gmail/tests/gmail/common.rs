@@ -1,12 +1,9 @@
-#![allow(
-    dead_code,
-    reason = "Shared by several test binaries; each uses a different subset."
-)]
+//! A fake Gmail and a client wired as the app wires it.
 
 use std::sync::Arc;
 
 use ub_fake_gmail::{FakeGmail, FakeUser};
-use ub_gmail::{Gmail, OAuthConfig, OAuthTokens, RefreshToken, default_http_client};
+use ub_gmail::{Gmail, HttpClient, OAuthConfig, QuotaConfig, RefreshToken, Scheduler, Tokens};
 
 pub const ME: &str = "me@example.com";
 
@@ -21,7 +18,7 @@ pub fn oauth_config(fake: &FakeGmail) -> OAuthConfig {
     }
 }
 
-/// A fake with one user and a client wired as the app wires it.
+/// A fake with one user, and a client for that user.
 pub fn setup() -> (FakeGmail, FakeUser, Gmail) {
     let fake = FakeGmail::start();
     let user = fake.add_user(ME);
@@ -29,14 +26,22 @@ pub fn setup() -> (FakeGmail, FakeUser, Gmail) {
     (fake, user, gmail)
 }
 
+/// A client for `user` with production limits.
 pub fn client_for(fake: &FakeGmail, user: &FakeUser) -> Gmail {
-    let http = default_http_client();
-    let tokens = Arc::new(OAuthTokens::new(
+    let http = HttpClient::new().unwrap();
+    let tokens = Arc::new(Tokens::new(
         oauth_config(fake),
         http.clone(),
-        RefreshToken(user.refresh_token().to_owned()),
+        RefreshToken::new(user.refresh_token()),
     ));
-    Gmail::new(&fake.base_url(), http, tokens)
+    let scheduler = Scheduler::new(QuotaConfig::default());
+    Gmail::new(
+        &fake.base_url(),
+        http,
+        tokens,
+        scheduler.account(user.email()),
+    )
+    .unwrap()
 }
 
 /// A minimal RFC 822 draft carrying the app's local draft id header.

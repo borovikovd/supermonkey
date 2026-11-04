@@ -50,12 +50,13 @@ const CONFINED: &[(&str, &[&str])] = &[
     ("axum", &["ub-bridge", "ub-testkit", "ub-fake-gmail"]),
 ];
 
-/// Every workspace crate's direct dependencies, normal and dev, by name.
+/// Every workspace crate's direct dependencies by name, each with whether it is
+/// a dev-dependency only.
 #[expect(
     clippy::expect_used,
     reason = "a test helper: unreadable metadata should fail the test loudly"
 )]
-fn workspace_deps() -> BTreeMap<String, BTreeSet<String>> {
+fn workspace_deps() -> BTreeMap<String, BTreeSet<(String, bool)>> {
     let out = Command::new(env!("CARGO"))
         .args(["metadata", "--format-version", "1", "--no-deps"])
         .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -73,7 +74,10 @@ fn workspace_deps() -> BTreeMap<String, BTreeSet<String>> {
                 .as_array()
                 .expect("dependencies")
                 .iter()
-                .map(|d| d["name"].as_str().expect("dependency name").to_owned())
+                .map(|d| {
+                    let name = d["name"].as_str().expect("dependency name").to_owned();
+                    (name, d["kind"].as_str() == Some("dev"))
+                })
                 .collect();
             (name, deps)
         })
@@ -90,9 +94,14 @@ fn workspace_crates_depend_only_on_lower_layers() {
             .find(|(c, _)| c == krate)
             .unwrap_or_else(|| panic!("{krate} is not in ARCHITECTURE.md's crate table"))
             .1;
-        for dep in crate_deps.iter().filter(|d| members.contains(d.as_str())) {
+        for (dep, dev_only) in crate_deps
+            .iter()
+            .filter(|(d, _)| members.contains(d.as_str()))
+        {
+            // Tests anywhere may run against the fake Google.
+            let fake_in_tests = *dev_only && dep == "ub-fake-gmail";
             assert!(
-                allowed.contains(&dep.as_str()),
+                fake_in_tests || allowed.contains(&dep.as_str()),
                 "{krate} may not depend on {dep}"
             );
         }
@@ -103,7 +112,10 @@ fn workspace_crates_depend_only_on_lower_layers() {
 fn infrastructure_crates_stay_where_the_design_puts_them() {
     for (krate, crate_deps) in workspace_deps() {
         for (infra, users) in CONFINED {
-            if crate_deps.contains(*infra) {
+            if crate_deps
+                .iter()
+                .any(|(d, dev_only)| d == infra && !dev_only)
+            {
                 assert!(
                     users.contains(&krate.as_str()),
                     "{krate} may not use {infra}"
