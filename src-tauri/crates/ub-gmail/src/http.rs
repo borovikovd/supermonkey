@@ -23,9 +23,16 @@ use serde::Deserialize;
 use crate::outcome::{GmailError, Outcome};
 
 /// The HTTP client for Gmail, Google's OAuth endpoints, and one-click
-/// unsubscribe. Cheap to clone: clones share one connection pool.
+/// unsubscribe. Cheap to clone: clones share the connection pools.
 #[derive(Debug, Clone)]
-pub struct HttpClient(reqwest::Client);
+pub struct HttpClient {
+    /// Google's endpoints.
+    google: reqwest::Client,
+    /// A list's unsubscribe URL, which comes from mail anyone can send: it
+    /// follows no redirects, so an `https` URL can't bounce the POST to a
+    /// plain `http` or local address.
+    lists: reqwest::Client,
+}
 
 /// The HTTP client could not start (its TLS backend failed to load).
 #[derive(Debug, thiserror::Error)]
@@ -40,16 +47,28 @@ const READ_TIMEOUT: Duration = Duration::from_secs(60);
 impl HttpClient {
     /// A client with the connect and read timeouts the outcome rule relies on.
     pub fn new() -> Result<Self, HttpClientError> {
-        reqwest::Client::builder()
-            .connect_timeout(CONNECT_TIMEOUT)
-            .read_timeout(READ_TIMEOUT)
-            .build()
-            .map(Self)
-            .map_err(HttpClientError)
+        let builder = || {
+            reqwest::Client::builder()
+                .connect_timeout(CONNECT_TIMEOUT)
+                .read_timeout(READ_TIMEOUT)
+        };
+        Ok(Self {
+            google: builder().build().map_err(HttpClientError)?,
+            lists: builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(HttpClientError)?,
+        })
     }
 
+    /// The client for Google's endpoints.
     pub(crate) fn inner(&self) -> &reqwest::Client {
-        &self.0
+        &self.google
+    }
+
+    /// The client for a mailing list's one-click unsubscribe URL.
+    pub(crate) fn lists(&self) -> &reqwest::Client {
+        &self.lists
     }
 }
 
@@ -95,18 +114,23 @@ impl ReadResponse {
     /// Reads the whole body.
     pub(crate) async fn read(response: reqwest::Response) -> Result<Self, GmailError> {
         let status = response.status();
-        let retry_after = response
-            .headers()
-            .get(RETRY_AFTER)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.trim().parse().ok())
-            .map(Duration::from_secs);
+        let retry_after = retry_after(&response);
         let body = response.bytes().await.map_err(|e| from_transport(&e))?;
         Ok(Self {
             status,
             retry_after,
             body: body.to_vec(),
         })
+    }
+
+    /// A response's status and `Retry-After`, its body unread: for a server
+    /// that is not Google's, whose body is neither needed nor trusted.
+    pub(crate) fn status_only(response: &reqwest::Response) -> Self {
+        Self {
+            status: response.status(),
+            retry_after: retry_after(response),
+            body: Vec::new(),
+        }
     }
 
     /// Parses a 2xx body. One that does not parse is no clear answer.
@@ -140,6 +164,16 @@ impl ReadResponse {
         };
         outcome.into()
     }
+}
+
+/// A response's `Retry-After` in seconds.
+fn retry_after(response: &reqwest::Response) -> Option<Duration> {
+    response
+        .headers()
+        .get(RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse().ok())
+        .map(Duration::from_secs)
 }
 
 /// A body that did not parse, described without quoting it: serde's message
