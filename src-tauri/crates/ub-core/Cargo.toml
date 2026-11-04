@@ -8,6 +8,23 @@ license.workspace = true
 publish = false
 
 [dependencies]
+ub-domain = { path = "../ub-domain" }
+ub-mime = { path = "../ub-mime" }
+ub-gmail = { path = "../ub-gmail" }
+ub-store = { path = "../ub-store" }
+ub-ipc = { path = "../ub-ipc" }
+# The local time zone for the snooze picker.
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+parking_lot = "0.12"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"
+
+[dev-dependencies]
+ub-store = { path = "../ub-store", features = ["test-hooks"] }
+proptest = "1"
+tempfile = "3"
 
 [lints]
 workspace = true
