@@ -3537,7 +3537,7 @@ Also kept, because they test logic the E2E suite can't observe:
 
 - `crates/ub-gmail/tests/gmail/scheduler.rs`: priorities, concurrency, quota, and back-off.
 - `crates/ub-gmail/tests/gmail/oauth.rs`: the `state` check, token caching and early refresh, one refresh shared by concurrent 401s, and secrets kept out of debug output.
-- `crates/ub-core/src/tests/clock.rs`: the activity tracking `settle()` relies on, and that closing a `Kick` (an account stopping) wakes a loop even between its last check and its wait.
+- `crates/ub-core/src/tests/clock.rs`: the activity tracking `settle()` relies on, that closing a `Kick` (an account stopping) wakes a loop even between its last check and its wait, and that stopping a task group (quit) waits for the tasks of the groups inside it, such as the account workers' (a task mid-step at the stop can't be timed from E2E).
 - `crates/ub-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser: several URIs, mailto subject and body, a `+` in the address, junk, spacing, and when one-click applies.
 - `src/logging.rs`: the stderr logger drops the HTML parser's warnings and keeps ours (logs are not visible to the E2E suite).
 - `crates/ub-store/src/open.rs`: a database of another schema version, or a file that is not one, is moved aside with its WAL and a fresh one created (there is no migration code).

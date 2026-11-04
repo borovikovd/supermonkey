@@ -8,6 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::runtime::Handle;
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::TaskTracker;
+use tokio_util::task::task_tracker::TaskTrackerToken;
 
 use super::Activity;
 
@@ -55,13 +56,17 @@ tokio::task_local! {
 
 /// A group of tasks under one cancellation token: the core's root group, or
 /// an account worker's. Cancelling it ends every task in it at its next
-/// `.await`; [`Tasks::stop`] also waits for them to end.
+/// `.await`; [`Tasks::stop`] also waits for them to end, and for the tasks
+/// of every group inside it.
 #[derive(Clone)]
 pub struct Tasks {
     runtime: Handle,
     activity: Arc<Activity>,
     cancel: CancellationToken,
     tracker: TaskTracker,
+    /// The trackers of the groups this one is inside, innermost first: each
+    /// counts this group's tasks too, so stopping it waits for them.
+    outer: Arc<[TaskTracker]>,
 }
 
 impl Tasks {
@@ -72,17 +77,23 @@ impl Tasks {
             activity,
             cancel: CancellationToken::new(),
             tracker: TaskTracker::new(),
+            outer: Arc::new([]),
         }
     }
 
-    /// A group inside this one: cancelled with it, or on its own.
+    /// A group inside this one: cancelled with it, or on its own. Stopping
+    /// this one waits for the new group's tasks too.
     #[must_use]
     pub fn child(&self) -> Self {
+        let outer: Vec<TaskTracker> = std::iter::once(self.tracker.clone())
+            .chain(self.outer.iter().cloned())
+            .collect();
         Self {
             runtime: self.runtime.clone(),
             activity: Arc::clone(&self.activity),
             cancel: self.cancel.child_token(),
             tracker: TaskTracker::new(),
+            outer: outer.into(),
         }
     }
 
@@ -108,6 +119,8 @@ impl Tasks {
             return;
         }
         let cancel = self.cancel.clone();
+        // Counted by every outer group until the task has ended.
+        let counted: Vec<TaskTrackerToken> = self.outer.iter().map(TaskTracker::token).collect();
         let scoped = TASK.scope(
             TaskActivity::new(Arc::clone(&self.activity), label),
             async move {
@@ -118,7 +131,11 @@ impl Tasks {
                 }
             },
         );
-        self.tracker.spawn_on(scoped, &self.runtime);
+        let task = async move {
+            scoped.await;
+            drop(counted);
+        };
+        self.tracker.spawn_on(task, &self.runtime);
     }
 
     /// Cancels every task of the group without waiting for them.

@@ -154,6 +154,34 @@ async fn a_cancelled_group_ends_its_tasks_and_starts_no_more() {
     assert!(activity.is_idle(), "nothing starts after the group stopped");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stopping_a_group_waits_for_the_tasks_of_the_groups_inside_it() {
+    use futures_util::FutureExt;
+
+    let activity = Activity::new();
+    let root = tasks(&activity);
+    let inner = root.child().child();
+    let (started, running) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    // Mid-step when the stop comes, as a task is between two awaits: the
+    // cancel can only drop it once this step returns.
+    inner.spawn("mid-step", async move {
+        started.send(()).unwrap();
+        released.recv().unwrap();
+    });
+    running.recv_timeout(Duration::from_secs(5)).unwrap();
+    let mut stop = std::pin::pin!(root.stop());
+    assert!(
+        (&mut stop).now_or_never().is_none(),
+        "the stop waits for a task two groups down"
+    );
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), stop)
+        .await
+        .expect("the stop returns once the task has ended");
+    assert!(activity.is_idle());
+}
+
 #[tokio::test]
 async fn a_busy_scope_counts_until_it_waits_on_the_person() {
     let activity = Activity::new();
