@@ -1,20 +1,68 @@
 //! Ubermensch's mail model and the rules over it (ARCHITECTURE.md, section 3).
 //!
 //! Pure: nothing here does I/O, runs async, reads the clock, or knows SQL. The
-//! `sqlite` and `ts` features only add conversions for the newtypes.
+//! `sqlite` and `ts` features only add conversions for the newtypes and enums.
+//!
+//! - Model: ids and [`Millis`], [`Addr`], [`LabelSet`] and [`SystemLabel`],
+//!   [`MessageFacts`], [`Thread`] and its [`ThreadDigest`], [`Identity`].
+//! - Views: [`View::lists`], [`View::gmail_listing`].
+//! - Actions: [`LabelDelta`], [`plan_modify`], [`MessageChange`],
+//!   [`ThreadChange`], [`snooze_after`].
+//! - Compose: [`addressing`], [`DraftContent`], [`gmail_draft_kind`],
+//!   [`gmail_draft_aim`].
+//! - Split Inbox: [`Router`], [`is_person_to_person`], [`STARTER_SPLITS`].
+//! - The query language: [`query`].
+//! - Snooze times: [`snooze`].
+//! - Autocomplete: [`contacts`].
 
 mod addr;
+mod addressing;
+pub mod contacts;
+mod drafts;
+mod hue;
+mod identity;
 mod ids;
 mod kinds;
+mod kinds_text;
+mod labels;
+mod message;
+mod modify;
+pub mod query;
+pub mod snooze;
+mod splits;
+mod thread;
 mod time;
+mod views;
+
+#[cfg(test)]
+mod test_support;
+#[cfg(test)]
+mod tests;
 
 pub use addr::Addr;
-pub use kinds::{
-    DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SplitKind, SyncStatus, UndoKind, View,
-};
-
+pub use addressing::{Addressing, ReplyTarget, addressing, reply_addressing};
+pub use drafts::{DraftAim, DraftContent, gmail_draft_aim, gmail_draft_kind};
+pub use hue::{AVATAR_HUES, avatar_hue};
+pub use identity::{Identity, SendAsAddress};
 pub use ids::{
     AccountId, ActionNo, AttachmentId, DraftId, GmailDraftId, GmailMessageId, GmailThreadId,
     LabelId, MessageId, NoticeId, OutboxId, Rev, SplitId, SubId, ThreadId, UndoEntryId,
 };
+pub use kinds::{
+    DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SplitKind, SyncStatus, UndoKind, View,
+};
+pub use kinds_text::UnknownKind;
+pub use labels::{LabelSet, SystemLabel, is_category_id, is_system_label_id};
+pub use message::MessageFacts;
+pub use modify::{
+    LabelDelta, MessageChange, ModifyError, SnoozeEdit, ThreadChange, ThreadModify, plan_modify,
+    snooze_after,
+};
+pub use query::{Query, RuleError};
+pub use splits::{
+    IMPORTANT_POSITION, OTHER_POSITION, Pin, Router, STARTER_SPLITS, Split, StarterSplit,
+    email_domain, is_person_to_person, split_position,
+};
+pub use thread::{Thread, ThreadDigest};
 pub use time::Millis;
+pub use views::GmailListing;
