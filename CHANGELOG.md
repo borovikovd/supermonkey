@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0](https://github.com/borovikovd/ubermensch/compare/v0.3.0...v0.4.0) (2026-11-04)
+
+
+### Features
+
+* add Select all (Cmd+Shift+A) and Select all from here (Cmd+A) ([0397351](https://github.com/borovikovd/ubermensch/commit/039735181151db454e5bad87347ed03fc6bd710f))
+* block senders and domains with Gmail filters ([578a73a](https://github.com/borovikovd/ubermensch/commit/578a73a5324e46efb4293d7bc14205626678e7d8))
+* make search look like Superhuman's ([518c17d](https://github.com/borovikovd/ubermensch/commit/518c17df5664c9eeca59a428d32ba9d4f5e75260))
+* unsubscribe with Cmd+U, as in Superhuman ([f6691cb](https://github.com/borovikovd/ubermensch/commit/f6691cb17e6781960d7d0edbe7ed264bddd8c427))
+
 ## [0.3.0](https://github.com/borovikovd/ubermensch/compare/v0.2.1...v0.3.0) (2026-11-04)
 
 
