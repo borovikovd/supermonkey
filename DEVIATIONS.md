@@ -7,7 +7,7 @@ written. Each keeps the spec's intent.
 
 - **Workspace crates.** Pure logic lives in separate crates under
   `src-tauri/crates/`: `ub-mime` (MIME parse, sanitize, build), `ub-gmail`
-  (Gmail client, OAuth, quota scheduler, Keychain), `ub-fake-gmail` (the fake
+  (Gmail client, OAuth, quota scheduler, token file), `ub-fake-gmail` (the fake
   Gmail server for tests), `ub-rules` (rule/search language, snooze times,
   contact ranking).
 - **Debug web bridge.** Debug builds started with `UBERMENSCH_WEB_BRIDGE=1`

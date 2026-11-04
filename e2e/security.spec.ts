@@ -207,7 +207,7 @@ test.describe("security", () => {
 
   test("SEC-04 the webview holds no Gmail credentials", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
-    const tokens = (await gmail.keychain()).map((k) => k.token);
+    const tokens = (await gmail.tokens()).map((k) => k.token);
     expect(tokens.length).toBeGreaterThan(0);
 
     const stored = await app.page.evaluate<string>(WEBVIEW_STATE);

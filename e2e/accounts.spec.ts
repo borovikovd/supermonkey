@@ -104,7 +104,7 @@ function settingsBlock(app: App, email: string): Locator {
     .last();
 }
 
-test("ACC-01 first run adds the first account; token goes to the Keychain", async ({
+test("ACC-01 first run adds the first account; its token goes to a file only the user can read", async ({
   app,
   gmail,
 }) => {
@@ -123,10 +123,9 @@ test("ACC-01 first run adds the first account; token goes to the Keychain", asyn
   await expect(app.rows).toHaveCount(A_INBOX.length);
   expect((await app.subjects()).toSorted()).toEqual(A_INBOX);
 
-  const keychain = await gmail.keychain();
-  expect(keychain.map(({ service, account }) => ({ service, account }))).toEqual([
-    { service: "ubermensch", account: A },
-  ]);
+  const stored = await gmail.tokens();
+  expect(stored.map((t) => t.account)).toEqual([A]);
+  expect(await gmail.tokenFileMode(), "only the user can read the token file").toBe("600");
   // The consent page opened in the system browser, with a loopback redirect, PKCE, and one scope.
   const { openedUrls } = await gmail.platform();
   expect(openedUrls).toHaveLength(1);
@@ -136,7 +135,7 @@ test("ACC-01 first run adds the first account; token goes to the Keychain", asyn
   expect(auth.searchParams.get("code_challenge_method")).toBe("S256");
   expect(auth.searchParams.get("scope")).toBe("https://www.googleapis.com/auth/gmail.modify");
   expect(app.popups).toEqual([]);
-  expect(await gmail.dbContains(keychain[0]?.token ?? "missing")).toBe(false);
+  expect(await gmail.dbContains(stored[0]?.token ?? "missing")).toBe(false);
 });
 
 test("ACC-02 add a second account from the palette; switch with Ctrl+1 and Ctrl+2", async ({
@@ -155,7 +154,7 @@ test("ACC-02 add a second account from the palette; switch with Ctrl+1 and Ctrl+
   expect(await avatarOrder(app)).toEqual([A, B]);
   await expect(app.account(B)).toHaveText(/^Z/);
   await expect(app.account(A)).toHaveText(/^A/);
-  expect((await gmail.keychain()).map((k) => k.account).toSorted()).toEqual([A, B]);
+  expect((await gmail.tokens()).map((k) => k.account).toSorted()).toEqual([A, B]);
   // Avatar hues, in the order added.
   const hue = (email: string) =>
     app.account(email).evaluate((el) => {
@@ -391,7 +390,7 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   test.slow();
   const s = await seeds.standard(gmail, app);
   const settings = app.sheet("Settings");
-  const tokens = Object.fromEntries((await gmail.keychain()).map((k) => [k.account, k.token]));
+  const tokens = Object.fromEntries((await gmail.tokens()).map((k) => [k.account, k.token]));
 
   // d: Cancel changes nothing.
   await app.press("Meta+,");
@@ -401,7 +400,7 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   await app.press("Escape");
   await app.settle();
   expect(await avatarOrder(app)).toEqual([A, B]);
-  expect(await gmail.keychain()).toHaveLength(2);
+  expect(await gmail.tokens()).toHaveLength(2);
   expect(await gmail.revocations()).toEqual([]);
 
   // b: remove A while on screen, with 2 queued actions and 1 waiting send.
@@ -439,7 +438,7 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   expect(
     a.messages.filter((m) => m.labels.includes("SENT") && m.raw.includes("Never to be sent")),
   ).toEqual([]);
-  expect((await gmail.keychain()).map((k) => k.account)).toEqual([B]);
+  expect((await gmail.tokens()).map((k) => k.account)).toEqual([B]);
 
   // Re-adding A: its Inbox matches Gmail again, and z has nothing to undo.
   await gmail.nextSignIn({ email: A });
@@ -464,7 +463,7 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   await expect(app.account(B)).toHaveCount(0);
   await app.press("Escape");
   await app.settle();
-  expect((await gmail.keychain()).map((k) => k.account)).toEqual([A]);
+  expect((await gmail.tokens()).map((k) => k.account)).toEqual([A]);
   expect(await gmail.revocations()).toContainEqual({ account: B, token: tokens[B] });
   await expect(app.rows).toHaveCount(A_INBOX.length);
   await expect(app.account(A)).toBeVisible();
@@ -562,7 +561,7 @@ test("ACC-09 a failed sign-in adds nothing", async ({ app, gmail }) => {
   await app.firstRunButton.click();
   await expect(app.page.getByText(/access_denied|denied/i)).toBeVisible();
   await expect(app.page.getByRole("navigation")).toHaveCount(0);
-  expect(await gmail.keychain()).toEqual([]);
+  expect(await gmail.tokens()).toEqual([]);
 
   // Abandoned in the browser: the attempt waits, and nothing is added.
   await gmail.nextSignIn({ abandon: true });
@@ -570,13 +569,13 @@ test("ACC-09 a failed sign-in adds nothing", async ({ app, gmail }) => {
   await expect(app.page.getByText(/Waiting for Google in your browser/)).toBeVisible();
   await app.settle();
   await expect(app.page.getByRole("navigation")).toHaveCount(0);
-  expect(await gmail.keychain()).toEqual([]);
+  expect(await gmail.tokens()).toEqual([]);
 
   // A click while it waits starts over, and that attempt succeeds.
   await gmail.nextSignIn({ email: A });
   await app.firstRunButton.click();
   await expect(app.account(A)).toBeVisible();
-  expect((await gmail.keychain()).map((k) => k.account)).toEqual([A]);
+  expect((await gmail.tokens()).map((k) => k.account)).toEqual([A]);
 });
 
 test("ACC-10 accounts with the same Gmail thread id stay separate", async ({ app, gmail }) => {
@@ -665,7 +664,7 @@ test("ACC-12 re-adding an account while its removal is still revoking keeps the 
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  const old = (await gmail.keychain()).find((k) => k.account === B)?.token;
+  const old = (await gmail.tokens()).find((k) => k.account === B)?.token;
   // The removal's revoke is slow to answer.
   const revoke = await gmail.hold("oauth.revoke");
   await app.press("Meta+,");
@@ -688,8 +687,8 @@ test("ACC-12 re-adding an account while its removal is still revoking keeps the 
   await app.settle();
 
   expect(await gmail.revocations()).toEqual([{ account: B, token: old }]);
-  const fresh = (await gmail.keychain()).find((k) => k.account === B)?.token;
-  expect(fresh, "the new token stays in the Keychain").toBeDefined();
+  const fresh = (await gmail.tokens()).find((k) => k.account === B)?.token;
+  expect(fresh, "the new token stays in the token file").toBeDefined();
   expect(fresh).not.toBe(old);
   // The new grant works: B refreshes its token and syncs.
   await gmail.expireAccessTokens(B);
@@ -733,4 +732,39 @@ test("ACC-13 adding an account that is already signed in replays its queue once"
     "the queued archive went out once",
   ).toHaveLength(1);
   await expect(app.row("Person 1")).toHaveCount(0);
+});
+
+test("ACC-14 an account with no stored token at launch shows Sign in again", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await app.restart(async () => {
+    await gmail.forgetToken(A);
+  });
+  await app.settle();
+
+  // A asks for a sign-in; B, whose token is there, does not.
+  await expect(app.signInMarker(A)).toBeVisible();
+  await expect(app.account(A)).toHaveAttribute("title", /Sign in again/);
+  await expect(app.signInMarker(B)).toHaveCount(0);
+  // An archive waits for the sign-in, and A's cached mail stays readable.
+  await expect(app.highlighted).toContainText("Person 1");
+  await app.press("e");
+  await app.settle();
+  expect(await labelsOf(gmail, A, s.latest("p1").id)).toContain("INBOX");
+  await app.row("Q4 plan").click();
+  await expect(app.conversationTitle).toHaveText("Q4 plan");
+  await app.press("Escape");
+
+  await app.press("Meta+,");
+  await gmail.nextSignIn({ email: A });
+  await settingsBlock(app, A).getByRole("button", { name: "Sign in again" }).click();
+  await app.settle();
+  await expect(app.signInMarker(A)).toHaveCount(0);
+  expect((await gmail.tokens()).map((t) => t.account).toSorted()).toEqual([A, B].toSorted());
+  await app.press("Escape");
+  await app.advance(10_000);
+  await app.settle();
+  expect(await labelsOf(gmail, A, s.latest("p1").id)).not.toContain("INBOX");
 });

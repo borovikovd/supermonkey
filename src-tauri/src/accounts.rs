@@ -71,7 +71,7 @@ pub const SYSTEM_LABELS: [(&str, &str); 10] = [
 ];
 
 /// Deletes the account's rows, queue, and outbox. The async side stops its
-/// sync, deletes its Keychain item, revokes the token, and removes files.
+/// sync, deletes its refresh token, revokes it, and removes files.
 pub fn remove(ctx: &mut Ctx<'_>, account: AccountId) -> anyhow::Result<()> {
     let email: String =
         ctx.tx

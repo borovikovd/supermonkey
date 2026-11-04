@@ -1,5 +1,5 @@
 //! Gmail for Ubermensch: the REST client, error outcomes, quota scheduling, Google OAuth
-//! and Keychain token storage.
+//! and refresh-token storage.
 //!
 //! Wiring for one account:
 //!
@@ -24,19 +24,19 @@
 
 mod client;
 mod error;
-mod keychain;
 mod oauth;
 mod quota;
 pub mod retry;
+mod tokens;
 mod types;
 
 pub use client::{GMAIL_BASE_URL, Gmail, ThreadListQuery, default_http_client};
 pub use error::{GmailError, Outcome};
-pub use keychain::{KEYCHAIN_SERVICE, Keychain, MemoryTokenStore, TokenStore, TokenStoreError};
 pub use oauth::{
     AccessToken, AuthResult, GMAIL_SCOPE, OAuthConfig, OAuthTokens, RefreshToken, authorize,
     refresh, revoke,
 };
 pub use quota::{AccountScheduler, Permit, Priority, QuotaBucket, QuotaConfig, Scheduler, cost};
 pub use retry::{backoff, with_retry};
+pub use tokens::{MemoryTokenStore, TokenFile, TokenStore, TokenStoreError};
 pub use types::*;

@@ -86,7 +86,7 @@ impl fmt::Debug for AccessToken {
 /// The result of a completed sign-in.
 #[derive(Debug, Clone)]
 pub struct AuthResult {
-    /// Goes into the Keychain.
+    /// Goes into the token store.
     pub refresh_token: RefreshToken,
     pub access_token: AccessToken,
 }

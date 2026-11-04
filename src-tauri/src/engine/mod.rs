@@ -187,6 +187,9 @@ pub struct Engine {
     shut_down: AtomicBool,
 }
 
+/// The refresh-token file in the app's data folder.
+pub const TOKEN_FILE: &str = "tokens.json";
+
 /// Builds the engine for the app window and starts it.
 pub fn start(
     app: &AppHandle,
@@ -198,10 +201,10 @@ pub fn start(
     let config = Config::from_env();
     let store: Arc<dyn TokenStore> =
         if cfg!(debug_assertions) && std::env::var("UBERMENSCH_GMAIL_BASE").is_ok() {
-            // Against the fake server, keep test tokens out of the real Keychain.
+            // Against the fake server, keep test tokens out of the real data folder.
             Arc::new(ub_gmail::MemoryTokenStore::default())
         } else {
-            Arc::new(ub_gmail::Keychain)
+            Arc::new(ub_gmail::TokenFile::new(data_dir.join(TOKEN_FILE)))
         };
     #[cfg(feature = "fake")]
     let (config, store) = demo::setup(&writer).unwrap_or((config, store));
@@ -410,6 +413,11 @@ impl Engine {
             accounts.remove(&account);
         }
         rt.stop();
+        self.mark_needs_signin(account);
+    }
+
+    /// Shows Sign in again for the account. Its mail stays readable.
+    fn mark_needs_signin(&self, account: AccountId) {
         self.writer.sync(move |ctx| {
             ctx.tx.execute(
                 "UPDATE accounts SET needs_signin = 1 WHERE id = ?1",
@@ -524,8 +532,15 @@ fn launch(engine: &Arc<Engine>) {
                 ));
                 engine.start_account(id, email, tokens);
             }
-            // Fixture accounts and accounts whose token is gone stay readable offline.
-            _ => log::info!("no refresh token for account {id}; not syncing"),
+            // Its mail stays readable; Sign in again brings a new token.
+            Ok(None) => {
+                log::info!("no refresh token for account {id}; it needs a sign-in");
+                engine.mark_needs_signin(id);
+            }
+            Err(err) => {
+                log::warn!("read refresh token of account {id}: {}", err.0);
+                engine.mark_needs_signin(id);
+            }
         }
     }
     update_badge(engine);

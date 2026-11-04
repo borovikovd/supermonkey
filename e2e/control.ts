@@ -196,7 +196,7 @@ export type Recorded = {
   focusRequests: number;
 };
 
-export type KeychainItem = { service: string; account: string; token: string };
+export type TokenItem = { account: string; token: string };
 
 /** Where the page's channel should be, from the core's side of `settle()`. */
 export type CoreIdle = { rev: number; ack: number; signIns: number; held: number };
@@ -365,9 +365,19 @@ export class Control {
     return this.call("POST", "/__test/sign-in", opts);
   }
 
-  /** Stored refresh tokens, as the Keychain would list them. */
-  keychain(): Promise<KeychainItem[]> {
-    return this.call("GET", "/__test/keychain");
+  /** Stored refresh tokens, as the token file holds them, by account. */
+  tokens(): Promise<TokenItem[]> {
+    return this.call("GET", "/__test/tokens");
+  }
+
+  /** The token file's permission bits, such as "600", or null before the first save. */
+  tokenFileMode(): Promise<string | null> {
+    return this.call("GET", "/__test/tokens/mode");
+  }
+
+  /** Deletes an account's token from the file, as if it was never saved. */
+  forgetToken(email: string): Promise<null> {
+    return this.call("POST", "/__test/tokens/forget", { email });
   }
 
   /** Tokens revoked at Google, oldest first. */

@@ -28,9 +28,7 @@ use ub_fake_gmail::{
     AddedDraft, AddedMessage, Answer, FakeGmail, FakeUser, Fault, LoggedRequest, Matcher,
     NewAttachment, NewMessage, Release,
 };
-use ub_gmail::{
-    KEYCHAIN_SERVICE, MemoryTokenStore, OAuthConfig, QuotaConfig, RefreshToken, TokenStore,
-};
+use ub_gmail::{OAuthConfig, QuotaConfig, RefreshToken, TokenFile, TokenStore};
 
 use super::webbridge::Bridge;
 use super::{Config, Engine, Platform};
@@ -154,7 +152,7 @@ struct Hit {
 struct Server {
     fake: FakeGmail,
     users: Mutex<HashMap<String, FakeUser>>,
-    store: Arc<MemoryTokenStore>,
+    store: Arc<TokenFile>,
     platform: Arc<TestPlatform>,
     bridge: Bridge,
     clock: &'static Manual,
@@ -215,7 +213,7 @@ pub async fn run(port: u16, dist: PathBuf, now_ms: i64) -> anyhow::Result<()> {
         core: tokio::sync::Mutex::new(open_core(&db)?),
         fake,
         users: Mutex::new(HashMap::new()),
-        store: Arc::new(MemoryTokenStore::default()),
+        store: Arc::new(TokenFile::new(data_dir.join(super::TOKEN_FILE))),
         platform,
         bridge: bridge.clone(),
         clock,
@@ -283,7 +281,9 @@ fn control(server: Arc<Server>) -> Router {
         )
         .route("/__test/invalid-grant", post(invalid_grant))
         .route("/__test/sign-in", post(next_sign_in))
-        .route("/__test/keychain", get(keychain))
+        .route("/__test/tokens", get(tokens))
+        .route("/__test/tokens/mode", get(tokens_mode))
+        .route("/__test/tokens/forget", post(forget_token))
         .route("/__test/revocations", get(revocations))
         .route("/__test/fault", post(fault))
         .route("/__test/release", post(release))
@@ -518,7 +518,7 @@ async fn start(State(s): State<Arc<Server>>) -> Ctl {
         reads,
         s.data_dir.clone(),
         config,
-        Arc::<MemoryTokenStore>::clone(&s.store),
+        Arc::<TokenFile>::clone(&s.store),
     );
     s.bridge.set_engine(Some(Arc::clone(&engine)));
     engine.run(effects);
@@ -1083,17 +1083,38 @@ async fn next_sign_in(State(s): State<Arc<Server>>, Json(req): Json<SignInReq>) 
     Ok(done())
 }
 
-/// The token store, as the Keychain would list it.
-async fn keychain(State(s): State<Arc<Server>>) -> Ctl {
+/// The refresh-token file's entries, as stored on disk.
+async fn tokens(State(s): State<Arc<Server>>) -> Ctl {
     let items: Vec<Value> = s
         .store
         .entries()
+        .map_err(|e| Fail(e.0))?
         .into_iter()
-        .map(|(account, token)| {
-            json!({ "service": KEYCHAIN_SERVICE, "account": account, "token": token.0 })
-        })
+        .map(|(account, token)| json!({ "account": account, "token": token.0 }))
         .collect();
     Ok(Json(json!(items)))
+}
+
+/// The refresh-token file's permission bits, such as "600", or null before the first save.
+async fn tokens_mode(State(s): State<Arc<Server>>) -> Ctl {
+    use std::os::unix::fs::PermissionsExt as _;
+    let mode = std::fs::metadata(s.data_dir.join(super::TOKEN_FILE))
+        .ok()
+        .map(|m| format!("{:o}", m.permissions().mode() & 0o777));
+    Ok(Json(json!(mode)))
+}
+
+#[derive(Deserialize)]
+struct ForgetTokenReq {
+    email: String,
+}
+
+/// Deletes an account's refresh token from the file, as if it was never saved.
+async fn forget_token(State(s): State<Arc<Server>>, Json(req): Json<ForgetTokenReq>) -> Ctl {
+    s.store
+        .delete_refresh_token(&req.email)
+        .map_err(|e| Fail(e.0))?;
+    Ok(done())
 }
 
 /// Tokens revoked at Google, oldest first.

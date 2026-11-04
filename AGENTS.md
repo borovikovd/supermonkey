@@ -80,7 +80,10 @@ names) is in [Project specifics](#project-specifics) at the end; the rest is gen
 
 - Credential files stay git-ignored. Never commit them, print them, or paste them into
   logs, tests, or chat.
-- Tokens live in the OS keychain. Never log tokens, auth codes, or user content.
+- Tokens live in the OS keychain, or in a file only the user can read when the
+  keychain gets in the way (an unsigned macOS build makes the keychain ask for the
+  login password after every update). Never in the database, the repo, or logs.
+  Never log tokens, auth codes, or user content.
 
 ## Concurrency
 
@@ -285,5 +288,5 @@ The only section that changes from project to project.
   `GOOGLE_OAUTH_CLIENT_JSON` Actions secret. The version lives in `package.json`
   (`tauri.conf.json` points at it) and in `src-tauri/Cargo.toml`; release-please
   bumps both. Windows and Linux builds wait until the app works off macOS.
-- **Secrets.** `google-oauth-client.json` is git-ignored. Refresh tokens are in the
-  macOS Keychain.
+- **Secrets.** `google-oauth-client.json` is git-ignored. Refresh tokens are in
+  `tokens.json` (mode 0600) in the app's data folder, not the Keychain.

@@ -11,7 +11,7 @@ This is a local program. It installs as a normal `.app`. There is no backend ser
 | Topic | Choice |
 |---|---|
 | Job of v1 | Personal daily driver for real Gmail |
-| Platform | macOS only. Window chrome, Keychain, and shortcuts are Mac-specific |
+| Platform | macOS only. Window chrome and shortcuts are Mac-specific |
 | Look | Light, dense, single-line rows, Split Inbox, command palette, core shortcuts. See Look |
 | Speed | Every local action paints within its budget. See Performance |
 | Accounts | Several Gmail accounts, each with its own inbox. One account is on screen at a time, as in Superhuman |
@@ -179,11 +179,13 @@ Add an account from the first-run screen or the palette (`Add account`). Sign-in
 
 The OAuth client is a Desktop-type client in the user's own Google Cloud project. Its client ID and secret are build-time config. Google treats a desktop secret as not confidential. The consent screen is published In production, not Testing, because Testing expires refresh tokens after 7 days. The app stays unverified, so each sign-in shows Google's unverified-app warning.
 
-The refresh token goes into the macOS Keychain. Service name `ubermensch`, account name the email address. Access tokens stay in memory.
+Refresh tokens go into `tokens.json` in the app's data folder, keyed by email address. Only the user can read the file (mode 0600), and it is replaced atomically on each change. Not the Keychain: an unsigned build has no stable identity, so macOS would ask for the login password on every launch after an update. Access tokens stay in memory.
+
+An account whose token is missing at launch shows Sign in again, as for `invalid_grant`.
 
 If Google rejects the refresh token (`invalid_grant`), the account shows Sign in again. Its cached mail stays readable. Its queue and outbox wait until sign-in succeeds.
 
-Removing an account deletes its Keychain item and its rows from the local database. If it was on screen, the next account in the rail takes its place.
+Removing an account deletes its refresh token and its rows from the local database. If it was on screen, the next account in the rail takes its place.
 
 ### Switching
 
@@ -507,7 +509,7 @@ Changing a setting is an action, as in UI state. It is not an undo entry. Settin
 `Remove account` asks to confirm. If the account's queue or outbox is not empty, the confirmation says how many actions and sends will be lost. Removing an account:
 - drops its queue and outbox, and stops its sync
 - deletes its rows from every table and its downloaded attachments
-- deletes its tokens from Keychain and revokes the refresh token with Google when online
+- deletes its refresh token and revokes it with Google when online
 - if it was on screen, switches to the next account on the rail, or shows the first-run screen if none are left
 
 ## Search
@@ -692,7 +694,7 @@ The thread list is virtualized. The conversation view does not virtualize a thre
 
 ## Security
 
-- Refresh tokens live in Keychain. The database holds no tokens.
+- Refresh tokens live in a file only the user can read. The database holds no tokens.
 - HTML is sanitized before insert. The message iframe's CSP is `script-src 'none'`.
 - The app CSP allows inline styles and `img-src https: http: data:`, because `srcdoc` iframes inherit it. Tauri's nonce injection is turned off for `style-src` (`dangerousDisableAssetCspModification`), because a nonce makes browsers ignore `'unsafe-inline'`.
 - The webview has no Gmail credentials and cannot call Gmail.
@@ -711,7 +713,7 @@ The thread list is virtualized. The conversation view does not virtualize a thre
 | Chrome state | Zustand 5 |
 | Editor | TipTap 3 |
 | Database | rusqlite 0.40, bundled SQLite, FTS5 |
-| Tokens | keyring, macOS Keychain |
+| Tokens | a JSON file in the data folder, mode 0600 |
 | HTML | ammonia |
 | MIME | mail-builder, for every message and draft Rust writes |
 | IPC types | ts-rs 12, generated from Rust |
@@ -747,7 +749,7 @@ The acceptance bar is the whole daily driver. Build it in this order so each ste
 
 ## Done when
 
-- Two Gmail accounts can be added, switched with `Ctrl+1` and `Ctrl+2`, and removed. Tokens are in Keychain.
+- Two Gmail accounts can be added, switched with `Ctrl+1` and `Ctrl+2`, and removed. Tokens are in the token file.
 - Each account's Inbox matches Gmail's inbox after a sync, including mail that arrived while the app was closed.
 - Inbox rows sit under Important, Other, and any custom splits. `Tab` moves between them. A sender pinned to Important stays there across syncs. An empty split with hide-when-empty on stays hidden, except when `g` then `i` or `g` then `o` shows its header.
 - `j`, `k`, `e`, `h`, `c`, `r`, `Enter`, `/`, and `Cmd+K` do what the shortcut table says.

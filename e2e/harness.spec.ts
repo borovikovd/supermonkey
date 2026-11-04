@@ -240,18 +240,18 @@ test("links open through the core's open_url; remote images hit the image host",
   expect(app.popups).toEqual([]);
 });
 
-test("removing an account revokes its token and empties its keychain item", async ({
+test("removing an account revokes its token and deletes its stored token", async ({
   app,
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  const token = (await gmail.keychain()).find((k) => k.account === B)?.token;
+  const token = (await gmail.tokens()).find((k) => k.account === B)?.token;
   await app.press("Meta+,");
   await app.sheet("Settings").getByRole("button", { name: "Remove account" }).nth(1).click();
   await app.sheet("Settings").getByRole("button", { name: "Remove", exact: true }).click();
   await app.settle();
   expect(await gmail.revocations()).toEqual([{ account: B, token }]);
-  expect((await gmail.keychain()).map((k) => k.account)).toEqual([A]);
+  expect((await gmail.tokens()).map((k) => k.account)).toEqual([A]);
 });
 
 test("the Gmail search waits for a 300 ms pause in app time", async ({ app, gmail }) => {
@@ -341,7 +341,7 @@ test("Gmail-side drafts, deleted threads, and expired history", async ({ app, gm
   expect(resync?.answer).toBe(200);
 });
 
-test("sign-in: a denial stores nothing; the keychain lists tokens; no token in the database", async ({
+test("sign-in: a denial stores nothing; the token file lists tokens; no token in the database", async ({
   app,
   gmail,
 }) => {
@@ -350,20 +350,19 @@ test("sign-in: a denial stores nothing; the keychain lists tokens; no token in t
   await gmail.nextSignIn({ deny: true });
   await app.firstRunButton.click();
   await expect(app.page.getByText(/access_denied/)).toBeVisible();
-  expect(await gmail.keychain()).toEqual([]);
+  expect(await gmail.tokens()).toEqual([]);
   await gmail.nextSignIn({ email: A });
   await app.firstRunButton.click();
   await expect(app.account(A)).toBeVisible();
   await app.settle();
-  const keychain = await gmail.keychain();
-  expect(keychain.map(({ service, account }) => ({ service, account }))).toEqual([
-    { service: "ubermensch", account: A },
-  ]);
+  const stored = await gmail.tokens();
+  expect(stored.map((t) => t.account)).toEqual([A]);
+  expect(await gmail.tokenFileMode(), "only the user can read the token file").toBe("600");
   const auth = (await gmail.platform()).openedUrls.at(-1) ?? "";
   expect(new URL(auth).searchParams.get("scope")).toBe(
     "https://www.googleapis.com/auth/gmail.modify",
   );
-  expect(await gmail.dbContains(keychain[0]?.token ?? "missing")).toBe(false);
+  expect(await gmail.dbContains(stored[0]?.token ?? "missing")).toBe(false);
   expect(await gmail.dbContains("Q4 plan")).toBe(true);
 });
 
