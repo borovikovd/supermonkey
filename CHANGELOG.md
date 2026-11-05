@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/borovikovd/ubermensch/compare/v0.5.0...v0.5.1) (2026-11-05)
+
+
+### Chores
+
+* release 0.5.1 ([26be74b](https://github.com/borovikovd/ubermensch/commit/26be74b086a583e72b834b5e3ddc498e23301069))
+
 ## [0.5.0](https://github.com/borovikovd/ubermensch/compare/v0.4.0...v0.5.0) (2026-11-05)
 
 
