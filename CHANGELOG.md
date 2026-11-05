@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.2](https://github.com/borovikovd/ubermensch/compare/v0.5.1...v0.5.2) (2026-11-05)
+
+
+### Bug Fixes
+
+* **reading:** show a message's preview while its body downloads ([e1e684d](https://github.com/borovikovd/ubermensch/commit/e1e684dcfaedf86f49c68ed00ecbbf5d4abeb7e3))
+* **search:** show only matching mail for in:sent, is:unread, and other Gmail operators ([6ee548b](https://github.com/borovikovd/ubermensch/commit/6ee548b397b61fcc0a6fd1b3b61f2b2df278603c))
+
 ## [0.5.1](https://github.com/borovikovd/ubermensch/compare/v0.5.0...v0.5.1) (2026-11-05)
 
 
