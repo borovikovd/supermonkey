@@ -18,8 +18,11 @@ use super::queue::{BACKFILL, INBOX_BODIES, INBOX_META, LATE, Listing, OTHER_META
 use super::read::read_thread;
 use super::resync::full_resync;
 use crate::Error;
+use crate::read::read;
 use crate::workers::drafts::{Occasion, reconcile};
 use crate::workers::snooze;
+use ub_domain::AccountId;
+use ub_store::ReadPool;
 
 /// How often history is polled while Gmail answers.
 const POLL_EVERY: Duration = Duration::from_secs(45);
@@ -31,7 +34,7 @@ const WOKE_AFTER: Duration = Duration::from_secs(3 * 45);
 /// The account's sync loop: the connect sync if it never finished, else a
 /// resume; then a poll at once and on every interval, kick, and focus.
 pub(crate) async fn run(ctx: Arc<AccountCtx>) {
-    match is_connected(&ctx).await {
+    match is_connected(&ctx.deps.pool, ctx.account).await {
         Ok(true) => queue_inbox(&ctx),
         Ok(false) => loop {
             match connect(&ctx).await {
@@ -93,10 +96,11 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
     }
 }
 
-async fn is_connected(ctx: &AccountCtx) -> Result<bool, Error> {
-    let account = ctx.account;
-    ctx.read(move |r| Ok(r.accounts().get(account)?.is_some_and(|a| a.connected)))
-        .await
+async fn is_connected(pool: &Arc<ReadPool>, account: AccountId) -> Result<bool, Error> {
+    read(pool, move |r| {
+        Ok(r.accounts().get(account)?.is_some_and(|a| a.connected))
+    })
+    .await
 }
 
 /// The connect sync: the profile's cursor, `sendAs`, labels, then the

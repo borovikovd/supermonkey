@@ -15,7 +15,7 @@ use crate::workers::account::AccountCtx;
 /// Downloads every attachment the draft carries that has no file yet, and
 /// stores their paths on it.
 pub(crate) async fn download_parts(ctx: &AccountCtx, id: DraftId) -> Result<(), WriteFailure> {
-    let Some(draft) = load(ctx, id.clone()).await? else {
+    let Some(draft) = load(&ctx.deps.pool, id.clone()).await? else {
         return Ok(());
     };
     let mut paths = HashMap::new();

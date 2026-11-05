@@ -13,7 +13,10 @@ use ub_store::{Priority as WritePriority, StoreError};
 use super::write::list_drafts;
 use crate::Error;
 use crate::drafts::{GmailDraft, Reconcile, apply_gmail_draft, defer_if_open, drop_gone};
+use crate::read::read;
 use crate::workers::account::{AccountCtx, LATE, OTHER_META, Work, draft_message, fetch_thread};
+use ub_domain::AccountId;
+use ub_store::ReadPool;
 
 /// When a draft reconcile runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,7 +44,7 @@ impl Occasion {
 /// Reconciles the account's local drafts with `drafts.list`.
 pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<(), GmailError> {
     let (meta, body) = occasion.priorities();
-    let started = started(ctx).await;
+    let started = started(&ctx.deps.pool, ctx.account).await;
     let listed = list_drafts(ctx, meta).await?;
     if occasion == Occasion::Sync {
         for draft in &listed {
@@ -119,7 +122,13 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
             if defer(ctx, local).await {
                 continue;
             }
-        } else if !has_mail(ctx, listed.message.thread_id.clone()).await {
+        } else if !has_mail(
+            &ctx.deps.pool,
+            ctx.account,
+            listed.message.thread_id.clone(),
+        )
+        .await
+        {
             // A draft new to the app gets its kind and target from its
             // thread's messages, once: they must be stored first.
             fetch_thread(ctx, &listed.message.thread_id, Format::Metadata, meta).await?;
@@ -137,7 +146,7 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
 /// it open: its composer closed without edits.
 pub(crate) async fn read_skipped(ctx: &AccountCtx, id: &DraftId) {
     let account = ctx.account;
-    let draft = super::write::load(ctx, id.clone()).await;
+    let draft = super::write::load(&ctx.deps.pool, id.clone()).await;
     let gmail = match draft {
         Ok(Some(draft)) => draft.gmail_draft_id,
         Ok(None) => None,
@@ -152,7 +161,7 @@ pub(crate) async fn read_skipped(ctx: &AccountCtx, id: &DraftId) {
     // Its own Gmail draft: no other copy is in question.
     let reconcile = Reconcile {
         live: Arc::default(),
-        started: started(ctx).await,
+        started: started(&ctx.deps.pool, ctx.account).await,
         writing: Arc::clone(&ctx.lane.writing),
     };
     let read = ctx
@@ -170,11 +179,11 @@ pub(crate) async fn read_skipped(ctx: &AccountCtx, id: &DraftId) {
 
 /// The last `rev` committed, before a reconcile's first request. Unknown,
 /// every local draft counts as changed since, so none is touched.
-async fn started(ctx: &AccountCtx) -> Rev {
-    match ctx.read(|r| r.meta().rev()).await {
+async fn started(pool: &Arc<ReadPool>, account: AccountId) -> Rev {
+    match read(pool, |r| r.meta().rev()).await {
         Ok(rev) => rev,
         Err(e) => {
-            tracing::warn!(account = ctx.account.0, error = %e, "couldn't read the rev for a draft reconcile");
+            tracing::warn!(account = account.0, error = %e, "couldn't read the rev for a draft reconcile");
             Rev(i64::MIN)
         }
     }
@@ -197,17 +206,19 @@ async fn defer(ctx: &AccountCtx, id: DraftId) -> bool {
 }
 
 /// Whether the Gmail thread's messages other than drafts are stored.
-async fn has_mail(ctx: &AccountCtx, thread: ub_domain::GmailThreadId) -> bool {
-    let account = ctx.account;
-    let read = ctx
-        .read(move |r| {
-            let Some(id) = r.threads().by_gmail_id(account, &thread)? else {
-                return Ok(false);
-            };
-            Ok(r.messages().facts(id)?.iter().any(|m| !m.is_draft))
-        })
-        .await;
-    read.unwrap_or_else(|e| {
+async fn has_mail(
+    pool: &Arc<ReadPool>,
+    account: AccountId,
+    thread: ub_domain::GmailThreadId,
+) -> bool {
+    let has = read(pool, move |r| {
+        let Some(id) = r.threads().by_gmail_id(account, &thread)? else {
+            return Ok(false);
+        };
+        Ok(r.messages().facts(id)?.iter().any(|m| !m.is_draft))
+    })
+    .await;
+    has.unwrap_or_else(|e| {
         tracing::warn!(account = account.0, error = %e, "couldn't read a draft's thread");
         false
     })

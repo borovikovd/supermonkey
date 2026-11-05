@@ -11,18 +11,20 @@ use ub_store::{Draft, Priority as WritePriority, StoreError};
 
 use super::WriteFailure;
 use crate::Error;
+use crate::read::read;
 use crate::workers::account::{AccountCtx, parse};
 use crate::workers::attachments::{DownloadError, ensure};
 use crate::workers::files::{attachments_dir, draft_dir, is_inside};
+use std::sync::Arc;
+use ub_store::ReadPool;
 
 /// How many times a `drafts.create` with no clear answer is tried, each
 /// after looking for the draft the last one may have made.
 const CREATE_TRIES: usize = 3;
 
 /// The draft as stored, or `None` when it is gone.
-pub(crate) async fn load(ctx: &AccountCtx, id: DraftId) -> Result<Option<Draft>, Error> {
-    Ok(ctx
-        .read(move |r| r.drafts().get(&id))
+pub(crate) async fn load(pool: &Arc<ReadPool>, id: DraftId) -> Result<Option<Draft>, Error> {
+    Ok(read(pool, move |r| r.drafts().get(&id))
         .await?
         .map(|record| record.draft))
 }
@@ -38,7 +40,7 @@ pub(crate) async fn write(
     draft: &Draft,
 ) -> Result<ub_gmail::Draft, WriteFailure> {
     let raw = build_raw(ctx, draft).await?;
-    let thread = gmail_thread(ctx, draft).await?;
+    let thread = gmail_thread(&ctx.deps.pool, draft).await?;
     let existing = match &draft.gmail_draft_id {
         Some(id) => Some(id.clone()),
         None if draft.create_sent => recover_create(ctx, &draft.id).await?.map(|d| d.id),
@@ -61,13 +63,13 @@ pub(crate) async fn write(
 /// The Gmail thread the draft goes on: its thread's, else the one its last
 /// upsert returned.
 async fn gmail_thread(
-    ctx: &AccountCtx,
+    pool: &Arc<ReadPool>,
     draft: &Draft,
 ) -> Result<Option<GmailThreadId>, WriteFailure> {
     let Some(thread) = draft.thread else {
         return Ok(draft.gmail_thread_id.clone());
     };
-    let row = ctx.read(move |r| r.threads().row(thread)).await?;
+    let row = read(pool, move |r| r.threads().row(thread)).await?;
     Ok(row
         .map(|row| row.gmail_id)
         .or_else(|| draft.gmail_thread_id.clone()))
@@ -130,7 +132,7 @@ async fn recover_create(
     ctx: &AccountCtx,
     local: &DraftId,
 ) -> Result<Option<ub_gmail::Draft>, WriteFailure> {
-    if let Some(stored) = load(ctx, local.clone())
+    if let Some(stored) = load(&ctx.deps.pool, local.clone())
         .await?
         .and_then(|d| d.gmail_draft_id)
     {

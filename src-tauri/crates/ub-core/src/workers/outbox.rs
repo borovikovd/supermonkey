@@ -20,6 +20,8 @@ use super::drafts::{WriteFailure, load, write};
 use crate::Error;
 use crate::drafts::store_ids;
 use crate::outbox::{Event, resolve};
+use crate::read::read;
+use ub_store::ReadPool;
 
 /// How long the runner waits, at most, before it looks at the outbox again.
 const IDLE_WAIT: Duration = Duration::from_secs(30);
@@ -128,10 +130,9 @@ async fn step(ctx: &AccountCtx, row: &Outbox, event: Event) -> Result<bool, Fail
 }
 
 /// The row as stored now, or `None` when it is gone.
-async fn current(ctx: &AccountCtx, row: &Outbox) -> Result<Option<Outbox>, Failure> {
+async fn current(pool: &Arc<ReadPool>, row: &Outbox) -> Result<Option<Outbox>, Failure> {
     let id = row.id;
-    Ok(ctx
-        .read(move |r| r.outbox().get(id))
+    Ok(read(pool, move |r| r.outbox().get(id))
         .await?
         .map(|r| r.outbox))
 }
@@ -148,7 +149,7 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
     if !step(ctx, row, Event::Start { late }).await? {
         return Ok(());
     }
-    let Some(draft) = load(ctx, row.draft.clone()).await? else {
+    let Some(draft) = load(&ctx.deps.pool, row.draft.clone()).await? else {
         return Ok(());
     };
     // 1 to 3: parts, MIME, and the Gmail draft. Failing here, Gmail never
@@ -199,7 +200,10 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
 
 /// `drafts.send`, unless an undo is held on the row: then it is not sent.
 async fn send_draft(ctx: &AccountCtx, row: &Outbox, gmail: &GmailDraftId) -> Result<(), Failure> {
-    if current(ctx, row).await?.is_some_and(|r| r.undo_requested) {
+    if current(&ctx.deps.pool, row)
+        .await?
+        .is_some_and(|r| r.undo_requested)
+    {
         step(ctx, row, Event::Held).await?;
         return Ok(());
     }
@@ -230,7 +234,10 @@ async fn send_draft(ctx: &AccountCtx, row: &Outbox, gmail: &GmailDraftId) -> Res
 /// A sending row with no clear answer yet: `drafts.get` finds its draft,
 /// which is sent again, or Gmail no longer has it, which means it was sent.
 async fn settle(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
-    let Some(gmail) = current(ctx, row).await?.and_then(|r| r.gmail_draft_id) else {
+    let Some(gmail) = current(&ctx.deps.pool, row)
+        .await?
+        .and_then(|r| r.gmail_draft_id)
+    else {
         // It never reached Gmail: the next pass sends it from the start.
         step(ctx, row, Event::Unreached).await?;
         ctx.outbox.kick();

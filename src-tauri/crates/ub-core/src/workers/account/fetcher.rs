@@ -14,6 +14,9 @@ use super::ingest::{drop_thread, store_thread};
 use super::queue::{Listing, Slot, Work};
 use super::read::read_thread;
 use crate::ops::LocalChanges;
+use crate::read::read;
+use ub_domain::AccountId;
+use ub_store::ReadPool;
 
 /// Fetch workers per account. The account's scheduler caps how many of
 /// their requests run at once.
@@ -141,7 +144,7 @@ async fn run_one(ctx: &AccountCtx, slot: Slot, work: &Work) -> Result<(), GmailE
             history,
             body,
         } => {
-            if !is_current(ctx, thread, *history).await {
+            if !is_current(&ctx.deps.pool, ctx.account, thread, *history).await {
                 fetch_thread(ctx, thread, Format::Metadata, slot.priority).await?;
             }
             if let Some(body) = body {
@@ -155,7 +158,7 @@ async fn run_one(ctx: &AccountCtx, slot: Slot, work: &Work) -> Result<(), GmailE
             Ok(())
         }
         Work::Body { thread } => {
-            if needs_bodies(ctx, thread.clone()).await {
+            if needs_bodies(&ctx.deps.pool, ctx.account, thread.clone()).await {
                 fetch_thread(ctx, thread, Format::Full, slot.priority).await?;
             }
             Ok(())
@@ -220,22 +223,22 @@ pub(crate) async fn fetch_thread(
 /// Whether the cached thread is at Gmail's `history` already, so a metadata
 /// read would change nothing.
 pub(crate) async fn is_current(
-    ctx: &AccountCtx,
+    pool: &Arc<ReadPool>,
+    account: AccountId,
     thread: &GmailThreadId,
     history: Option<HistoryId>,
 ) -> bool {
     let Some(history) = history else {
         return false;
     };
-    let (account, id) = (ctx.account, thread.clone());
-    let stored = ctx
-        .read(move |r| {
-            let Some(t) = r.threads().by_gmail_id(account, &id)? else {
-                return Ok(None);
-            };
-            Ok(r.threads().row(t)?.and_then(|row| row.history_id))
-        })
-        .await;
+    let id = thread.clone();
+    let stored = read(pool, move |r| {
+        let Some(t) = r.threads().by_gmail_id(account, &id)? else {
+            return Ok(None);
+        };
+        Ok(r.threads().row(t)?.and_then(|row| row.history_id))
+    })
+    .await;
     match stored {
         Ok(stored) => stored == Some(history),
         Err(e) => {
@@ -246,12 +249,17 @@ pub(crate) async fn is_current(
 }
 
 /// Whether the thread is not stored, or a message of it lacks its body.
-pub(crate) async fn needs_bodies(ctx: &AccountCtx, id: GmailThreadId) -> bool {
-    let account = ctx.account;
-    ctx.read(move |r| r.messages().thread_needs_bodies(account, &id))
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "couldn't read whether a thread has its bodies");
-            true
-        })
+pub(crate) async fn needs_bodies(
+    pool: &Arc<ReadPool>,
+    account: AccountId,
+    id: GmailThreadId,
+) -> bool {
+    read(pool, move |r| {
+        r.messages().thread_needs_bodies(account, &id)
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "couldn't read whether a thread has its bodies");
+        true
+    })
 }

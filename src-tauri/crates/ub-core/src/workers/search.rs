@@ -121,7 +121,12 @@ async fn list_page(
             (Vec::new(), None)
         }
     };
-    let current = join_all(threads.iter().map(|t| is_current(ctx, &t.id, t.history_id))).await;
+    let current = join_all(
+        threads
+            .iter()
+            .map(|t| is_current(&ctx.deps.pool, ctx.account, &t.id, t.history_id)),
+    )
+    .await;
     let reads = threads
         .iter()
         .zip(current)
@@ -132,7 +137,7 @@ async fn list_page(
     }
     let hits: Vec<GmailThreadId> = threads.into_iter().map(|t| t.id).collect();
     for hit in &hits {
-        if needs_bodies(ctx, hit.clone()).await {
+        if needs_bodies(&ctx.deps.pool, ctx.account, hit.clone()).await {
             ctx.queue.push(
                 LATE,
                 Work::Body {

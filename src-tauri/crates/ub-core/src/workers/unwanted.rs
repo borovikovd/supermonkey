@@ -8,7 +8,11 @@ use ub_ipc::{BlockResult, BlockedSender, BlockedSenders, Unsubscribed};
 use ub_mime::{PlainMessage, build_plain, list_unsubscribe};
 
 use super::account::AccountCtx;
+use crate::read::read;
 use crate::{Error, Platform};
+use std::sync::Arc;
+use ub_domain::AccountId;
+use ub_store::ReadPool;
 
 /// The headers an unsubscribe reads.
 const HEADERS: [&str; 2] = ["List-Unsubscribe", "List-Unsubscribe-Post"];
@@ -25,7 +29,7 @@ pub(crate) async fn unsubscribe(
     platform: &dyn Platform,
     thread: ThreadId,
 ) -> Result<Unsubscribed, Error> {
-    let messages = thread_messages(ctx, thread).await?;
+    let messages = thread_messages(&ctx.deps.pool, ctx.account, thread).await?;
     let Some(message) = unsubscribe_source(&messages) else {
         return Err(Error::Invalid(
             "The conversation has no message to unsubscribe from".to_owned(),
@@ -55,7 +59,7 @@ pub(crate) async fn unsubscribe(
     }
     if let Some(mailto) = how.mailto {
         let raw = build_plain(&PlainMessage {
-            from: &Addr::new(account_email(ctx).await?),
+            from: &Addr::new(account_email(&ctx.deps.pool, ctx.account).await?),
             to: &mailto.to,
             subject: mailto.subject.as_deref().unwrap_or(UNSUBSCRIBE),
             text: mailto.body.as_deref().unwrap_or(UNSUBSCRIBE),
@@ -90,7 +94,7 @@ pub(crate) async fn block(
     thread: ThreadId,
     domain: bool,
 ) -> Result<BlockResult, Error> {
-    let messages = thread_messages(ctx, thread).await?;
+    let messages = thread_messages(&ctx.deps.pool, ctx.account, thread).await?;
     let Some(email) = messages
         .iter()
         .rev()
@@ -174,11 +178,15 @@ fn blocked_sender(filter: Filter) -> Option<BlockedSender> {
 
 /// The thread's messages, oldest first; the thread must be the account's,
 /// since the webview is not trusted.
-async fn thread_messages(ctx: &AccountCtx, thread: ThreadId) -> Result<Vec<MessageFacts>, Error> {
-    let account = ctx.account;
-    let (owner, messages) = ctx
-        .read(move |r| Ok((r.threads().account_of(thread)?, r.messages().facts(thread)?)))
-        .await?;
+async fn thread_messages(
+    pool: &Arc<ReadPool>,
+    account: AccountId,
+    thread: ThreadId,
+) -> Result<Vec<MessageFacts>, Error> {
+    let (owner, messages) = read(pool, move |r| {
+        Ok((r.threads().account_of(thread)?, r.messages().facts(thread)?))
+    })
+    .await?;
     if owner != Some(account) {
         return Err(Error::Invalid(
             "The conversation is not in this account".to_owned(),
@@ -188,11 +196,12 @@ async fn thread_messages(ctx: &AccountCtx, thread: ThreadId) -> Result<Vec<Messa
 }
 
 /// The account's address, which an unsubscribe email comes from.
-async fn account_email(ctx: &AccountCtx) -> Result<String, Error> {
-    let account = ctx.account;
-    ctx.read(move |r| Ok(r.accounts().get(account)?.map(|a| a.email)))
-        .await?
-        .ok_or_else(|| Error::Invalid("The account is gone".to_owned()))
+async fn account_email(pool: &Arc<ReadPool>, account: AccountId) -> Result<String, Error> {
+    read(pool, move |r| {
+        Ok(r.accounts().get(account)?.map(|a| a.email))
+    })
+    .await?
+    .ok_or_else(|| Error::Invalid("The account is gone".to_owned()))
 }
 
 #[cfg(test)]
