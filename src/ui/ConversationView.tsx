@@ -9,9 +9,10 @@ import type { AttachmentInfo, DraftSummary, MessageSummary, OutboxRow } from "..
 import { appHooks, conversationRef } from "../keyboard/refs";
 import { useChrome } from "../store/chrome";
 import { useAppState, useConversation, useCurrent, useSubscription } from "../store/hooks";
+import { useMirror } from "../store/mirror";
 import { blocks } from "./folds";
 import { formatTime } from "./format";
-import { MessageFrame } from "./MessageFrame";
+import { LoadingBody, MessageFrame } from "./MessageFrame";
 
 type Address = MessageSummary["from"];
 
@@ -202,7 +203,7 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
     if (added.some((m) => m.unread) && document.hasFocus()) markReadOnOpen(thread);
   }, [data, thread]);
 
-  if (!data) return <div className="flex-1" />;
+  if (!data) return <Opening thread={thread} />;
   if (data.gone)
     return (
       <div className="flex flex-1 items-center justify-center text-text-2">
@@ -350,6 +351,34 @@ const Edge = () => (
   <span className="absolute inset-y-0 left-0 w-0.75 rounded-l-sm bg-accent-edge" />
 );
 
+/**
+ * The conversation before its first load: the subject and latest message
+ * from the list row, so opening never shows a blank screen.
+ */
+function Opening({ thread }: { thread: number }) {
+  const row = useMirror((s) => s.rows[String(thread)]);
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mr-auto reading-column max-w-reading min-w-content-min px-16 pt-2 pb-24">
+        <div className="mb-6 flex items-start gap-4">
+          <h1 className="selectable flex-1 text-subject">{row?.subject || "(no subject)"}</h1>
+        </div>
+        <div className={`${BLOCK} my-1 py-5`}>
+          {row && (
+            <div className="mb-3 flex w-full items-baseline gap-2 text-body">
+              <span className="truncate font-medium">{row.sender}</span>
+              <span className="tabular ml-auto shrink-0 text-row text-text-3">
+                {formatTime(row.time)}
+              </span>
+            </div>
+          )}
+          <LoadingBody snippet={row?.snippet ?? ""} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Message({
   m,
   expanded,
@@ -416,6 +445,7 @@ function Message({
         <MessageFrame
           id={m.id}
           hasBody={m.hasBody}
+          snippet={m.snippet}
           onSelect={select}
           remoteImages={remoteImages}
           quoteOpen={quoteOpen}

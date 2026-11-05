@@ -708,3 +708,33 @@ test.describe("conversation", () => {
     expect(await fullReads()).toBe(before + 1);
   });
 });
+
+test("CONV-21 a message still downloading shows its snippet and a loading bar, then its body", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const body = await gmail.hold({ api: "threads.get", query: { format: "full" } });
+  await gmail.deliver({
+    account: A,
+    from: seeds.PERSONS[0] ?? "",
+    subject: "Slow body",
+    text: "The first lines arrive before the rest.",
+  });
+  await expect
+    .poll(async () => (await gmail.requests("threads.get")).some((r) => r.held))
+    .toBe(true);
+  await app.row("Slow body").click();
+  await expect(app.conversationTitle).toHaveText("Slow body");
+
+  const loading = app.conversation.locator("[data-message] [aria-busy=true]");
+  await expect(loading).toContainText("The first lines arrive before the rest.");
+  await expect(app.conversation).not.toContainText("Downloading message");
+  await expect(app.conversation.locator("iframe[data-frame]")).toHaveCount(0);
+
+  await body.release();
+  await expect(
+    app.conversation.locator("iframe[data-frame]").contentFrame().locator("body"),
+  ).toContainText("The first lines arrive before the rest.");
+  await expect(loading).toHaveCount(0);
+});

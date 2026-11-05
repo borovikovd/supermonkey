@@ -59,16 +59,33 @@ function srcdoc(body: MessageBody, remoteImages: boolean, quoteOpen: boolean): s
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><style>${frameTokens()}${BASE_STYLE}</style></head><body>${body.html}${quote}</body></html>`;
 }
 
+/**
+ * A message whose body is still on its way: its snippet, readable at once as
+ * in Gmail and Superhuman, under a thin bar that shows only if the wait is
+ * long enough to notice.
+ */
+export function LoadingBody({ snippet }: { snippet: string }) {
+  return (
+    <div aria-busy="true" aria-label="Loading message" data-loading>
+      <div aria-hidden="true" className="loading-bar mb-3" />
+      <p className="text-body text-text-2">{snippet && `${snippet}…`}</p>
+    </div>
+  );
+}
+
 /** An expanded message body in a sandboxed `srcdoc` iframe, sized to its content. */
 export function MessageFrame({
   id,
   hasBody,
+  snippet,
   remoteImages,
   quoteOpen,
   onSelect,
 }: {
   id: number;
   hasBody: boolean;
+  /** Shown, with a loading bar, until the body is here. */
+  snippet: string;
   remoteImages: boolean;
   quoteOpen: boolean;
   /** Clicks inside the message body select the message. */
@@ -148,13 +165,7 @@ export function MessageFrame({
     };
   }, [body, onSelect, id]);
 
-  if (!body) {
-    return (
-      <div className="py-2 text-row text-text-3">
-        {hasBody ? "Loading…" : "Downloading message…"}
-      </div>
-    );
-  }
+  if (!body) return <LoadingBody snippet={snippet} />;
   return (
     <iframe
       ref={frame}

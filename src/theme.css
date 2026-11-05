@@ -161,6 +161,50 @@
   }
 }
 
+/*
+ * A message still loading: a thin track with a sliding segment. It stays
+ * hidden for the first 300 ms, so a quick load never flashes it.
+ */
+.loading-bar {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--color-fill);
+  opacity: 0;
+  animation: fade-in 150ms ease 300ms forwards;
+}
+.loading-bar::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  width: 30%;
+  background: var(--color-accent);
+  animation: loading-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes loading-slide {
+  from {
+    left: -30%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-bar {
+    animation: none;
+    opacity: 1;
+  }
+  .loading-bar::after {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.4;
+  }
+}
+
 html,
 body,
 #root {
