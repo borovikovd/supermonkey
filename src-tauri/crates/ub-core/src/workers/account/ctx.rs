@@ -153,7 +153,12 @@ impl AccountCtx {
                 self.deps.network.wait(self.clock(), wait).await;
                 AfterError::Retry
             }
-            _ => AfterError::Drop,
+            Outcome::NotFound => AfterError::Drop,
+            outcome => {
+                // Nothing retries it before the next launch, so say so.
+                tracing::info!(account = self.account.0, %outcome, "Gmail refused a background read; dropping it");
+                AfterError::Drop
+            }
         }
     }
 
