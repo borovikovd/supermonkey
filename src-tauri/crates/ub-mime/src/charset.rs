@@ -60,6 +60,22 @@ pub(crate) fn decode_charset(bytes: Vec<u8>, charset: Option<&str>) -> String {
     })
 }
 
+/// Decodes a text part of a message Gmail served as `format=full`. Gmail can
+/// serve such a part in UTF-8 under its original `Content-Type` (a part labelled
+/// `koi8-r` arrived that way). Bytes that are valid
+/// UTF-8 and not plain ASCII are read as UTF-8: text in a legacy 8-bit charset is
+/// almost never valid UTF-8 by chance. Anything else uses the declared charset,
+/// which keeps 7-bit charsets such as ISO-2022-JP and UTF-16 working.
+pub(crate) fn decode_text_part(bytes: Vec<u8>, charset: Option<&str>) -> String {
+    if !bytes.is_ascii() {
+        match String::from_utf8(bytes) {
+            Ok(text) => return text,
+            Err(err) => return decode_charset(err.into_bytes(), charset),
+        }
+    }
+    decode_charset(bytes, charset)
+}
+
 /// A charset name without quotes or an RFC 2231 language suffix (`utf-8*en`).
 fn label(charset: &str) -> &str {
     let label = charset.trim().trim_matches('"');

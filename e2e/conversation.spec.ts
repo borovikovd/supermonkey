@@ -738,3 +738,23 @@ test("CONV-21 a message still downloading shows its snippet and a loading bar, t
   ).toContainText("The first lines arrive before the rest.");
   await expect(loading).toHaveCount(0);
 });
+
+test("CONV-22 a message labelled with a legacy charset but served as UTF-8 reads correctly", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await gmail.deliver({
+    account: A,
+    from: seeds.PERSONS[0] ?? "",
+    subject: "Знакомство",
+    text: "Добрый день, Дина",
+    html: "<p>Добрый день, Дина</p>",
+    charset: "koi8-r",
+  });
+  await app.row("Знакомство").click();
+
+  const body = app.conversation.locator("iframe[data-frame]").contentFrame().locator("body");
+  await expect(body).toContainText("Добрый день, Дина");
+  await expect(body).not.toContainText("п■п╬п╠");
+});

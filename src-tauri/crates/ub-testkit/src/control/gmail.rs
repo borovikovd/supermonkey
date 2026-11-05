@@ -69,6 +69,9 @@ pub(crate) struct DeliverReq {
     text: Option<String>,
     #[serde(default)]
     html: Option<String>,
+    /// The charset the text parts are labelled with; their bytes stay UTF-8.
+    #[serde(default)]
+    charset: Option<String>,
     /// Defaults to `INBOX`, `UNREAD`.
     #[serde(default)]
     labels: Option<Vec<String>>,
@@ -118,6 +121,7 @@ fn deliver_one(s: &Server, req: DeliverReq) -> Result<AddedMessage, Fail> {
         subject: req.subject,
         text: req.text,
         html: req.html,
+        charset: req.charset,
         labels: req
             .labels
             .unwrap_or_else(|| vec!["INBOX".into(), "UNREAD".into()]),

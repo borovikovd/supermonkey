@@ -503,6 +503,9 @@ pub struct NewMessage {
     pub subject: String,
     pub text: Option<String>,
     pub html: Option<String>,
+    /// The charset the text parts' `Content-Type` names; default `utf-8`. Their
+    /// bytes stay UTF-8, as Gmail's `format=full` can serve a `koi8-r` part.
+    pub charset: Option<String>,
     /// Label ids, e.g. `INBOX`, `UNREAD`, or a user label's id.
     pub labels: Vec<String>,
     /// Joins this thread; otherwise the message starts a new one.

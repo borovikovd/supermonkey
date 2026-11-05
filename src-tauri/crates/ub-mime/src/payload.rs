@@ -6,7 +6,7 @@ use ub_domain::{Addr, DraftId, Millis};
 
 use crate::addr::parse_address_list;
 use crate::body::RawBody;
-use crate::charset::{decode_base64, decode_charset};
+use crate::charset::{decode_base64, decode_text_part};
 use crate::cid::CidImages;
 use crate::encoded_word::decode_encoded_words;
 use crate::headers::{DRAFT_HEADER, bare_id, message_ids, parse_date, parse_draft_id};
@@ -244,7 +244,7 @@ impl Walk {
         if is_body {
             if let Some(bytes) = data {
                 let charset = header_param(content_type, "charset");
-                let decoded = decode_charset(bytes, charset.as_deref());
+                let decoded = decode_text_part(bytes, charset.as_deref());
                 let body = if mime_type == "text/html" {
                     &mut self.html
                 } else {

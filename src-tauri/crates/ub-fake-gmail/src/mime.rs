@@ -348,8 +348,9 @@ pub(crate) fn build(msg: &NewMessage, date_ms: u64, message_id: &str) -> Vec<u8>
         counter += 1;
         format!("=_fake_boundary_{counter}")
     };
+    let charset = msg.charset.as_deref().unwrap_or("utf-8");
     let text_part =
-        |mime: &str, text: &str| leaf(&format!("{mime}; charset=utf-8"), text.as_bytes(), &[]);
+        |mime: &str, text: &str| leaf(&format!("{mime}; charset={charset}"), text.as_bytes(), &[]);
     let mut body = match (&msg.text, &msg.html) {
         (Some(text), Some(html)) => multipart(
             "alternative",

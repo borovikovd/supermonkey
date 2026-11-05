@@ -21,6 +21,8 @@ export type Delivery = {
   subject: string;
   text?: string;
   html?: string;
+  /** The charset the body parts are labelled with; their bytes stay UTF-8. Default: utf-8. */
+  charset?: string;
   /** Gmail label ids. Default: INBOX, UNREAD. */
   labels?: string[];
   /** Joins this Gmail thread. */

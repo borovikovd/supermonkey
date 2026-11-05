@@ -283,7 +283,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 18      | 13      | 5      | 0      |
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 10      | 5       | 5      | 0      |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 6       | 4       | 2      | 0      |
-| `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 21      | 5       | 15     | 1      |
+| `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 22      | 6       | 15     | 1      |
 | `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 13      | 9       | 4      | 0      |
 | `undo.spec.ts`             | UND    | the `z` stack, partial revert, per-account history, persistence                              | `standard`                               | H15                         | 8       | 4       | 3      | 1      |
 | `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 8       | 2       | 6      | 0      |
@@ -305,7 +305,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 5       | 3       | 2      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **253** | **149** | **94** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **254** | **150** | **94** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -987,6 +987,15 @@ _EG · §Reading, §UI state (Subscriptions)_
 - **Steps:** open "Slow body" while its body read is held; then release it.
 - **Expect:** while held, the expanded message shows its snippet in a busy (`aria-busy`) block, with no "Downloading message" line and no frame. After the release, the frame shows the body and the busy block is gone.
 - **Why:** the expanded message used to show only a faint "Downloading message…" line under the subject, which read as an empty email.
+
+#### CONV-22 · P1 · A message labelled with a legacy charset but served as UTF-8 reads correctly
+
+_EG · §Reading_
+
+- **Seed:** `standard`. Deliver "Знакомство" to A with a text and an HTML body in Russian, both labelled `charset=koi8-r` while their bytes are UTF-8, as Gmail's `format=full` served a real message.
+- **Steps:** open it.
+- **Expect:** the frame shows "Добрый день, Дина" and no KOI8-R mojibake ("п■п╬п╠").
+- **Why:** the app decoded the UTF-8 bytes in the declared KOI8-R, so Russian mail showed box-drawing characters.
 
 ### 5.5 `triage-actions.spec.ts` (TRI)
 
