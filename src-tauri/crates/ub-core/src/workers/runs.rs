@@ -102,6 +102,16 @@ impl<K: Eq + Hash> Run<K> {
     pub(crate) fn stopped(&self) -> &CancellationToken {
         &self.stop
     }
+
+    /// Whether it is still its key's run: neither stopped nor replaced.
+    pub(crate) fn is_current(&self) -> bool {
+        self.runs
+            .0
+            .lock()
+            .running
+            .get(&self.key)
+            .is_some_and(|r| r.number == self.number)
+    }
 }
 
 impl<K: Eq + Hash> Drop for Run<K> {

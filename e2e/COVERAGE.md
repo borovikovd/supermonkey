@@ -287,7 +287,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 13      | 9       | 4      | 0      |
 | `undo.spec.ts`             | UND    | the `z` stack, partial revert, per-account history, persistence                              | `standard`                               | H15                         | 8       | 4       | 3      | 1      |
 | `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 8       | 2       | 6      | 0      |
-| `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 9       | 3       | 5      | 1      |
+| `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 10      | 3       | 6      | 1      |
 | `splits.spec.ts`           | SPL    | routing, `Tab`, pins, own reply, custom splits, starters, hiding, cap                        | `standard`, `splits`, `bulk`, `bulk1000` | H10, H12, H15               | 10      | 6       | 3      | 1      |
 | `snooze.spec.ts`           | SNZ    | picker, snooze, wake triggers, clearing rules, history echo, undo                            | `standard`                               | H13, H14, H15               | 8       | 6       | 1      | 1      |
 | `compose-reply.spec.ts`    | REP    | inline composer, addressing, quoting, forward, resume rules, Gmail drafts                    | `standard`, `drafts`                     | H4, H6                      | 15      | 10      | 5      | 0      |
@@ -305,7 +305,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **248** | **147** | **91** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **249** | **147** | **92** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -1486,6 +1486,15 @@ _EP · §Search, DEVIATIONS (Search looks like Superhuman's)_
   - The field's left edge is within 1px of the senders column, its text is 16px, the hint bar reads "Enter to see results", and the Tips column lists `from:`.
   - The `plan` row marks only "plan" (any case), never the operator's value.
   - Close ends the search: no field, no Tips, and the Inbox title is back.
+
+#### SRC-10 · P2 · A Gmail search stops searching when its account signs in again under it
+
+_EG · §Search, §Accounts (Add account for an account the app has)_
+
+- **Seed:** `standard`. `hold(threads.list q="zebra crossing")`.
+- **Steps:** search "zebra crossing" and `advance(300)`: its listing parks. `nextSignIn(A)` and run `Add account`, which replaces A's worker; wait until the new worker lists Inbox. Release the hold, `settle()`.
+- **Expect:** the parked listing went with the old worker; "Searching Gmail…" is gone and "Nothing here." shows.
+- **Why:** the listing ran on the account worker's tasks. A worker stopped under it (Sign in again, Add account, a refused grant) dropped it before it settled the subscription, which then said "Searching Gmail…" forever.
 
 ### 5.9 `splits.spec.ts` (SPL)
 

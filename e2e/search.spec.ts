@@ -424,3 +424,39 @@ test("SRC-09 search takes the header as in Superhuman, marks matches, and lists 
   await expect(app.page.getByRole("complementary", { name: "Search tips" })).toHaveCount(0);
   await expect(app.splitTitles().first()).toBeVisible();
 });
+
+test("SRC-10 a Gmail search stops searching when its account signs in again under it", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  // The search's listing is on its way to Gmail when A's worker is replaced.
+  const listing = await gmail.hold({ api: "threads.list", query: { q: "zebra crossing" } });
+  await search(app, "zebra crossing");
+  await app.advance(300);
+  await expect
+    .poll(async () => (await gmail.requests("threads.list")).some((r) => r.held))
+    .toBe(true);
+  await expect(app.page.getByText("Searching Gmail…")).toBeVisible();
+
+  const lists = (await gmail.requests("threads.list", { account: A })).length;
+  await gmail.nextSignIn({ email: A });
+  // Enter leaves the field for the results, where the palette opens.
+  await app.press("Enter");
+  await expect(field(app)).not.toBeFocused();
+  await app.press("Meta+k");
+  await expect(app.palette).toBeVisible();
+  await app.type("Add account");
+  await expect(app.palette.locator("[cmdk-item]").first()).toContainText("Add account");
+  await app.press("Enter");
+  // The new worker is running once it lists Inbox again.
+  await expect
+    .poll(async () => (await gmail.requests("threads.list", { account: A })).length)
+    .toBeGreaterThan(lists);
+  // The old worker's listing went with it: nothing is parked any more.
+  await listing.release(undefined, { min: 0 });
+  await app.settle();
+
+  await expect(app.page.getByText("Searching Gmail…")).toHaveCount(0);
+  await expect(app.page.getByText("Nothing here.")).toBeVisible();
+});

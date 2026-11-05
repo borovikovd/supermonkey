@@ -7,13 +7,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::future::join_all;
-use ub_domain::{AccountId, GmailThreadId, SubId};
+use ub_domain::{AccountId, GmailThreadId, SubId, ThreadId};
 use ub_gmail::{Format, PageToken, Priority, ThreadQuery};
 use ub_store::Priority as WritePriority;
 
 use super::account::{AccountCtx, LATE, Work, fetch_thread, is_current, needs_bodies};
 use super::registry::AccountWorkers;
-use super::runs::Runs;
+use super::runs::{Run, Runs};
 use crate::clock::sleep;
 use crate::effects::GmailQuery;
 use crate::writer::CoreWriter;
@@ -47,12 +47,16 @@ impl Searches {
             settle(workers.writer(), sub, Vec::new(), None);
             return;
         };
-        let run = self.running.replace(sub.clone());
+        let listing = Listing {
+            run: self.running.replace(sub.clone()),
+            to_settle: Some((workers.writer().clone(), sub)),
+        };
         let ctx = Arc::clone(worker.ctx());
         worker.ctx().tasks.spawn("gmail listing", async move {
+            let stopped = listing.run.stopped().clone();
             tokio::select! {
-                () = run.stopped().cancelled() => {}
-                () = list_page(&ctx, sub, query, page) => {}
+                () = stopped.cancelled() => {}
+                (hits, next) = list_page(&ctx, query, page) => listing.settle(hits, next),
             }
         });
     }
@@ -63,10 +67,45 @@ impl Searches {
     }
 }
 
+/// A listing in flight. The account's worker may stop under it (replaced by
+/// a sign-in, or signed out), dropping it at its next `.await`: the
+/// subscription then settles with no Gmail hits, as it does for an account
+/// with no worker, instead of searching forever.
+struct Listing {
+    run: Run<SubId>,
+    /// The subscription to settle, until it is settled.
+    to_settle: Option<(CoreWriter, SubId)>,
+}
+
+impl Listing {
+    /// Settles the subscription with the page's hits.
+    fn settle(mut self, hits: Vec<ThreadId>, next: Option<PageToken>) {
+        if let Some((writer, sub)) = self.to_settle.take() {
+            settle(&writer, sub, hits, next);
+        }
+    }
+}
+
+impl Drop for Listing {
+    fn drop(&mut self) {
+        // A stopped or replaced listing leaves the subscription to what
+        // stopped it: closed, or listing again.
+        if let Some((writer, sub)) = self.to_settle.take()
+            && self.run.is_current()
+        {
+            settle(&writer, sub, Vec::new(), None);
+        }
+    }
+}
+
 /// Lists one page, reads the metadata of hits not cached at their history
-/// id, queues their bodies at priority 5, and merges the hits into the
-/// subscription. A failed listing settles it with none.
-async fn list_page(ctx: &AccountCtx, sub: SubId, query: GmailQuery, page: Option<PageToken>) {
+/// id, and queues their bodies at priority 5. Returns the hits to merge into
+/// the subscription, and the next page; a failed listing has none.
+async fn list_page(
+    ctx: &AccountCtx,
+    query: GmailQuery,
+    page: Option<PageToken>,
+) -> (Vec<ThreadId>, Option<PageToken>) {
     if matches!(query, GmailQuery::Search(_)) && page.is_none() {
         sleep(ctx.clock(), TYPING_PAUSE).await;
     }
@@ -103,7 +142,6 @@ async fn list_page(ctx: &AccountCtx, sub: SubId, query: GmailQuery, page: Option
         }
     }
     let account = ctx.account;
-    let writer = ctx.writer().clone();
     let ids = ctx
         .read(move |r| {
             let mut ids = Vec::with_capacity(hits.len());
@@ -117,7 +155,7 @@ async fn list_page(ctx: &AccountCtx, sub: SubId, query: GmailQuery, page: Option
             tracing::warn!(error = %e, "couldn't read a listing's hits");
             Vec::new()
         });
-    settle(&writer, sub, ids, next);
+    (ids, next)
 }
 
 fn thread_query(query: GmailQuery, page: Option<PageToken>) -> ThreadQuery {
@@ -141,12 +179,7 @@ fn thread_query(query: GmailQuery, page: Option<PageToken>) -> ThreadQuery {
 
 /// Merges a page's hits into the subscription, records its next page, and
 /// ends its `searching`, with a patch even if no row changed.
-fn settle(
-    writer: &CoreWriter,
-    sub: SubId,
-    hits: Vec<ub_domain::ThreadId>,
-    next: Option<PageToken>,
-) {
+fn settle(writer: &CoreWriter, sub: SubId, hits: Vec<ThreadId>, next: Option<PageToken>) {
     writer.queue(WritePriority::Sync, "merge Gmail hits", move |_, state| {
         state.subs.merge_gmail_hits(&sub, hits, next);
         Ok(())
