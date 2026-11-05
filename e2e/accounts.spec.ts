@@ -864,3 +864,48 @@ test("ACC-17 a first sign-in shows the whole Inbox before reading the account's 
   const drafts = await gmail.requests("drafts.get", { account: A });
   expect(drafts.length).toBeLessThan(DRAFTS / 2);
 });
+
+test("ACC-18 an account removed while its Sign in again waits in the browser comes back and syncs", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await gmail.invalidGrant(A, true);
+  await gmail.expireAccessTokens(A);
+  await gmail.poll();
+  await app.settle();
+  await expect(app.signInMarker(A)).toBeVisible();
+
+  // Sign in again; the consent page stays open.
+  const consent = await gmail.hold("oauth.authorize");
+  await gmail.nextSignIn({ email: A });
+  await app.press("Meta+,");
+  const settings = app.sheet("Settings");
+  await settingsBlock(app, A).getByRole("button", { name: "Sign in again" }).click();
+  await expect
+    .poll(async () => (await gmail.requests("oauth.authorize")).some((r) => r.held))
+    .toBe(true);
+
+  // A is removed meanwhile, then the person finishes the sign-in.
+  await settingsBlock(app, A).getByRole("button", { name: "Remove account" }).click();
+  await settings.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(app.account(A)).toHaveCount(0);
+  await app.press("Escape");
+  await consent.release();
+  await expect(app.account(A)).toBeVisible();
+  await app.settle();
+
+  // A is back as a new account, and it syncs.
+  expect(await avatarOrder(app)).toEqual([B, A]);
+  await expect(app.signInMarker(A)).toHaveCount(0);
+  await gmail.deliver({
+    account: A,
+    from: "Carol <carol@corp.test>",
+    subject: "Back again",
+    text: "Hi.",
+  });
+  await app.settle();
+  await app.press("Control+2");
+  await expect(app.row("Back again")).toHaveCount(1);
+  await expect(app.row("Q4 plan")).toHaveCount(1);
+});

@@ -280,7 +280,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 
 | File                       | Prefix | Scope                                                                                        | Main seeds                               | Harness beyond H1–H3        | Cases   | P1      | P2     | P3     |
 | -------------------------- | ------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | ------- | ------- | ------ | ------ |
-| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 17      | 12      | 5      | 0      |
+| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 18      | 13      | 5      | 0      |
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 10      | 5       | 5      | 0      |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 6       | 4       | 2      | 0      |
 | `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 19      | 4       | 14     | 1      |
@@ -305,7 +305,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **246** | **146** | **90** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **247** | **147** | **90** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -539,6 +539,18 @@ _EG · §Sync (priorities)_
 - **Steps:** sign in A from the first-run screen. Wait for the Inbox header.
 - **Expect:** the header reaches `Important 16 · Other 7`, and by then fewer than half the drafts have had their `drafts.get`.
 - **Why:** the connect sync read every draft at priority 2, which used up the quota bucket. With real Gmail, the Inbox sat on the two draft threads for most of a minute, and the Other tab was missing.
+
+#### ACC-18 · P1 · An account removed while its Sign in again waits in the browser comes back and syncs
+
+_EG · §Accounts (Sign in again, remove), AGENTS.md (assume every await lets the world change)_
+
+- **Seed:** `standard`. A is signed out: `invalidGrant(A, on)`, `expireAccessTokens(A)`, `poll()`.
+- **Steps:**
+  1. `hold(oauth.authorize)`: the consent page stays open. `nextSignIn(A)`, then **Sign in again** on A's block in Settings.
+  2. While the authorize request is parked, remove A in Settings.
+  3. Release it, `settle()`. Deliver a new message to A, `settle()`, and switch to A.
+- **Expect:** A is back in the rail after B, with no sign-in marker; its Inbox holds `plan` and the new message.
+- **Why:** the sign-in made a new account row for A, but started the worker for the removed row's id, so the new row never synced.
 
 ### 5.2 `inbox-navigation.spec.ts` (NAV)
 

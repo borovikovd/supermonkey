@@ -62,7 +62,9 @@ impl Accounts {
     }
 
     /// Signs an account in again, to renew a refused grant or add a scope.
-    /// It must be the same Google account.
+    /// It must be the same Google account. An account removed while the
+    /// sign-in waited in the browser is added again, under a new id, as Add
+    /// account would (DEVIATIONS).
     pub async fn sign_in_again(&self, account: AccountId) -> Result<(), Error> {
         let expected = self
             .writer
@@ -78,9 +80,11 @@ impl Accounts {
             )));
         }
         self.keep_token(&expected, tokens.refresh_token()).await?;
-        let (_, grant) = self.signed_in_row(&expected).await?;
-        self.workers.signed_in(account, &expected, tokens, grant)?;
-        tracing::info!(account = account.0, "signed in again");
+        // The row's id now, not `account`: a removal meanwhile deleted that
+        // row, and this sign-in made a new one.
+        let (id, grant) = self.signed_in_row(&expected).await?;
+        self.workers.signed_in(id, &expected, tokens, grant)?;
+        tracing::info!(account = id.0, "signed in again");
         Ok(())
     }
 

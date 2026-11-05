@@ -252,3 +252,7 @@ the spec's wording:
 - **Unblock deletes only a block.** The filter id comes from the webview:
   the core lists the account's filters and deletes it only if it is one of
   the blocks Blocked senders shows.
+- **An account removed while its Sign in again waits in the browser** comes
+  back when the person finishes that sign-in, under a new id, as Add
+  account would bring it back. The sign-in finished after the removal, so
+  it is the person's last word; SPEC does not say.
