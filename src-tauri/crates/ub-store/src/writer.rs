@@ -46,15 +46,14 @@ impl Priority {
     }
 }
 
+/// A queued job: it runs on the writer thread, in its own transaction.
+type Job<S> = dyn FnOnce(&mut Runner<S>) + Send;
 /// Runs after every commit, on the writer thread, with the caller's state,
 /// the committed database, and what the commit changed.
-type OnCommit<S> = Box<dyn FnMut(&mut S, &Snapshot<'_>, &Commit) + Send>;
-/// Runs after every rolled-back job, on the writer thread.
-type OnRollback<S> = Box<dyn FnMut(&mut S) + Send>;
-type Job<S> = Box<dyn FnOnce(&mut Runner<S>) + Send>;
+type OnCommit<S> = dyn FnMut(&mut S, &Snapshot<'_>, &Commit) + Send;
 
 enum Entry<S> {
-    Job(Job<S>),
+    Job(Box<Job<S>>),
     Stop(reply::Sender<Result<(), StoreError>>),
 }
 
@@ -231,8 +230,9 @@ struct Runner<S> {
     /// The last committed `rev`.
     rev: Rev,
     state: S,
-    on_commit: OnCommit<S>,
-    on_rollback: OnRollback<S>,
+    on_commit: Box<OnCommit<S>>,
+    /// Runs after every rolled-back job.
+    on_rollback: Box<dyn FnMut(&mut S) + Send>,
 }
 
 impl<S> Runner<S> {
@@ -310,7 +310,7 @@ impl<S> Runner<S> {
     }
 }
 
-fn rolled_back<S>(on_rollback: &mut OnRollback<S>, state: &mut S) {
+fn rolled_back<S>(on_rollback: &mut dyn FnMut(&mut S), state: &mut S) {
     if let Err(panic) = catch_unwind(AssertUnwindSafe(|| on_rollback(state))) {
         let message = panic_message(panic.as_ref());
         tracing::error!(target: "ub_store", %message, "on_rollback panicked");

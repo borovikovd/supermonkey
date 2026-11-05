@@ -3,11 +3,11 @@
 //! these directly; [`crate::dispatch`] calls them by name.
 
 use base64::Engine as _;
-use ub_core::{App, ChannelSink, MAX_ATTACHMENT_BYTES, NewAttachment, attachment_too_large};
+use ub_core::{App, MAX_ATTACHMENT_BYTES, NewAttachment, attachment_too_large};
 use ub_domain::{AccountId, AttachmentId, DraftId, MessageId, ThreadId};
 use ub_ipc::{
-    BlockResult, BlockedSenders, ContactSuggestion, DraftAttachment, LaunchInfo, ListRow,
-    MessageBody, NumberedAction, SnoozeChoice, Unsubscribed,
+    BlockResult, BlockedSenders, ChannelMessage, ContactSuggestion, DraftAttachment, LaunchInfo,
+    ListRow, MessageBody, NumberedAction, SnoozeChoice, Unsubscribed,
 };
 
 /// A command's result: its value, or the message the UI shows.
@@ -35,7 +35,10 @@ fn err(error: &ub_core::Error) -> String {
 
 /// The page's first call: channel messages go to `sink` from now on.
 /// Returns where the page's action numbers continue.
-pub async fn connect(app: &App, sink: ChannelSink) -> CmdResult<LaunchInfo> {
+pub async fn connect(
+    app: &App,
+    sink: Box<dyn FnMut(ChannelMessage) + Send>,
+) -> CmdResult<LaunchInfo> {
     app.lifecycle().connect(sink).await.map_err(|e| err(&e))
 }
 

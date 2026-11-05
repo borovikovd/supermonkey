@@ -9,11 +9,6 @@ use crate::activity::{Activity, Busy, Tracked};
 use crate::effects::{Effect, EffectSender};
 use crate::subs::Registry;
 
-/// Where channel messages go: the webview's channel, or the web bridge's
-/// event stream. Called on the writer thread after each commit, so it must
-/// not block.
-pub type ChannelSink = Box<dyn FnMut(ChannelMessage) + Send>;
-
 /// What the writer thread owns besides the database. Jobs and the commit
 /// hooks reach it without a lock.
 pub(crate) struct WriterState {
@@ -30,7 +25,10 @@ pub(crate) struct WriterState {
     undo: Vec<Box<dyn FnOnce() + Send>>,
     activity: Arc<Activity>,
     router: EffectSender,
-    sink: Option<ChannelSink>,
+    /// Where channel messages go: the webview's channel, or the web
+    /// bridge's event stream. Called on the writer thread after each
+    /// commit, so it must not block.
+    sink: Option<Box<dyn FnMut(ChannelMessage) + Send>>,
     /// Whether Gmail is reachable, for the app subscription.
     online: bool,
     /// The `ack` of the last channel message sent.
@@ -113,7 +111,7 @@ impl WriterState {
     }
 
     /// Sends channel messages to `sink` from now on.
-    pub(crate) fn set_sink(&mut self, sink: ChannelSink) {
+    pub(crate) fn set_sink(&mut self, sink: Box<dyn FnMut(ChannelMessage) + Send>) {
         self.sink = Some(sink);
     }
 

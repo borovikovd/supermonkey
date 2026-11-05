@@ -3,7 +3,7 @@
 //! actions in and gives `ub_ipc` read models and channel messages out.
 //!
 //! Start a core with [`App::start`] and [`Lifecycle::launch`] it, then:
-//! - [`Lifecycle::connect`] a page's [`ChannelSink`]: one
+//! - [`Lifecycle::connect`] a page's channel sink: one
 //!   [`ub_ipc::ChannelMessage`] per commit goes there, and each batch of
 //!   first loads as its own message;
 //! - [`Actions::submit`] the page's numbered actions;
@@ -52,4 +52,3 @@ pub use lifecycle::Lifecycle;
 pub use mail::{MAX_ATTACHMENT_BYTES, Mail, NewAttachment, attachment_too_large};
 pub use platform::{Notification, Platform, PlatformError};
 pub use queries::Queries;
-pub use writer::ChannelSink;

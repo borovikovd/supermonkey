@@ -5,14 +5,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use ub_ipc::LaunchInfo;
+use ub_ipc::{ChannelMessage, LaunchInfo};
 use ub_store::{Priority, ReadPool, StoreError};
 
 use crate::actions::{ActionError, Received};
 use crate::activity::{Kick, Tasks};
 use crate::clock::Clock;
 use crate::workers::{AccountWorkers, Network, Notifier, snooze};
-use crate::writer::{ChannelSink, CoreWriter};
+use crate::writer::CoreWriter;
 use crate::{Error, Notification};
 
 /// How long quitting waits for work the user already did to commit.
@@ -53,7 +53,10 @@ impl Lifecycle {
     /// order after every UI job queued before. Returns where the page's
     /// action numbers continue: after the last one received, so a reload
     /// never reuses a number still queued.
-    pub async fn connect(&self, sink: ChannelSink) -> Result<LaunchInfo, Error> {
+    pub async fn connect(
+        &self,
+        sink: Box<dyn FnMut(ChannelMessage) + Send>,
+    ) -> Result<LaunchInfo, Error> {
         self.deps
             .writer
             .call(Priority::Ui, move |_, state| {
