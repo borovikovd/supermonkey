@@ -2,7 +2,7 @@ import type { App } from "./app.ts";
 import type { Control, Delivery } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
-import { A } from "./seeds.ts";
+import { A, B } from "./seeds.ts";
 
 const NEWS = "News Co <news@news.test>";
 
@@ -243,4 +243,49 @@ test("UNW-08 Mark spam, and block the domain", async ({ app, gmail }) => {
   expect(await labelsOf(gmail, junk.id)).toContain("SPAM");
   expect(await labelsOf(gmail, junk.id)).not.toContain("TRASH");
   expect((await gmail.filters(A)).map((f) => f.from)).toEqual(["@junk.test"]);
+});
+
+test("UNW-09 unsubscribe, block, and unblock act only on the account's own thread and block filter", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  /** Runs a command as the webview would, with any arguments it likes. */
+  const invoke = (cmd: string, args: Record<string, unknown>) =>
+    app.page.evaluate(
+      async ([c, a]) => {
+        const r = await fetch(`/invoke/${c}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(a),
+        });
+        return r.status;
+      },
+      [cmd, args] as const,
+    );
+  const [a, b] = [1, 2];
+  const own = Number(await app.rowKey("Person 1"));
+  await app.press("Control+2");
+  const others = Number(await app.rowKey("B 2"));
+  await app.press("Control+1");
+
+  // B's thread, named with A's account: refused, nothing filtered or trashed.
+  expect(await invoke("block", { account: a, thread: others, domain: false })).toBe(400);
+  expect(await invoke("unsubscribe", { account: a, thread: others })).toBe(400);
+  await app.settle();
+  expect(await gmail.requests("filters.create")).toEqual([]);
+  const bState = await gmail.gmail(B);
+  expect(bState.messages.filter((m) => m.labels.includes("TRASH"))).toEqual([]);
+
+  // A block of A's own sender works; only that filter can be unblocked, and only by A.
+  expect(await invoke("block", { account: a, thread: own, domain: false })).toBe(200);
+  await app.settle();
+  const [filter] = await gmail.filters(A);
+  expect(filter?.add).toEqual(["TRASH"]);
+  expect(await invoke("unblock", { account: a, id: "forged" })).toBe(400);
+  expect(await invoke("unblock", { account: b, id: filter?.id })).toBe(400);
+  expect(await gmail.requests("filters.delete")).toEqual([]);
+  expect(await gmail.filters(A)).toHaveLength(1);
+  expect(await invoke("unblock", { account: a, id: filter?.id })).toBe(200);
+  expect(await gmail.filters(A)).toEqual([]);
 });

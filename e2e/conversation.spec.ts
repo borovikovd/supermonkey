@@ -654,4 +654,57 @@ test.describe("conversation", () => {
       .getByText("Itinerary for Tuesday");
     await expect(text).toHaveCSS("color", "rgb(60, 64, 67)");
   });
+
+  test("CONV-20 a conversation opened, closed, and opened again in one batch still reads its body", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    // The new thread's body read in the background fails and backs off on
+    // the app's clock, so only opening the conversation reads it now.
+    await gmail.fault(
+      { api: "threads.get", query: { format: "full" } },
+      { kind: "status", status: 500 },
+      { times: 1 },
+    );
+    await gmail.deliver({
+      account: A,
+      from: seeds.PERSONS[0] ?? "",
+      subject: "Opened twice",
+      text: "Read after opening it again.",
+      labels: ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+    });
+    await app.settle();
+    await expect(app.row("Opened twice")).toHaveCount(1);
+    const fullReads = async () =>
+      (await gmail.requests("threads.get", { account: A })).filter(
+        (r) => r.params.format === "full",
+      ).length;
+    const before = await fullReads();
+
+    // One submit carries the first open's close, the open, the close, and the open again.
+    await expect(app.highlighted).toContainText("Person 1");
+    // Page timers wait for the test, so nothing prefetches on the way.
+    await app.page.clock.pauseAt(await app.now());
+    const release = await app.park("submit");
+    await app.press("Enter");
+    await expect(app.conversationTitle).toHaveText("Person 1");
+    await app.press("Escape", "k");
+    await expect(app.highlighted).toContainText("Opened twice");
+    // Its data has not arrived, so the conversation shows no title yet.
+    await app.press("Enter");
+    await expect(app.list).toHaveCount(0);
+    await app.press("Escape");
+    await expect(app.highlighted).toContainText("Opened twice");
+    await app.press("Enter");
+    await expect(app.list).toHaveCount(0);
+    await release();
+    await app.page.clock.resume();
+    await app.page.clock.setFixedTime(await app.now());
+    await app.settle();
+
+    await expect(app.conversationTitle).toHaveText("Opened twice");
+    await expect(app.messageBody(0).locator("body")).toContainText("Read after opening it again.");
+    expect(await fullReads()).toBe(before + 1);
+  });
 });

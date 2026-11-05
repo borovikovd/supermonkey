@@ -1,10 +1,10 @@
-//! Random input built from the characters these parsers care about must never panic.
+//! Random input built from the characters these parsers care about must never
+//! panic (COVERAGE section 9).
 
-use std::collections::HashMap;
-
+use serde_json::json;
 use ub_mime::{
-    decode_encoded_words, html_to_text, parse_address_list, sanitize_html, split_gmail_quote,
-    split_quoted_history, text_to_html,
+    CidImages, RawBody, decode_encoded_words, html_to_text, list_unsubscribe, parse_address_list,
+    parse_message, sanitize_html, split_gmail_quote, split_quoted_history, text_to_html,
 };
 
 const PIECES: &[&str] = &[
@@ -72,7 +72,8 @@ fn random_inputs() -> impl Iterator<Item = String> {
 
 #[test]
 fn parsers_never_panic() {
-    let cids = HashMap::from([("a".to_string(), "data:image/png;base64,AA==".to_string())]);
+    let mut images = CidImages::new();
+    images.insert("a", "image/png", &[0]);
     for input in random_inputs() {
         let _ = parse_address_list(&input);
         let _ = decode_encoded_words(&input);
@@ -80,6 +81,30 @@ fn parsers_never_panic() {
         let _ = text_to_html(&input);
         let _ = split_gmail_quote(&input);
         let _ = split_quoted_history(&input);
-        let _ = sanitize_html(&input, &cids);
+        let _ = sanitize_html(&input, &images);
+        let _ = list_unsubscribe(&input, Some(&input));
+
+        let header = |name: &str| json!({ "name": name, "value": input });
+        let payload = json!({
+            "mimeType": "multipart/mixed",
+            "headers": [header("From"), header("To"), header("Subject"), header("Date"),
+                        header("Message-ID"), header("References"), header("X-Ubermensch-Draft")],
+            "parts": [
+                { "partId": "0", "mimeType": "text/html",
+                  "headers": [header("Content-Type")], "body": { "data": input } },
+                { "partId": "1", "mimeType": "image/png", "filename": input,
+                  "headers": [header("Content-Disposition"), header("Content-ID")],
+                  "body": { "attachmentId": input, "size": 1 } },
+            ],
+        });
+        let parsed = parse_message(&payload).unwrap();
+        let _ = parsed.inline_images_to_fetch().count();
+        let _ = parsed.body.clone().render(&parsed.cid_images());
+        let _ = parsed.body.into_draft();
+        let _ = RawBody {
+            html: None,
+            text: Some(input),
+        }
+        .render(&images);
     }
 }

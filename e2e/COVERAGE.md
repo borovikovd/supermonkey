@@ -280,32 +280,32 @@ Files are independent and can be written in parallel. Each depends only on the s
 
 | File                       | Prefix | Scope                                                                                        | Main seeds                               | Harness beyond H1–H3        | Cases   | P1      | P2     | P3     |
 | -------------------------- | ------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | ------- | ------- | ------ | ------ |
-| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 15      | 10      | 5      | 0      |
+| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 18      | 13      | 5      | 0      |
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 10      | 5       | 5      | 0      |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 6       | 4       | 2      | 0      |
-| `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 19      | 4       | 14     | 1      |
+| `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 20      | 4       | 15     | 1      |
 | `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 13      | 9       | 4      | 0      |
 | `undo.spec.ts`             | UND    | the `z` stack, partial revert, per-account history, persistence                              | `standard`                               | H15                         | 8       | 4       | 3      | 1      |
 | `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 8       | 2       | 6      | 0      |
-| `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 9       | 3       | 5      | 1      |
+| `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 10      | 3       | 6      | 1      |
 | `splits.spec.ts`           | SPL    | routing, `Tab`, pins, own reply, custom splits, starters, hiding, cap                        | `standard`, `splits`, `bulk`, `bulk1000` | H10, H12, H15               | 10      | 6       | 3      | 1      |
 | `snooze.spec.ts`           | SNZ    | picker, snooze, wake triggers, clearing rules, history echo, undo                            | `standard`                               | H13, H14, H15               | 8       | 6       | 1      | 1      |
 | `compose-reply.spec.ts`    | REP    | inline composer, addressing, quoting, forward, resume rules, Gmail drafts                    | `standard`, `drafts`                     | H4, H6                      | 15      | 10      | 5      | 0      |
 | `compose-new.spec.ts`      | NEW    | `c` screen, formatting, shortcuts, `Esc` machine, untouched rule, discard                    | `standard`                               | H4                          | 12      | 7       | 5      | 0      |
 | `recipients.spec.ts`       | RCP    | chips, autocomplete, ranking, invalid addresses, Cc/Bcc                                      | `contacts`, `standard`                   | H23                         | 10      | 3       | 7      | 0      |
-| `attachments.spec.ts`      | ATT    | attach, download on demand, offline forward, MIME tree                                       | `standard`                               | H4, H9, H23                 | 6       | 5       | 1      | 0      |
-| `drafts.spec.ts`           | DRF    | autosave and upsert, Drafts `Enter`, Gmail-side edits and deletes, offline, reload and crash | `standard`, `drafts`                     | H6, H15, H16                | 17      | 14      | 2      | 1      |
+| `attachments.spec.ts`      | ATT    | attach, download on demand, offline forward, MIME tree                                       | `standard`                               | H4, H9, H23                 | 7       | 6       | 1      | 0      |
+| `drafts.spec.ts`           | DRF    | autosave and upsert, Drafts `Enter`, Gmail-side edits and deletes, offline, reload and crash | `standard`, `drafts`                     | H6, H15, H16                | 18      | 15      | 2      | 1      |
 | `undo-send.spec.ts`        | SND    | the outbox state machine, held undo, rejection, no clear answer, restart                     | `standard`                               | H8a, H8b, H9, H13, H15      | 18      | 15      | 3      | 0      |
-| `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 7       | 6       | 1      | 0      |
+| `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 8       | 6       | 2      | 0      |
 | `gmail-errors.spec.ts`     | ERR    | the outcome matrix for actions and `drafts.create`, back-off, 401, 404                       | `standard`                               | H6, H8, H9, H10, H13        | 9       | 5       | 3      | 1      |
-| `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 10      | 5       | 3      | 2      |
+| `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 11      | 5       | 4      | 2      |
 | `notifications.spec.ts`    | NOT    | when to notify, summary, mute, Dock badge, click                                             | `standard`                               | H17, H18                    | 6       | 5       | 1      | 0      |
 | `settings.spec.ts`         | SET    | the sheet, remote images                                                                     | `standard`                               | H15, H20                    | 4       | 1       | 2      | 1      |
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
-| `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
+| `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 5       | 3       | 2      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
-| `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 8       | 6       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **239** | **141** | **88** | **10** |
+| `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
+| **Total**                  |        |                                                                                              |                                          |                             | **250** | **147** | **93** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -516,6 +516,41 @@ _EP · §Accounts (switching)_
 - **Steps:** click A's avatar while A is on screen, then `Esc`. Click B's avatar, then click it again.
 - **Expect:** the first click opens Settings with A's block. Clicking B switches to B's Inbox without opening Settings; clicking B again opens Settings.
 - **Why:** with one account, its avatar did nothing, so it looked broken.
+
+#### ACC-16 · P1 · A removal waiting on its revoke holds up no other account
+
+_EG · §Accounts (remove), AGENTS.md (isolation: a slow resource must not block the others)_
+
+- **Seed:** `standard`, with C signed in too.
+- **Steps:**
+  1. `hold(oauth.revoke)`. Remove B in Settings; its revoke parks.
+  2. `nextSignIn(B)` and run `Add account`: the sign-in waits for the revoke (ACC-12).
+  3. Remove C. Open `p1` in A and press `e`.
+  4. Release the revokes, `settle()`.
+- **Expect:**
+  - After step 3, C's revoke is parked too, and A's `messages.batchModify` reaches Gmail before any revoke answers.
+  - After step 4, B's and C's grants are revoked, and B is signed in again.
+
+#### ACC-17 · P1 · A first sign-in shows the whole Inbox before reading the account's drafts
+
+_EG · §Sync (priorities)_
+
+- **Seed:** `none`, with 14 Gmail drafts on A: replies on `p4` and `plan`, and 12 new messages. `quota(true)`.
+- **Steps:** sign in A from the first-run screen. Wait for the Inbox header.
+- **Expect:** the header reaches `Important 16 · Other 7`, and by then fewer than half the drafts have had their `drafts.get`.
+- **Why:** the connect sync read every draft at priority 2, which used up the quota bucket. With real Gmail, the Inbox sat on the two draft threads for most of a minute, and the Other tab was missing.
+
+#### ACC-18 · P1 · An account removed while its Sign in again waits in the browser comes back and syncs
+
+_EG · §Accounts (Sign in again, remove), AGENTS.md (assume every await lets the world change)_
+
+- **Seed:** `standard`. A is signed out: `invalidGrant(A, on)`, `expireAccessTokens(A)`, `poll()`.
+- **Steps:**
+  1. `hold(oauth.authorize)`: the consent page stays open. `nextSignIn(A)`, then **Sign in again** on A's block in Settings.
+  2. While the authorize request is parked, remove A in Settings.
+  3. Release it, `settle()`. Deliver a new message to A, `settle()`, and switch to A.
+- **Expect:** A is back in the rail after B, with no sign-in marker; its Inbox holds `plan` and the new message.
+- **Why:** the sign-in made a new account row for A, but started the worker for the removed row's id, so the new row never synced.
 
 ### 5.2 `inbox-navigation.spec.ts` (NAV)
 
@@ -934,6 +969,15 @@ _EP · §Conversation (iframes), Look_
 - **Seed:** `standard`, with the page's `prefers-color-scheme` set to dark.
 - **Steps:** deliver a message whose `<style>` sets `.primary-text` to `#3c4043`, and to `#e8eaed !important` under `@media (prefers-color-scheme: dark)`, as Google Calendar invites do. Open it.
 - **Expect:** the text is `rgb(60, 64, 67)`. The card is always white, so the message's dark-mode colors would make it unreadable.
+
+#### CONV-20 · P2 · A conversation opened, closed, and opened again in one batch still reads its body
+
+_EG · §Sync (priority 2), §UI state (Actions)_
+
+- **Seed:** `standard`. `fault(threads.get format=full, 500, {times: 1})`, then deliver "Opened twice" to A: its body read in the background fails and backs off on the app clock.
+- **Steps:** with `p1` highlighted, pause the page clock and park the submits. Open `p1`, `Esc`, `k` to "Opened twice", open it, `Esc`, open it again. Release the submits and `settle()`.
+- **Expect:** the conversation shows the message's body, and exactly one more `threads.get` (`format=full`) went out.
+- **Why:** the actions after the first open went out in one batch, which asked for the thread's bodies, said they were unneeded, and asked again. The writer kept only the first of two equal effects, so the read was started and stopped, and nothing read the body.
 
 ### 5.5 `triage-actions.spec.ts` (TRI)
 
@@ -1442,6 +1486,15 @@ _EP · §Search, DEVIATIONS (Search looks like Superhuman's)_
   - The field's left edge is within 1px of the senders column, its text is 16px, the hint bar reads "Enter to see results", and the Tips column lists `from:`.
   - The `plan` row marks only "plan" (any case), never the operator's value.
   - Close ends the search: no field, no Tips, and the Inbox title is back.
+
+#### SRC-10 · P2 · A Gmail search stops searching when its account signs in again under it
+
+_EG · §Search, §Accounts (Add account for an account the app has)_
+
+- **Seed:** `standard`. `hold(threads.list q="zebra crossing")`.
+- **Steps:** search "zebra crossing" and `advance(300)`: its listing parks. `nextSignIn(A)` and run `Add account`, which replaces A's worker; wait until the new worker lists Inbox. Release the hold, `settle()`.
+- **Expect:** the parked listing went with the old worker; "Searching Gmail…" is gone and "Nothing here." shows.
+- **Why:** the listing ran on the account worker's tasks. A worker stopped under it (Sign in again, Add account, a refused grant) dropped it before it settled the subscription, which then said "Searching Gmail…" forever.
 
 ### 5.9 `splits.spec.ts` (SPL)
 
@@ -2261,6 +2314,14 @@ _EG · §Keyboard (untouched rule), DEVIATIONS (a file still attaching)_
   - After step 2, the composer is gone.
   - Gmail has one draft, carrying `notes.txt`. The draft was not discarded as untouched.
 
+#### ATT-07 · P1 · A downloaded attachment is quarantined before it opens
+
+_EG · §Reading (open with the default app), AGENTS.md (treat external content as hostile)_
+
+- **Seed:** `standard`.
+- **Steps:** open `fwd` and click `contract.pdf`.
+- **Expect:** the opened file carries `com.apple.quarantine` as Mail writes it: flags `0081`, the app time in hex Unix seconds, the agent `Ubermensch`, and an upper-case UUID. So Gatekeeper checks a file a stranger sent, such as a `.terminal` or `.jar`, before it runs.
+
 ### 5.15 `drafts.spec.ts` (DRF)
 
 #### DRF-01 · P1 · Drafts autosave and update a single Gmail draft
@@ -2460,6 +2521,17 @@ _EG · §Reply composer ("A draft from Gmail is aimed at the message its `In-Rep
   2. Release, `settle()`.
   3. Open `p2` and press `r`.
 - **Expect:** the composer resumes `dTwoB`, the newer draft started on the latest message, rather than starting an empty one.
+
+#### DRF-18 · P1 · A crash after `drafts.create` reached Gmail, before its ids were stored, leaves one draft
+
+_EG · §Gmail errors (`drafts.create` is unsafe to repeat; the `X-Ubermensch-Draft` recovery), §Drafts_
+
+- **Steps:**
+  1. `holdAnswer(drafts.create)`. In `p3`, press `r` and type; wait until the create is parked. Gmail has the draft.
+  2. Crash and relaunch (the parked answer is lost), `settle()`.
+- **Expect:**
+  - The log has one `drafts.create`: the replayed upsert looks for the draft by its header before it creates one.
+  - Gmail has only the draft from step 1, with the typed text, and Drafts lists one row for it.
 
 ### 5.16 `undo-send.spec.ts` (SND)
 
@@ -2789,6 +2861,16 @@ _EG · §Offline ("Loss of network leaves the queued action in place")_
   - At the end, all three are archived in Gmail.
   - Each thread's change appears exactly once in the log, apart from the dropped attempt.
 
+#### OFF-08 · P2 · Conversations opened offline read only the bodies still on screen when the network returns
+
+_EG · §Sync (priority 2: a thread the user opens, then its prefetched neighbors), §Offline, AGENTS.md (isolation, bounded work)_
+
+- **Steps:**
+  1. `fault(threads.get format=full, 400)` and deliver six threads: their bodies are not stored. Clear the fault.
+  2. `offline(true)`. Open the oldest and press `j` four times, `k` three times, `j` twice, with `settle()` after each.
+  3. Note the conversations subscribed now. `offline(false)`, `settle()`.
+- **Expect:** after the reconnect, the `format=full` reads are exactly one per subscribed thread among the six: a thread opened or prefetched several times reads once, and one no longer on screen does not read at all.
+
 ### 5.18 `gmail-errors.spec.ts` (ERR)
 
 Outcomes by kind of call (§Gmail errors). "Silent" means no toast.
@@ -3030,6 +3112,15 @@ _EG · §Sync (bodies), §Performance (stored bodies never change)_
 - **Seed:** `standard` (the `fwd` contract has an inline `cid:` logo).
 - **Steps:** count `req(attachments.get)`; deliver a reply into `fwd`; `settle()`; open it.
 - **Expect:** a `format=full` fetch of `fwd` ran for the reply's body, `req(attachments.get)` did not grow, and the reply shows expanded with its body.
+
+#### SYN-11 · P2 · A slower label or `sendAs` read never undoes a newer one
+
+_EG · §Sync (`sendAs` and labels refresh on focus), AGENTS.md (stale answers)_
+
+- **Steps:**
+  1. `holdAnswer` on the next `labels.list`, then `focus(false)`, `focus(true)`: a refresh reads the labels and its answer parks. `gmail.label(A, "Newer")`, focus again, `settle()`. Release, `settle()`.
+  2. The same with `sendAs.list`, adding the alias `ana@new.dev` between the two reads.
+- **Expect:** `g` `l` lists Newer, and the composer's From picker lists `ana@new.dev`: the answer read first and stored last is dropped.
 
 ### 5.20 `notifications.spec.ts` (NOT)
 
@@ -3277,6 +3368,15 @@ _EG · §Security_
   - Every request in the fake's log came from the core: no `Origin` header, and no browser user agent.
   - `inspect.dbContains(token)` is false.
 
+#### SEC-05 · P2 · Another page cannot take the app's channel from the core
+
+_EG · AGENTS.md (debug-only servers), ARCHITECTURE.md (the web bridge)_
+
+- **Seed:** `standard`.
+- **Steps:** in a second tab, load a page on `evil.test` whose `<img>` points at the bridge's `/events`. Close it. Then press `e` on `p1` in the app and `settle()`.
+- **Expect:** the `/events` request gets 403; the app's page still applies every commit, and `p1` leaves the list.
+- **Why:** a cross-site `<img>` sends no `Origin`, which the bridge let in as if a tool had sent it. Opening `/events` takes the channel from the page before, so any page in the browser could cut the debug app's UI off from the core.
+
 ### 5.24 `ui-consistency.spec.ts` (UIC)
 
 #### UIC-01 · P1 · Rows you just acted on never flash back during fast triage or a poll
@@ -3411,6 +3511,20 @@ _ST · §Unsubscribe and block_
 - **Steps:** palette Mark as spam, "Mark spam, and block everyone at junk.test".
 - **Expect:** the message has `SPAM` (not `TRASH`) in Gmail, the row leaves the list, and `filters(A)` has one filter on `@junk.test`.
 
+#### UNW-09 · P1 · Unsubscribe, block, and unblock act only on the account's own thread and block filter
+
+_EG · AGENTS.md (validate every command's input in Rust; the webview is not trusted), §Unsubscribe and block_
+
+- **Seed:** `standard`.
+- **Steps:** call the commands as a page could, through the web bridge:
+  1. `block` and `unsubscribe` with A's account and one of B's threads.
+  2. `block` A's `p1` sender. Then `unblock` with A and a made-up filter id, and with B and A's filter id.
+  3. `unblock` with A and its filter id.
+- **Expect:**
+  - Step 1 is refused: no `filters.create`, and nothing of B's is trashed.
+  - In step 2, the block makes one filter, and both unblocks are refused with no `filters.delete`.
+  - Step 3 deletes the filter.
+
 ---
 
 ## 6. Done-when traceability
@@ -3456,7 +3570,7 @@ _ST · §Unsubscribe and block_
 | Search                      | SRC-01 to SRC-07                                                                                                                                                            |
 | Offline                     | OFF-01 to OFF-07, LAB-04, DRF-05, DRF-06, SRC-05                                                                                                                            |
 | Notifications               | NOT-01 to NOT-06, CONV-09, SYN-04                                                                                                                                           |
-| Sync                        | SYN-01 to SYN-07, LAB-07, VIEW-05                                                                                                                                           |
+| Sync                        | SYN-01 to SYN-07, LAB-07, VIEW-05, ACC-17                                                                                                                                   |
 | Gmail errors                | ERR-01 to ERR-09, ACC-08, SND-05 to SND-08, LAB-05, DRF-04, OFF-05, DRF-13, DRF-14, SND-18                                                                                  |
 | Data                        | ACC-07, ACC-10, SEC-04                                                                                                                                                      |
 | UI state                    | TRI-10, UND-05, UIC-01 to UIC-05, DRF-08, CONV-03, CONV-09, NEW-12                                                                                                          |
@@ -3493,27 +3607,46 @@ _ST · §Unsubscribe and block_
 
 ## 9. Kept unit and property tests
 
-These stay, and the E2E suite deliberately does not repeat their partitions.
+These stay, and the E2E suite deliberately does not repeat their partitions. Paths are under `src-tauri/`.
 
-| Test                                                    | What it covers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | E2E overlap, kept small on purpose                                                                       |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `src-tauri/crates/ub-rules/src/query.rs` (inline tests) | Lenient and strict parsing, error messages (`Missing )`, `OR needs a term after it`, …), operator case-insensitivity, AND binding tighter than OR, parentheses, quoted phrases, unsupported operators kept as always-true terms, rule mode against search mode (bare words search the body only in search), the `label:` hyphen form and case, FTS5 translation, escaping, prefix only on the last word, valid SQLite output, `strip_is_list`                                                                                                    | SRC-02 (one query per family, plus `is:list` stripped from `q`) and SPL-06 (label case, `CATEGORY_` ids) |
-| `ub-rules/src/splits.rs`                                | `person_to_person` over category and list combinations; the starters parse and match                                                                                                                                                                                                                                                                                                                                                                                                                                                             | SPL-01, SPL-07                                                                                           |
-| `ub-rules/src/snooze.rs`                                | Options before and after 18:00, the next calendar day after midnight, next week on every weekday, DST gaps and folds, the phrase grammar (`fri 9am`, `in 2 hours`, `dec 24`, ISO dates, `tmrw`), rejected inputs                                                                                                                                                                                                                                                                                                                                 | SNZ-01, SNZ-02                                                                                           |
-| `ub-mime/tests/sanitize.rs`                             | The hostile fixture: scripts, handlers, `javascript:`, forms, iframes, svg, math, meta refresh, base, link, `data:text/html` removed; style, class, id, `data:image`, remote images, legacy table attributes kept; links get `rel=noopener`; `cid:` rewritten to `data:` before sanitizing; `data:` allowed only for images; text extraction leaves out hidden content                                                                                                                                                                           | SEC-01 (the integration: sanitized at ingest, sandbox, CSP)                                              |
-| `ub-mime/tests/no_panic.rs`                             | 3,000 seeded random inputs through every parser and the sanitizer; no panic                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | none                                                                                                     |
-| `src-tauri/tests/writer_channel.rs`                     | Proptest: random subscribes, actions (Done, Return to inbox, trash, spam, star, read, snooze), undo, and remote `INBOX` changes. A list rebuilt from its first load plus patches always equals a fresh load at that `rev`. Also: a reloaded page's action numbers continue after actions still queued behind a running job, not after the last committed one (`launch_numbers_continue_after_actions_still_queued`); and a first load lost to a failed commit goes out with the next one (`a_first_load_lost_to_a_failed_commit_is_sent_again`). | UIC-01 (only the user-visible part)                                                                      |
+| Test                                            | What it covers                                                                                                                                                                                                                                                                                                                                                                                                                                             | E2E overlap, kept small on purpose                                                                       |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `crates/ub-domain/src/query/tests.rs`           | Lenient and strict parsing, error messages (`Missing )`, `OR needs a term after it`, …), operator case-insensitivity, AND binding tighter than OR, parentheses, quoted phrases, unsupported operators kept as always-true terms, rule mode against search mode (bare words search the body only in search), the `label:` hyphen form and case, FTS5 translation, escaping, prefix only on the last word, valid SQLite output, `is:list` stripped for Gmail | SRC-02 (one query per family, plus `is:list` stripped from `q`) and SPL-06 (label case, `CATEGORY_` ids) |
+| `crates/ub-domain/src/tests.rs`                 | `person_to_person` over category and list combinations; the starters parse and match; pin precedence and the latest message from someone else                                                                                                                                                                                                                                                                                                              | SPL-01, SPL-03, SPL-07                                                                                   |
+| `crates/ub-domain/src/snooze/{options,text}.rs` | Options before and after 18:00, the next calendar day after midnight, next week on every weekday, DST gaps and folds, the phrase grammar (`fri 9am`, `in 2 hours`, `dec 24`, ISO dates, `tmrw`), rejected inputs                                                                                                                                                                                                                                           | SNZ-01, SNZ-02                                                                                           |
+| `crates/ub-mime/tests/sanitize.rs`              | The hostile fixture: scripts, handlers, `javascript:`, forms, iframes, svg, math, meta refresh, base, link, `data:text/html` removed; style, class, id, `data:image`, remote images, legacy table attributes kept; links get `rel=noopener`; `cid:` rewritten to `data:` before sanitizing; `data:` allowed only for images; text extraction leaves out hidden content                                                                                     | SEC-01 (the integration: sanitized at ingest, sandbox, CSP)                                              |
+| `crates/ub-mime/tests/no_panic.rs`              | 3,000 seeded random inputs through every parser and the sanitizer; no panic                                                                                                                                                                                                                                                                                                                                                                                | none                                                                                                     |
+| `crates/ub-core/src/tests/writer_channel.rs`    | Proptest: random subscribes, actions (Done, Return to inbox, trash, spam, star, read, snooze), undo, and remote `INBOX` changes. A list rebuilt from its first load plus patches always equals a fresh load at that `rev`. Also: a reloaded page's action numbers continue after actions still queued behind a running job, not after the last committed one; and a first load lost to a failed commit goes out with the next one.                         | UIC-01 (only the user-visible part)                                                                      |
 
 Also kept, because they test logic the E2E suite can't observe:
 
-- `crates/ub-gmail/tests/scheduler.rs`: priorities, concurrency, quota, and back-off.
-- `crates/ub-gmail/tests/oauth.rs`: the `state` check, token caching and early refresh, one refresh shared by concurrent 401s, and secrets kept out of debug output.
-- `src-tauri/src/clock.rs`: the activity tracking `settle()` relies on, and that closing a `Kick` (an account stopping) wakes a loop even between its last check and its wait.
-- `ub-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser: several URIs, mailto subject and body, a `+` in the address, junk, spacing, and when one-click applies.
-- `src-tauri/tests/logging.rs`: the stderr logger drops the HTML parser's warnings and keeps ours (logs are not visible to the E2E suite).
-- `src-tauri/src/db/mod.rs`: older databases get `AUTOINCREMENT` on `notices`, `outbox`, and `ops` without losing rows or the `ops` index.
+- `crates/ub-gmail/tests/gmail/scheduler.rs`: priorities, concurrency, quota, and back-off, and that a forgotten (removed) account starts afresh instead of staying in the map.
+- `crates/ub-gmail/tests/gmail/oauth.rs`: the `state` check (a redirect with another state gets a 400 and the sign-in goes on), token caching and early refresh, one refresh shared by concurrent 401s, and secrets kept out of debug output.
+- `crates/ub-core/src/tests/clock.rs`: the activity tracking `settle()` relies on, that closing a `Kick` (an account stopping) wakes a loop even between its last check and its wait, and that stopping a task group (quit) waits for the tasks of the groups inside it, such as the account workers' (a task mid-step at the stop can't be timed from E2E).
+- `crates/ub-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser: several URIs, mailto subject and body, a `+` in the address, junk, spacing, and when one-click applies.
+- `src/logging.rs`: the stderr logger drops the HTML parser's warnings and keeps ours (logs are not visible to the E2E suite).
+- `crates/ub-store/src/open.rs`: a database of another schema version, or a file that is not one, is moved aside with its WAL and a fresh one created (there is no migration code).
+- `crates/ub-core/src/outbox/machine.rs`: the send state machine's every event in every state.
+- `crates/ub-core/src/tests/actions.rs`: a draft save that arrives after its send is dropped, and a split whose rule does not parse is not saved (the sheet checks rules before it saves).
+- `crates/ub-core/src/tests/writer_channel.rs` (also): a commit whose updates panic while being sent still releases its effects and goes idle, so `settle()` never hangs on it (E2E can't make the core panic).
+- `crates/ub-core/src/tests/badge.rs`: commits that land while the Dock badge is being set make one more count, not one each (the recorded platform keeps only the last badge).
+- `crates/ub-core/src/tests/accounts.rs`: a sign-out reported for a grant older than the last sign-in changes nothing, even when its writer job runs after the sign-in's (the sign-in's job has the UI's priority; E2E can't hold the writer between the two).
+- `crates/ub-core/src/tests/notify.rs`: a poll that reads a whole thread for one changed message notifies only for the mail history reported added.
+- `crates/ub-core/src/tests/snooze.rs`: a new snooze time re-arms the snooze timer (the E2E clock fires every due timer on an advance, so it can't tell).
+- `crates/ub-core/src/workers/unwanted.rs`: Blocked senders lists only filters that trash one sender (the fake has no other kind).
+- `crates/ub-core/src/workers/attachments.rs`: two attachments of one message with one name keep their own files (the fake's seeds never repeat a name).
+- `crates/ub-gmail/tests/gmail/client.rs`: one-click unsubscribe posts only to `https` (or loopback in debug) and follows no redirect, so a list can't bounce the POST to a local address (the E2E list server never redirects).
+- `crates/ub-core/src/workers/account/ingest.rs`: a poll whose history is older than a thread read stored meanwhile leaves that read's labels (the race needs a fetch to land between `history.list` and its commit).
+- `crates/ub-bridge/src/commands.rs`: a file over the 25 MB attachment limit is refused before its base64 is decoded (the web bridge's own body limit is lower, so E2E can't send one).
+- `crates/ub-core/src/tests/actions.rs` (also): the core refuses a file over the limit and keeps nothing.
+- `crates/ub-core/src/tests/writer_channel.rs` (also): `ack` never moves back when a batch queued behind a failed one commits first.
+- `crates/ub-core/src/tests/writer_channel.rs` (also): a search opened in a batch whose commit fails still gets its Gmail listing and stops searching (E2E can't make a commit fail).
+- `crates/ub-core/src/tests/writer_channel.rs` (also): a labels or `sendAs` answer whose store rolled back does not make an older read's answer stale, and a later rollback leaves a committed store alone (E2E can't make a commit fail).
+- `crates/ub-bridge/src/web.rs`: the debug web bridge answers only loopback hosts and its own or the dev server's origin, and refuses a request with no `Origin` that the browser marks as from another site or page (the E2E page is always same-origin; SEC-05 covers the cross-site `<img>`).
+- `crates/ub-core/src/tests/perf.rs` (ignored; needs `UBERMENSCH_PERF_DB`): local search and autocomplete per keystroke against SPEC Performance on the perf fixture.
+- `tests/layers.rs`: the crate layering of ARCHITECTURE.md, section 3.
 
-Everything else was deleted, because a case here covers it: the contact ranking (RCP-02), the MIME build and Gmail payload tests (ATT-04, CONV), the address, encoding, quote and HTML helpers, the list diff (UIC-01), the mirror's Vitest tests (UIC, UND), `ub-gmail/tests/{api,outcomes}.rs` (ERR), and `src-tauri/tests/{sync_fake,compose_fake,splits}.rs` (SYN, SND, DRF, SPL).
+Everything else was deleted, because a case here covers it: the contact ranking (RCP-02), the MIME build and Gmail payload tests (ATT-04, CONV), the address, encoding, quote and HTML helpers, the list diff (UIC-01), the mirror's Vitest tests (UIC, UND), the old Gmail API and outcome tests (ERR), and the old sync, compose, and splits integration tests (SYN, SND, DRF, SPL).
 
 ---
 

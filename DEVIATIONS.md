@@ -5,17 +5,21 @@ written. Each keeps the spec's intent.
 
 ## Build and tooling
 
-- **Workspace crates.** Pure logic lives in separate crates under
-  `src-tauri/crates/`: `ub-mime` (MIME parse, sanitize, build), `ub-gmail`
-  (Gmail client, OAuth, quota scheduler, token file), `ub-fake-gmail` (the fake
-  Gmail server for tests), `ub-rules` (rule/search language, snooze times,
-  contact ranking).
+- **Workspace crates.** The Rust side is split into crates under
+  `src-tauri/crates/` by layer (`ub-domain`, `ub-mime`, `ub-gmail`,
+  `ub-store`, `ub-ipc`, `ub-core`, `ub-bridge`, `ub-testkit`, and
+  `ub-fake-gmail`, the fake Gmail for tests); ARCHITECTURE.md, section 3,
+  says what each holds.
 - **Debug web bridge.** Debug builds started with `UBERMENSCH_WEB_BRIDGE=1`
   serve the same command surface on `127.0.0.1:1430`, so the UI can run in a
   browser against the real Rust core for automated checks. Release builds
   never start it.
 - **Perf measurements** were taken on this Mac in Chrome through the web
   bridge, not on an M1 MacBook Air in WKWebView.
+- The local search and autocomplete bench (`ub-core`'s ignored `perf` tests)
+  times the core's part of a keystroke on a copy of the perf fixture that the
+  system already has cached, as it has a running app's database. Reading a
+  cold disk is part of the cold-launch budget, not a keystroke's.
 
 ## Data
 
@@ -79,7 +83,8 @@ written. Each keeps the spec's intent.
   the local draft; the local text is kept, since the copy holds text this app
   wrote and the local draft is never older.
 - Demo mode: debug builds with `--features fake` and `UBERMENSCH_FAKE=1`
-  (`pnpm demo`) run an in-process fake Gmail with demo mail and two accounts.
+  (`vp run demo`) run an in-process fake Gmail with demo mail and two accounts,
+  on a data folder in the system's temporary directory emptied at each launch.
 
 ## Snooze, offline, notifications (step 6)
 
@@ -178,8 +183,8 @@ the spec's wording:
   row: it and the row moved to are both selected.
 - **"Requests for the account on screen go first."** Request slots and the
   quota bucket are per account, so requests of different accounts never wait
-  on each other. The scheduler still orders waiters by the account on screen,
-  but that order has no effect anyone can observe.
+  on each other, and there is no ordering by the account on screen: it
+  would have no effect anyone could observe.
 - **A file still attaching** shows as a dashed chip. `Cmd+Enter` meanwhile
   waits for it and then sends; if it fails to attach, nothing is sent and the
   composer stays. Closing meanwhile takes the composer off screen at once and
@@ -194,3 +199,60 @@ the spec's wording:
   start of the reply, not shortcuts: printable keys and Backspace are kept
   and put in the editor when it opens. Leaving the conversation first drops
   them. `c` does not do this.
+
+## Decided in the rewrite: mail actions and the op queue
+
+- **Rejection toasts** read "Gmail rejected a change (status): Gmail's
+  message". Two answers that are not a plain 4xx count as rejections too, so
+  the change rolls back instead of retrying forever: a `batchModify` 404
+  where every message still exists (a label it names is gone), and a
+  `labels.create` 409 for a name `labels.list` then does not show.
+- **One op at a time per account, across worker replacement.** An op's
+  Gmail call and the write of its result run outside the worker that
+  started them, and the next worker's runner waits for them, so a second
+  sign-in never sends a queued op twice (ACC-13). Quitting can still cut an
+  op off; it stays queued and is sent again on the next launch, which
+  `batchModify` and `labels.create` (by its 409) make harmless.
+- **A label list read before a label made here got its Gmail id** keeps
+  every label made here, not only that one; the next refresh drops any that
+  Gmail no longer has.
+- **A label made here that merges into one Gmail already had** (a refresh
+  stored Gmail's copy before the create answered) is renamed in queued ops
+  and undo entries too, so they keep naming a label that exists.
+
+## Decided in the rewrite: compose
+
+- **A draft's files are read only from the app's own folders.** The paths
+  in a save come from the webview, which is not trusted: a file added to a
+  draft is read only from that draft's folder in the app's data folder, and
+  an attachment a draft carries only from the account's downloads (else it
+  is downloaded again). A file that is gone, or outside those folders,
+  rejects the write with a toast instead of sending without it.
+- **Files added to a draft** are kept as `drafts/<draft>/<n>/<name>` in the
+  app's data folder, with the id `file-<n>`, so the file keeps the name the
+  user picked and two files added at once never share one. The folder goes
+  when the draft is sent, discarded, or its account removed.
+- **A poll that sees a draft change** reconciles the drafts only. The
+  connect sync and the full resync also queue each Gmail draft's thread for
+  metadata and bodies, as SPEC Sync lists them.
+- **A file added to a draft is at most 25 MB**, Gmail's own limit for
+  attachments; SPEC sets none. A larger one is refused with a toast before
+  its content is decoded or written.
+
+## Decided in the review of the rewrite
+
+- **Files from mail are quarantined.** Every attachment the app writes to
+  disk gets `com.apple.quarantine` (flags `0081`, the time, `Ubermensch`,
+  an event UUID) before it can be opened, so Gatekeeper checks it as it
+  checks a browser download. SPEC Reading says only "open with the default
+  app".
+- **A sign-in redirect with another `state`** is answered 400 and ignored;
+  the sign-in keeps waiting for its own. A page that finds the loopback
+  port can no longer end the sign-in the user is in the middle of.
+- **Unblock deletes only a block.** The filter id comes from the webview:
+  the core lists the account's filters and deletes it only if it is one of
+  the blocks Blocked senders shows.
+- **An account removed while its Sign in again waits in the browser** comes
+  back when the person finishes that sign-in, under a new id, as Add
+  account would bring it back. The sign-in finished after the removal, so
+  it is the person's last word; SPEC does not say.

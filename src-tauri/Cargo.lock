@@ -1684,17 +1684,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hashify"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04a037b1848eada162d6534c206770180e6bfc0eaa97292250c3e7179d8b1f73"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.9",
-]
-
-[[package]]
 name = "hashlink"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2270,6 +2259,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lazy_static"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
+
+[[package]]
 name = "libappindicator"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2394,18 +2389,6 @@ dependencies = [
  "encodify",
  "gethostname",
  "web-time",
-]
-
-[[package]]
-name = "mail-parser"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d4ea9311ef3ca6189aa85c5f984bd47b2f12079bcabae28917d900ab26c9ecc"
-dependencies = [
- "encodify",
- "hashify",
- "memchr",
- "simdutf8",
 ]
 
 [[package]]
@@ -2569,6 +2552,15 @@ dependencies = [
  "serde",
  "tauri-winrt-notification",
  "zbus",
+]
+
+[[package]]
+name = "nu-ansi-term"
+version = "0.50.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
+dependencies = [
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4012,6 +4004,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharded-slab"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4728,6 +4729,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread_local"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "time"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4783,6 +4793,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
@@ -4810,17 +4821,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tokio-stream"
-version = "0.1.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3d06f0b082ba57c26b79407372e57cf2a1e28124f78e9479fe80322cf53420b"
-dependencies = [
- "futures-core",
- "pin-project-lite",
- "tokio",
-]
-
-[[package]]
 name = "tokio-util"
 version = "0.7.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4829,6 +4829,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]
@@ -5005,6 +5006,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db97caf9d906fbde555dd62fa95ddba9eecfd14cb388e4f491a66d74cd5fb79a"
 dependencies = [
  "once_cell",
+ "valuable",
+]
+
+[[package]]
+name = "tracing-log"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
+dependencies = [
+ "log",
+ "once_cell",
+ "tracing-core",
+]
+
+[[package]]
+name = "tracing-subscriber"
+version = "0.3.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
+dependencies = [
+ "nu-ansi-term",
+ "sharded-slab",
+ "smallvec",
+ "thread_local",
+ "tracing-core",
+ "tracing-log",
 ]
 
 [[package]]
@@ -5071,6 +5098,60 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
 
 [[package]]
+name = "ub-bridge"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "futures-core",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "ub-core",
+ "ub-domain",
+ "ub-ipc",
+]
+
+[[package]]
+name = "ub-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "parking_lot",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "ub-domain",
+ "ub-gmail",
+ "ub-ipc",
+ "ub-mime",
+ "ub-store",
+ "url",
+ "uuid",
+ "xattr",
+]
+
+[[package]]
+name = "ub-domain"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "rusqlite",
+ "serde",
+ "thiserror 2.0.21",
+ "ts-rs",
+]
+
+[[package]]
 name = "ub-fake-gmail"
 version = "0.1.0"
 dependencies = [
@@ -5094,14 +5175,27 @@ dependencies = [
  "base64 0.22.1",
  "oauth2",
  "parking_lot",
+ "percent-encoding",
  "rand 0.9.5",
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "tracing",
+ "ub-domain",
  "ub-fake-gmail",
  "url",
+]
+
+[[package]]
+name = "ub-ipc"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "ts-rs",
+ "ub-domain",
 ]
 
 [[package]]
@@ -5114,21 +5208,51 @@ dependencies = [
  "encoding_rs",
  "html-escape",
  "mail-builder",
- "mail-parser",
  "percent-encoding",
  "regex",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
+ "ub-domain",
  "url",
 ]
 
 [[package]]
-name = "ub-rules"
+name = "ub-store"
 version = "0.1.0"
 dependencies = [
- "chrono",
- "chrono-tz",
+ "parking_lot",
  "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+ "ub-domain",
+]
+
+[[package]]
+name = "ub-testkit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "parking_lot",
+ "rand 0.9.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "ub-bridge",
+ "ub-core",
+ "ub-domain",
+ "ub-fake-gmail",
+ "ub-gmail",
+ "ub-store",
+ "url",
 ]
 
 [[package]]
@@ -5136,19 +5260,6 @@ name = "ubermensch"
 version = "0.4.0"
 dependencies = [
  "anyhow",
- "axum",
- "base64 0.22.1",
- "chrono",
- "crossbeam-channel",
- "futures-util",
- "html-escape",
- "log",
- "parking_lot",
- "proptest",
- "rand 0.9.5",
- "reqwest",
- "rusqlite",
- "serde",
  "serde_json",
  "tauri",
  "tauri-build",
@@ -5156,15 +5267,15 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-window-state",
- "tempfile",
  "tokio",
- "tokio-stream",
- "ts-rs",
- "ub-fake-gmail",
+ "tracing",
+ "tracing-subscriber",
+ "ub-bridge",
+ "ub-core",
+ "ub-domain",
  "ub-gmail",
- "ub-mime",
- "ub-rules",
- "uuid",
+ "ub-ipc",
+ "ub-testkit",
 ]
 
 [[package]]
@@ -5253,6 +5364,12 @@ dependencies = [
  "serde_core",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "valuable"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vcpkg"
@@ -5950,6 +6067,16 @@ dependencies = [
  "libc",
  "once_cell",
  "pkg-config",
+]
+
+[[package]]
+name = "xattr"
+version = "1.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "963d6fab92d5504b971dc8bd90ca743c2575e590bc8071ea5bc571598667ae08"
+dependencies = [
+ "libc",
+ "rustix",
 ]
 
 [[package]]

@@ -551,3 +551,52 @@ test("SYN-10 a reply to a stored thread downloads no inline image again", async 
   await expect(app.messages).toHaveCount(2);
   await expect(app.messages.last().locator("iframe")).toHaveCount(1);
 });
+
+test("SYN-11 a slower label or sendAs read never undoes a newer one", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  const refresh = async () => {
+    await app.focus(false);
+    await app.focus(true);
+  };
+  const held = async (api: "labels.list" | "sendAs.list") =>
+    (await gmail.requests(api, { account: A })).some((r) => r.held);
+  const fromPicker = async () => {
+    await app.compose();
+    await app.press("Meta+Shift+F");
+    await expect(app.palette).toBeVisible();
+    const aliases = app.palette.locator("[cmdk-item]").filter({ hasText: "ana@new.dev" });
+    const count = await aliases.count();
+    await app.press("Escape");
+    await app.press("Escape", "Escape");
+    await expect(app.page.getByRole("heading", { name: "New Message" })).toHaveCount(0);
+    return count;
+  };
+
+  // A refresh reads the labels now and answers late; a later one sees a new label.
+  const list = await gmail.holdAnswer("labels.list", { account: A, times: 1 });
+  await refresh();
+  await expect.poll(() => held("labels.list")).toBe(true);
+  await gmail.label(A, "Newer");
+  await refresh();
+  await app.settle();
+  await list.release();
+  await app.settle();
+  await app.press("g", "l");
+  await expect(
+    app.palette.getByRole("option", { name: "Newer", exact: true }),
+    "the stale list deletes nothing",
+  ).toHaveCount(1);
+  await app.press("Escape");
+  await expect(app.palette).toHaveCount(0);
+
+  // The same for sendAs: an alias added between the two reads stays.
+  const sendAs = await gmail.holdAnswer("sendAs.list", { account: A, times: 1 });
+  await refresh();
+  await expect.poll(() => held("sendAs.list")).toBe(true);
+  await gmail.sendAs(A, "ana@new.dev", "Ana New");
+  await refresh();
+  await app.settle();
+  await sendAs.release();
+  await app.settle();
+  expect(await fromPicker(), "the stale sendAs drops no alias").toBe(1);
+});

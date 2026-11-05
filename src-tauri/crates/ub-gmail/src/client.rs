@@ -1,237 +1,413 @@
 //! The Gmail REST client for one account.
 
+use std::borrow::Cow;
 use std::sync::Arc;
-use std::time::Duration;
 
-use base64::Engine;
+use base64::Engine as _;
 use base64::engine::DecodePaddingMode;
 use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig, URL_SAFE};
+use percent_encoding::{AsciiSet, NON_ALPHANUMERIC, utf8_percent_encode};
 use reqwest::{Method, StatusCode};
-use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use serde_json::{Value, json};
+use tracing::Instrument as _;
+use ub_domain::{GmailDraftId, GmailMessageId, GmailThreadId, LabelId};
 
-use crate::error::{self, GmailError, Outcome, ReadResponse};
-use crate::oauth::OAuthTokens;
-use crate::types::{
-    Draft, Filter, Format, Label, ListDraftsResponse, ListFiltersResponse, ListHistoryResponse,
-    ListThreadsResponse, Message, MessagePartBody, Profile, SendAs, Thread,
+use crate::http::{self, HttpClient, ReadResponse};
+use crate::ids::{FilterId, GmailAttachmentId, HistoryId, PageToken};
+use crate::oauth::{AccessToken, Tokens};
+use crate::outcome::{GmailError, Outcome};
+use crate::quota::{AccountScheduler, Priority, Units, cost};
+use crate::wire::{
+    Draft, DraftPage, Filter, Format, HistoryPage, Label, Message, PartBody, Profile, SendAs,
+    Thread, ThreadPage, ThreadQuery,
 };
 
 /// Google's Gmail API base URL.
 pub const GMAIL_BASE_URL: &str = "https://gmail.googleapis.com";
 
-/// Accepts base64url with or without padding, as Gmail returns both.
+/// Accepts base64url with or without padding: Gmail sends both.
 const BASE64URL_LENIENT: GeneralPurpose = GeneralPurpose::new(
     &base64::alphabet::URL_SAFE,
     GeneralPurposeConfig::new().with_decode_padding_mode(DecodePaddingMode::Indifferent),
 );
 
-/// A reqwest client with the timeouts the error rule relies on: a connect timeout (Offline)
-/// and a read timeout (`NoResponse`).
-#[expect(
-    clippy::expect_used,
-    reason = "fails only if the TLS backend can't start, and nothing works without it"
-)]
-pub fn default_http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
-        .read_timeout(Duration::from_secs(60))
-        .build()
-        .expect("reqwest client")
-}
+/// Characters an id keeps in a path segment; everything else is escaped, so
+/// an id can never reach another path or the query.
+const SEGMENT: &AsciiSet = &NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'~');
 
-/// Parameters of `threads.list`.
-#[derive(Debug, Clone, Default)]
-pub struct ThreadListQuery {
-    /// A Gmail search query.
-    pub q: Option<String>,
-    /// Threads must carry all of these labels.
-    pub label_ids: Vec<String>,
-    pub page_token: Option<String>,
-    /// Gmail's default is 100, its maximum 500.
-    pub max_results: Option<u32>,
-    pub include_spam_trash: bool,
+/// The base URL given to [`Gmail::new`] is not an `http` or `https` URL.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum InvalidBaseUrl {
+    /// It is not a URL.
+    #[error("the Gmail base URL {url:?} does not parse")]
+    Unparsable {
+        /// The URL as given.
+        url: String,
+        /// Why it does not parse.
+        #[source]
+        source: url::ParseError,
+    },
+    /// It is a URL of another scheme.
+    #[error("the Gmail base URL {0:?} is not an http or https URL")]
+    NotHttp(String),
 }
 
 /// A Gmail client for one account.
 ///
-/// Every call returns a [`GmailError`] classified by [`Outcome`]. A 401 refreshes the access
-/// token once and retries inside the call. Other retries are the caller's: see
-/// [`crate::retry`]. The client does not schedule or meter requests: wrap calls in
-/// [`crate::AccountScheduler::run`] with the method's cost from [`crate::cost`].
+/// Every call waits its turn in the account's [`AccountScheduler`] at the
+/// priority given, paying the method's published quota cost, so a call can't
+/// skip the scheduler or pay the wrong cost. A 401 refreshes the access token
+/// once and retries inside the call. Other retries are the caller's: see
+/// [`crate::retry`]. Errors carry an [`Outcome`].
+///
+/// Cheap to clone: clones share the tokens and the scheduler.
 #[derive(Clone)]
 pub struct Gmail {
-    base_url: String,
-    http: reqwest::Client,
-    tokens: Arc<OAuthTokens>,
+    /// `{base}/gmail/v1/users/me`.
+    api: Arc<str>,
+    http: HttpClient,
+    tokens: Arc<Tokens>,
+    scheduler: AccountScheduler,
+}
+
+/// One request, before it is sent.
+struct Call<'a> {
+    api: &'static str,
+    priority: Priority,
+    cost: Units,
+    method: Method,
+    path: String,
+    query: Vec<(&'static str, Cow<'a, str>)>,
+    body: Option<Value>,
+}
+
+impl<'a> Call<'a> {
+    fn new(
+        api: &'static str,
+        priority: Priority,
+        cost: Units,
+        method: Method,
+        segments: &[&str],
+    ) -> Self {
+        let path = segments
+            .iter()
+            .map(|s| utf8_percent_encode(s, SEGMENT).to_string())
+            .collect::<Vec<_>>()
+            .join("/");
+        Self {
+            api,
+            priority,
+            cost,
+            method,
+            path,
+            query: Vec::new(),
+            body: None,
+        }
+    }
+
+    fn query(mut self, name: &'static str, value: impl Into<Cow<'a, str>>) -> Self {
+        self.query.push((name, value.into()));
+        self
+    }
+
+    fn query_opt(self, name: &'static str, value: Option<impl Into<Cow<'a, str>>>) -> Self {
+        match value {
+            Some(value) => self.query(name, value),
+            None => self,
+        }
+    }
+
+    fn body(mut self, body: Value) -> Self {
+        self.body = Some(body);
+        self
+    }
 }
 
 impl Gmail {
-    /// A client for the account `tokens` belong to, against `base_url` ([`GMAIL_BASE_URL`]
-    /// or the fake's).
-    pub fn new(base_url: &str, http: reqwest::Client, tokens: Arc<OAuthTokens>) -> Self {
-        Gmail {
-            base_url: base_url.trim_end_matches('/').to_owned(),
+    /// A client for the account `tokens` belong to, against `base_url`
+    /// ([`GMAIL_BASE_URL`], or the fake's), scheduled by `scheduler`.
+    pub fn new(
+        base_url: &str,
+        http: HttpClient,
+        tokens: Arc<Tokens>,
+        scheduler: AccountScheduler,
+    ) -> Result<Self, InvalidBaseUrl> {
+        let parsed = url::Url::parse(base_url).map_err(|source| InvalidBaseUrl::Unparsable {
+            url: base_url.to_owned(),
+            source,
+        })?;
+        if !matches!(parsed.scheme(), "http" | "https") {
+            return Err(InvalidBaseUrl::NotHttp(base_url.to_owned()));
+        }
+        let api = format!("{}/gmail/v1/users/me", base_url.trim_end_matches('/'));
+        Ok(Self {
+            api: api.into(),
             http,
             tokens,
-        }
+            scheduler,
+        })
     }
 
-    /// `users.getProfile`. Cost 1.
-    pub async fn get_profile(&self) -> Result<Profile, GmailError> {
-        self.get("profile", &[]).await
+    /// The account's scheduler, for work that should share its slots.
+    pub fn scheduler(&self) -> &AccountScheduler {
+        &self.scheduler
     }
 
-    /// `users.settings.sendAs.list`. Cost 1.
-    pub async fn list_send_as(&self) -> Result<Vec<SendAs>, GmailError> {
-        #[derive(serde::Deserialize)]
+    /// `users.getProfile`: the address and the current history cursor. Cost 1.
+    pub async fn get_profile(&self, priority: Priority) -> Result<Profile, GmailError> {
+        let call = Call::new(
+            "getProfile",
+            priority,
+            cost::GET_PROFILE,
+            Method::GET,
+            &["profile"],
+        );
+        self.json(call).await
+    }
+
+    /// `settings.sendAs.list`: every address the account sends as. Cost 1.
+    pub async fn list_send_as(&self, priority: Priority) -> Result<Vec<SendAs>, GmailError> {
+        #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
-        struct Response {
+        struct List {
             #[serde(default)]
             send_as: Vec<SendAs>,
         }
-        let response: Response = self.get("settings/sendAs", &[]).await?;
-        Ok(response.send_as)
+        let call = Call::new(
+            "sendAs.list",
+            priority,
+            cost::SEND_AS_LIST,
+            Method::GET,
+            &["settings", "sendAs"],
+        );
+        Ok(self.json::<List>(call).await?.send_as)
     }
 
-    /// `users.labels.list`. Cost 1.
-    pub async fn list_labels(&self) -> Result<Vec<Label>, GmailError> {
-        #[derive(serde::Deserialize)]
-        struct Response {
+    /// `labels.list`. Cost 1.
+    pub async fn list_labels(&self, priority: Priority) -> Result<Vec<Label>, GmailError> {
+        #[derive(Deserialize)]
+        struct List {
             #[serde(default)]
             labels: Vec<Label>,
         }
-        let response: Response = self.get("labels", &[]).await?;
-        Ok(response.labels)
+        let call = Call::new(
+            "labels.list",
+            priority,
+            cost::LABELS_LIST,
+            Method::GET,
+            &["labels"],
+        );
+        Ok(self.json::<List>(call).await?.labels)
     }
 
-    /// `users.labels.create`, shown in the label list and message list. Cost 5.
-    /// A name that exists gives [`Outcome::Conflict`].
-    pub async fn create_label(&self, name: &str) -> Result<Label, GmailError> {
-        let body = json!({
+    /// `labels.create`, shown in the label list and the message list. A name
+    /// that exists is [`Outcome::Conflict`]. Cost 5.
+    pub async fn create_label(&self, priority: Priority, name: &str) -> Result<Label, GmailError> {
+        let call = Call::new(
+            "labels.create",
+            priority,
+            cost::LABELS_CREATE,
+            Method::POST,
+            &["labels"],
+        )
+        .body(json!({
             "name": name,
             "labelListVisibility": "labelShow",
             "messageListVisibility": "show",
-        });
-        self.json(Method::POST, "labels", &[], Some(&body)).await
+        }));
+        self.json(call).await
     }
 
-    /// `users.history.list` from `start_history_id`, 500 records a page. Cost 2.
-    /// A cursor that is too old gives [`Outcome::NotFound`].
+    /// `history.list` after `start`, 500 records a page. A cursor too old
+    /// for Gmail to keep is [`Outcome::NotFound`]. Cost 2.
     pub async fn list_history(
         &self,
-        start_history_id: u64,
-        page_token: Option<&str>,
-    ) -> Result<ListHistoryResponse, GmailError> {
-        let start_history_id = start_history_id.to_string();
-        let mut query = vec![
-            ("startHistoryId", start_history_id.as_str()),
-            ("maxResults", "500"),
-        ];
-        query.extend(page_token.map(|token| ("pageToken", token)));
-        self.get("history", &query).await
+        priority: Priority,
+        start: HistoryId,
+        page: Option<&PageToken>,
+    ) -> Result<HistoryPage, GmailError> {
+        let call = Call::new(
+            "history.list",
+            priority,
+            cost::HISTORY_LIST,
+            Method::GET,
+            &["history"],
+        )
+        .query("startHistoryId", start.to_string())
+        .query("maxResults", "500")
+        .query_opt("pageToken", page.map(PageToken::as_str));
+        self.json(call).await
     }
 
-    /// `users.threads.list`. Cost 10.
+    /// `threads.list`. Cost 10.
     pub async fn list_threads(
         &self,
-        params: &ThreadListQuery,
-    ) -> Result<ListThreadsResponse, GmailError> {
-        let max_results = params.max_results.map(|max| max.to_string());
-        let mut query = Vec::new();
-        query.extend(params.q.as_deref().map(|q| ("q", q)));
-        query.extend(params.label_ids.iter().map(|id| ("labelIds", id.as_str())));
-        query.extend(
-            params
-                .page_token
-                .as_deref()
-                .map(|token| ("pageToken", token)),
-        );
-        query.extend(max_results.as_deref().map(|max| ("maxResults", max)));
-        if params.include_spam_trash {
-            query.push(("includeSpamTrash", "true"));
+        priority: Priority,
+        query: &ThreadQuery,
+    ) -> Result<ThreadPage, GmailError> {
+        let mut call = Call::new(
+            "threads.list",
+            priority,
+            cost::THREADS_LIST,
+            Method::GET,
+            &["threads"],
+        )
+        .query_opt("q", query.q.as_deref())
+        .query_opt(
+            "pageToken",
+            query.page_token.as_ref().map(PageToken::as_str),
+        )
+        .query_opt("maxResults", query.max_results.map(|n| n.to_string()));
+        for label in &query.label_ids {
+            call = call.query("labelIds", label.as_str());
         }
-        self.get("threads", &query).await
+        if query.include_spam_trash {
+            call = call.query("includeSpamTrash", "true");
+        }
+        self.json(call).await
     }
 
-    /// `users.threads.get`. With [`Format::Metadata`], `metadata_headers` limits the headers
+    /// `threads.get`. With [`Format::Metadata`], `headers` limits the headers
     /// returned (empty means all). Cost 40, or 120 with [`Format::Full`].
     pub async fn get_thread(
         &self,
-        id: &str,
+        priority: Priority,
+        id: &GmailThreadId,
         format: Format,
-        metadata_headers: &[&str],
+        headers: &[&str],
     ) -> Result<Thread, GmailError> {
-        let mut query = vec![("format", format.as_str())];
-        query.extend(
-            metadata_headers
-                .iter()
-                .map(|&header| ("metadataHeaders", header)),
-        );
-        self.get(&format!("threads/{id}"), &query).await
+        let mut call = Call::new(
+            "threads.get",
+            priority,
+            cost::threads_get(format),
+            Method::GET,
+            &["threads", id.as_str()],
+        )
+        .query("format", format.as_str());
+        for &header in headers {
+            call = call.query("metadataHeaders", header);
+        }
+        self.json(call).await
     }
 
-    /// `users.messages.get`. Cost 20, or 60 with [`Format::Full`] or [`Format::Raw`].
-    pub async fn get_message(&self, id: &str, format: Format) -> Result<Message, GmailError> {
-        self.get(&format!("messages/{id}"), &[("format", format.as_str())])
-            .await
+    /// `messages.get`. Cost 20, or 60 with [`Format::Full`] or [`Format::Raw`].
+    pub async fn get_message(
+        &self,
+        priority: Priority,
+        id: &GmailMessageId,
+        format: Format,
+    ) -> Result<Message, GmailError> {
+        let call = Call::new(
+            "messages.get",
+            priority,
+            cost::messages_get(format),
+            Method::GET,
+            &["messages", id.as_str()],
+        )
+        .query("format", format.as_str());
+        self.json(call).await
     }
 
-    /// `users.messages.get` with `format=metadata` and only the named headers. Cost 20.
+    /// `messages.get` with `format=metadata` and only the named headers.
+    /// Cost 20.
     pub async fn get_message_headers(
         &self,
-        id: &str,
+        priority: Priority,
+        id: &GmailMessageId,
         headers: &[&str],
     ) -> Result<Message, GmailError> {
-        let mut query = vec![("format", Format::Metadata.as_str())];
-        query.extend(headers.iter().map(|&header| ("metadataHeaders", header)));
-        self.get(&format!("messages/{id}"), &query).await
+        let mut call = Call::new(
+            "messages.get",
+            priority,
+            cost::messages_get(Format::Metadata),
+            Method::GET,
+            &["messages", id.as_str()],
+        )
+        .query("format", Format::Metadata.as_str());
+        for &header in headers {
+            call = call.query("metadataHeaders", header);
+        }
+        self.json(call).await
     }
 
-    /// `users.messages.send` from RFC 822 bytes, outside any draft. Cost 100.
-    pub async fn send_message(&self, raw_rfc822: &[u8]) -> Result<Message, GmailError> {
-        let body = json!({ "raw": URL_SAFE.encode(raw_rfc822) });
-        self.json(Method::POST, "messages/send", &[], Some(&body))
-            .await
+    /// `messages.batchModify`. One unknown id fails the whole call with
+    /// [`Outcome::NotFound`], without saying which. Cost 50.
+    pub async fn batch_modify(
+        &self,
+        priority: Priority,
+        ids: &[GmailMessageId],
+        add: &[LabelId],
+        remove: &[LabelId],
+    ) -> Result<(), GmailError> {
+        let call = Call::new(
+            "messages.batchModify",
+            priority,
+            cost::MESSAGES_BATCH_MODIFY,
+            Method::POST,
+            &["messages", "batchModify"],
+        )
+        .body(json!({ "ids": ids, "addLabelIds": add, "removeLabelIds": remove }));
+        self.empty(call).await
     }
 
-    /// `users.settings.filters.create`: mail from `from` (an address or
-    /// `@domain`) skips the Inbox and goes to Trash. Cost 5. Needs
-    /// [`crate::GMAIL_SETTINGS_SCOPE`].
-    pub async fn create_trash_filter(&self, from: &str) -> Result<Filter, GmailError> {
-        let body = json!({
-            "criteria": { "from": from },
-            "action": { "addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"] },
-        });
-        self.json(Method::POST, "settings/filters", &[], Some(&body))
-            .await
+    /// `messages.trash`. Cost 20.
+    pub async fn trash_message(
+        &self,
+        priority: Priority,
+        id: &GmailMessageId,
+    ) -> Result<Message, GmailError> {
+        let call = Call::new(
+            "messages.trash",
+            priority,
+            cost::MESSAGES_TRASH,
+            Method::POST,
+            &["messages", id.as_str(), "trash"],
+        );
+        self.json(call).await
     }
 
-    /// `users.settings.filters.list`. Cost 1.
-    pub async fn list_filters(&self) -> Result<Vec<Filter>, GmailError> {
-        let r: ListFiltersResponse = self.get("settings/filters", &[]).await?;
-        Ok(r.filter)
+    /// `messages.send` of RFC 822 bytes, outside any draft. Cost 100.
+    pub async fn send_message(
+        &self,
+        priority: Priority,
+        rfc822: &[u8],
+    ) -> Result<Message, GmailError> {
+        let call = Call::new(
+            "messages.send",
+            priority,
+            cost::MESSAGES_SEND,
+            Method::POST,
+            &["messages", "send"],
+        )
+        .body(json!({ "raw": URL_SAFE.encode(rfc822) }));
+        self.json(call).await
     }
 
-    /// `users.settings.filters.delete`. Cost 5.
-    pub async fn delete_filter(&self, id: &str) -> Result<(), GmailError> {
-        self.send(Method::DELETE, &format!("settings/filters/{id}"), &[], None)
-            .await?;
-        Ok(())
-    }
-
-    /// `users.messages.attachments.get`, decoded to bytes. Cost 20.
+    /// `messages.attachments.get`, decoded to bytes. Cost 20.
     pub async fn get_attachment(
         &self,
-        message_id: &str,
-        attachment_id: &str,
+        priority: Priority,
+        message: &GmailMessageId,
+        attachment: &GmailAttachmentId,
     ) -> Result<Vec<u8>, GmailError> {
-        let body: MessagePartBody = self
-            .get(
-                &format!("messages/{message_id}/attachments/{attachment_id}"),
-                &[],
-            )
-            .await?;
+        let call = Call::new(
+            "attachments.get",
+            priority,
+            cost::ATTACHMENTS_GET,
+            Method::GET,
+            &[
+                "messages",
+                message.as_str(),
+                "attachments",
+                attachment.as_str(),
+            ],
+        );
+        let body: PartBody = self.json(call).await?;
         BASE64URL_LENIENT
             .decode(body.data.unwrap_or_default())
             .map_err(|e| {
@@ -239,157 +415,235 @@ impl Gmail {
             })
     }
 
-    /// `users.messages.batchModify`. Cost 50. One unknown id fails the whole call with
-    /// [`Outcome::NotFound`] without saying which.
-    pub async fn batch_modify(
-        &self,
-        ids: &[String],
-        add_label_ids: &[String],
-        remove_label_ids: &[String],
-    ) -> Result<(), GmailError> {
-        let body = json!({
-            "ids": ids,
-            "addLabelIds": add_label_ids,
-            "removeLabelIds": remove_label_ids,
-        });
-        self.send(Method::POST, "messages/batchModify", &[], Some(&body))
-            .await?;
-        Ok(())
-    }
-
-    /// `users.messages.trash`. Cost 20.
-    pub async fn trash_message(&self, id: &str) -> Result<Message, GmailError> {
-        self.json(Method::POST, &format!("messages/{id}/trash"), &[], None)
-            .await
-    }
-
-    /// `users.drafts.list`, 500 a page. Cost 5.
+    /// `drafts.list`, 500 a page. Each draft's message has only its id and
+    /// thread id. Cost 5.
     pub async fn list_drafts(
         &self,
-        page_token: Option<&str>,
-    ) -> Result<ListDraftsResponse, GmailError> {
-        let mut query = vec![("maxResults", "500")];
-        query.extend(page_token.map(|token| ("pageToken", token)));
-        self.get("drafts", &query).await
+        priority: Priority,
+        page: Option<&PageToken>,
+    ) -> Result<DraftPage, GmailError> {
+        let call = Call::new(
+            "drafts.list",
+            priority,
+            cost::DRAFTS_LIST,
+            Method::GET,
+            &["drafts"],
+        )
+        .query("maxResults", "500")
+        .query_opt("pageToken", page.map(PageToken::as_str));
+        self.json(call).await
     }
 
-    /// `users.drafts.get`. Cost 20, or 60 with [`Format::Full`] or [`Format::Raw`].
-    pub async fn get_draft(&self, id: &str, format: Format) -> Result<Draft, GmailError> {
-        self.get(&format!("drafts/{id}"), &[("format", format.as_str())])
-            .await
+    /// `drafts.get`. Cost 20, or 60 with [`Format::Full`] or [`Format::Raw`].
+    pub async fn get_draft(
+        &self,
+        priority: Priority,
+        id: &GmailDraftId,
+        format: Format,
+    ) -> Result<Draft, GmailError> {
+        let call = Call::new(
+            "drafts.get",
+            priority,
+            cost::messages_get(format),
+            Method::GET,
+            &["drafts", id.as_str()],
+        )
+        .query("format", format.as_str());
+        self.json(call).await
     }
 
-    /// `users.drafts.create` from RFC 822 bytes. Cost 10. Not safe to repeat after
-    /// [`Outcome::NoResponse`] or a 5xx: see SPEC, Gmail errors.
+    /// `drafts.create` of RFC 822 bytes, in `thread` when given. Not safe to
+    /// repeat after no response or a 5xx: see SPEC Gmail errors. Cost 10.
     pub async fn create_draft(
         &self,
-        raw_rfc822: &[u8],
-        thread_id: Option<&str>,
+        priority: Priority,
+        rfc822: &[u8],
+        thread: Option<&GmailThreadId>,
     ) -> Result<Draft, GmailError> {
-        let body = json!({ "message": draft_message(raw_rfc822, thread_id) });
-        self.json(Method::POST, "drafts", &[], Some(&body)).await
+        let call = Call::new(
+            "drafts.create",
+            priority,
+            cost::DRAFTS_CREATE,
+            Method::POST,
+            &["drafts"],
+        )
+        .body(json!({ "message": draft_message(rfc822, thread) }));
+        self.json(call).await
     }
 
-    /// `users.drafts.update`: replaces the draft's message (its message id changes). Cost 15.
+    /// `drafts.update`: replaces the draft's message, whose id changes.
+    /// Cost 15.
     pub async fn update_draft(
         &self,
-        id: &str,
-        raw_rfc822: &[u8],
-        thread_id: Option<&str>,
+        priority: Priority,
+        id: &GmailDraftId,
+        rfc822: &[u8],
+        thread: Option<&GmailThreadId>,
     ) -> Result<Draft, GmailError> {
-        let body = json!({ "id": id, "message": draft_message(raw_rfc822, thread_id) });
-        self.json(Method::PUT, &format!("drafts/{id}"), &[], Some(&body))
-            .await
+        let call = Call::new(
+            "drafts.update",
+            priority,
+            cost::DRAFTS_UPDATE,
+            Method::PUT,
+            &["drafts", id.as_str()],
+        )
+        .body(json!({ "id": id, "message": draft_message(rfc822, thread) }));
+        self.json(call).await
     }
 
-    /// `users.drafts.send`. Returns the sent message. Cost 100. After
-    /// [`Outcome::NoResponse`] or a 5xx, settle with [`Gmail::get_draft`]: a 404 means sent.
-    pub async fn send_draft(&self, id: &str) -> Result<Message, GmailError> {
-        let body = json!({ "id": id });
-        self.json(Method::POST, "drafts/send", &[], Some(&body))
-            .await
-    }
-
-    /// `users.drafts.delete`. Cost 10.
-    pub async fn delete_draft(&self, id: &str) -> Result<(), GmailError> {
-        self.send(Method::DELETE, &format!("drafts/{id}"), &[], None)
-            .await?;
-        Ok(())
-    }
-
-    async fn get<T: DeserializeOwned>(
+    /// `drafts.send`: sends the draft and returns the sent message. After no
+    /// response or a 5xx, settle with [`Gmail::get_draft`]: a 404 means sent.
+    /// Cost 100.
+    pub async fn send_draft(
         &self,
-        path: &str,
-        query: &[(&str, &str)],
-    ) -> Result<T, GmailError> {
-        self.json(Method::GET, path, query, None).await
+        priority: Priority,
+        id: &GmailDraftId,
+    ) -> Result<Message, GmailError> {
+        let call = Call::new(
+            "drafts.send",
+            priority,
+            cost::DRAFTS_SEND,
+            Method::POST,
+            &["drafts", "send"],
+        )
+        .body(json!({ "id": id }));
+        self.json(call).await
     }
 
-    async fn json<T: DeserializeOwned>(
+    /// `drafts.delete`. Cost 10.
+    pub async fn delete_draft(
         &self,
-        method: Method,
-        path: &str,
-        query: &[(&str, &str)],
-        body: Option<&Value>,
-    ) -> Result<T, GmailError> {
-        let response = self.send(method, path, query, body).await?;
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|e| error::from_transport(&e))?;
-        // A 2xx whose body does not parse is no clear answer.
-        serde_json::from_slice(&bytes).map_err(|e| {
-            GmailError::with_detail(Outcome::NoResponse, format!("response body: {e}"))
-        })
+        priority: Priority,
+        id: &GmailDraftId,
+    ) -> Result<(), GmailError> {
+        let call = Call::new(
+            "drafts.delete",
+            priority,
+            cost::DRAFTS_DELETE,
+            Method::DELETE,
+            &["drafts", id.as_str()],
+        );
+        self.empty(call).await
     }
 
-    /// Sends one request, refreshing the token and retrying once on 401, and classifies
-    /// any non-2xx status.
-    async fn send(
-        &self,
-        method: Method,
-        path: &str,
-        query: &[(&str, &str)],
-        body: Option<&Value>,
-    ) -> Result<reqwest::Response, GmailError> {
-        let url = format!("{}/gmail/v1/users/me/{path}", self.base_url);
-        let token = self.tokens.access_token().await?;
-        let mut response = self.attempt(&method, &url, query, body, &token).await?;
-        if response.status() == StatusCode::UNAUTHORIZED {
-            let token = self.tokens.refresh_after_401(&token).await?;
-            response = self.attempt(&method, &url, query, body, &token).await?;
+    /// `settings.filters.list`. Needs [`crate::GMAIL_SETTINGS_SCOPE`]. Cost 1.
+    pub async fn list_filters(&self, priority: Priority) -> Result<Vec<Filter>, GmailError> {
+        #[derive(Deserialize)]
+        struct List {
+            #[serde(default)]
+            filter: Vec<Filter>,
         }
-        if response.status().is_success() {
-            Ok(response)
+        let call = Call::new(
+            "filters.list",
+            priority,
+            cost::FILTERS_LIST,
+            Method::GET,
+            &["settings", "filters"],
+        );
+        Ok(self.json::<List>(call).await?.filter)
+    }
+
+    /// `settings.filters.create`: mail from `from` (an address or `@domain`)
+    /// skips the Inbox and goes to Trash. Needs
+    /// [`crate::GMAIL_SETTINGS_SCOPE`]. Cost 5.
+    pub async fn create_trash_filter(
+        &self,
+        priority: Priority,
+        from: &str,
+    ) -> Result<Filter, GmailError> {
+        let call = Call::new(
+            "filters.create",
+            priority,
+            cost::FILTERS_CREATE,
+            Method::POST,
+            &["settings", "filters"],
+        )
+        .body(json!({
+            "criteria": { "from": from },
+            "action": { "addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"] },
+        }));
+        self.json(call).await
+    }
+
+    /// `settings.filters.delete`. Needs [`crate::GMAIL_SETTINGS_SCOPE`].
+    /// Cost 5.
+    pub async fn delete_filter(&self, priority: Priority, id: &FilterId) -> Result<(), GmailError> {
+        let call = Call::new(
+            "filters.delete",
+            priority,
+            cost::FILTERS_DELETE,
+            Method::DELETE,
+            &["settings", "filters", id.as_str()],
+        );
+        self.empty(call).await
+    }
+
+    async fn json<T: for<'de> Deserialize<'de>>(&self, call: Call<'_>) -> Result<T, GmailError> {
+        let api = call.api;
+        self.execute(call).await?.json(api)
+    }
+
+    async fn empty(&self, call: Call<'_>) -> Result<(), GmailError> {
+        self.execute(call).await.map(drop)
+    }
+
+    /// Runs a call in its own span, logging a failure.
+    async fn execute(&self, call: Call<'_>) -> Result<ReadResponse, GmailError> {
+        let span = tracing::debug_span!("gmail", api = call.api);
+        async {
+            let result = self.send_call(&call).await;
+            if let Err(err) = &result {
+                tracing::debug!(outcome = %err.outcome(), detail = err.detail(), "Gmail call failed");
+            }
+            result
+        }
+        .instrument(span)
+        .await
+    }
+
+    /// Waits for the scheduler, sends, refreshes the token and retries once
+    /// on a 401, and classifies a status that is not a success.
+    async fn send_call(&self, call: &Call<'_>) -> Result<ReadResponse, GmailError> {
+        let _permit = self.scheduler.acquire(call.priority, call.cost).await;
+        let url = format!("{}/{}", self.api, call.path);
+        let token = self.tokens.access_token().await?;
+        let mut response = self.attempt(call, &url, &token).await?;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            tracing::debug!("401; refreshing the access token");
+            let token = self.tokens.refresh_after_401(&token).await?;
+            response = self.attempt(call, &url, &token).await?;
+        }
+        let read = ReadResponse::read(response).await?;
+        if read.status.is_success() {
+            Ok(read)
         } else {
-            Err(ReadResponse::read(response).await?.to_error())
+            Err(read.to_error())
         }
     }
 
     async fn attempt(
         &self,
-        method: &Method,
+        call: &Call<'_>,
         url: &str,
-        query: &[(&str, &str)],
-        body: Option<&Value>,
-        token: &str,
+        token: &AccessToken,
     ) -> Result<reqwest::Response, GmailError> {
         let mut request = self
             .http
-            .request(method.clone(), url)
-            .bearer_auth(token)
-            .query(query);
-        if let Some(body) = body {
+            .inner()
+            .request(call.method.clone(), url)
+            .bearer_auth(token.secret())
+            .query(&call.query);
+        if let Some(body) = &call.body {
             request = request.json(body);
         }
-        request.send().await.map_err(|e| error::from_transport(&e))
+        http::send(request).await
     }
 }
 
-fn draft_message(raw_rfc822: &[u8], thread_id: Option<&str>) -> Value {
-    let mut message = json!({ "raw": URL_SAFE.encode(raw_rfc822) });
-    if let Some(thread_id) = thread_id {
-        message["threadId"] = json!(thread_id);
+fn draft_message(rfc822: &[u8], thread: Option<&GmailThreadId>) -> Value {
+    let mut message = json!({ "raw": URL_SAFE.encode(rfc822) });
+    if let Some(thread) = thread {
+        message["threadId"] = json!(thread);
     }
     message
 }

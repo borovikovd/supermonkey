@@ -1,0 +1,24 @@
+//! Why an action was rejected.
+
+use ub_domain::{ModifyError, RuleError};
+use ub_store::StoreError;
+
+/// Why the core rejected a UI action. A rejected action is logged and its
+/// writes roll back; `ack` still moves past it, so the mirror falls back to
+/// Rust's state (SPEC UI state, Actions).
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ActionError {
+    /// The database refused a read or write.
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    /// The action names something that does not exist, or asks for
+    /// something the core does not accept.
+    #[error("{0}")]
+    Invalid(&'static str),
+    /// A mail change that can't be made as asked.
+    #[error(transparent)]
+    Modify(#[from] ModifyError),
+    /// A split's rule doesn't parse.
+    #[error(transparent)]
+    Rule(#[from] RuleError),
+}

@@ -496,3 +496,53 @@ test("OFF-06 losing the network during replay leaves the rest queued", async ({ 
     [s.message("p3", 1).id],
   ]);
 });
+
+test("OFF-08 conversations opened offline read only the bodies still on screen when the network returns", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  // New threads whose bodies the background sync drops (a 400 is not retried).
+  const fullRead = { api: "threads.get", query: { format: "full" } } as const;
+  await gmail.fault(fullRead, { kind: "status", status: 400, reason: "invalidArgument" });
+  const subjects = ["Read 1", "Read 2", "Read 3", "Read 4", "Read 5", "Read 6"];
+  const delivered = await gmail.deliverMany(
+    subjects.map((subject, i) => ({
+      account: A,
+      from: "Lee Lane <lee@lane.test>",
+      subject,
+      text: `Body ${i + 1}.`,
+      labels: ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+    })),
+  );
+  await app.settle();
+  await gmail.clearFaults();
+  const keys = await Promise.all(subjects.map((subject) => app.rowKey(subject)));
+  const gmailIds = new Map(keys.map((key, i) => [key, delivered[i]?.threadId ?? ""]));
+
+  // Offline: every open and prefetch asks for bodies that can't be read yet.
+  await gmail.offline(true);
+  await app.row("Read 6").click();
+  await expect(app.conversationTitle).toHaveText("Read 6");
+  await ["j", "j", "j", "j", "k", "k", "k", "j", "j"].reduce(async (before, key) => {
+    await before;
+    await app.press(key);
+    await app.settle();
+  }, Promise.resolve());
+  const shown = Object.keys(
+    await app.page.evaluate<Record<string, string>>(`Object.fromEntries(
+      Object.entries(window.__ub.useMirror.getState().subs)
+        .filter(([, s]) => s.type === "conversation").map(([id, s]) => [String(s.key.thread), id]))`),
+  );
+  const needed = shown.flatMap((key) => gmailIds.get(key) ?? []);
+  expect(needed.length).toBeGreaterThan(0);
+  const since = await lastSeq(app);
+
+  await gmail.offline(false);
+  await app.settle();
+  const reads = (await gmail.requests("threads.get"))
+    .filter((r) => r.seq > since && r.params.format === "full")
+    .map((r) => r.path.split("/").at(-1) ?? "");
+  // One read per thread still on screen; none for those left behind.
+  expect(reads.toSorted()).toEqual(needed.toSorted());
+});

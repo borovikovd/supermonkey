@@ -259,16 +259,25 @@ The only section that changes from project to project.
   vp run <task>              # one step: test:rust, lint:rust, lint:ts, typecheck, bindings, e2e
   ```
 
-- **Layout.**
-  - `src-tauri/src`: the core.
-    - `writer/` is the single database writer.
-    - `subs/` pushes first loads and patches to the UI.
-    - `engine/` holds sync, the op queue, and the outbox.
-    - `ids.rs` holds the id newtypes.
-  - `src-tauri/crates`:
-    - `ub-gmail`: client, quota, scheduler, OAuth;
+- **Layout.** [ARCHITECTURE.md](ARCHITECTURE.md) has the design.
+  - `src-tauri/src`: the Tauri shell: setup, plugins, the window, the Tauri
+    `Platform`, and the commands, which call `ub-bridge`. Also the `e2e-server`
+    and `perf-fixture` binaries, thin `main`s over `ub-testkit`.
+  - `src-tauri/crates`, lowest layer first (`src-tauri/tests/layers.rs` checks
+    the edges):
+    - `ub-domain`: the id and unit newtypes (`ids.rs`), the mail model, view
+      membership, split routing, the search and rule language, snooze times;
     - `ub-mime`: parse, sanitize, build;
-    - `ub-rules`: pure rules;
+    - `ub-gmail`: the client, quota and scheduler, OAuth, the token store;
+    - `ub-store`: SQLite: the schema, the single writer, the read pool, the
+      repositories;
+    - `ub-ipc`: the types shared with the UI, generated into `src/bindings`;
+    - `ub-core`: the application: actions, queries, subscriptions (`subs/`),
+      the writer-side rules, and each account's workers (`workers/`: sync, the
+      op queue, the outbox, drafts);
+    - `ub-bridge`: one command dispatch for Tauri and the debug web bridge;
+    - `ub-testkit`: the E2E server and its `/__test` control API, demo mode,
+      the perf fixture;
     - `ub-fake-gmail`: the fake Gmail for tests and demo mode.
   - `src`: the UI.
     - `store/` holds the mirror and the chrome state.

@@ -1,0 +1,16 @@
+[package]
+name = "ub-ipc"
+version = "0.1.0"
+description = "The IPC contract: every type exported to TypeScript, and nothing else"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ub-domain = { path = "../ub-domain", features = ["ts"] }
+serde = { version = "1", features = ["derive"] }
+ts-rs = { version = "12", features = ["serde-json-impl"] }
+
+[lints]
+workspace = true

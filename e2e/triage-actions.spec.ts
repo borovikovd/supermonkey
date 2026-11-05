@@ -769,6 +769,8 @@ test("TRI-13 Cmd+A selects from the highlight to the end of its split; Cmd+Shift
   // Outside the Inbox it is the whole list, from the palette too. Esc clears it.
   await app.press("g", "e");
   await expect(app.rows.first()).toBeVisible();
+  // Done's Gmail listing merges its hits in after the first rows show.
+  await app.settle();
   await app.press("Meta+k");
   await app.type("Select all");
   await app.press("Enter");

@@ -1,0 +1,31 @@
+[package]
+name = "ub-domain"
+version = "0.1.0"
+description = "Ubermensch's mail model and rules: pure, with no I/O"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+# Date math only: no `clock` feature, so nothing here can read the time.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+rusqlite = { version = "0.40", optional = true }
+ts-rs = { version = "12", optional = true }
+
+[dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+chrono-tz = "0.10"
+# Only to check that `Query::to_fts5` output is valid FTS5 syntax.
+rusqlite = { version = "0.40", features = ["bundled"] }
+
+[features]
+# SQLite conversions for the newtypes, for ub-store.
+sqlite = ["dep:rusqlite"]
+# TypeScript bindings for the newtypes, for ub-ipc.
+ts = ["dep:ts-rs"]
+
+[lints]
+workspace = true
