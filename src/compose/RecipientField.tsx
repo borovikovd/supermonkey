@@ -137,7 +137,7 @@ export function RecipientField({
             data-chip={a.email}
             aria-invalid={bad || undefined}
             data-selected={selectedChip === i || undefined}
-            className={`group flex items-center gap-0.5 rounded-control px-1 ${
+            className={`group flex items-center gap-0.5 rounded-md px-1 ${
               bad ? "text-danger" : "text-link"
             } ${selectedChip === i ? "bg-accent-soft" : ""}`}
           >
@@ -161,7 +161,7 @@ export function RecipientField({
         aria-expanded={open}
         aria-controls={`${label}-suggestions`}
         aria-activedescendant={open ? `${label}-suggestion-${active}` : undefined}
-        className="min-w-[120px] flex-1 bg-transparent px-1 outline-none"
+        className="min-w-30 flex-1 bg-transparent px-1 outline-none"
         value={text}
         onChange={(e) => {
           const v = e.target.value;
@@ -249,7 +249,7 @@ export function RecipientField({
           // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- rich rows; native elements cannot render them
           role="listbox"
           id={`${label}-suggestions`}
-          className="fade-in absolute top-full left-20 z-20 mt-1 w-[420px] overflow-hidden rounded-sheet bg-bg py-1 shadow-float"
+          className="fade-in absolute top-full left-20 z-20 mt-1 w-menu overflow-hidden rounded-lg bg-bg py-1 shadow-float"
         >
           {suggestions.map((s, i) => (
             // oxlint-disable-next-line jsx-a11y/interactive-supports-focus -- see the listbox

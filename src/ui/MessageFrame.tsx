@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { getBodies, openUrlInCore } from "../ipc/bridge";
 import type { MessageBody } from "../ipc/types";
+import { frameTokens } from "./frameTokens";
 
 /** Bodies never change, so a loaded body is kept for the session. */
 const bodies = new Map<number, MessageBody>();
@@ -37,17 +38,17 @@ function loadBody(id: number): Promise<void> {
 
 const BASE_STYLE = `
 html,body{margin:0;padding:0;background:transparent}
-body{font:15px/26px -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;color:#141413;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased}
+body{font:15px/26px var(--font-sans);color:var(--color-text);overflow-wrap:anywhere;-webkit-font-smoothing:antialiased}
 body>:first-child{margin-top:0}
 body>:last-child{margin-bottom:0}
 img{max-width:100%;height:auto}
 table{max-width:100%}
-a{color:#4198D2}
-blockquote{margin:0 0 0 8px;padding-left:12px;border-left:2px solid #EDEBE5;color:#73716D}
-.ub-toggle{display:block;width:fit-content;margin:4px 0;color:#A3A09A;font-size:15px;line-height:15px;letter-spacing:2px;cursor:pointer;user-select:none}.ub-toggle:hover{color:#73716D}
+a{color:var(--color-link)}
+blockquote{margin:0 0 0 8px;padding-left:12px;border-left:2px solid var(--color-border-2);color:var(--color-text-2)}
+.ub-toggle{display:block;width:fit-content;margin:4px 0;color:var(--color-text-3);font-size:15px;line-height:15px;letter-spacing:2px;cursor:pointer;user-select:none}.ub-toggle:hover{color:var(--color-text-2)}
 .ub-quote{display:none}
 .ub-quote.ub-open{display:block}
-a.ub-link-focus{outline:2px solid #714CB6;outline-offset:2px;border-radius:2px}
+a.ub-link-focus{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:2px}
 `;
 
 function srcdoc(body: MessageBody, remoteImages: boolean, quoteOpen: boolean): string {
@@ -55,7 +56,7 @@ function srcdoc(body: MessageBody, remoteImages: boolean, quoteOpen: boolean): s
   const quote = body.quoteHtml
     ? `<div class="ub-toggle" data-ub-toggle>•••</div><div class="ub-quote${quoteOpen ? " ub-open" : ""}">${body.quoteHtml}</div>`
     : "";
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><style>${BASE_STYLE}</style></head><body>${body.html}${quote}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><style>${frameTokens()}${BASE_STYLE}</style></head><body>${body.html}${quote}</body></html>`;
 }
 
 /** An expanded message body in a sandboxed `srcdoc` iframe, sized to its content. */

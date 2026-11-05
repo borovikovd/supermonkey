@@ -74,12 +74,12 @@ const Row = memo(function Row({
       data-unread={row?.unread ? true : undefined}
       data-starred={row?.starred ? true : undefined}
     >
-      {highlighted && <span className="absolute top-0 bottom-0 left-0 w-[3px] bg-accent" />}
-      <span className="flex w-[5px] shrink-0 justify-center">
-        {row?.unread && <span className="h-[5px] w-[5px] rounded-full bg-unread" />}
+      {highlighted && <span className="absolute top-0 bottom-0 left-0 w-0.75 bg-accent" />}
+      <span className="flex w-1.25 shrink-0 justify-center">
+        {row?.unread && <span className="size-1.25 rounded-full bg-unread" />}
       </span>
       <span
-        className={`w-[180px] shrink-0 truncate ${row?.unread ? "font-semibold text-text" : "font-medium text-text-2"}`}
+        className={`w-sender shrink-0 truncate ${row?.unread ? "font-semibold text-text" : "font-medium text-text-2"}`}
       >
         {row ? row.sender || row.senderEmail : ""}
         {row && row.messageCount > 1 && (
@@ -88,7 +88,7 @@ const Row = memo(function Row({
       </span>
       <span className="flex min-w-0 flex-1 items-center gap-1 truncate">
         {row?.starred && (
-          <Star size={12} strokeWidth={1.5} className="shrink-0 fill-[#E8B339] text-[#E8B339]" />
+          <Star size={12} strokeWidth={1.5} className="shrink-0 fill-star text-star" />
         )}
         <span className="truncate text-text">
           <span>{row?.subject ? marked(row.subject, terms) : row ? "(no subject)" : ""}</span>

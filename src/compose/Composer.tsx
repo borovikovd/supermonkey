@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { act, addAttachment, later } from "../ipc/bridge";
 import type { Addr, DraftAttachment, DraftFields } from "../ipc/types";
 import { useChrome } from "../store/chrome";
+import { frameTokens } from "../ui/frameTokens";
 import { useAppState, useDraft } from "../store/hooks";
 import { RecipientField, formatAddr, isValidEmail, type RecipientHandle } from "./RecipientField";
 import {
@@ -55,7 +56,7 @@ function QuoteBlock({ html }: { html: string }) {
           title="quoted"
           sandbox="allow-same-origin"
           className="mt-2 w-full border-0"
-          srcDoc={`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="script-src 'none'"><style>body{margin:0;font:13px/20px -apple-system,sans-serif;color:#73716D}</style></head><body>${html}</body></html>`}
+          srcDoc={`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="script-src 'none'"><style>${frameTokens()}body{margin:0;font:13px/20px var(--font-sans);color:var(--color-text-2)}</style></head><body>${html}</body></html>`}
           onLoad={(e) => {
             const el = e.currentTarget;
             const doc = el.contentDocument;
@@ -109,10 +110,10 @@ function AttachmentList({
       {attachments.map((a) => (
         <span
           key={a.id}
-          className="flex items-center gap-1.5 rounded-control border border-border-2 px-2 py-1 text-row"
+          className="flex items-center gap-1.5 rounded-md border border-border-2 px-2 py-1 text-row"
         >
           <Paperclip size={12} strokeWidth={1.5} className="text-text-3" />
-          <span className="max-w-[220px] truncate">{a.filename}</span>
+          <span className="max-w-filename truncate">{a.filename}</span>
           <button
             tabIndex={-1}
             aria-label={`Remove ${a.filename}`}
@@ -127,10 +128,10 @@ function AttachmentList({
         <span
           key={`attaching-${a.key}`}
           aria-busy="true"
-          className="flex items-center gap-1.5 rounded-control border border-dashed border-border-2 px-2 py-1 text-row text-text-3"
+          className="flex items-center gap-1.5 rounded-md border border-dashed border-border-2 px-2 py-1 text-row text-text-3"
         >
           <Paperclip size={12} strokeWidth={1.5} />
-          <span className="max-w-[220px] truncate">{a.name}</span>
+          <span className="max-w-filename truncate">{a.name}</span>
         </span>
       ))}
     </div>
@@ -471,7 +472,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       <button
         tabIndex={-1}
         title="Cc and Bcc (⌘⇧C, ⌘⇧B)"
-        className="flex h-6 w-6 items-center justify-center rounded-control text-text-3 hover:bg-fill-half hover:text-text-2"
+        className="flex h-6 w-6 items-center justify-center rounded-md text-text-3 hover:bg-fill-half hover:text-text-2"
         onClick={() => {
           setShowCc(true);
           setShowBcc(true);
@@ -486,8 +487,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     <div
       ref={root}
       // A floating card, as Superhuman draws its composer.
-      className={`selectable flex flex-col rounded-[10px] bg-bg px-10 pt-4 pb-3 shadow-[0_6px_28px_rgb(20_20_19/0.09),0_0_0_1px_rgb(20_20_19/0.05)] ${
-        inline ? "-mx-10 mt-6 min-h-[220px]" : "min-h-[440px]"
+      className={`selectable flex flex-col rounded-xl bg-bg px-10 pt-4 pb-3 shadow-raised ${
+        inline ? "-mx-10 mt-6 min-h-composer-inline-min" : "min-h-composer-min"
       } ${blurred ? "opacity-95" : ""}`}
       onFocusCapture={() => useChrome.getState().set({ composeBlurred: false })}
     >
@@ -553,10 +554,10 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       <div className="relative pt-3">
         <EditorContent editor={editor} />
         {link !== null && (
-          <div className="absolute top-0 left-0 z-10 flex items-center gap-2 rounded-control bg-bg p-1 shadow-float">
+          <div className="absolute top-0 left-0 z-10 flex items-center gap-2 rounded-md bg-bg p-1 shadow-float">
             <input
               ref={linkRef}
-              className="w-72 rounded-control border border-border px-2 py-1 text-row outline-none"
+              className="w-72 rounded-md border border-border px-2 py-1 text-row outline-none"
               placeholder="https://"
               value={link}
               onChange={(e) => setLink(e.target.value)}

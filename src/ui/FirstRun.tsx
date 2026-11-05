@@ -11,7 +11,7 @@ export function FirstRun() {
       <div className="text-subject font-semibold">Ubermensch</div>
       <div className="text-row text-text-2">A fast, keyboard-first client for Gmail.</div>
       <button
-        className="mt-2 rounded-control bg-accent px-4 py-2 text-row font-medium text-white"
+        className="mt-2 rounded-md bg-accent px-4 py-2 text-row font-medium text-inverse"
         onClick={start}
       >
         Add a Gmail account

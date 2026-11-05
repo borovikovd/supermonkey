@@ -217,7 +217,7 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       {/* Wide: centered. Narrow: clear of the round header buttons. */}
-      <div className="mr-auto ml-[max(84px,calc((100%-768px)/2))] max-w-[768px] min-w-[520px] px-16 pt-2 pb-24">
+      <div className="mr-auto reading-column max-w-reading min-w-content-min px-16 pt-2 pb-24">
         <div className="mb-6 flex items-start gap-4">
           <h1 className="selectable flex-1 text-subject">{data.subject || "(no subject)"}</h1>
           <div className="flex h-8 shrink-0 items-center gap-1">
@@ -282,7 +282,7 @@ function Fold({ ids }: { ids: number[] }) {
 /** A send still in the outbox, shown at the end of its thread. */
 function PendingSend({ row }: { row: OutboxRow }) {
   return (
-    <div className="my-2 flex items-center gap-3 rounded-control bg-surface px-4 py-2 text-row">
+    <div className="my-2 flex items-center gap-3 rounded-md bg-surface px-4 py-2 text-row">
       <span className="font-medium">Me</span>
       <span className="truncate text-text-2">{row.snippet}</span>
       <span className="ml-auto text-hint text-accent">
@@ -297,7 +297,7 @@ function DraftStub({ draft }: { draft: DraftSummary }) {
   return (
     <button
       onClick={() => startReply("resumeDraft", draft.id)}
-      className="my-1 flex w-full items-center gap-3 rounded-control bg-surface px-4 py-2 text-left text-row hover:bg-fill-half"
+      className="my-1 flex w-full items-center gap-3 rounded-md bg-surface px-4 py-2 text-left text-row hover:bg-fill-half"
     >
       <File size={14} strokeWidth={1.5} className="text-danger" />
       <span className="font-medium text-danger">Draft</span>
@@ -328,7 +328,7 @@ function Action({
       title={title}
       aria-label={title}
       onClick={() => press(keyName)}
-      className="flex h-7 w-7 items-center justify-center rounded-control text-text-3 hover:bg-fill hover:text-text"
+      className="flex h-7 w-7 items-center justify-center rounded-md text-text-3 hover:bg-fill hover:text-text"
     >
       {children}
     </button>
@@ -339,15 +339,15 @@ function Action({
  * Every message block spans past the text column by the same amount, so the
  * text never moves when the selection raises a block into a card.
  */
-const BLOCK = "relative -mx-10 w-[calc(100%+5rem)] px-10";
+const BLOCK = "relative bleed-x px-10";
 /** A one-line block: a collapsed message or a fold. */
 const ROW = `${BLOCK} flex h-12 items-center gap-3 text-left text-body hover:bg-fill-half`;
 /** The selected message: a white card with a soft shadow. */
-const CARD = "rounded-[4px] bg-bg shadow-card hover:bg-bg";
+const CARD = "rounded-sm bg-bg shadow-card hover:bg-bg";
 
 /** The selected message's light accent edge. */
 const Edge = () => (
-  <span className="absolute inset-y-0 left-0 w-[3px] rounded-l-[4px] bg-accent-edge" />
+  <span className="absolute inset-y-0 left-0 w-0.75 rounded-l-sm bg-accent-edge" />
 );
 
 function Message({
@@ -377,7 +377,7 @@ function Message({
       >
         {selected && <Edge />}
         <span
-          className={`w-[160px] shrink-0 truncate ${m.unread ? "font-semibold" : "font-medium text-text-2"}`}
+          className={`w-sender-narrow shrink-0 truncate ${m.unread ? "font-semibold" : "font-medium text-text-2"}`}
         >
           {name(m.from, own)}
         </span>
@@ -433,10 +433,10 @@ function Attachments({ files }: { files: AttachmentInfo[] }) {
         <button
           key={a.id}
           onClick={() => void openAttachment(a.id)}
-          className="flex items-center gap-2 rounded-control border border-border px-2 py-1 text-row hover:bg-fill-half"
+          className="flex items-center gap-2 rounded-md border border-border px-2 py-1 text-row hover:bg-fill-half"
         >
           <Paperclip size={12} strokeWidth={1.5} className="text-text-3" />
-          <span className="max-w-[200px] truncate">{a.filename}</span>
+          <span className="max-w-filename truncate">{a.filename}</span>
           <span className="text-hint text-text-3">{Math.max(1, Math.round(a.size / 1024))} KB</span>
         </button>
       ))}

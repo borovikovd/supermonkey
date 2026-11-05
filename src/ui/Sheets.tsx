@@ -85,7 +85,7 @@ function Sheet({
     // The backdrop closes on a click outside the sheet; Esc closes from the keyboard.
     <div
       role="presentation"
-      className="fixed inset-0 z-30 bg-black/10"
+      className="fixed inset-0 z-30 bg-scrim"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) closeSheet();
       }}
@@ -94,9 +94,9 @@ function Sheet({
         open
         aria-modal="true"
         aria-label={title}
-        className={`fade-in absolute top-16 left-1/2 m-0 max-h-[80vh] -translate-x-1/2 overflow-y-auto rounded-sheet border-0 bg-bg px-8 py-5 text-text shadow-float ${wide ? "w-[760px]" : "w-[550px]"}`}
+        className={`fade-in absolute top-16 left-1/2 m-0 max-h-sheet-max -translate-x-1/2 overflow-y-auto rounded-lg border-0 bg-bg px-8 py-5 text-text shadow-float ${wide ? "w-sheet-wide" : "w-sheet"}`}
       >
-        <div className="mb-4 text-[15px] font-semibold">{title}</div>
+        <div className="mb-4 text-title font-semibold">{title}</div>
         {children}
       </dialog>
     </div>
@@ -116,7 +116,7 @@ function Shortcuts() {
                 className="flex min-h-7 items-center justify-between gap-3 border-b border-border-2 py-1 text-row"
               >
                 <span className="text-text-2">{d}</span>
-                <kbd className="shrink-0 rounded-[4px] bg-fill px-1.5 text-hint font-medium text-text-2">
+                <kbd className="shrink-0 rounded-sm bg-fill px-1.5 text-hint font-medium text-text-2">
                   {k}
                 </kbd>
               </div>
@@ -146,7 +146,7 @@ function Toggle({
       className={`relative h-5 w-9 rounded-full transition-colors ${on ? "bg-accent" : "bg-border"}`}
     >
       <span
-        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${on ? "left-[18px]" : "left-0.5"}`}
+        className={`absolute top-0.5 h-4 w-4 rounded-full bg-bg transition-all ${on ? "left-4.5" : "left-0.5"}`}
       />
     </button>
   );
@@ -172,7 +172,7 @@ function AccountBlock({ a }: { a: AccountInfo }) {
       </div>
       <div className="flex flex-wrap gap-2 pt-2">
         <button
-          className="rounded-control border border-border px-2 py-1 text-row hover:bg-fill-half"
+          className="rounded-md border border-border px-2 py-1 text-row hover:bg-fill-half"
           onClick={() => {
             useChrome.getState().setAccount(a.id);
             useChrome.getState().set({ sheet: "splits" });
@@ -182,7 +182,7 @@ function AccountBlock({ a }: { a: AccountInfo }) {
         </button>
         {a.needsSignin && (
           <button
-            className="rounded-control bg-accent px-2 py-1 text-row text-white"
+            className="rounded-md bg-accent px-2 py-1 text-row text-inverse"
             onClick={() => reportSignIn(signInAgain(a.id))}
           >
             Sign in again
@@ -190,7 +190,7 @@ function AccountBlock({ a }: { a: AccountInfo }) {
         )}
         {!confirm ? (
           <button
-            className="rounded-control px-2 py-1 text-row text-danger hover:bg-fill-half"
+            className="rounded-md px-2 py-1 text-row text-danger hover:bg-fill-half"
             onClick={() => setConfirm(true)}
           >
             Remove account
@@ -203,7 +203,7 @@ function AccountBlock({ a }: { a: AccountInfo }) {
                 ` ${queued} queued actions and ${sends} sends will be lost.`}
             </span>
             <button
-              className="rounded-control bg-danger px-2 py-1 text-white"
+              className="rounded-md bg-danger px-2 py-1 text-inverse"
               onClick={() => act({ type: "removeAccount", account: a.id })}
             >
               Remove
@@ -306,13 +306,13 @@ function Splits() {
             </button>
           </div>
           <input
-            className="w-28 rounded-control border border-border px-1.5 py-0.5"
+            className="w-28 rounded-md border border-border px-1.5 py-0.5"
             value={s.name}
             onChange={(e) => update(i, { name: e.target.value })}
           />
           {s.kind === "custom" ? (
             <input
-              className="flex-1 rounded-control border border-border px-1.5 py-0.5 font-mono text-[12px]"
+              className="flex-1 rounded-md border border-border px-1.5 py-0.5 font-mono text-code"
               value={s.query}
               placeholder="from:boss@acme.com OR label:Receipts"
               onChange={(e) => update(i, { query: e.target.value })}
@@ -352,7 +352,7 @@ function Splits() {
       ))}
       <div className="mt-3 flex flex-wrap gap-2">
         <button
-          className="rounded-control border border-border px-2 py-1 text-row"
+          className="rounded-md border border-border px-2 py-1 text-row"
           onClick={() => add("New split", "")}
         >
           Add split
@@ -360,7 +360,7 @@ function Splits() {
         {STARTERS.filter(([n]) => !rows.some((r) => r.name === n)).map(([n, q]) => (
           <button
             key={n}
-            className="rounded-control border border-border px-2 py-1 text-row text-text-2"
+            className="rounded-md border border-border px-2 py-1 text-row text-text-2"
             onClick={() => add(n, q)}
           >
             + {n}
@@ -368,7 +368,7 @@ function Splits() {
         ))}
         <div className="flex-1" />
         <button
-          className="rounded-control bg-accent px-3 py-1 text-row text-white"
+          className="rounded-md bg-accent px-3 py-1 text-row text-inverse"
           onClick={() => {
             act({ type: "saveSplits", account, splits: rows, deleted });
             closeSheet();

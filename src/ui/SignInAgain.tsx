@@ -22,7 +22,7 @@ export function SignInAgain({ account, email }: { account: number; email: string
         sync its mail. Anything you sent or changed meanwhile goes out once you are back.
       </div>
       <button
-        className="mt-2 rounded-control bg-accent px-4 py-2 text-row font-medium text-white"
+        className="mt-2 rounded-md bg-accent px-4 py-2 text-row font-medium text-inverse"
         onClick={start}
       >
         Sign in with Google

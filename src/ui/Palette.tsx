@@ -62,7 +62,7 @@ function Chip({ keys }: { keys: string }) {
       {keys.split(" ").map((k) => (
         <kbd
           key={k}
-          className="rounded-[4px] bg-[#3a3835] px-1.5 text-hint font-medium text-palette-text-2"
+          className="rounded-sm bg-palette-key px-1.5 text-hint font-medium text-palette-text-2"
         >
           {k}
         </kbd>
@@ -478,7 +478,7 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
         open
         aria-modal="true"
         aria-label={placeholder}
-        className="fade-in absolute top-[33%] left-1/2 m-0 w-[680px] -translate-x-1/2 -translate-y-1/3 overflow-hidden rounded-sheet border-0 bg-palette-bg p-0 text-palette-text shadow-float"
+        className="fade-in absolute top-1/3 left-1/2 m-0 w-palette -translate-x-1/2 -translate-y-1/3 overflow-hidden rounded-lg border-0 bg-palette-bg p-0 text-palette-text shadow-float"
       >
         <Command
           shouldFilter={!fromRust}
@@ -507,9 +507,9 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
             value={query}
             onValueChange={setQuery}
             placeholder={placeholder}
-            className="h-12 w-full border-b border-[#33312e] bg-transparent px-4 text-[15px] text-palette-text outline-none placeholder:text-palette-text-2"
+            className="h-12 w-full border-b border-palette-hi bg-transparent px-4 text-title text-palette-text outline-none placeholder:text-palette-text-2"
           />
-          <Command.List className="max-h-[288px] overflow-y-auto py-1">
+          <Command.List className="max-h-palette-list overflow-y-auto py-1">
             <Command.Empty className="px-4 py-2 text-row text-palette-text-2">
               No results
             </Command.Empty>
@@ -530,7 +530,7 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
                     start,
                   );
                 }}
-                className="mx-1 flex h-row cursor-default items-center justify-between rounded-control px-3 text-row"
+                className="mx-1 flex h-row cursor-default items-center justify-between rounded-md px-3 text-row"
               >
                 <span className="truncate">{it.label}</span>
                 {it.keys && <Chip keys={it.keys} />}

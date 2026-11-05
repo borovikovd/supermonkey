@@ -19,7 +19,7 @@ export function SearchTips() {
   return (
     <aside
       aria-label="Search tips"
-      className="hidden w-[260px] shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-2 px-6 py-4 lg:flex"
+      className="hidden w-tips shrink-0 flex-col gap-4 overflow-y-auto border-l border-border-2 px-6 py-4 lg:flex"
     >
       <h2 className="text-row font-semibold text-text">Tips</h2>
       <dl className="flex flex-col gap-3">

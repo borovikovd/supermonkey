@@ -52,11 +52,11 @@ export function App() {
         <AccountSubs key={a.id} account={a.id} />
       ))}
       {/* The traffic lights sit in this strip; content starts below it. */}
-      <div data-tauri-drag-region className="h-[34px] shrink-0" />
+      <div data-tauri-drag-region className="h-titlebar shrink-0" />
       <div className="flex min-h-0 flex-1">
         <Rail accounts={app.accounts} />
         {/* The white panel on the off-white canvas, as in Superhuman. */}
-        <div className="relative mr-2 mb-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-border-2 bg-bg shadow-[0_1px_2px_rgb(20_20_19/0.04)]">
+        <div className="relative mr-2 mb-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border-2 bg-bg shadow-panel">
           {signedOut && screen?.kind !== "compose" ? (
             // A composer already open stays, so nothing typed is lost.
             <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">

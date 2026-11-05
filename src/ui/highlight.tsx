@@ -26,7 +26,7 @@ export function marked(text: string, terms: readonly string[]): React.ReactNode 
     const at = start;
     start += part.length;
     return i % 2 === 1 ? (
-      <mark key={at} className="rounded-[2px] bg-match text-inherit">
+      <mark key={at} className="rounded-xs bg-match text-inherit">
         {part}
       </mark>
     ) : (

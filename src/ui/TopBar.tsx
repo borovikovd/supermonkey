@@ -42,7 +42,7 @@ function SearchField() {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3" data-tauri-drag-region="false">
       {search.focus === "field" && (
-        <span className="absolute top-0 bottom-0 left-0 w-[3px] bg-accent" />
+        <span className="absolute top-0 bottom-0 left-0 w-0.75 bg-accent" />
       )}
       <input
         ref={ref}
@@ -50,7 +50,7 @@ function SearchField() {
         // oxlint-disable-next-line jsx-a11y/no-autofocus
         autoFocus
         aria-label="Search"
-        className="ml-[13px] min-w-0 flex-1 bg-transparent text-search text-text outline-none placeholder:text-text-3"
+        className="ml-3.25 min-w-0 flex-1 bg-transparent text-search text-text outline-none placeholder:text-text-3"
         placeholder="Search"
         value={search.query}
         onChange={(e) => {
@@ -207,7 +207,7 @@ function IconButton({
     <button
       title={title}
       onClick={onClick}
-      className={`flex h-7 w-7 items-center justify-center text-text-2 hover:bg-fill hover:text-text ${round ? "rounded-full" : "rounded-control"}`}
+      className={`flex h-7 w-7 items-center justify-center text-text-2 hover:bg-fill hover:text-text ${round ? "rounded-full" : "rounded-md"}`}
     >
       {children}
     </button>

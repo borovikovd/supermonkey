@@ -290,6 +290,11 @@ The only section that changes from project to project.
   - The harness: `e2e/app.ts` (page helpers), `e2e/control.ts` (the fake's control
     API, including faults and held replies), and `e2e/seeds.ts`.
   - Time moves with `app.advance()`; tests wait with `app.settle()`.
+- **Design tokens.** `src/theme.css` holds every color, text size, radius,
+  shadow, font, and fixed width. Tailwind's own values are switched off, so
+  components can only use these. `e2e/tokens.spec.ts` fails on color literals
+  and one-off `[…]` values in `src`. Message frames get the colors they need
+  from `src/ui/frameTokens.ts`.
 - **Releases.** `.github/workflows/release.yml` keeps a "release X.Y.Z" pull
   request open on `main`; merging it tags the version, builds the universal macOS
   `.dmg`, and publishes the GitHub Release with notes from the commits. Only the

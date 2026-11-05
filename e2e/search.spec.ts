@@ -402,9 +402,7 @@ test("SRC-09 search takes the header as in Superhuman, marks matches, and lists 
       .first()
       .evaluate((el) => Math.round(el.getBoundingClientRect().left));
   expect(
-    Math.abs(
-      (await left("input[placeholder=Search]")) - (await left("[role=option] .w-\\[180px\\]")),
-    ),
+    Math.abs((await left("input[placeholder=Search]")) - (await left("[role=option] .w-sender"))),
   ).toBeLessThanOrEqual(1);
   await expect(field(app)).toHaveCSS("font-size", "16px");
   await expect(app.page.getByText("Enter to see results")).toBeVisible();
