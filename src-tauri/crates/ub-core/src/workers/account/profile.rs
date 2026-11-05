@@ -35,8 +35,8 @@ pub(crate) async fn refresh_send_as(ctx: &AccountCtx) -> Result<(), GmailError> 
     ctx.writer().queue(
         WritePriority::Sync,
         "store sendAs addresses",
-        move |tx, _| {
-            if !lane.send_as_reads.store(read) {
+        move |tx, state| {
+            if !lane.send_as_reads.store(read, state) {
                 return Ok(());
             }
             let Some(record) = tx.read().accounts().get(account)? else {
@@ -72,9 +72,12 @@ pub(crate) async fn refresh_labels(ctx: &AccountCtx) -> Result<(), GmailError> {
         })
         .collect();
     let account = ctx.account;
-    ctx.writer()
-        .queue(WritePriority::Sync, "store the label list", move |tx, _| {
-            if !lane.label_reads.store(read) || tx.read().accounts().get(account)?.is_none() {
+    ctx.writer().queue(
+        WritePriority::Sync,
+        "store the label list",
+        move |tx, state| {
+            if !lane.label_reads.store(read, state) || tx.read().accounts().get(account)?.is_none()
+            {
                 return Ok(());
             }
             let all = tx.read().labels().all(account)?;
@@ -105,6 +108,7 @@ pub(crate) async fn refresh_labels(ctx: &AccountCtx) -> Result<(), GmailError> {
                 tx.labels().sync_from_gmail(account, &labels)?;
             }
             Ok::<_, StoreError>(())
-        });
+        },
+    );
     Ok(())
 }

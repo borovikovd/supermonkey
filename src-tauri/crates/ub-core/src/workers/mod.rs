@@ -25,6 +25,8 @@ mod search;
 pub(crate) mod snooze;
 pub(crate) mod unwanted;
 
+#[cfg(test)]
+pub(crate) use account::Freshness;
 pub(crate) use account::{AccountWorker, ReadMessage, WorkerDeps, store_draft_message};
 pub(crate) use attachments::open_attachment;
 pub(crate) use files::safe_name;

@@ -23,6 +23,7 @@ use ub_ipc::{
 use ub_store::{NewMessage, Pending, Priority, ReadPool, StoreError};
 
 use super::{Harness, NEWEST, eventually, seed};
+use crate::workers::Freshness;
 
 #[derive(Debug, Clone)]
 enum Op {
@@ -553,6 +554,57 @@ async fn a_search_opened_in_a_failed_batch_still_settles() {
         })
     };
     eventually("the search stops searching", settled).await;
+}
+
+/// Two reads of the labels answer out of order. The newer one's store rolls
+/// back: its answer was never stored, so the older one's, stored next, must
+/// not be dropped as stale.
+#[tokio::test]
+async fn a_read_stored_in_a_job_that_rolled_back_is_not_the_newest() {
+    let h = Harness::start().await;
+    let reads = Arc::new(Freshness::default());
+    let (older, newer) = (reads.start(), reads.start());
+    let failing = Arc::clone(&reads);
+    let failed = h
+        .app
+        .writer()
+        .call(Priority::Sync, move |tx, state| {
+            assert!(failing.store(newer, state), "the newer read stores first");
+            tx.fail_commit();
+            Ok::<_, StoreError>(())
+        })
+        .await;
+    assert!(failed.is_err(), "the commit failed");
+    let late = Arc::clone(&reads);
+    let stored = h
+        .app
+        .writer()
+        .call(Priority::Sync, move |_, state| {
+            Ok::<_, StoreError>(late.store(older, state))
+        })
+        .await
+        .unwrap();
+    assert!(stored, "the older read's answer is the newest stored");
+    // A later job that rolls back leaves the committed store alone.
+    let failed = h
+        .app
+        .writer()
+        .call(Priority::Sync, |tx, _| {
+            tx.fail_commit();
+            Ok::<_, StoreError>(())
+        })
+        .await;
+    assert!(failed.is_err(), "the commit failed");
+    let again = Arc::clone(&reads);
+    let stored = h
+        .app
+        .writer()
+        .call(Priority::Sync, move |_, state| {
+            Ok::<_, StoreError>(again.store(older, state))
+        })
+        .await
+        .unwrap();
+    assert!(!stored, "the older read is stored already");
 }
 
 /// A commit whose updates can't be sent (the sink panicked) still releases

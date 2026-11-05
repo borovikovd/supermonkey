@@ -25,6 +25,9 @@ pub(crate) struct WriterState {
     /// The running job's activity, held until its channel messages and
     /// effects are out.
     held: Vec<Busy>,
+    /// Undoes what the running job changed outside the database, if it
+    /// rolls back.
+    undo: Vec<Box<dyn FnOnce() + Send>>,
     activity: Arc<Activity>,
     router: EffectSender,
     sink: Option<ChannelSink>,
@@ -51,6 +54,7 @@ impl WriterState {
             subs: Registry::default(),
             effects: Vec::new(),
             held: Vec::new(),
+            undo: Vec::new(),
             activity,
             router,
             sink: None,
@@ -113,6 +117,12 @@ impl WriterState {
         self.sink = Some(sink);
     }
 
+    /// Runs `undo` if the running job rolls back: it changed something
+    /// outside the database that must go back with it.
+    pub(crate) fn undo_on_rollback(&mut self, undo: impl FnOnce() + Send + 'static) {
+        self.undo.push(Box::new(undo));
+    }
+
     /// Keeps the running job busy until its commit's messages and effects are out.
     pub(crate) fn hold(&mut self, busy: Busy) {
         self.held.push(busy);
@@ -135,6 +145,7 @@ impl WriterState {
     pub(crate) fn release(&mut self) {
         let effects = std::mem::take(&mut self.effects);
         self.send_effects(effects.into_iter().map(|recorded| recorded.effect));
+        self.undo.clear();
         self.held.clear();
     }
 
@@ -148,6 +159,9 @@ impl WriterState {
                 .filter(|recorded| recorded.survives_rollback)
                 .map(|recorded| recorded.effect),
         );
+        for undo in self.undo.drain(..).rev() {
+            undo();
+        }
         self.held.clear();
     }
 
