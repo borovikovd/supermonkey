@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.0](https://github.com/borovikovd/ubermensch/compare/v0.4.0...v0.5.0) (2026-11-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* local data starts over. After updating, sign in to your accounts again; mail syncs back from Gmail.
+
+### Refactoring
+
+* rewrite the Rust core ([cbff0f6](https://github.com/borovikovd/ubermensch/commit/cbff0f6449386ee350b7a05b6e6fe374912b6961))
+
 ## [0.4.0](https://github.com/borovikovd/ubermensch/compare/v0.3.0...v0.4.0) (2026-11-04)
 
 
