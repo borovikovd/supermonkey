@@ -13,7 +13,10 @@
 //!
 //! The bridge serves real mail in a debug app, so it answers only requests
 //! addressed to a loopback host (no DNS rebinding) from its own origin or
-//! the Vite dev server's: any other page in the browser gets `403`.
+//! the Vite dev server's: any other page in the browser gets `403`. That
+//! includes a page's `<img>` or `<script>` pointed at `/events`, which sends
+//! no `Origin` but a `Sec-Fetch-Site` that is not `same-origin`: opening the
+//! stream would take the channel from the app's page.
 
 use std::convert::Infallible;
 use std::pin::Pin;
@@ -150,10 +153,16 @@ pub async fn serve_local(bridge: WebBridge) -> std::io::Result<()> {
     axum::serve(listener, bridge.router()).await
 }
 
+/// The browser's word on who made a request: `same-origin`, `same-site`,
+/// `cross-site`, or `none` (typed in the address bar). Tools send none.
+const SEC_FETCH_SITE: HeaderName = HeaderName::from_static("sec-fetch-site");
+
 /// Whether a request may reach the bridge: addressed to a loopback host,
-/// and from no page (`curl`, a same-origin `EventSource`), the bridge's own
-/// origin, or the dev server's.
-fn is_allowed(host: Option<&str>, origin: Option<&str>) -> bool {
+/// and from no page (`curl`), the bridge's own page (a same-origin
+/// `EventSource`, which sends no `Origin`), the bridge's own origin, or the
+/// dev server's. A request with no `Origin` that the browser says another
+/// page made (`Sec-Fetch-Site`) is refused.
+fn is_allowed(host: Option<&str>, origin: Option<&str>, fetch_site: Option<&str>) -> bool {
     let Some(host) = host else {
         return false;
     };
@@ -161,9 +170,12 @@ fn is_allowed(host: Option<&str>, origin: Option<&str>) -> bool {
     if !matches!(name, "127.0.0.1" | "localhost") {
         return false;
     }
-    origin.is_none_or(|origin| {
-        DEV_ORIGINS.contains(&origin) || origin.strip_prefix("http://") == Some(host)
-    })
+    match origin {
+        Some(origin) => {
+            DEV_ORIGINS.contains(&origin) || origin.strip_prefix("http://") == Some(host)
+        }
+        None => fetch_site.is_none_or(|site| matches!(site, "same-origin" | "none")),
+    }
 }
 
 /// Refuses requests [`is_allowed`] does not let in, and answers the dev
@@ -171,7 +183,8 @@ fn is_allowed(host: Option<&str>, origin: Option<&str>) -> bool {
 async fn local_only(request: Request, next: Next) -> Response {
     let headers = request.headers();
     let (host, origin) = (header(headers, HOST), header(headers, ORIGIN));
-    if !is_allowed(host.as_deref(), origin.as_deref()) {
+    let fetch_site = header(headers, SEC_FETCH_SITE);
+    if !is_allowed(host.as_deref(), origin.as_deref(), fetch_site.as_deref()) {
         tracing::warn!("the web bridge refused a request from another page or host");
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -307,33 +320,55 @@ mod tests {
         // The dev server's page, and the E2E server's page on its own origin.
         assert!(is_allowed(
             Some("127.0.0.1:1430"),
-            Some("http://localhost:5173")
+            Some("http://localhost:5173"),
+            None
         ));
         assert!(is_allowed(
             Some("127.0.0.1:1430"),
-            Some("http://127.0.0.1:5173")
+            Some("http://127.0.0.1:5173"),
+            None
         ));
         assert!(is_allowed(
             Some("127.0.0.1:41234"),
-            Some("http://127.0.0.1:41234")
+            Some("http://127.0.0.1:41234"),
+            None
         ));
-        assert!(is_allowed(Some("localhost:1430"), None));
+        assert!(is_allowed(Some("localhost:1430"), None, None));
         // Any other page in the browser.
         assert!(!is_allowed(
             Some("127.0.0.1:1430"),
-            Some("https://evil.test")
+            Some("https://evil.test"),
+            None
         ));
         assert!(!is_allowed(
             Some("127.0.0.1:1430"),
-            Some("http://127.0.0.1:9999")
+            Some("http://127.0.0.1:9999"),
+            None
         ));
-        assert!(!is_allowed(Some("127.0.0.1:1430"), Some("null")));
+        assert!(!is_allowed(Some("127.0.0.1:1430"), Some("null"), None));
         // DNS rebinding: a hostile name that resolves to 127.0.0.1.
-        assert!(!is_allowed(Some("evil.test:1430"), None));
+        assert!(!is_allowed(Some("evil.test:1430"), None, None));
         assert!(!is_allowed(
             Some("evil.test:1430"),
-            Some("http://evil.test:1430")
+            Some("http://evil.test:1430"),
+            None
         ));
-        assert!(!is_allowed(None, None));
+        assert!(!is_allowed(None, None, None));
+        // The bridge's own page: a same-origin `EventSource` sends no
+        // `Origin`, and its browser says so.
+        assert!(is_allowed(
+            Some("127.0.0.1:41234"),
+            None,
+            Some("same-origin")
+        ));
+        assert!(is_allowed(Some("127.0.0.1:1430"), None, Some("none")));
+        // Another page's `<img src=…/events>`: no `Origin`, but the browser
+        // says another page made it.
+        assert!(!is_allowed(
+            Some("127.0.0.1:1430"),
+            None,
+            Some("cross-site")
+        ));
+        assert!(!is_allowed(Some("localhost:1430"), None, Some("same-site")));
     }
 }

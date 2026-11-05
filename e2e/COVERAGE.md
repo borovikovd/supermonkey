@@ -302,10 +302,10 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `notifications.spec.ts`    | NOT    | when to notify, summary, mute, Dock badge, click                                             | `standard`                               | H17, H18                    | 6       | 5       | 1      | 0      |
 | `settings.spec.ts`         | SET    | the sheet, remote images                                                                     | `standard`                               | H15, H20                    | 4       | 1       | 2      | 1      |
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
-| `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
+| `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 5       | 3       | 2      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **249** | **147** | **92** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **250** | **147** | **93** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -3368,6 +3368,15 @@ _EG · §Security_
   - Every request in the fake's log came from the core: no `Origin` header, and no browser user agent.
   - `inspect.dbContains(token)` is false.
 
+#### SEC-05 · P2 · Another page cannot take the app's channel from the core
+
+_EG · AGENTS.md (debug-only servers), ARCHITECTURE.md (the web bridge)_
+
+- **Seed:** `standard`.
+- **Steps:** in a second tab, load a page on `evil.test` whose `<img>` points at the bridge's `/events`. Close it. Then press `e` on `p1` in the app and `settle()`.
+- **Expect:** the `/events` request gets 403; the app's page still applies every commit, and `p1` leaves the list.
+- **Why:** a cross-site `<img>` sends no `Origin`, which the bridge let in as if a tool had sent it. Opening `/events` takes the channel from the page before, so any page in the browser could cut the debug app's UI off from the core.
+
 ### 5.24 `ui-consistency.spec.ts` (UIC)
 
 #### UIC-01 · P1 · Rows you just acted on never flash back during fast triage or a poll
@@ -3633,7 +3642,7 @@ Also kept, because they test logic the E2E suite can't observe:
 - `crates/ub-core/src/tests/writer_channel.rs` (also): `ack` never moves back when a batch queued behind a failed one commits first.
 - `crates/ub-core/src/tests/writer_channel.rs` (also): a search opened in a batch whose commit fails still gets its Gmail listing and stops searching (E2E can't make a commit fail).
 - `crates/ub-core/src/tests/writer_channel.rs` (also): a labels or `sendAs` answer whose store rolled back does not make an older read's answer stale, and a later rollback leaves a committed store alone (E2E can't make a commit fail).
-- `crates/ub-bridge/src/web.rs`: the debug web bridge answers only loopback hosts and its own or the dev server's origin (the E2E page is always same-origin).
+- `crates/ub-bridge/src/web.rs`: the debug web bridge answers only loopback hosts and its own or the dev server's origin, and refuses a request with no `Origin` that the browser marks as from another site or page (the E2E page is always same-origin; SEC-05 covers the cross-site `<img>`).
 - `crates/ub-core/src/tests/perf.rs` (ignored; needs `UBERMENSCH_PERF_DB`): local search and autocomplete per keystroke against SPEC Performance on the perf fixture.
 - `tests/layers.rs`: the crate layering of ARCHITECTURE.md, section 3.
 
