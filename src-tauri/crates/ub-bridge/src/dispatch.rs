@@ -19,12 +19,6 @@ pub enum Reply {
     Quit,
 }
 
-/// Whether a command runs a sign-in, which may wait on the person in the
-/// browser for as long as they take.
-pub(crate) fn is_sign_in(command: &str) -> bool {
-    matches!(command, "add_account" | "sign_in_again")
-}
-
 /// Runs `command` with its arguments, named as the UI names them (an object
 /// such as `{"account": 1, "thread": 2}`). `connect` only returns the launch
 /// info here: the host connects the page's channel its own way.

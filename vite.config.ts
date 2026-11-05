@@ -143,6 +143,11 @@ export default defineConfig({
           "cargo fmt --all --check",
           "cargo clippy --workspace --all-targets -q -- -D warnings",
           "cargo clippy --workspace --all-targets --features fake -q -- -D warnings",
+          // The app alone, as `tauri dev` and `tauri build` compile it: the
+          // workspace runs above unify features, so code only the web bridge
+          // or the fake uses would pass there and warn here.
+          "cargo clippy -p ubermensch -q -- -D warnings",
+          "cargo clippy -p ubermensch --release -q -- -D warnings",
           "cargo doc --workspace --no-deps -q",
         ],
         cwd: "src-tauri",

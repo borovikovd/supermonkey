@@ -13,7 +13,6 @@ mod dispatch;
 #[cfg(feature = "web")]
 mod web;
 
-pub(crate) use dispatch::is_sign_in;
 pub use dispatch::{Reply, dispatch};
 #[cfg(feature = "web")]
 pub use web::{WebBridge, serve_local};

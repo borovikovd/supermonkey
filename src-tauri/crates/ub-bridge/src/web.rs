@@ -43,7 +43,7 @@ use ub_core::activity::{Activity, busy_scope};
 use ub_domain::{ActionNo, Rev};
 use ub_ipc::ChannelMessage;
 
-use crate::{Reply, dispatch, is_sign_in};
+use crate::{Reply, dispatch};
 
 /// Where the debug app serves the bridge, for `vp dev` in a browser.
 pub(crate) const LOCAL_ADDR: &str = "127.0.0.1:1430";
@@ -271,6 +271,12 @@ impl Stream for PushStream {
             }
         }
     }
+}
+
+/// Whether a command runs a sign-in, which may wait on the person in the
+/// browser for as long as they take.
+fn is_sign_in(command: &str) -> bool {
+    matches!(command, "add_account" | "sign_in_again")
 }
 
 /// Runs a command by name, as the Tauri commands do. It counts as core
