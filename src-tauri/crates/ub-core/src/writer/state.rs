@@ -53,12 +53,11 @@ impl WriterState {
         }
     }
 
-    /// Records an effect, released once this job commits. Recording the
-    /// same effect twice in one job releases it once.
+    /// Records an effect, released once this job commits. An effect
+    /// recorded twice in one job is released once, in the place of its last
+    /// recording (see [`WriterState::release`]).
     pub(crate) fn effect(&mut self, effect: Effect) {
-        if !self.effects.iter().any(|e| *e.get() == effect) {
-            self.effects.push(self.activity.track("effect", effect));
-        }
+        self.effects.push(self.activity.track("effect", effect));
     }
 
     /// Where the effects recorded so far end, for [`WriterState::drop_effects_from`].
@@ -103,8 +102,20 @@ impl WriterState {
     }
 
     /// Hands the job's effects to the router, and lets the job go idle.
+    ///
+    /// An effect recorded more than once goes out once, where it was last
+    /// recorded: a later effect may undo an earlier one, and the last word
+    /// must stay last. A conversation opened, closed, and opened again in
+    /// one batch asks for its bodies, then says they are unneeded, then asks
+    /// again; keeping the first ask would end with the read stopped.
     pub(crate) fn release(&mut self) {
-        for effect in self.effects.drain(..) {
+        let mut last: Vec<Tracked<Effect>> = Vec::with_capacity(self.effects.len());
+        for effect in self.effects.drain(..).rev() {
+            if !last.iter().any(|kept| kept.get() == effect.get()) {
+                last.push(effect);
+            }
+        }
+        for effect in last.into_iter().rev() {
             // The router is gone only while the core shuts down; the effect
             // has nowhere to go then.
             let _ = self.router.send(effect);

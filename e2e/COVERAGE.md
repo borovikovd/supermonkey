@@ -283,7 +283,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 18      | 13      | 5      | 0      |
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 10      | 5       | 5      | 0      |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 6       | 4       | 2      | 0      |
-| `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 19      | 4       | 14     | 1      |
+| `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 20      | 4       | 15     | 1      |
 | `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 13      | 9       | 4      | 0      |
 | `undo.spec.ts`             | UND    | the `z` stack, partial revert, per-account history, persistence                              | `standard`                               | H15                         | 8       | 4       | 3      | 1      |
 | `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 8       | 2       | 6      | 0      |
@@ -305,7 +305,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **247** | **147** | **90** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **248** | **147** | **91** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -969,6 +969,15 @@ _EP · §Conversation (iframes), Look_
 - **Seed:** `standard`, with the page's `prefers-color-scheme` set to dark.
 - **Steps:** deliver a message whose `<style>` sets `.primary-text` to `#3c4043`, and to `#e8eaed !important` under `@media (prefers-color-scheme: dark)`, as Google Calendar invites do. Open it.
 - **Expect:** the text is `rgb(60, 64, 67)`. The card is always white, so the message's dark-mode colors would make it unreadable.
+
+#### CONV-20 · P2 · A conversation opened, closed, and opened again in one batch still reads its body
+
+_EG · §Sync (priority 2), §UI state (Actions)_
+
+- **Seed:** `standard`. `fault(threads.get format=full, 500, {times: 1})`, then deliver "Opened twice" to A: its body read in the background fails and backs off on the app clock.
+- **Steps:** with `p1` highlighted, pause the page clock and park the submits. Open `p1`, `Esc`, `k` to "Opened twice", open it, `Esc`, open it again. Release the submits and `settle()`.
+- **Expect:** the conversation shows the message's body, and exactly one more `threads.get` (`format=full`) went out.
+- **Why:** the actions after the first open went out in one batch, which asked for the thread's bodies, said they were unneeded, and asked again. The writer kept only the first of two equal effects, so the read was started and stopped, and nothing read the body.
 
 ### 5.5 `triage-actions.spec.ts` (TRI)
 
