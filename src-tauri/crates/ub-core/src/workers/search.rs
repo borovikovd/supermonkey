@@ -3,20 +3,17 @@
 //! time. Each page's hits are stored, then merged into the subscription,
 //! which stops showing `searching` and offers the next page.
 
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use futures_util::future::join_all;
-use parking_lot::Mutex;
-use tokio_util::sync::CancellationToken;
 use ub_domain::{AccountId, GmailThreadId, SubId};
 use ub_gmail::{Format, PageToken, Priority, ThreadQuery};
 use ub_store::Priority as WritePriority;
 
 use super::account::{AccountCtx, LATE, Work, fetch_thread, is_current, needs_bodies};
 use super::registry::AccountWorkers;
+use super::runs::Runs;
 use crate::clock::sleep;
 use crate::effects::GmailQuery;
 use crate::writer::CoreWriter;
@@ -30,8 +27,7 @@ const TYPING_PAUSE: Duration = Duration::from_millis(300);
 /// The listings running, by subscription.
 #[derive(Default)]
 pub(crate) struct Searches {
-    running: Mutex<HashMap<SubId, (u64, CancellationToken)>>,
-    next: AtomicU64,
+    running: Arc<Runs<SubId>>,
 }
 
 impl Searches {
@@ -39,7 +35,7 @@ impl Searches {
     /// worker for the account (signed out), the subscription settles with
     /// no Gmail hits.
     pub(crate) fn start(
-        self: &Arc<Self>,
+        &self,
         workers: &AccountWorkers,
         sub: SubId,
         account: AccountId,
@@ -51,29 +47,19 @@ impl Searches {
             settle(workers.writer(), sub, Vec::new(), None);
             return;
         };
-        let id = self.next.fetch_add(1, Ordering::SeqCst);
-        let token = CancellationToken::new();
-        self.running.lock().insert(sub.clone(), (id, token.clone()));
+        let run = self.running.replace(sub.clone());
         let ctx = Arc::clone(worker.ctx());
-        let searches = Arc::clone(self);
         worker.ctx().tasks.spawn("gmail listing", async move {
             tokio::select! {
-                () = token.cancelled() => {}
-                () = list_page(&ctx, sub.clone(), query, page) => {}
-            }
-            let mut running = searches.running.lock();
-            if running.get(&sub).is_some_and(|(running, _)| *running == id) {
-                running.remove(&sub);
+                () = run.stopped().cancelled() => {}
+                () = list_page(&ctx, sub, query, page) => {}
             }
         });
     }
 
     /// A subscription closed: its listing and the reads it queued stop.
     pub(crate) fn cancel(&self, sub: &SubId) {
-        let running = self.running.lock().remove(sub);
-        if let Some((_, token)) = running {
-            token.cancel();
-        }
+        self.running.stop(sub);
     }
 }
 

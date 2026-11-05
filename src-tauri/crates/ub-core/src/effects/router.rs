@@ -17,7 +17,7 @@ pub(crate) type EffectReceiver = mpsc::UnboundedReceiver<Tracked<Effect>>;
 /// What the router hands effects to.
 pub(crate) struct Router {
     pub(crate) workers: Arc<AccountWorkers>,
-    pub(crate) searches: Arc<Searches>,
+    pub(crate) searches: Searches,
     pub(crate) notifier: Arc<Notifier>,
     /// Wakes the snooze timer.
     pub(crate) snoozes: Arc<Kick>,

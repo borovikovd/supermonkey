@@ -23,7 +23,6 @@ mod freshness;
 mod health;
 mod history;
 mod ingest;
-mod opened;
 mod poller;
 mod profile;
 mod queue;

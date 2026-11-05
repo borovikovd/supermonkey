@@ -152,7 +152,7 @@ impl App {
         let badge = Arc::new(Kick::new(Arc::clone(&activity)));
         let router = Router {
             workers: Arc::clone(&workers),
-            searches: Arc::new(Searches::default()),
+            searches: Searches::default(),
             notifier: Arc::clone(&notifier),
             snoozes: Arc::clone(&snoozes),
             badge: Arc::clone(&badge),

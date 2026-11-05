@@ -4,7 +4,8 @@
 //! them (`registry`); Gmail listings for list subscriptions (`search`); and
 //! the app's network flag (`network`); showing notifications and their
 //! click-through (`notifications`); the snooze timer (`snooze`); and
-//! unsubscribe and block (`unwanted`).
+//! unsubscribe and block (`unwanted`). Work stopped from outside, one run per
+//! key, goes through `runs`.
 //! Effects reach them through [`crate::effects`]'s router.
 
 mod account;
@@ -19,6 +20,7 @@ mod ops;
 mod outbox;
 mod quarantine;
 mod registry;
+mod runs;
 mod search;
 pub(crate) mod snooze;
 pub(crate) mod unwanted;

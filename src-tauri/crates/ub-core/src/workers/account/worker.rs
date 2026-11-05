@@ -9,12 +9,12 @@ use ub_gmail::Gmail;
 
 use super::ctx::{AccountCtx, SignOutSender, WorkerDeps, WorkerId};
 use super::health::Health;
-use super::opened::OpenedReads;
 use super::queue::FetchQueue;
 use super::{fetcher, poller, profile};
 use crate::activity::Tasks;
 use crate::workers::grants::Grant;
 use crate::workers::ops::{self, OpsLane};
+use crate::workers::runs::Runs;
 use crate::workers::{drafts, outbox};
 
 /// What the registry builds a worker from.
@@ -36,8 +36,12 @@ pub(crate) struct WorkerParts {
 #[derive(Clone)]
 pub(crate) struct AccountWorker {
     ctx: Arc<AccountCtx>,
-    /// Reads of conversations' bodies in flight.
-    opened: Arc<OpenedReads>,
+    /// Reads of conversations' bodies in flight (SPEC Sync, priority 2): at
+    /// most one per thread, each stopped once no subscription shows its
+    /// thread. Offline, a read waits for the network; without this, every
+    /// open and prefetch would leave a read of its own waiting, and all of
+    /// them would go out when the network came back.
+    opened: Arc<Runs<ThreadId>>,
     /// The sign-in whose grant it runs on.
     grant: Grant,
     /// The worker it replaced, until that one has stopped: stopping this
@@ -179,7 +183,7 @@ impl AccountWorker {
     /// Stops the read of `thread`'s bodies for a conversation: no
     /// subscription shows it any more.
     pub(crate) fn release_opened(&self, thread: ThreadId) {
-        self.opened.stop(thread);
+        self.opened.stop(&thread);
     }
 
     /// Cancels every task without waiting.
