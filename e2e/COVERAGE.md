@@ -3631,6 +3631,7 @@ Also kept, because they test logic the E2E suite can't observe:
 - `crates/ub-bridge/src/commands.rs`: a file over the 25 MB attachment limit is refused before its base64 is decoded (the web bridge's own body limit is lower, so E2E can't send one).
 - `crates/ub-core/src/tests/actions.rs` (also): the core refuses a file over the limit and keeps nothing.
 - `crates/ub-core/src/tests/writer_channel.rs` (also): `ack` never moves back when a batch queued behind a failed one commits first.
+- `crates/ub-core/src/tests/writer_channel.rs` (also): a search opened in a batch whose commit fails still gets its Gmail listing and stops searching (E2E can't make a commit fail).
 - `crates/ub-bridge/src/web.rs`: the debug web bridge answers only loopback hosts and its own or the dev server's origin (the E2E page is always same-origin).
 - `crates/ub-core/src/tests/perf.rs` (ignored; needs `UBERMENSCH_PERF_DB`): local search and autocomplete per keystroke against SPEC Performance on the perf fixture.
 - `tests/layers.rs`: the crate layering of ARCHITECTURE.md, section 3.

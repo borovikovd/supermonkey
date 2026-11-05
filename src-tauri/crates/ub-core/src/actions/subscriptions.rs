@@ -17,7 +17,7 @@ pub(super) fn reset(ctx: &mut ActionCtx<'_, '_>) -> Result<(), ActionError> {
         crate::drafts::close(ctx.tx, ctx.state, &draft, ctx.now)?;
     }
     for (id, key) in ctx.state.subs.close_all() {
-        ctx.state.effect(Effect::CancelSub(id));
+        ctx.state.sub_effect(Effect::CancelSub(id));
         released(ctx, &key);
     }
     Ok(())
@@ -67,7 +67,7 @@ pub(super) fn subscribe(
         });
     }
     for effect in effects {
-        ctx.state.effect(effect);
+        ctx.state.sub_effect(effect);
     }
     if let Some(replaced) = ctx.state.subs.open(sub, key, online && gmail.is_some()) {
         released(ctx, &replaced);
@@ -78,7 +78,7 @@ pub(super) fn subscribe(
 /// Closes a subscription and cancels its queued Gmail work.
 pub(super) fn unsubscribe(ctx: &mut ActionCtx<'_, '_>, sub: SubId) {
     let closed = ctx.state.subs.close(&sub);
-    ctx.state.effect(Effect::CancelSub(sub));
+    ctx.state.sub_effect(Effect::CancelSub(sub));
     if let Some(key) = closed {
         released(ctx, &key);
     }
@@ -91,7 +91,7 @@ fn released(ctx: &mut ActionCtx<'_, '_>, key: &SubKey) {
     if let SubKey::Conversation { thread, .. } = *key
         && !ctx.state.subs.watches_thread(thread)
     {
-        ctx.state.effect(Effect::ThreadUnneeded(thread));
+        ctx.state.sub_effect(Effect::ThreadUnneeded(thread));
     }
 }
 
@@ -108,7 +108,7 @@ pub(super) fn more_results(ctx: &mut ActionCtx<'_, '_>, sub: &SubId) -> Result<(
     let Some(page) = ctx.state.subs.get_mut(sub).and_then(|s| s.next_page.take()) else {
         return Ok(());
     };
-    ctx.state.effect(Effect::GmailList {
+    ctx.state.sub_effect(Effect::GmailList {
         sub: sub.clone(),
         account,
         query,

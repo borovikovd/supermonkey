@@ -59,8 +59,8 @@ impl Drop for Releasing<'_> {
 }
 
 /// `on_rollback`: the job's effects and activity go with its transaction.
-/// Subscriptions it opened or closed stay so: a first load it would have
-/// sent goes out with the next commit.
+/// Subscriptions it opened or closed stay so, and the work they asked for
+/// goes out: a first load it would have sent goes out with the next commit.
 pub(crate) fn on_rollback(state: &mut WriterState) {
     state.discard();
 }

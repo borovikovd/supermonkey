@@ -523,6 +523,38 @@ async fn a_first_load_lost_to_a_failed_commit_is_sent_again() {
     assert_eq!(firsts, [sub("app")], "one first load, after the failure");
 }
 
+/// A batch whose commit fails keeps the subscriptions it opened, so the
+/// work they asked for must go out too. A search whose Gmail listing was
+/// dropped with the failed commit would say it is searching forever.
+#[tokio::test]
+async fn a_search_opened_in_a_failed_batch_still_settles() {
+    let mut h = Harness::start().await;
+    let (account, _) = h.write(seed).await;
+    h.app
+        .writer()
+        .call(Priority::Ui, |_, state| {
+            state.fail_next_commit = true;
+            Ok::<_, StoreError>(())
+        })
+        .await
+        .unwrap();
+    h.act(vec![Action::Subscribe {
+        sub: sub("search"),
+        key: SubKey::Search {
+            account,
+            query: "zebra".to_owned(),
+        },
+    }])
+    .await;
+    // The account has no worker, so its listing settles at once, empty.
+    let settled = || {
+        h.messages.lock().iter().flat_map(|m| &m.updates).any(|u| {
+            matches!(u, SubUpdate::List { sub: s, searching: false, .. } if *s == sub("search"))
+        })
+    };
+    eventually("the search stops searching", settled).await;
+}
+
 /// A commit whose updates can't be sent (the sink panicked) still releases
 /// its effects and lets the core go idle: `settle()` would wait forever
 /// otherwise, and the effects would leave with some later commit.

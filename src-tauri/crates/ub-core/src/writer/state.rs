@@ -19,9 +19,9 @@ pub type ChannelSink = Box<dyn FnMut(ChannelMessage) + Send>;
 pub(crate) struct WriterState {
     /// The open subscriptions.
     pub(crate) subs: Registry,
-    /// Effects the running job recorded; released after its commit, dropped
-    /// on rollback.
-    effects: Vec<Tracked<Effect>>,
+    /// Effects the running job recorded; released after its commit. On
+    /// rollback only those of subscription changes go out.
+    effects: Vec<Recorded>,
     /// The running job's activity, held until its channel messages and
     /// effects are out.
     held: Vec<Busy>,
@@ -35,6 +35,14 @@ pub(crate) struct WriterState {
     /// Tests: the next action batch's commit fails.
     #[cfg(test)]
     pub(crate) fail_next_commit: bool,
+}
+
+/// An effect a job recorded.
+struct Recorded {
+    effect: Tracked<Effect>,
+    /// The work a subscription change asks for: the change stays in the
+    /// registry when the job rolls back, so this goes out either way.
+    survives_rollback: bool,
 }
 
 impl WriterState {
@@ -57,7 +65,22 @@ impl WriterState {
     /// recorded twice in one job is released once, in the place of its last
     /// recording (see [`WriterState::release`]).
     pub(crate) fn effect(&mut self, effect: Effect) {
-        self.effects.push(self.activity.track("effect", effect));
+        self.record(effect, false);
+    }
+
+    /// Records the work a subscription opened, closed, or paged asks for: a
+    /// listing, a thread's bodies, a draft's parts, or stopping them. The
+    /// registry keeps the change even if the job rolls back, so this goes
+    /// out then too; dropped, the subscription would wait for it forever.
+    pub(crate) fn sub_effect(&mut self, effect: Effect) {
+        self.record(effect, true);
+    }
+
+    fn record(&mut self, effect: Effect, survives_rollback: bool) {
+        self.effects.push(Recorded {
+            effect: self.activity.track("effect", effect),
+            survives_rollback,
+        });
     }
 
     /// Where the effects recorded so far end, for [`WriterState::drop_effects_from`].
@@ -66,7 +89,8 @@ impl WriterState {
     }
 
     /// Drops the effects recorded since `mark`: the step that recorded them
-    /// rolled back.
+    /// was rejected. A subscription action is rejected only before it
+    /// changes the registry, so none of its work is lost here.
     pub(crate) fn drop_effects_from(&mut self, mark: usize) {
         self.effects.truncate(mark);
     }
@@ -109,8 +133,28 @@ impl WriterState {
     /// one batch asks for its bodies, then says they are unneeded, then asks
     /// again; keeping the first ask would end with the read stopped.
     pub(crate) fn release(&mut self) {
-        let mut last: Vec<Tracked<Effect>> = Vec::with_capacity(self.effects.len());
-        for effect in self.effects.drain(..).rev() {
+        let effects = std::mem::take(&mut self.effects);
+        self.send_effects(effects.into_iter().map(|recorded| recorded.effect));
+        self.held.clear();
+    }
+
+    /// Drops what a rolled-back job recorded, but the work of the
+    /// subscription changes it made, and lets it go idle.
+    pub(crate) fn discard(&mut self) {
+        let effects = std::mem::take(&mut self.effects);
+        self.send_effects(
+            effects
+                .into_iter()
+                .filter(|recorded| recorded.survives_rollback)
+                .map(|recorded| recorded.effect),
+        );
+        self.held.clear();
+    }
+
+    /// Sends effects to the router in order, each once, where it last was.
+    fn send_effects(&self, effects: impl DoubleEndedIterator<Item = Tracked<Effect>>) {
+        let mut last: Vec<Tracked<Effect>> = Vec::new();
+        for effect in effects.rev() {
             if !last.iter().any(|kept| kept.get() == effect.get()) {
                 last.push(effect);
             }
@@ -120,12 +164,5 @@ impl WriterState {
             // has nowhere to go then.
             let _ = self.router.send(effect);
         }
-        self.held.clear();
-    }
-
-    /// Drops what a rolled-back job recorded, and lets it go idle.
-    pub(crate) fn discard(&mut self) {
-        self.effects.clear();
-        self.held.clear();
     }
 }
