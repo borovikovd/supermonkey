@@ -25,10 +25,24 @@ pub(crate) enum Occasion {
     Poll,
 }
 
+impl Occasion {
+    /// The priorities of its reads: listing and thread metadata, then
+    /// drafts' bodies. A sync reads drafts behind the Inbox's metadata and
+    /// their bodies later still, so a first sign-in shows the Inbox first; a
+    /// poll's draft change is read at once (SPEC Sync).
+    fn priorities(self) -> (Priority, Priority) {
+        match self {
+            Self::Sync => (Priority::P4, Priority::P5),
+            Self::Poll => (Priority::P2, Priority::P2),
+        }
+    }
+}
+
 /// Reconciles the account's local drafts with `drafts.list`.
 pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<(), GmailError> {
+    let (meta, body) = occasion.priorities();
     let started = started(ctx).await;
-    let listed = list_drafts(ctx, Priority::P2).await?;
+    let listed = list_drafts(ctx, meta).await?;
     if occasion == Occasion::Sync {
         for draft in &listed {
             ctx.queue.push(
@@ -108,19 +122,9 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
         } else if !has_mail(ctx, listed.message.thread_id.clone()).await {
             // A draft new to the app gets its kind and target from its
             // thread's messages, once: they must be stored first.
-            fetch_thread(
-                ctx,
-                &listed.message.thread_id,
-                Format::Metadata,
-                Priority::P2,
-            )
-            .await?;
+            fetch_thread(ctx, &listed.message.thread_id, Format::Metadata, meta).await?;
         }
-        match ctx
-            .gmail
-            .get_draft(Priority::P2, &listed.id, Format::Full)
-            .await
-        {
+        match ctx.gmail.get_draft(body, &listed.id, Format::Full).await {
             Ok(full) => store(ctx, full, reconcile.clone()).await,
             Err(e) if *e.outcome() == Outcome::NotFound => {}
             Err(e) => return Err(e),

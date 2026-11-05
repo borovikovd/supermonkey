@@ -829,3 +829,38 @@ test("ACC-16 a removal waiting on its revoke holds up no other account", async (
   expect(tokens.map((t) => t.account)).toEqual(expect.arrayContaining([A, B, C]));
   await expect(app.account(B)).toBeVisible();
 });
+
+test("ACC-17 a first sign-in shows the whole Inbox before reading the account's drafts", async ({
+  app,
+  gmail,
+}) => {
+  test.slow();
+  const s = await seeds.none(gmail, app, { open: false });
+  // Drafts made in Gmail: two replies on Inbox threads, and new messages.
+  // Reading them all costs more than the quota bucket holds.
+  const DRAFTS = 14;
+  const replies = ["p4", "plan"].map((key) => ({
+    subject: `Re: ${s.thread(key).subject}`,
+    to: [B],
+    threadId: s.thread(key).threadId,
+    inReplyTo: s.latest(key).messageId,
+    text: "A reply",
+  }));
+  const fresh = Array.from({ length: DRAFTS - replies.length }, (_, i) => ({
+    subject: `Draft ${i}`,
+    to: [B],
+    text: "Later",
+  }));
+  await Promise.all([...replies, ...fresh].map((d) => gmail.createDraft(A, d)));
+  await gmail.quota(true);
+  await app.open();
+
+  await gmail.nextSignIn({ email: A });
+  await app.firstRunButton.click();
+  await expect(app.account(A)).toBeVisible();
+  // The Inbox fills in at the production budget, its split tabs included.
+  await expect.poll(() => app.splitHeader(), { timeout: 60_000 }).toBe("Important 16 · Other 7");
+  // Drafts are read behind the Inbox's metadata (SPEC Sync), not ahead of it.
+  const drafts = await gmail.requests("drafts.get", { account: A });
+  expect(drafts.length).toBeLessThan(DRAFTS / 2);
+});

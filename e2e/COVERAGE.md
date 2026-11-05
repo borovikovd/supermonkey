@@ -280,7 +280,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 
 | File                       | Prefix | Scope                                                                                        | Main seeds                               | Harness beyond H1–H3        | Cases   | P1      | P2     | P3     |
 | -------------------------- | ------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | ------- | ------- | ------ | ------ |
-| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 16      | 11      | 5      | 0      |
+| `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 17      | 12      | 5      | 0      |
 | `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 10      | 5       | 5      | 0      |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 6       | 4       | 2      | 0      |
 | `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 19      | 4       | 14     | 1      |
@@ -305,7 +305,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 4       | 3       | 1      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **245** | **145** | **90** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **246** | **146** | **90** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -530,6 +530,15 @@ _EG · §Accounts (remove), AGENTS.md (isolation: a slow resource must not block
 - **Expect:**
   - After step 3, C's revoke is parked too, and A's `messages.batchModify` reaches Gmail before any revoke answers.
   - After step 4, B's and C's grants are revoked, and B is signed in again.
+
+#### ACC-17 · P1 · A first sign-in shows the whole Inbox before reading the account's drafts
+
+_EG · §Sync (priorities)_
+
+- **Seed:** `none`, with 14 Gmail drafts on A: replies on `p4` and `plan`, and 12 new messages. `quota(true)`.
+- **Steps:** sign in A from the first-run screen. Wait for the Inbox header.
+- **Expect:** the header reaches `Important 16 · Other 7`, and by then fewer than half the drafts have had their `drafts.get`.
+- **Why:** the connect sync read every draft at priority 2, which used up the quota bucket. With real Gmail, the Inbox sat on the two draft threads for most of a minute, and the Other tab was missing.
 
 ### 5.2 `inbox-navigation.spec.ts` (NAV)
 
@@ -3522,7 +3531,7 @@ _EG · AGENTS.md (validate every command's input in Rust; the webview is not tru
 | Search                      | SRC-01 to SRC-07                                                                                                                                                            |
 | Offline                     | OFF-01 to OFF-07, LAB-04, DRF-05, DRF-06, SRC-05                                                                                                                            |
 | Notifications               | NOT-01 to NOT-06, CONV-09, SYN-04                                                                                                                                           |
-| Sync                        | SYN-01 to SYN-07, LAB-07, VIEW-05                                                                                                                                           |
+| Sync                        | SYN-01 to SYN-07, LAB-07, VIEW-05, ACC-17                                                                                                                                   |
 | Gmail errors                | ERR-01 to ERR-09, ACC-08, SND-05 to SND-08, LAB-05, DRF-04, OFF-05, DRF-13, DRF-14, SND-18                                                                                  |
 | Data                        | ACC-07, ACC-10, SEC-04                                                                                                                                                      |
 | UI state                    | TRI-10, UND-05, UIC-01 to UIC-05, DRF-08, CONV-03, CONV-09, NEW-12                                                                                                          |
