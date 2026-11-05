@@ -147,7 +147,9 @@ export default defineConfig({
           // workspace runs above unify features, so code only the web bridge
           // or the fake uses would pass there and warn here.
           "cargo clippy -p ubermensch -q -- -D warnings",
-          "cargo clippy -p ubermensch --release -q -- -D warnings",
+          // A release build needs an OAuth client; linting gets a placeholder,
+          // so the gate runs without the real, git-ignored one.
+          "UBERMENSCH_OAUTH_CLIENT=lint/oauth-client.json cargo clippy -p ubermensch --release -q -- -D warnings",
           "cargo doc --workspace --no-deps -q",
         ],
         cwd: "src-tauri",
