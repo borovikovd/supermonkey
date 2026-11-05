@@ -122,7 +122,12 @@ impl App {
         } = deps;
         let tasks = Tasks::new(runtime, Arc::clone(&activity));
         let (to_router, from_writers) = mpsc::unbounded_channel();
-        let writer = CoreWriter::start(&config.db_path, Arc::clone(&activity), to_router)?;
+        let writer = CoreWriter::start(
+            &config.db_path,
+            Arc::clone(&activity),
+            to_router,
+            Arc::clone(&clock),
+        )?;
         let pool = Arc::new(ReadPool::open(&config.db_path, config.read_connections)?);
         let last = pool.with(|r| r.meta().last_action())?;
         let received = Arc::new(Received::default());

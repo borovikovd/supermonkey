@@ -256,3 +256,38 @@ the spec's wording:
   back when the person finishes that sign-in, under a new id, as Add
   account would bring it back. The sign-in finished after the removal, so
   it is the person's last word; SPEC does not say.
+
+## Decided when local search learned Gmail's operators
+
+- **A query local search can't evaluate lists only Gmail's hits.** SPEC
+  said local search ignores operators it does not support. Ignoring one
+  made it match everything, so `in:sent venue` listed incoming mail and the
+  merged list was a superset of Gmail's. Now local search evaluates the
+  operators the Tips column lists and their siblings, and for any other
+  (`filename:`, `larger:`, `from:(a b)`, a date it can't read) it lists
+  nothing: the list says `Searching Gmail…`, and offline that the search
+  needs Gmail. The core sends `needsGmail` with the search's list, so the UI
+  does not parse the query itself.
+- **Search operators evaluate per message, as Gmail's `threads.list` does.**
+  A conversation matches when one message matches the whole query, so
+  `-in:inbox` also finds an Inbox conversation holding your own reply, as
+  Gmail does. User labels stay the conversation's, as for `label:`.
+- **Dates are local.** `after:2026/01/31` is local midnight in this Mac's
+  time zone, as Gmail's web search reads it (the Gmail API documents
+  Pacific time). `after:` includes that instant, `before:` excludes it.
+  `newer_than:` and `older_than:` count back calendar days, months, and
+  years, so a DST change does not shift them by an hour.
+- **`in:snoozed` is this app's snooze.** This app snoozes by removing
+  `INBOX` and storing the time locally, which Gmail does not know; Gmail's
+  own `in:snoozed` hits are merged in as usual.
+- **`in:trash`, `in:spam`, `in:anywhere`, and `in:drafts` widen what local
+  search looks at** whenever the query names them, even negated, as Gmail
+  does. Other queries still skip drafts and mail in Trash and Spam.
+- **`from:me` is this account's addresses in search only.** A split rule
+  keeps reading `me` as text, as it always has, so no saved rule changes.
+- **Split rules keep their language.** Negation, `in:`, `is:` (other than
+  `is:list`), `has:`, `category:`, and dates are refused in a rule, as they
+  were. Read state, stars, and dates change without the conversation
+  changing, so a rule on them would leave conversations in a stale split;
+  `in:` adds nothing to rules that only see Inbox mail. Negation would make
+  sense in a rule but is left for when rules need it.

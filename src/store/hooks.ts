@@ -61,9 +61,13 @@ export function listKey(account: number, where: Where): SubKey {
 }
 
 /** The list as shown, with pending actions applied. */
-export function useListView(
-  key: SubKey | null,
-): ListView & { loaded: boolean; searching: boolean; more: boolean; sub?: string } {
+export function useListView(key: SubKey | null): ListView & {
+  loaded: boolean;
+  searching: boolean;
+  needsGmail: boolean;
+  more: boolean;
+  sub?: string;
+} {
   const id = useSubId(key);
   const sub = useMirror((s) => (id ? s.subs[id] : undefined));
   const rows = useMirror((s) => s.rows);
@@ -73,10 +77,24 @@ export function useListView(
   // ListView, and the compiler's caching is an optimization, not a guarantee.
   return useMemo(() => {
     if (!id || sub?.type !== "list") {
-      return { ids: [], rows: {}, loaded: false, searching: false, more: false };
+      return {
+        ids: [],
+        rows: {},
+        loaded: false,
+        searching: false,
+        needsGmail: false,
+        more: false,
+      };
     }
     const view = viewList({ ack: 0, rev: 0, subs: { [id]: sub }, rows, pending, removals }, id);
-    return { ...view, loaded: sub.loaded, searching: sub.searching, more: sub.more, sub: id };
+    return {
+      ...view,
+      loaded: sub.loaded,
+      searching: sub.searching,
+      needsGmail: sub.needsGmail,
+      more: sub.more,
+      sub: id,
+    };
   }, [id, sub, rows, pending, removals]);
 }
 

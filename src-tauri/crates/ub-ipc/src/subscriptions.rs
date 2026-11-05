@@ -50,6 +50,9 @@ pub enum SubUpdate {
         rows: Vec<ListRow>,
         /// Search only: a Gmail query is still running.
         searching: bool,
+        /// Search only: the query has a term local search can't evaluate,
+        /// so only Gmail's hits are listed.
+        needs_gmail: bool,
         /// Gmail has another page for this list.
         more: bool,
     },

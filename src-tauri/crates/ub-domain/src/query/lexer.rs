@@ -7,9 +7,11 @@ pub(super) enum TokKind<'a> {
     LParen,
     /// `)`.
     RParen,
+    /// A `-` right before a term, which it negates.
+    Minus,
     /// A bare `"quoted phrase"`.
     Phrase { text: &'a str, closed: bool },
-    /// Anything else, including `op:value`, `op:"quoted value"`, and `-negation`.
+    /// Anything else, including `op:value` and `op:"quoted value"`.
     Word(&'a str),
 }
 
@@ -46,6 +48,14 @@ pub(super) fn lex(s: &str) -> Vec<Tok<'_>> {
             ')' => {
                 i += 1;
                 TokKind::RParen
+            }
+            '-' if s[i + 1..]
+                .chars()
+                .next()
+                .is_some_and(|next| !next.is_whitespace() && next != ')') =>
+            {
+                i += 1;
+                TokKind::Minus
             }
             '"' => {
                 let (end, closed) = scan_quote(s, start);
@@ -98,15 +108,11 @@ fn scan_group(s: &str, start: usize) -> usize {
 }
 
 /// Index just past the word at `start`. A quote or group right after `op:`
-/// or a leading `-` belongs to the word.
+/// belongs to the word.
 fn scan_word(s: &str, start: usize) -> usize {
-    if s[start..].starts_with("-(") {
-        return scan_group(s, start + 1);
-    }
-    let negated = s[start..].starts_with('-');
     let mut i = start;
     while let Some(c) = s[i..].chars().next() {
-        let attached = s[..i].ends_with(':') || (negated && i == start + 1);
+        let attached = s[..i].ends_with(':');
         match c {
             '"' if attached => i = scan_quote(s, i).0,
             '(' if attached => i = scan_group(s, i),

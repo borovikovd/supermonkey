@@ -54,6 +54,13 @@ async fn perf_local_search_per_keystroke() {
         "label:Receipts",
         "is:list",
         "subject:lunch",
+        "in:sent",
+        "is:unread",
+        "has:attachment",
+        "-in:inbox",
+        "after:2020/01/01",
+        "-newsletter",
+        "invoice -newsletter",
     ];
     let mut slowest = Duration::ZERO;
     for (n, query) in queries.into_iter().enumerate() {

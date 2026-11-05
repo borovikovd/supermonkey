@@ -23,7 +23,8 @@ pub(crate) fn on_commit(state: &mut WriterState, snapshot: &Snapshot<'_>, commit
         }
     };
     let online = state.online();
-    let updates = state.subs.updates(**snapshot, &commit.changes, online);
+    let now = state.now();
+    let updates = state.subs.updates(**snapshot, &commit.changes, online, now);
     let ack_moved = ack != state.sent_ack;
     // An action batch moves `ack` even when it changed nothing a
     // subscription shows, so the mirror drops those pending actions.

@@ -9,7 +9,7 @@ import type { ListRow } from "../ipc/types";
 import { appHooks } from "../keyboard/refs";
 import { useChrome } from "../store/chrome";
 import { marked, searchTerms } from "./highlight";
-import { useCurrent } from "../store/hooks";
+import { useAppState, useCurrent } from "../store/hooks";
 import { useMirror } from "../store/mirror";
 import { useCurrentList, useSplitCounts } from "./current-list";
 import { countLabel, formatTime } from "./format";
@@ -143,6 +143,7 @@ export function ListView() {
   const isDrafts = viewKind === "drafts";
   const highlight = cur?.highlight ?? null;
   const forced = useChrome((s) => s.forcedSplit);
+  const online = useAppState()?.online ?? true;
 
   const items: Item[] = useMemo(() => {
     if (!isInbox) return list.ids.map((e) => ({ type: "row", key: e.key }));
@@ -292,12 +293,21 @@ export function ListView() {
   const terms = useMemo(() => searchTerms(query), [query]);
 
   if (items.length === 0) {
+    const search = cur?.where.kind === "search";
+    // Offline, local search can't answer a query only Gmail evaluates.
+    const needsGmail = search && list.needsGmail && !online;
     return (
       <div className="flex flex-1 flex-col">
-        {cur?.where.kind === "search" && list.searching && (
+        {search && list.searching && (
           <div className="px-4 py-3 text-row text-text-3">Searching Gmail…</div>
         )}
-        <Empty inbox={isInbox} loaded={list.loaded && !list.searching} />
+        {needsGmail ? (
+          <div className="px-4 py-3 text-row text-text-3">
+            This search needs Gmail. Results show when it can be reached.
+          </div>
+        ) : (
+          <Empty inbox={isInbox} loaded={list.loaded && !list.searching} />
+        )}
       </div>
     );
   }

@@ -1,6 +1,6 @@
 //! First loads and patches, built from the committed snapshot.
 
-use ub_domain::{SubId, View};
+use ub_domain::{Millis, SubId, View};
 use ub_ipc::{ListEntry, SubKey, SubUpdate};
 use ub_store::{Changes, Reads, StoreError};
 
@@ -17,17 +17,18 @@ pub(super) fn first_load(
     id: &SubId,
     sub: &mut Sub,
     online: bool,
+    now: Millis,
 ) -> Result<SubUpdate, StoreError> {
     let sub_id = id.clone();
     let key = sub.key.clone();
     Ok(match &key {
         SubKey::List { account, view } => {
             let ids = view_ids(reads, *account, view)?;
-            list_first(reads, sub_id, sub, ids, *view == View::Drafts)?
+            list_first(reads, sub_id, sub, ids, ListKind::of(view))?
         }
         SubKey::Search { account, query } => {
-            let ids = search_ids(reads, *account, query, &sub.gmail_hits)?;
-            list_first(reads, sub_id, sub, ids, false)?
+            let (ids, needs_gmail) = search_ids(reads, *account, query, &sub.gmail_hits, now)?;
+            list_first(reads, sub_id, sub, ids, ListKind::Search { needs_gmail })?
         }
         SubKey::App => SubUpdate::App {
             sub: sub_id,
@@ -66,6 +67,7 @@ pub(super) fn patch(
     changes: &Changes,
     forced: bool,
     online: bool,
+    now: Millis,
 ) -> Result<Option<SubUpdate>, StoreError> {
     if !forced && !affects(&sub.key, changes) {
         return Ok(None);
@@ -75,12 +77,12 @@ pub(super) fn patch(
     Ok(match &key {
         SubKey::List { account, view } => {
             let ids = view_ids(reads, *account, view)?;
-            let drafts = *view == View::Drafts;
-            list_patch(reads, sub_id, sub, ids, drafts, changes, forced)?
+            list_patch(reads, sub_id, sub, ids, ListKind::of(view), changes, forced)?
         }
         SubKey::Search { account, query } => {
-            let ids = search_ids(reads, *account, query, &sub.gmail_hits)?;
-            list_patch(reads, sub_id, sub, ids, false, changes, forced)?
+            let (ids, needs_gmail) = search_ids(reads, *account, query, &sub.gmail_hits, now)?;
+            let kind = ListKind::Search { needs_gmail };
+            list_patch(reads, sub_id, sub, ids, kind, changes, forced)?
         }
         SubKey::App => Some(SubUpdate::App {
             sub: sub_id,
@@ -110,13 +112,39 @@ pub(super) fn patch(
     })
 }
 
+/// What a list holds, as its updates need to know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ListKind {
+    /// Threads in a view.
+    View,
+    /// Drafts, keyed by draft id.
+    Drafts,
+    /// Search results, and whether the query needs Gmail.
+    Search { needs_gmail: bool },
+}
+
+impl ListKind {
+    fn of(view: &View) -> Self {
+        if *view == View::Drafts {
+            Self::Drafts
+        } else {
+            Self::View
+        }
+    }
+
+    fn needs_gmail(self) -> bool {
+        matches!(self, Self::Search { needs_gmail: true })
+    }
+}
+
 fn list_first(
     reads: Reads<'_>,
     sub_id: SubId,
     sub: &mut Sub,
     ids: Vec<ListEntry>,
-    drafts: bool,
+    kind: ListKind,
 ) -> Result<SubUpdate, StoreError> {
+    let drafts = kind == ListKind::Drafts;
     let window: Vec<&str> = ids
         .iter()
         .take(FIRST_WINDOW)
@@ -132,6 +160,7 @@ fn list_first(
         moved: Vec::new(),
         rows,
         searching: sub.searching,
+        needs_gmail: kind.needs_gmail(),
         more: sub.next_page.is_some(),
     })
 }
@@ -143,10 +172,11 @@ fn list_patch(
     sub_id: SubId,
     sub: &mut Sub,
     ids: Vec<ListEntry>,
-    drafts: bool,
+    kind: ListKind,
     changes: &Changes,
     forced: bool,
 ) -> Result<Option<SubUpdate>, StoreError> {
+    let drafts = kind == ListKind::Drafts;
     let d = diff(&sub.ids, &ids, |key| {
         if drafts {
             changes.drafts.contains(key)
@@ -167,6 +197,7 @@ fn list_patch(
         moved: d.moved,
         rows,
         searching: sub.searching,
+        needs_gmail: kind.needs_gmail(),
         more: sub.next_page.is_some(),
     }))
 }

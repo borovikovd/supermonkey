@@ -14,8 +14,9 @@ impl Query {
     /// `is:list`, say).
     ///
     /// It selects a superset of the matches. Terms FTS can't express
-    /// (`bcc:`, `label:`, `is:list`, unsupported operators) drop out of an
-    /// AND; an OR holding one can't narrow anything and drops out whole.
+    /// (`bcc:`, `label:`, `from:me`, `is:list`, `-term`, dates, ...) drop
+    /// out of an AND; an OR holding one can't narrow anything and drops out
+    /// whole.
     /// This is the one SQL string built at runtime; bind it as a parameter.
     pub fn to_fts5(&self) -> Option<String> {
         fts(self.expr()).map(|(s, _)| s)
@@ -25,6 +26,7 @@ impl Query {
 /// The expression, and whether it is compound (needs parentheses when nested).
 fn fts(e: &Expr) -> Option<(String, bool)> {
     match e {
+        Expr::Term(t) if !t.in_index() => None,
         Expr::Term(t) => {
             let column = match t.field {
                 Field::Any => ANY_COLUMNS,
@@ -38,7 +40,13 @@ fn fts(e: &Expr) -> Option<(String, bool)> {
             let star = if t.prefix { "*" } else { "" };
             Some((format!("{column} : {literal}{star}"), false))
         }
-        Expr::IsList | Expr::Unsupported(_) => None,
+        Expr::IsList
+        | Expr::Not(_)
+        | Expr::HasAttachment
+        | Expr::Snoozed
+        | Expr::Anywhere
+        | Expr::Date { .. }
+        | Expr::Unsupported(_) => None,
         Expr::And(xs) => join(xs.iter().filter_map(fts).collect(), " AND "),
         Expr::Or(xs) => join(xs.iter().map(fts).collect::<Option<_>>()?, " OR "),
     }

@@ -28,6 +28,8 @@ export type ListSub = {
   loaded: boolean;
   ids: ListEntry[];
   searching: boolean;
+  /** Search: the query has a term only Gmail can evaluate. */
+  needsGmail: boolean;
   /** Gmail has another page (Search, Label, Trash, Spam). */
   more: boolean;
 };
@@ -70,7 +72,15 @@ export function subForKey(key: SubKey): Sub {
   switch (key.type) {
     case "list":
     case "search":
-      return { type: "list", key, loaded: false, ids: [], searching: false, more: false };
+      return {
+        type: "list",
+        key,
+        loaded: false,
+        ids: [],
+        searching: false,
+        needsGmail: false,
+        more: false,
+      };
     case "conversation":
       return { type: "conversation", key, data: null };
     case "composer":
@@ -168,7 +178,14 @@ export function applyChannel(
         const ids = u.first ? (u.ids ?? []) : applyListPatch(sub.ids, u.removed, u.moved);
         if (u.first) left.push(...sub.ids.map((e) => e.key));
         else left.push(...u.removed);
-        subs[u.sub] = { ...sub, loaded: true, ids, searching: u.searching, more: u.more };
+        subs[u.sub] = {
+          ...sub,
+          loaded: true,
+          ids,
+          searching: u.searching,
+          needsGmail: u.needsGmail,
+          more: u.more,
+        };
         break;
       }
       case "conversation":

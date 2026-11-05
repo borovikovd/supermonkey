@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use ub_domain::{DraftId, SubId, ThreadId};
+use ub_domain::{DraftId, Millis, SubId, ThreadId};
 use ub_gmail::PageToken;
 use ub_ipc::{ListEntry, SubKey, SubUpdate};
 use ub_store::{Changes, Reads};
@@ -167,7 +167,13 @@ impl Registry {
     /// A subscription whose update can't be read gets none now; it gets a
     /// fresh first load with the next commit instead, so the mirror never
     /// keeps a list built on a patch it did not get.
-    pub(crate) fn updates(&mut self, reads: Reads<'_>, changes: &Changes, online: bool) -> Updates {
+    pub(crate) fn updates(
+        &mut self,
+        reads: Reads<'_>,
+        changes: &Changes,
+        online: bool,
+        now: Millis,
+    ) -> Updates {
         let app_forced = std::mem::take(&mut self.app_forced);
         let mut subs: Vec<(&SubId, &mut Sub)> = self.subs.iter_mut().collect();
         subs.sort_by_key(|(_, sub)| sub.opened);
@@ -175,7 +181,7 @@ impl Registry {
         for (id, sub) in subs {
             let forced = std::mem::take(&mut sub.forced) || (app_forced && sub.key == SubKey::App);
             if sub.first_sent {
-                match build::patch(reads, id, sub, changes, forced, online) {
+                match build::patch(reads, id, sub, changes, forced, online, now) {
                     Ok(Some(update)) => out.patches.push(update),
                     Ok(None) => {}
                     Err(e) => {
@@ -184,7 +190,7 @@ impl Registry {
                     }
                 }
             } else {
-                match build::first_load(reads, id, sub, online) {
+                match build::first_load(reads, id, sub, online, now) {
                     Ok(update) => {
                         sub.first_sent = true;
                         out.first_loads.push(update);

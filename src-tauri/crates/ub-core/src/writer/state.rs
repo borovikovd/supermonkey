@@ -2,10 +2,11 @@
 
 use std::sync::Arc;
 
-use ub_domain::ActionNo;
+use ub_domain::{ActionNo, Millis};
 use ub_ipc::ChannelMessage;
 
 use crate::activity::{Activity, Busy, Tracked};
+use crate::clock::Clock;
 use crate::effects::{Effect, EffectSender};
 use crate::subs::Registry;
 
@@ -31,6 +32,8 @@ pub(crate) struct WriterState {
     sink: Option<Box<dyn FnMut(ChannelMessage) + Send>>,
     /// Whether Gmail is reachable, for the app subscription.
     online: bool,
+    /// App time.
+    clock: Arc<dyn Clock>,
     /// The `ack` of the last channel message sent.
     pub(crate) sent_ack: ActionNo,
     /// Tests: the next action batch's commit fails.
@@ -47,8 +50,13 @@ struct Recorded {
 }
 
 impl WriterState {
-    pub(crate) fn new(activity: Arc<Activity>, router: EffectSender) -> Self {
+    pub(crate) fn new(
+        activity: Arc<Activity>,
+        router: EffectSender,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
         Self {
+            clock,
             subs: Registry::default(),
             effects: Vec::new(),
             held: Vec::new(),
@@ -95,6 +103,11 @@ impl WriterState {
     /// changes the registry, so none of its work is lost here.
     pub(crate) fn drop_effects_from(&mut self, mark: usize) {
         self.effects.truncate(mark);
+    }
+
+    /// App time now, for searches that count back from it.
+    pub(crate) fn now(&self) -> Millis {
+        self.clock.now()
     }
 
     /// Whether Gmail is reachable.

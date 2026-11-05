@@ -484,6 +484,7 @@ A custom split is a name plus a query. The query matches the message the rules r
 - `from:`, `to:`, `cc:`, and `bcc:` match the display name or the email address.
 - `label:` with a user label name matches the thread's user labels, ignoring case.
 - `label:` with a system or `CATEGORY_` id matches that message's own labels.
+- The search-only operators (`-term`, `in:`, `is:` other than `is:list`, `has:`, `category:`, dates, and Gmail's other operators) are refused, with the message `<term> isn't supported in split rules`.
 
 The settings sheet offers these starters, off until turned on:
 
@@ -536,7 +537,24 @@ Changing a setting is an action, as in UI state. It is not an undo entry. Settin
 
 `/` focuses search for the account on screen. As in Superhuman, the query takes the list header: left-aligned with the senders below, at 16px, with no box, the accent edge while the field has focus, and a close button (`Esc`) on the right. While the field has focus the hint bar reads `Enter to see results · Esc to close search`. Results replace the list, and their subjects and snippets mark the query's bare words and quoted phrases (not operator values) on `match`. When the window is wide enough, a Tips column on the right lists search operators. `Enter` or `↓` moves focus from the field to the results, where the shortcut table applies. `Esc` in the field or on the results restores the previous view.
 
-The first results come from local full-text search, and they appear immediately, including offline. Like Gmail search, local search skips threads with no message outside trash and spam. The local query language is the custom-rule language. A bare word matches the sender, the subject, or the body text. Local search ignores operators it does not support. Gmail applies the full query.
+The first results come from local full-text search, and they appear immediately, including offline. The local query language is the custom-rule language plus the Gmail operators below, with Gmail's meaning. A bare word matches the sender, the subject, or the body text. As in Gmail, a conversation matches when one of its messages matches the whole query.
+
+| Operator | Matches a message that |
+|---|---|
+| `-term`, `-(…)` | does not match the term or group |
+| `in:inbox`, `in:sent`, `in:starred`, `in:important`, `in:trash`, `in:spam`, `in:drafts`, `in:` a label | has that label, as `label:` does |
+| `in:anywhere` | is anywhere, Trash and Spam included |
+| `in:snoozed`, `is:snoozed` | is in a conversation snoozed in this app |
+| `is:unread`, `is:read`, `is:starred`, `is:important` | is unread, read, starred, or marked important |
+| `has:attachment` | has an attachment that is not inline |
+| `category:primary`, `social`, `promotions`, `updates`, `forums` | has that category |
+| `after:`, `before:` (also `newer:`, `older:`) | is dated on or after, or before, local midnight at the start of the day, written `2026/01/31`, `2026-01-31`, or `01/31/2026`. A bare number is seconds since 1970 |
+| `newer_than:`, `older_than:` | is newer, or older, than that many days, months, or years (`2d`, `3m`, `1y`) before now |
+| `from:me`, `to:me`, `cc:me`, `bcc:me` | is from, or to, one of this account's addresses |
+
+Like Gmail search, local search skips drafts and messages in trash and spam, and so conversations with no other message. A query that names `in:trash`, `in:spam`, or `in:anywhere` looks there too, and one that names `in:drafts` looks at drafts.
+
+Gmail applies the full query. Any other operator, such as `filename:` or `larger:`, needs data only Gmail has. Local search lists nothing for a query that holds one, rather than ignore the operator and show mail it may not match. The list shows `Searching Gmail…` until Gmail answers. Offline it says the search needs Gmail.
 
 While online, the app also runs the query through Gmail `threads.list` and merges anything the local index does not have yet. Gmail gets the query without `is:list`, which it does not know. A hit from that list has only ids. The row appears once a metadata fetch has the sender, subject, snippet, and time. The body fills in after that.
 

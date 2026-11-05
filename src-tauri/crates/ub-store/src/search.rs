@@ -1,12 +1,13 @@
 //! Local search (SPEC Search): the FTS5 index narrows, the query language
 //! decides, and Gmail's hits are merged in.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use ub_domain::query::MatchTarget;
-use ub_domain::{AccountId, Millis, Query, Thread, ThreadId};
+use ub_domain::{AccountId, MessageFacts, Millis, Query, Thread, ThreadId};
 
 use crate::StoreError;
+use crate::accounts::AccountReads;
 use crate::db::Db;
 use crate::labels::LabelReads;
 use crate::messages::MessageReads;
@@ -29,21 +30,24 @@ impl<'c> SearchReads<'c> {
         Self { db }
     }
 
-    /// The threads a Search list holds, newest first: local matches (a live
-    /// message matches the query), plus the Gmail hits for it that have a
-    /// live message. Like Gmail search, threads with no message outside
-    /// Trash and Spam are left out.
+    /// The threads a Search list holds, newest first: local matches (a
+    /// message the query looks at matches it), plus the Gmail hits for it
+    /// that have such a message. Like Gmail search, threads with no
+    /// message outside Trash and Spam are left out, unless the query names
+    /// Trash, Spam, or drafts ([`Query::scope`]). A query local search
+    /// can't evaluate ([`Query::needs_gmail`]) lists only Gmail's hits.
     pub fn threads(
         self,
         account: AccountId,
         query: &Query,
         gmail_hits: &[ThreadId],
     ) -> Result<Vec<ThreadId>, StoreError> {
-        let mut matched = if query.has_local_terms() {
+        let mut matched = if query.searches_locally() {
             self.local(account, query)?
         } else {
             Vec::new()
         };
+        let past_live = !query.scope().live_only();
         let mut seen: HashSet<ThreadId> = matched.iter().map(|&(_, t)| t).collect();
         for &hit in gmail_hits {
             if seen.contains(&hit) {
@@ -51,8 +55,9 @@ impl<'c> SearchReads<'c> {
             }
             let time: Option<Millis> = self.db.optional(
                 "read a Gmail hit's time",
-                "SELECT sort_time FROM threads WHERE id = ?1 AND account_id = ?2 AND has_live = 1",
-                (hit, account),
+                "SELECT sort_time FROM threads
+                 WHERE id = ?1 AND account_id = ?2 AND (has_live = 1 OR ?3)",
+                (hit, account, past_live),
                 |r| r.get("sort_time"),
             )?;
             if let Some(time) = time {
@@ -91,40 +96,57 @@ impl<'c> SearchReads<'c> {
             );
         }
         // The index narrows, or can't help; the query language decides.
-        let candidates: Vec<ThreadId> = match &fts {
+        let scope = query.scope();
+        let past_live = !scope.live_only();
+        let candidates: Vec<(ThreadId, bool)> = match &fts {
             Some(fts) => self.db.all(
                 "narrow a search with the index",
-                "SELECT DISTINCT m.thread_id FROM messages_fts f JOIN messages m ON m.id = f.rowid
-                 WHERE messages_fts MATCH ?1 AND m.account_id = ?2 AND m.is_live = 1
+                "SELECT t.id, t.snooze_until IS NOT NULL AS snoozed FROM threads t
+                 WHERE t.account_id = ?2 AND (t.has_live = 1 OR ?4) AND t.id IN (
+                   SELECT m.thread_id FROM messages_fts f JOIN messages m ON m.id = f.rowid
+                   WHERE messages_fts MATCH ?1 AND m.account_id = ?2 AND (m.is_live = 1 OR ?4))
                  LIMIT ?3",
-                (fts, account, CANDIDATE_LIMIT),
-                |r| r.get("thread_id"),
+                (fts, account, CANDIDATE_LIMIT, past_live),
+                |r| Ok((r.get("id")?, r.get("snoozed")?)),
             )?,
             None => self.db.all(
                 "read search candidates",
-                "SELECT id FROM threads WHERE account_id = ?1 AND has_live = 1
+                "SELECT id, snooze_until IS NOT NULL AS snoozed FROM threads
+                 WHERE account_id = ?1 AND (has_live = 1 OR ?3)
                  ORDER BY sort_time DESC, id DESC LIMIT ?2",
-                (account, CANDIDATE_LIMIT),
-                |r| r.get("id"),
+                (account, CANDIDATE_LIMIT, past_live),
+                |r| Ok((r.get("id")?, r.get("snoozed")?)),
             )?,
+        };
+        let Some(me) = AccountReads::new(self.db).identity(account)? else {
+            return Ok(Vec::new());
         };
         let names = LabelReads::new(self.db).user_label_names(account)?;
         let messages = MessageReads::new(self.db);
         let mut matched = Vec::new();
-        for id in candidates {
+        for (id, snoozed) in candidates {
             let thread = Thread::new(messages.facts(id)?);
-            let label_names: Vec<String> = thread
-                .labels()
+            let looked_at: Vec<&MessageFacts> = thread
+                .messages()
                 .iter()
+                .filter(|m| scope.admits(m))
+                .collect();
+            // User labels are the thread's, from the messages search looks at.
+            let label_names: Vec<String> = looked_at
+                .iter()
+                .flat_map(|m| m.labels.iter())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
                 .filter_map(|l| names.get(l).cloned())
                 .collect();
-            for m in thread.messages().iter().filter(|m| m.is_live()) {
+            for m in looked_at {
                 let body = if query.reads_body() {
                     messages.body_text(m.id)?
                 } else {
                     String::new()
                 };
-                if query.matches(&MatchTarget::search(m, &label_names, &body)) {
+                let target = MatchTarget::search(m, &label_names, &body, snoozed, &me);
+                if query.matches(&target) {
                     if let Some(latest) = thread.latest() {
                         matched.push((latest.date, id));
                     }

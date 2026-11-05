@@ -174,8 +174,6 @@ test("SRC-02 local query language, and what is sent to Gmail", async ({ app, gma
     ["subject:venue OR subject:ticket", ["Offsite venue", "Ticket #42"], []],
     ["label:receipts", ["Your receipt"], []],
     ["is:list", ["Digest: week 44", "Digest: daily", "Digest: week 43"], ["Big sale"]],
-    // has: is not supported locally, so it is ignored.
-    ["has:attachment venue", ["Offsite venue"], []],
     // Only in trashOld, which has no message outside trash and spam.
     ["wombat", [], ["Old trash"]],
   ];
@@ -457,4 +455,93 @@ test("SRC-10 a Gmail search stops searching when its account signs in again unde
 
   await expect(app.page.getByText("Searching Gmail…")).toHaveCount(0);
   await expect(app.page.getByText("Nothing here.")).toBeVisible();
+});
+
+test("SRC-11 local search applies Gmail's operators before Gmail answers", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  // Cache trashOld through the Trash view, so in:trash has something to find.
+  await app.press("Meta+k");
+  await app.palette.getByRole("option", { name: /^Go to Trash/ }).click();
+  await expect(app.row("Old trash")).toHaveCount(1);
+  await app.page
+    .getByRole("navigation")
+    .getByRole("button", { name: "Inbox", exact: true })
+    .click();
+  // Gmail's own answer is right; parked, it can't hide what local search shows.
+  await gmail.hold("threads.list");
+
+  // Mail dates: the clock is Monday 2026-11-02 10:00 in New York. Contract
+  // came at 00:00 that day, Links at 23:00 the day before.
+  const table: [string, string[], string[]][] = [
+    // The reported bug: in:sent listed incoming mail with the word.
+    ["in:sent venue", [], ["Offsite venue"]],
+    [
+      "in:sent",
+      ["Q4 plan", "Budget draft", "Alias note", "Sent 10 days ago", "Sent 89 days ago"],
+      ["Offsite venue", "Person 1", "Ticket #42"],
+    ],
+    ["is:unread", ["Offsite venue", "Person 1", "Q4 plan"], ["Ticket #42", "Person 2", "Big sale"]],
+    ["is:read person", ["Person 2", "Person 4"], ["Person 1", "Person 3"]],
+    ["has:attachment", ["Contract"], ["Offsite venue", "Person 1"]],
+    ["is:starred", ["Trip ideas"], ["Person 1"]],
+    ["-in:inbox", ["Trip ideas", "Sent 10 days ago"], ["Person 1", "Offsite venue"]],
+    ["after:2026/11/02", ["Offsite venue", "Contract"], ["Links", "Trip ideas"]],
+    ["before:2026-11-02", ["Links", "Trip ideas"], ["Offsite venue", "Contract"]],
+    ["newer_than:2d", ["Offsite venue", "Latest rule"], ["Trip ideas", "Sent 10 days ago"]],
+    ["older_than:1m", ["Sent 89 days ago"], ["Trip ideas", "Offsite venue"]],
+    ["from:carol -venue", ["Q4 plan"], ["Offsite venue"]],
+    ["-(is:unread OR is:starred) person", ["Person 2", "Person 4"], ["Person 1", "Person 3"]],
+    ["in:trash wombat", ["Old trash"], []],
+  ];
+  await inOrder(table, async ([query, include, exclude]) => {
+    await search(app, query);
+    await app.advance(300);
+    await app.settle();
+    await Promise.all([
+      ...include.map((subject) =>
+        expect(app.row(subject), `${query} finds ${subject}`).toHaveCount(1),
+      ),
+      ...exclude.map((subject) =>
+        expect(app.row(subject), `${query} skips ${subject}`).toHaveCount(0),
+      ),
+    ]);
+  });
+});
+
+test("SRC-12 a query local search can't evaluate waits for Gmail, and offline says it needs Gmail", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const listing = await gmail.hold("threads.list");
+  // `filename:` needs attachment names, which only Gmail has: local search
+  // must not list every venue mail as if the operator matched, or as if it
+  // never did.
+  await search(app, "venue -filename:pdf");
+  await app.advance(300);
+  await app.settle();
+  await expect(app.row("Offsite venue")).toHaveCount(0);
+  await expect(app.rows).toHaveCount(0);
+  await expect(app.page.getByText("Searching Gmail…")).toBeVisible();
+  // Gmail's hits are listed as usual once it answers.
+  await listing.release();
+  await app.settle();
+  await expect(app.row("Offsite venue")).toHaveCount(1);
+  await expect(app.page.getByText("Searching Gmail…")).toHaveCount(0);
+  await app.press("Escape");
+
+  await gmail.offline(true);
+  // The next poll fails, so the app knows it is offline.
+  await app.advance(45_000);
+  await search(app, "filename:pdf venue");
+  await expect(app.page.getByText("This search needs Gmail")).toBeVisible();
+  await expect(app.page.getByText("Nothing here.")).toHaveCount(0);
+  await expect(app.rows).toHaveCount(0);
+  // A query local search can evaluate still lists cached mail.
+  await search(app, "has:attachment");
+  await expect(app.row("Contract")).toHaveCount(1);
+  await expect(app.page.getByText("This search needs Gmail")).toHaveCount(0);
 });

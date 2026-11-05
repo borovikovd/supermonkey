@@ -1,6 +1,7 @@
 //! A list subscription's ids, in order (SPEC Views, Search).
 
-use ub_domain::{AccountId, Query, ThreadId, View};
+use chrono::{DateTime, Local};
+use ub_domain::{AccountId, Millis, Query, ThreadId, View};
 use ub_ipc::ListEntry;
 use ub_store::{Reads, StoreError};
 
@@ -36,20 +37,29 @@ pub(crate) fn view_ids(
         .collect())
 }
 
-/// A search's keys: local matches plus the Gmail hits it holds, newest first.
+/// A search's keys: local matches plus the Gmail hits it holds, newest
+/// first; and whether the query needs Gmail, because local search can't
+/// evaluate one of its terms. Dates in the query are days in this Mac's time
+/// zone, and ages count back from `now`.
 pub(crate) fn search_ids(
     reads: Reads<'_>,
     account: AccountId,
-    query: &str,
+    raw: &str,
     gmail_hits: &[ThreadId],
-) -> Result<Vec<ListEntry>, StoreError> {
-    Ok(reads
+    now: Millis,
+) -> Result<(Vec<ListEntry>, bool), StoreError> {
+    let query = DateTime::from_timestamp_millis(now.0).map_or_else(
+        || Query::parse(raw),
+        |now| Query::parse_search(raw, &now.with_timezone(&Local)),
+    );
+    let ids = reads
         .search()
-        .threads(account, &Query::parse(query), gmail_hits)?
+        .threads(account, &query, gmail_hits)?
         .into_iter()
         .map(|thread| ListEntry {
             key: thread.to_string(),
             split: None,
         })
-        .collect())
+        .collect();
+    Ok((ids, query.needs_gmail()))
 }

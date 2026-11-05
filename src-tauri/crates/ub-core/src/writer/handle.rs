@@ -7,6 +7,7 @@ use ub_store::{Pending, Priority, StoreError, WriteTx, Writer};
 
 use super::{WriterState, on_commit, on_rollback};
 use crate::activity::Activity;
+use crate::clock::Clock;
 use crate::effects::EffectSender;
 
 /// The one writer (ARCHITECTURE.md, section 6), with the core's state on its
@@ -24,8 +25,9 @@ impl CoreWriter {
         path: &Path,
         activity: Arc<Activity>,
         router: EffectSender,
+        clock: Arc<dyn Clock>,
     ) -> Result<Self, StoreError> {
-        let state = WriterState::new(Arc::clone(&activity), router);
+        let state = WriterState::new(Arc::clone(&activity), router, clock);
         let writer = Writer::start(path, state, on_commit, on_rollback)?;
         Ok(Self { writer, activity })
     }

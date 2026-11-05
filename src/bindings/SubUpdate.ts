@@ -13,6 +13,11 @@ export type SubUpdate = { "type": "list", sub: string, first: boolean, ids: Arra
  */
 searching: boolean, 
 /**
+ * Search only: the query has a term local search can't evaluate,
+ * so only Gmail's hits are listed.
+ */
+needsGmail: boolean, 
+/**
  * Gmail has another page for this list.
  */
 more: boolean, } | { "type": "conversation", sub: string, first: boolean, data: ConversationData, } | { "type": "composer", sub: string, first: boolean, draft: DraftState, } | { "type": "account", sub: string, first: boolean, summary: AccountSummary, } | { "type": "app", sub: string, first: boolean, state: AppState, };

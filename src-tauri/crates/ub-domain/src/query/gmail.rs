@@ -8,6 +8,7 @@ enum Kind {
     Open,
     Close,
     Op,
+    Minus,
     Other,
 }
 
@@ -19,13 +20,17 @@ pub fn gmail_query(raw: &str) -> String {
     if !toks.iter().any(is_list) {
         return raw.to_owned();
     }
-    let mut kept: Vec<(Kind, Tok<'_>)> = toks
-        .into_iter()
-        .filter(|t| !is_list(t))
+    // `-is:list` goes whole: the `-` with the term it negates.
+    let negates_is_list =
+        |i: usize| toks[i].kind == TokKind::Minus && toks.get(i + 1).is_some_and(is_list);
+    let mut kept: Vec<(Kind, Tok<'_>)> = (0..toks.len())
+        .filter(|&i| !is_list(&toks[i]) && !negates_is_list(i))
+        .map(|i| toks[i])
         .map(|t| {
             let kind = match t.kind {
                 TokKind::LParen => Kind::Open,
                 TokKind::RParen => Kind::Close,
+                TokKind::Minus => Kind::Minus,
                 _ if t.is_keyword("OR") || t.is_keyword("AND") => Kind::Op,
                 _ => Kind::Other,
             };
@@ -54,13 +59,7 @@ pub fn gmail_query(raw: &str) -> String {
 }
 
 fn is_list(t: &Tok<'_>) -> bool {
-    match t.kind {
-        TokKind::Word(w) => w
-            .strip_prefix('-')
-            .unwrap_or(w)
-            .eq_ignore_ascii_case("is:list"),
-        _ => false,
-    }
+    matches!(t.kind, TokKind::Word(w) if w.eq_ignore_ascii_case("is:list"))
 }
 
 /// The first dangling operator or empty group: its index and length.
@@ -71,6 +70,10 @@ fn dangling(kept: &[(Kind, Tok<'_>)]) -> Option<(usize, usize)> {
         match kept.get(i)?.0 {
             Kind::Op if matches!(prev, None | Some(Kind::Open | Kind::Op)) => Some((i, 1)),
             Kind::Op if matches!(next, None | Some(Kind::Close)) => Some((i, 1)),
+            // A `-` goes with the empty group it negated.
+            Kind::Open if next == Some(Kind::Close) && prev == Some(Kind::Minus) => {
+                Some((i - 1, 3))
+            }
             Kind::Open if next == Some(Kind::Close) => Some((i, 2)),
             _ => None,
         }
