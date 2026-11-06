@@ -1,5 +1,4 @@
-//! Quota units per Gmail method, from Google's published table (SPEC Sync,
-//! and DEVIATIONS where the table differs from the spec's list).
+//! Quota units per Gmail method, from Google's published table (SPEC Sync).
 
 use super::Units;
 use crate::wire::Format;

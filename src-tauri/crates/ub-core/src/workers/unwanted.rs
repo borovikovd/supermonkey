@@ -1,6 +1,6 @@
 //! Unsubscribe and block (SPEC Unsubscribe and block). Both need the network
 //! and are not queued: a queued unsubscribe could fire long after the user
-//! stopped caring (DEVIATIONS).
+//! stopped caring.
 
 use ub_domain::{Addr, MessageFacts, ThreadId, email_domain};
 use ub_gmail::{Filter, FilterId, GmailError, HttpClient, Priority};

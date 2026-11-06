@@ -2,7 +2,7 @@
 //! carries only its kind and target, and Rust fills the rest. A reply or
 //! forward started before its target's body was stored quotes the snippet,
 //! and gets the whole quote, and a forward its attachments, once the body
-//! lands (DEVIATIONS: Compose).
+//! lands (SPEC Addressing).
 
 use ub_domain::{
     AccountId, DraftContent, DraftId, DraftKind, MessageId, Millis, ReplyTarget, ThreadId,

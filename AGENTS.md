@@ -6,9 +6,10 @@ one is in [Project specifics](#project-specifics) at the end.
 
 ## How to work
 
-- The spec is the source of truth for behavior. When it leaves something open,
-  decide, and record the choice in the decisions log. Ask only when the choice is
-  hard to undo.
+- The spec is the source of truth for behavior and is always current. A change to
+  behavior starts in the spec: update it first, then the tests and the code, in the
+  same commit. Where the spec is silent, decide, and write the decision into the
+  spec. There is no separate decisions log. Ask only when a choice is hard to undo.
 - Work is done when the gate is green and you have used the change in the running
   app. Passing checks alone is not done.
 - Report what happened: which tests failed or are flaky, which steps you skipped,
@@ -241,8 +242,8 @@ The only section that changes from project to project.
 
 - **Product:** Ubermensch, a keyboard-first Gmail client for macOS. Tauri 2, React
   19 with the React Compiler, TypeScript 7, Tailwind 4, Vite+, Rust with SQLite.
-- **Docs:** [SPEC.md](SPEC.md) (behavior), [DEVIATIONS.md](DEVIATIONS.md)
-  (decisions), [ARCHITECTURE.md](ARCHITECTURE.md) (design).
+- **Docs:** [SPEC.md](SPEC.md) (behavior), [ARCHITECTURE.md](ARCHITECTURE.md)
+  (design).
 - **Commands.** `vp` (Vite+) for JS tooling, never `npm`, `pnpm`, or `npx`. `cargo`
   runs from `src-tauri`.
 

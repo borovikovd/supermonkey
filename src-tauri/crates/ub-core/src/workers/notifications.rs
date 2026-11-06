@@ -2,7 +2,7 @@
 //!
 //! The notification plugin does not report clicks on macOS, so a focus soon
 //! after a notification shown while the window was in the background counts
-//! as a click on it (DEVIATIONS: notification clicks).
+//! as a click on it.
 
 use std::sync::Arc;
 

@@ -85,7 +85,7 @@ Crates live under `src-tauri/crates/` with a `ub-` prefix (`ub-domain`, `ub-mime
 
   Removing or signing out an account cancels the token and waits for the group to stop.
 
-- **App-wide tasks:** the effect router (section 8.4), the snooze timer, and the Dock badge count. Wake from sleep is a poller noticing a gap in app time of more than three poll intervals; notification click-through is a focus within 30 s of a notification shown in the background (DEVIATIONS).
+- **App-wide tasks:** the effect router (section 8.4), the snooze timer, and the Dock badge count. Wake from sleep is a poller noticing a gap in app time of more than three poll intervals; notification click-through is a focus within 30 s of a notification shown in the background (SPEC Sync, Notifications).
 - **Shutdown:** quitting waits up to 5 s for pending UI actions to commit (SPEC), then cancels the root token and, within the same deadline, waits for every task to end, the account workers' and op lanes' included (a child task group is tracked by its parents), and exits.
 
 ## 5. Data flow
@@ -142,6 +142,7 @@ A worker fetches from Gmail, parses and sanitizes the result off the writer thre
 - **`Scheduler`:** the quota bucket (1,000 capacity, 4,800 per minute refill, background cap) and at most 8 requests at once per account, by priority 1 to 6. `sched.run(Priority, cost, future)` is the only way to call Gmail.
 - **`Retry`:** one policy type (back-off with jitter and `Retry-After`) used by the workers, with the per-call exceptions SPEC names (`drafts.create`, `drafts.send`).
 - **OAuth:** the loopback server, PKCE, state check, token refresh shortly before expiry, and revoke. Tokens persist through a `TokenStore` port with two implementations, the 0600 file and memory.
+- **One-click unsubscribe:** the `POST` goes through the same `reqwest::Client`, to `https` only and following no redirect. Debug builds also allow loopback `http`, where the E2E server stands in for a list.
 
 ## 8. Core
 
@@ -179,7 +180,7 @@ Each has exactly two implementations. AGENTS.md forbids traits with one.
 
 Rules that write live in modules the writer runs, each a set of functions over `&mut WriteTx` and the writer state: `actions` (one module per group of UI actions), `ops` (queueing, revert, rejection), `outbox` (a pure send state machine and its steps), `drafts`, `snooze` (waking due threads, as the same label change as Return to inbox), and `notify` (which new mail notifies, decided in the poll's own transaction so open conversations and stored messages agree). They record `Effect`s; the writer releases them to the router only after the commit lands.
 
-The router (`effects::Router`) is one task that hands each effect to its worker: fetches, Gmail listings, ops, outbox and draft work go to the account's worker; `Notify` goes to the `Notifier`, which posts it and remembers it for click-through; `Snoozes` re-arms the snooze timer; `Badge` kicks the badge task, which recounts unread mail once per wake, so a burst of commits costs one count. Each account's ops run in an `OpsLane` that outlives its worker, so a replaced worker's in-flight op lands before the next one replays.
+The router (`effects::Router`) is one task that hands each effect to its worker: fetches, Gmail listings, ops, outbox and draft work go to the account's worker; `Notify` goes to the `Notifier`, which posts it and remembers it for click-through; `Snoozes` re-arms the snooze timer; `Badge` kicks the badge task, which recounts unread mail once per wake, so a burst of commits costs one count. Each account's ops run in an `OpsLane` that outlives its worker, so a replaced worker's in-flight op lands before the next one replays, and a second sign-in never sends a queued op twice. An op's row goes only when its result is written, so an op that quitting cuts off stays queued and is sent again on the next launch; `batchModify` and `labels.create` (by its 409) make that harmless.
 
 Every task, timer, kick, and queued job counts in one `Activity`, so the E2E server's `settle()` can tell when the core is idle, and its manual clock moves app time.
 
@@ -198,7 +199,7 @@ Every task, timer, kick, and queued job counts in one `Activity`, so the E2E ser
   - `mime`: sanitize, no-panic fuzz, unsubscribe header;
   - `gmail`: scheduler, OAuth.
 - **Core tests** (`ub-core/src/tests`) for what E2E can't observe: a started `App` on a temporary database.
-- **Perf bench:** the ignored `perf` tests in `ub-core` time local search and autocomplete per keystroke on the perf fixture (`perf-fixture`, fake feature) against SPEC Performance.
+- **Perf bench:** the ignored `perf` tests in `ub-core` time local search and autocomplete per keystroke on the perf fixture (`perf-fixture`, fake feature) against SPEC Performance. The UI budgets so far were measured in Chrome through the web bridge on a development Mac, not on an M1 MacBook Air in WKWebView.
 - **Property test:** the writer/channel invariants (`store` + `core`), replacing `tests/writer_channel.rs`.
 - **Layering test** (section 3), and a test that no crate but `store` names `rusqlite`.
 - **Mutation probes** for every new guard, per AGENTS.md.
@@ -234,3 +235,10 @@ The rewrite landed in slices, each green on its own E2E specs before the next st
 3. **The `e2e-server` binary stays in the root package**, as a thin `main` over `testkit`, so `e2e/global-setup.ts` builds it as before.
 4. **`ipc` sits below `core`** and holds only the contract types, so `core` takes and returns them directly instead of mirroring 47 types with conversions. `domain`'s `sqlite` and `ts` features add trait impls for its newtypes and small enums, since the orphan rule keeps those impls out of `store` and `ipc`.
 5. **Starting and launching are two steps.** `App::start` opens the database and the read pool and starts the writer; nothing talks to Gmail until `Lifecycle::launch`. The E2E server seeds accounts between the two, as the old server did before its engine ran. The Gmail endpoints, OAuth client, and request budget are part of `core::Config`.
+
+## 14. Running and building
+
+- **Debug web bridge:** debug builds started with `UBERMENSCH_WEB_BRIDGE=1` serve the command surface on `127.0.0.1:1430`, so the UI can run in a browser against the real core for automated checks. Release builds leave the `web` feature off and never start it.
+- **Demo mode:** `vp run demo` is a debug build with `--features fake` and `UBERMENSCH_FAKE=1`. It runs the in-process fake Gmail with demo mail and two accounts, on a data folder in the system's temporary directory that is emptied at each launch.
+- **Attachments** are picked with the webview's file input and copied into the draft's folder by the `add_attachment` command, so no dialog plugin is needed.
+- **App icon:** `src-tauri/icons/app-icon.svg` is the source. `vp run tauri icon src-tauri/icons/app-icon.svg` makes every size; delete the `android` and `ios` folders it adds.

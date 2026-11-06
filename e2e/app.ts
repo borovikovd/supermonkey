@@ -237,7 +237,7 @@ export class App {
 
   /**
    * The Mac sleeps for `ms`, then wakes and stays awake until the next poll
-   * timer fires, which notices the gap (DEVIATIONS: wake detection).
+   * timer fires, which notices the gap (SPEC Sync: wake from sleep).
    */
   async sleepAndWake(ms: number): Promise<void> {
     await this.sleep(ms);

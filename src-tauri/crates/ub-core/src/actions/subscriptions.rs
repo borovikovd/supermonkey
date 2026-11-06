@@ -36,7 +36,7 @@ pub(super) fn subscribe(
     match &key {
         SubKey::Conversation { thread, .. } => {
             // Requests of different accounts never wait on each other, so
-            // the account on screen needs no head start (DEVIATIONS).
+            // the account on screen needs no head start (SPEC Sync).
             if let Some(account) = reads.threads().account_of(*thread)? {
                 effects.push(Effect::FetchThread {
                     account,

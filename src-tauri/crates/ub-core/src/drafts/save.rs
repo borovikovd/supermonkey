@@ -85,7 +85,7 @@ pub(crate) fn update(
 /// Queues one upsert of the draft. It writes the draft as it is when it
 /// runs, so a save replaces the one queued: an upsert already running read
 /// the draft before this save, and the new one, last in the queue, carries
-/// it (DEVIATIONS: Compose).
+/// it (SPEC Drafts).
 pub(crate) fn queue_upsert(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,

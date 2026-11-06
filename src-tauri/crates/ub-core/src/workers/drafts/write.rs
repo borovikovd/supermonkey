@@ -68,8 +68,8 @@ pub(crate) async fn write(
     create(ctx, &draft.id, &raw, thread.as_ref()).await
 }
 
-/// A draft that quotes its target's snippet is never written so (DEVIATIONS:
-/// Compose): the target's body is read now, ahead of other reads, and fills
+/// A draft that quotes its target's snippet is never written so (SPEC
+/// Addressing): the target's body is read now, ahead of other reads, and fills
 /// the draft as it lands. Offline, the write waits like any other. If Gmail
 /// no longer has the target, the snippet's quote goes.
 async fn with_target_body(ctx: &AccountCtx, draft: &Draft) -> Result<Draft, WriteFailure> {

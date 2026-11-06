@@ -23,7 +23,7 @@ pub struct Mail {
 }
 
 /// The largest file a draft takes: Gmail's own limit for attachments
-/// (DEVIATIONS). Checked before a file is decoded or written.
+/// (SPEC Drafts). Checked before a file is decoded or written.
 pub const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
 
 /// What a file the user attaches to a draft is: its name, type, and bytes.

@@ -4,7 +4,7 @@ This is the test design for the end-to-end suite. It is not test code. It says w
 
 - **What runs.** Playwright on WebKit drives the real React UI. The UI talks to the real Rust core through the web bridge. The core talks to the in-process fake Gmail (`ub-fake-gmail`), which can inject failures.
 - **What is not exercised.** The native shell (window chrome, real macOS notifications, the real Dock). A recording platform stands in for it, so notifications, the Dock badge, opened URLs and files, and stored tokens can still be asserted.
-- **Source of truth.** `SPEC.md`, as amended by `DEVIATIONS.md`. Section references below (§) are SPEC headings.
+- **Source of truth.** `SPEC.md`. Section references below (§) are SPEC headings.
 - **Where the spec is silent or ambiguous,** a case does not guess. The question is listed under [Decisions on open questions](#10-decisions-on-open-questions), and the case says which assertion waits on it.
 
 Contents:
@@ -236,7 +236,7 @@ All of them exist now; [section 3.1](#31-using-the-harness) says how to use them
 |     | (a) **Absolute start time.** Set the core and browser clocks to the scenario anchor before `start`. Today the clock can only advance from real now.                                                                                                                                                                                                                                                                                                                      | exists                          |                                                                                         |
 |     | (b) **Everything time-based runs on app time:** the 45 s poll timer, retry back-off, `Retry-After`, the outbox `send_after`, the 30 s sync-status threshold, and the search debounce. Today `advance` kicks snoozes and queues only; poll and back-off use real `tokio` time.                                                                                                                                                                                            | exists                          |                                                                                         |
 |     | (c) `app.advance(ms)`                                                                                                                                                                                                                                                                                                                                                                                                                                                    | exists                          |                                                                                         |
-| H14 | **Sleep and wake:** `gmail.wake()`, or a clock _jump_ that does not fire the timers in between. This simulates the Mac sleeping. DEVIATIONS says wake is detected as a gap of more than three poll intervals.                                                                                                                                                                                                                                                            | exists (`app.sleep`)            | SNZ-04                                                                                  |
+| H14 | **Sleep and wake:** `gmail.wake()`, or a clock _jump_ that does not fire the timers in between. This simulates the Mac sleeping. §Sync says wake is detected as a gap of more than three poll intervals.                                                                                                                                                                                                                                                                 | exists (`app.sleep`)            | SNZ-04                                                                                  |
 | H15 | **Restart and crash:**                                                                                                                                                                                                                                                                                                                                                                                                                                                   | exists                          | OFF-03, UND-06, SND-09, SNZ-04, DRF-08, SYN-02, SET-02                                  |
 |     | `restart()`: a graceful quit as `Cmd+Q` (the UI closes an open composer as a second `Esc` would, then the core stops), followed by a relaunch on the same database and the same fake Gmail.                                                                                                                                                                                                                                                                              |                                 |                                                                                         |
 |     | `crash()`: the core is killed with no composer close.                                                                                                                                                                                                                                                                                                                                                                                                                    |                                 |                                                                                         |
@@ -966,7 +966,7 @@ _EG · §Reading (read on open), §Keyboard ("When the acted-on conversation lea
 
 #### CONV-17 · P2 · Message headers name people as Superhuman does, and the selected message is a raised card
 
-_EP · DEVIATIONS (Look: the conversation as Superhuman draws it)_
+_EP · §Reading (message headers), §Layout (the selected message)_
 
 - **Seed:** `standard`.
 - **Steps:** open `addr`, `alias`, `p1`, then `own`; in `own`, press `p`.
@@ -979,7 +979,7 @@ _EP · DEVIATIONS (Look: the conversation as Superhuman draws it)_
 
 #### CONV-18 · P2 · The subject row's Done and Snooze buttons act like `e` and `h`
 
-_EP · DEVIATIONS (Look: the conversation as Superhuman draws it), §Keyboard_
+_EP · §Layout (the subject row), §Keyboard_
 
 - **Seed:** `standard`.
 - **Steps:** open `p1`, click Mark Done; then click Snooze.
@@ -1031,7 +1031,7 @@ Action table. It comes from §Archive, trash, star, read and from the removal ta
 | `#`       | +`TRASH` −`INBOX` −`SPAM`                                                                  | every list except Trash                           | Trash                 |
 | `!`       | +`SPAM` −`INBOX` −`TRASH`                                                                  | every list except Spam                            | Spam                  |
 | `s`       | ±`STARRED`                                                                                 | Starred (when unstarring)                         | Starred               |
-| `u`       | +`UNREAD` on the latest message only (DEVIATIONS), or −`UNREAD` on every message           | –                                                 | –                     |
+| `u`       | +`UNREAD` on the latest message only, or −`UNREAD` on every message                        | –                                                 | –                     |
 | `h`       | −`INBOX`, and `snooze_until` set locally                                                   | Inbox, Done                                       | Snoozed               |
 | `l`       | ±user label                                                                                | the current label view (when removing that label) | the label view        |
 | `y`       | −the current view's label                                                                  | the current view                                  | –                     |
@@ -1088,7 +1088,7 @@ _DT · §Archive, trash, star, read_
 
 #### TRI-05 · P1 · Star and read toggles
 
-_ST · §Archive, trash, star, read; DEVIATIONS (Gmail) · Done when 6_
+_ST · §Archive, trash, star, read · Done when 6_
 
 - **Seed:** `standard`. Use `own`, a read thread with 2 messages.
 - **Steps:**
@@ -1185,7 +1185,7 @@ _EG · §Archive, trash, star, read ("A reply that arrives while an archive is q
 
 #### TRI-12 · P1 · `e` marks the conversation read, and `z` makes the same messages unread again
 
-_ST · §Archive, trash, star, read; DEVIATIONS (`e` marks read)_
+_ST · §Archive, trash, star, read_
 
 - **Seed:** `empty`, then deliver a thread of two messages: the first read, the second unread.
 - **Steps:** press `e`, then `g e`. Press `z`, then `g i`.
@@ -1529,7 +1529,7 @@ _EG · §Search (local full-text search), §Undo send_
 
 #### SRC-09 · P2 · Search takes the header as in Superhuman, marks matches, and lists tips
 
-_EP · §Search, DEVIATIONS (Search looks like Superhuman's)_
+_EP · §Search_
 
 - **Seed:** `standard`.
 - **Steps:** `/`. Type `from:dave plan`. Click the close button.
@@ -1549,7 +1549,7 @@ _EG · §Search, §Accounts (Add account for an account the app has)_
 
 #### SRC-11 · P1 · Local search applies Gmail's operators before Gmail answers
 
-_DT · §Search, DEVIATIONS (local search learned Gmail's operators)_
+_DT · §Search (the operator table)_
 
 - **Seed:** `standard`. Open Trash once, so `trashOld` is cached. Then `hold(threads.list)`: Gmail's answer, which is right, can't hide what local search shows. Each query is followed by `app.advance(300)` and `settle()`.
 
@@ -2048,7 +2048,7 @@ _EG · §Keyboard (compose blurred)_
 
 #### REP-15 · P2 · Text typed before the reply opens goes into the reply
 
-_EG · §Keyboard ("while compose … is focused, keystrokes go to that field"), DEVIATIONS (typed ahead)_
+_EG · §Keyboard ("while compose … is focused, keystrokes go to that field"), §Reply composer (keys typed before the editor has focus)_
 
 - **Steps:**
   1. Highlight `p3`. Park the page's submits, press `r`, type "thanks". Release, `settle()`.
@@ -2059,7 +2059,7 @@ _EG · §Keyboard ("while compose … is focused, keystrokes go to that field"),
 
 #### REP-16 · P1 · A reply started while the message's body downloads quotes all of it
 
-_EG · §Addressing ("Rust builds it from the stored target message when it builds the MIME"), DEVIATIONS (Compose: a quote filled before the body)_
+_EG · §Addressing (a quote filled once the body lands)_
 
 - **Steps:**
   1. `hold(threads.get, format=full)`. Deliver a message whose text ends, past the snippet, with a marker. Once its body read is parked, open it, press `r`, type, and show the quote.
@@ -2072,7 +2072,7 @@ _EG · §Addressing ("Rust builds it from the stored target message when it buil
 
 #### REP-17 · P1 · A forward started while the message's body downloads carries all of it and its attachments
 
-_EG · §Addressing ("Forward quotes the target message, carries its attachments"), DEVIATIONS (Compose: a quote filled before the body)_
+_EG · §Addressing ("Forward quotes the target message, carries its attachments")_
 
 - **Steps:**
   1. `hold(threads.get, format=full)`. Deliver a message with a marker past the snippet and `contract.pdf`. Once its body read is parked, open it, press `f`.
@@ -2084,7 +2084,7 @@ _EG · §Addressing ("Forward quotes the target message, carries its attachments
 
 #### REP-18 · P2 · A forwarded attachment that arrives with the body can be removed, and an untouched forward is still discarded
 
-_EG · §Addressing, §Actions (untouched rule), DEVIATIONS (Compose: a quote filled before the body)_
+_EG · §Addressing, §Actions (untouched rule)_
 
 - **Steps:**
   1. Hold the body read of a delivered message with `contract.pdf`, open it, press `f`. Release, wait for `contract.pdf` in the composer, then `Esc` `Esc`, `settle()`.
@@ -2199,7 +2199,7 @@ _DT · §Keyboard ("A stray `r` leaves nothing behind")_
 | `f`                            | removed the forwarded attachment  | `Esc` `Esc` | kept                                |
 | `c`                            | subject only                      | `Esc` `Esc` | kept                                |
 | a resumed draft                | none                              | `Esc` `Esc` | kept                                |
-| a draft reopened by undo send  | none                              | `Esc` `Esc` | kept (DEVIATIONS)                   |
+| a draft reopened by undo send  | none                              | `Esc` `Esc` | kept (§Keyboard)                    |
 | `r`                            | typed, then deleted back to empty | `Esc` `Esc` | **not asserted** (Q4)               |
 
 #### NEW-08 · P2 · `Cmd+K` in compose
@@ -2446,7 +2446,7 @@ _DT · §Drafts_
 
 #### ATT-05 · P1 · A send while a file is still attaching carries the file
 
-_EG · §Compose, DEVIATIONS (a file still attaching)_
+_EG · §Compose, §Drafts (a file still attaching)_
 
 - **Steps:**
   1. Press `c`, add Kim, a subject, and a body.
@@ -2456,7 +2456,7 @@ _EG · §Compose, DEVIATIONS (a file still attaching)_
 
 #### ATT-06 · P1 · Closing a fresh composer while a file is attaching keeps the draft
 
-_EG · §Keyboard (untouched rule), DEVIATIONS (a file still attaching)_
+_EG · §Keyboard (untouched rule), §Drafts (a file still attaching)_
 
 - **Steps:**
   1. Press `c`. Park the page's `add_attachment` invoke and choose `notes.txt`.
@@ -3385,11 +3385,11 @@ _DT, BVA · §Notifications_
 
 #### NOT-06 · P2 · Clicking a notification opens that account's Inbox on the thread
 
-_ST · §Notifications, DEVIATIONS (focus within 30 s counts as a click)_
+_ST · §Notifications (focus within 30 s counts as a click)_
 
 - **Steps:**
   1. With A on screen, `gmail.focus(false)`. `deliver` U to B and `poll()`.
-  2. Click the notification (or `gmail.focus(true)` within 30 s, per DEVIATIONS).
+  2. Click the notification (or `gmail.focus(true)` within 30 s, per §Notifications).
   3. Repeat with 4 messages, so the notification is a summary.
   4. Repeat with a touched composer open on A.
 - **Expect:**
@@ -3595,7 +3595,7 @@ _EG · §UI state (Actions: "a webview reload does not reuse numbers of actions 
 
 #### UIC-03 · P2 · An action whose submit fails is sent again
 
-_EG · §UI state (Actions: "The UI sends actions one invoke at a time"); DEVIATIONS (a failed submit is sent again)_
+_EG · §UI state (Actions: "The UI sends actions one invoke at a time", and "If an invoke fails")_
 
 - **Steps:** with `page.route`, answer the page's first `submit` with a 500 and let later ones through. `e` on `p1`, then `settle()`.
 - **Expect:**
@@ -3742,64 +3742,63 @@ _EG · AGENTS.md (validate every command's input in Rust; the webview is not tru
 
 ## 7. SPEC section traceability
 
-| SPEC section                | Cases                                                                                                                                                                       |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Window                      | NAV-01, NAV-03, NAV-04, NAV-06, SPL-10 (native window behavior: §8)                                                                                                         |
-| Look, Motion                | ACC-02 (avatar hue, P3 detail); the rest are in §8                                                                                                                          |
-| Performance                 | §8                                                                                                                                                                          |
-| Views                       | VIEW-01 to VIEW-05, NAV-05, SRC-07                                                                                                                                          |
-| Accounts, Switching         | ACC-01 to ACC-10, SND-10, NEW-10                                                                                                                                            |
-| Keyboard                    | NAV-02 to NAV-05, NAV-07, TRI-02, TRI-06, TRI-07, TRI-09, NEW-05 to NEW-07, NEW-12, PAL-01, PAL-02                                                                          |
-| Undo                        | UND-01 to UND-08, TRI-06, SPL-04, SND-03, SNZ-07                                                                                                                            |
-| Reading                     | CONV-01 to CONV-14, DRF-02, ATT-02, SEC-01, SEC-03, SET-02                                                                                                                  |
-| Compose                     | NEW-02 to NEW-04, NEW-08, NEW-11                                                                                                                                            |
-| Reply composer              | REP-01, REP-02, REP-07 to REP-10, NEW-01                                                                                                                                    |
-| Addressing                  | REP-03 to REP-06, REP-11, REP-12, ATT-03, NEW-10                                                                                                                            |
-| Recipients and autocomplete | RCP-01 to RCP-11, NEW-09                                                                                                                                                    |
-| Drafts                      | DRF-01 to DRF-17, ATT-01, ATT-04, NEW-11, VIEW-04, SND-13, SND-18                                                                                                           |
-| Send and undo               | SND-01 to SND-19, REP-10, ATT-03                                                                                                                                            |
-| Archive, trash, star, read  | TRI-01 to TRI-11, ERR-04                                                                                                                                                    |
-| Labels                      | LAB-01 to LAB-07                                                                                                                                                            |
-| Split Inbox                 | SPL-01 to SPL-11                                                                                                                                                            |
-| Snooze                      | SNZ-01 to SNZ-07, SYN-04, TRI-08                                                                                                                                            |
-| Settings                    | SET-01, SET-02, ACC-07, NOT-04, UND-03                                                                                                                                      |
-| Search                      | SRC-01 to SRC-12                                                                                                                                                            |
-| Offline                     | OFF-01 to OFF-07, LAB-04, DRF-05, DRF-06, SRC-05, SRC-12                                                                                                                    |
-| Notifications               | NOT-01 to NOT-06, CONV-09, SYN-04                                                                                                                                           |
-| Sync                        | SYN-01 to SYN-07, LAB-07, VIEW-05, ACC-17                                                                                                                                   |
-| Gmail errors                | ERR-01 to ERR-09, ACC-08, SND-05 to SND-08, LAB-05, DRF-04, OFF-05, DRF-13, DRF-14, SND-18                                                                                  |
-| Data                        | ACC-07, ACC-10, SEC-04                                                                                                                                                      |
-| UI state                    | TRI-10, UND-05, UIC-01 to UIC-06, DRF-08, CONV-03, CONV-09, NEW-12                                                                                                          |
-| Security                    | SEC-01 to SEC-04, ACC-01                                                                                                                                                    |
-| DEVIATIONS                  | TRI-05 (`u` on the latest message only), NEW-07 (an undo-reopened draft is never discarded), NOT-06 (click heuristic), SNZ-04 (wake detection), SYN-02 (re-list on restart) |
+| SPEC section                | Cases                                                                                              |
+| --------------------------- | -------------------------------------------------------------------------------------------------- |
+| Window                      | NAV-01, NAV-03, NAV-04, NAV-06, SPL-10 (native window behavior: §8)                                |
+| Look, Motion                | ACC-02 (avatar hue, P3 detail); the rest are in §8                                                 |
+| Performance                 | §8                                                                                                 |
+| Views                       | VIEW-01 to VIEW-05, NAV-05, SRC-07                                                                 |
+| Accounts, Switching         | ACC-01 to ACC-10, SND-10, NEW-10                                                                   |
+| Keyboard                    | NAV-02 to NAV-05, NAV-07, TRI-02, TRI-06, TRI-07, TRI-09, NEW-05 to NEW-07, NEW-12, PAL-01, PAL-02 |
+| Undo                        | UND-01 to UND-08, TRI-06, SPL-04, SND-03, SNZ-07                                                   |
+| Reading                     | CONV-01 to CONV-14, DRF-02, ATT-02, SEC-01, SEC-03, SET-02                                         |
+| Compose                     | NEW-02 to NEW-04, NEW-08, NEW-11                                                                   |
+| Reply composer              | REP-01, REP-02, REP-07 to REP-10, NEW-01                                                           |
+| Addressing                  | REP-03 to REP-06, REP-11, REP-12, ATT-03, NEW-10                                                   |
+| Recipients and autocomplete | RCP-01 to RCP-11, NEW-09                                                                           |
+| Drafts                      | DRF-01 to DRF-17, ATT-01, ATT-04, NEW-11, VIEW-04, SND-13, SND-18                                  |
+| Send and undo               | SND-01 to SND-19, REP-10, ATT-03                                                                   |
+| Archive, trash, star, read  | TRI-01 to TRI-11, ERR-04                                                                           |
+| Labels                      | LAB-01 to LAB-07                                                                                   |
+| Split Inbox                 | SPL-01 to SPL-11                                                                                   |
+| Snooze                      | SNZ-01 to SNZ-07, SYN-04, TRI-08                                                                   |
+| Settings                    | SET-01, SET-02, ACC-07, NOT-04, UND-03                                                             |
+| Search                      | SRC-01 to SRC-12                                                                                   |
+| Offline                     | OFF-01 to OFF-07, LAB-04, DRF-05, DRF-06, SRC-05, SRC-12                                           |
+| Notifications               | NOT-01 to NOT-06, CONV-09, SYN-04                                                                  |
+| Sync                        | SYN-01 to SYN-07, LAB-07, VIEW-05, ACC-17                                                          |
+| Gmail errors                | ERR-01 to ERR-09, ACC-08, SND-05 to SND-08, LAB-05, DRF-04, OFF-05, DRF-13, DRF-14, SND-18         |
+| Data                        | ACC-07, ACC-10, SEC-04                                                                             |
+| UI state                    | TRI-10, UND-05, UIC-01 to UIC-06, DRF-08, CONV-03, CONV-09, NEW-12                                 |
+| Security                    | SEC-01 to SEC-04, ACC-01                                                                           |
 
 ---
 
 ## 8. Not covered end-to-end, and why
 
-| Spec behavior                                                                                                                                                     | Why it is not an E2E case                                                                                                                                                                                                                  | Where it is covered instead                                                                                                  |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| Window behavior: a second launch focuses the window, closing hides it, a Dock click shows it, size and position are restored, the overlay title bar, drag regions | The native shell is not exercised.                                                                                                                                                                                                         | Manual Done-when pass on a real Mac                                                                                          |
-| Real Google OAuth: system browser, the unverified-app warning, a consent screen in production                                                                     | The fake OAuth stands in for it. ACC-01 checks the token file holds the token under the account's email with mode 600, and checks scope, PKCE, and loopback in the auth URL.                                                               | Manual pass against two real Google accounts (SPEC Testing)                                                                  |
-| Performance budgets, the perf fixture, the keydown-to-paint meter, 60 fps scrolling, cold launch time                                                             | Timing on CI WebKit is not the M1 WKWebView target.                                                                                                                                                                                        | The separate perf check (SPEC Testing, Performance)                                                                          |
-| Look (colors, type sizes, spacing, the palette's dark theme), Motion, Reduce Motion                                                                               | Visual, not behavioral. Optional screenshot checks could be added later.                                                                                                                                                                   | Design review                                                                                                                |
-| The quota bucket (1,000 units, refill 4,800 a minute, the 4,000 a minute background cap), the six priority levels, at most 8 requests per account                 | Internal scheduling. Through the UI it is neither observable nor stable (SYN-07 is the one smoke check).                                                                                                                                   | `crates/ub-gmail/tests/scheduler.rs` (kept; see §9). The on-screen account going first has no observable effect (DEVIATIONS) |
-| The exact back-off jitter distribution                                                                                                                            | Random. ERR-02 checks `Retry-After` and that gaps grow.                                                                                                                                                                                    | `backoff_doubles_to_a_minute_with_jitter` in `scheduler.rs` (kept)                                                           |
-| OAuth protocol edge cases: a wrong `state`, concurrent 401s sharing one refresh, refresh before expiry, secrets kept out of `Debug` output                        | Below the UI. A token leaking into logs is not observable E2E.                                                                                                                                                                             | Keep `crates/ub-gmail/tests/oauth.rs` (recommended)                                                                          |
-| The classification of each HTTP response into an outcome                                                                                                          | ERR-* and SND-08 cover the **behavior** for each outcome. The mapping itself is implied.                                                                                                                                                   | –                                                                                                                            |
-| Sanitizer policy, element by element                                                                                                                              | ammonia's allow-list. SEC-01 checks a representative hostile sample end to end.                                                                                                                                                            | Kept `ub-mime/tests/sanitize.rs`                                                                                             |
-| MIME parsing robustness: charsets, malformed headers, random inputs                                                                                               | Fuzzing does not belong in E2E. ATT-04 has one encoded-subject round trip.                                                                                                                                                                 | Kept `ub-mime/tests/no_panic.rs`                                                                                             |
-| The query language grammar, its error messages, FTS translation, Unicode matching                                                                                 | Pure parsing. SRC-02 and SPL-06 check one representative per operator family, plus the wiring: body words only in search, `is:list` stripped for Gmail. SRC-11 checks each search operator family, SRC-12 a query only Gmail can evaluate. | Kept `ub-rules` `query.rs` tests                                                                                             |
-| Snooze arithmetic across weekdays and DST, the phrase grammar                                                                                                     | Pure. SNZ-01 checks one normal hour and SNZ-02 one boundary.                                                                                                                                                                               | Kept `ub-rules` `snooze.rs` tests                                                                                            |
-| Contact score math: recency halving every 90 days, count × recency, word-start matching rules                                                                     | Pure. RCP-02 checks tier order and exclusions from real ingest.                                                                                                                                                                            | Kept `ub-rules` `contacts.rs` tests                                                                                          |
-| Person-to-person classification over every label id combination                                                                                                   | Pure. SPL-01 checks the list-header flag at ingest and four categories.                                                                                                                                                                    | Kept `ub-rules` `splits.rs` `person_to_person`                                                                               |
-| Writer and channel ordering: `rev`, `ack`, patches against first loads, a stale fetch never bringing a row back                                                   | Races that cannot be reproduced deterministically through the UI. UIC-01 checks only the user-visible no-flash property.                                                                                                                   | Kept `tests/writer_channel.rs` proptest                                                                                      |
-| Fine detail of the mirror's pending-action re-application (the deleted `mirror-core.test.ts`)                                                                     | Covered at the behavior level by UND-05, UIC-01, TRI-01, and TRI-10. The exact `ack` interleavings are not reproducible E2E.                                                                                                               | Consider keeping a small Vitest for `undoTarget` and the removal table if UND-05 proves flaky.                               |
-| Table schemas, `rev` and action-number values, `contact_sources` dedup (each message id counts once)                                                              | Internal. Double counting after a resync would only show as a ranking shift, which is not observable with confidence.                                                                                                                      | Consider one unit or integration test of contacts ingest idempotence.                                                        |
-| A due snooze not yet woken (app closed, Mac asleep) "stays in Snoozed and out of Done"                                                                            | Only true while the app is not running, so the UI cannot show it. SNZ-04's launch row checks that Gmail stays out of Inbox while the app is down and that the thread wakes before first paint.                                             | –                                                                                                                            |
-| The full resync step-3 race at scale; billing and units-per-day figures                                                                                           | Cost and scale facts                                                                                                                                                                                                                       | –                                                                                                                            |
-| Real sleep and wake events                                                                                                                                        | Simulated by H14                                                                                                                                                                                                                           | –                                                                                                                            |
-| Label colors, editing nested labels, permanent delete, other non-goals                                                                                            | Out of scope in SPEC                                                                                                                                                                                                                       | –                                                                                                                            |
+| Spec behavior                                                                                                                                                     | Why it is not an E2E case                                                                                                                                                                                                                  | Where it is covered instead                                                                    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| Window behavior: a second launch focuses the window, closing hides it, a Dock click shows it, size and position are restored, the overlay title bar, drag regions | The native shell is not exercised.                                                                                                                                                                                                         | Manual Done-when pass on a real Mac                                                            |
+| Real Google OAuth: system browser, the unverified-app warning, a consent screen in production                                                                     | The fake OAuth stands in for it. ACC-01 checks the token file holds the token under the account's email with mode 600, and checks scope, PKCE, and loopback in the auth URL.                                                               | Manual pass against two real Google accounts (SPEC Testing)                                    |
+| Performance budgets, the perf fixture, the keydown-to-paint meter, 60 fps scrolling, cold launch time                                                             | Timing on CI WebKit is not the M1 WKWebView target.                                                                                                                                                                                        | The separate perf check (SPEC Testing, Performance)                                            |
+| Look (colors, type sizes, spacing, the palette's dark theme), Motion, Reduce Motion                                                                               | Visual, not behavioral. Optional screenshot checks could be added later.                                                                                                                                                                   | Design review                                                                                  |
+| The quota bucket (1,000 units, refill 4,800 a minute, the 4,000 a minute background cap), the six priority levels, at most 8 requests per account                 | Internal scheduling. Through the UI it is neither observable nor stable (SYN-07 is the one smoke check).                                                                                                                                   | `crates/ub-gmail/tests/scheduler.rs` (kept; see §9). No account's requests go first (§Sync)    |
+| The exact back-off jitter distribution                                                                                                                            | Random. ERR-02 checks `Retry-After` and that gaps grow.                                                                                                                                                                                    | `backoff_doubles_to_a_minute_with_jitter` in `scheduler.rs` (kept)                             |
+| OAuth protocol edge cases: a wrong `state`, concurrent 401s sharing one refresh, refresh before expiry, secrets kept out of `Debug` output                        | Below the UI. A token leaking into logs is not observable E2E.                                                                                                                                                                             | Keep `crates/ub-gmail/tests/oauth.rs` (recommended)                                            |
+| The classification of each HTTP response into an outcome                                                                                                          | ERR-* and SND-08 cover the **behavior** for each outcome. The mapping itself is implied.                                                                                                                                                   | –                                                                                              |
+| Sanitizer policy, element by element                                                                                                                              | ammonia's allow-list. SEC-01 checks a representative hostile sample end to end.                                                                                                                                                            | Kept `ub-mime/tests/sanitize.rs`                                                               |
+| MIME parsing robustness: charsets, malformed headers, random inputs                                                                                               | Fuzzing does not belong in E2E. ATT-04 has one encoded-subject round trip.                                                                                                                                                                 | Kept `ub-mime/tests/no_panic.rs`                                                               |
+| The query language grammar, its error messages, FTS translation, Unicode matching                                                                                 | Pure parsing. SRC-02 and SPL-06 check one representative per operator family, plus the wiring: body words only in search, `is:list` stripped for Gmail. SRC-11 checks each search operator family, SRC-12 a query only Gmail can evaluate. | Kept `ub-rules` `query.rs` tests                                                               |
+| Snooze arithmetic across weekdays and DST, the phrase grammar                                                                                                     | Pure. SNZ-01 checks one normal hour and SNZ-02 one boundary.                                                                                                                                                                               | Kept `ub-rules` `snooze.rs` tests                                                              |
+| Contact score math: recency halving every 90 days, count × recency, word-start matching rules                                                                     | Pure. RCP-02 checks tier order and exclusions from real ingest.                                                                                                                                                                            | Kept `ub-rules` `contacts.rs` tests                                                            |
+| Person-to-person classification over every label id combination                                                                                                   | Pure. SPL-01 checks the list-header flag at ingest and four categories.                                                                                                                                                                    | Kept `ub-rules` `splits.rs` `person_to_person`                                                 |
+| Writer and channel ordering: `rev`, `ack`, patches against first loads, a stale fetch never bringing a row back                                                   | Races that cannot be reproduced deterministically through the UI. UIC-01 checks only the user-visible no-flash property.                                                                                                                   | Kept `tests/writer_channel.rs` proptest                                                        |
+| Fine detail of the mirror's pending-action re-application (the deleted `mirror-core.test.ts`)                                                                     | Covered at the behavior level by UND-05, UIC-01, TRI-01, and TRI-10. The exact `ack` interleavings are not reproducible E2E.                                                                                                               | Consider keeping a small Vitest for `undoTarget` and the removal table if UND-05 proves flaky. |
+| Table schemas, `rev` and action-number values, `contact_sources` dedup (each message id counts once)                                                              | Internal. Double counting after a resync would only show as a ranking shift, which is not observable with confidence.                                                                                                                      | Consider one unit or integration test of contacts ingest idempotence.                          |
+| A due snooze not yet woken (app closed, Mac asleep) "stays in Snoozed and out of Done"                                                                            | Only true while the app is not running, so the UI cannot show it. SNZ-04's launch row checks that Gmail stays out of Inbox while the app is down and that the thread wakes before first paint.                                             | –                                                                                              |
+| The full resync step-3 race at scale; billing and units-per-day figures                                                                                           | Cost and scale facts                                                                                                                                                                                                                       | –                                                                                              |
+| Real sleep and wake events                                                                                                                                        | Simulated by H14                                                                                                                                                                                                                           | –                                                                                              |
+| Label colors, editing nested labels, permanent delete, other non-goals                                                                                            | Out of scope in SPEC                                                                                                                                                                                                                       | –                                                                                              |
 
 ## 9. Kept unit and property tests
 
@@ -3849,7 +3848,7 @@ Everything else was deleted, because a case here covers it: the contact ranking 
 
 ## 10. Decisions on open questions
 
-The design agent listed 26 places where the SPEC is silent or ambiguous. Each is decided below, following `AGENTS.md`: take the closest reading of the SPEC, and record real departures in `DEVIATIONS.md`. Cases assert these decisions.
+The design agent listed 26 places where the SPEC is silent or ambiguous. Each is decided below, following `AGENTS.md`: take the closest reading of the SPEC, and write real departures into `SPEC.md`. Cases assert these decisions.
 
 | Q                                    | Decision                                                                                                                                                             |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -3861,11 +3860,11 @@ The design agent listed 26 places where the SPEC is silent or ambiguous. Each is
 | Q6 Held undo meets no clear answer   | The undo wins: if `drafts.get` finds the draft still there, it is not sent again and returns as "not sent".                                                          |
 | Q7 Notify after relaunch             | Yes. Only the connect sync and a full resync are silent.                                                                                                             |
 | Q8 Remove account offline            | Revocation is best effort and skipped offline. Not asserted.                                                                                                         |
-| Q9 Split settings                    | Saving the sheet is an undo entry (§Undo: "changes mail or splits"). The Save button stays; recorded in DEVIATIONS.                                                  |
+| Q9 Split settings                    | The Save button stays: edits apply on Save, and a save is not an undo entry (§Split Inbox). Not asserted.                                                            |
 | Q10 Action in its own view           | A no-op: no undo entry, no Gmail call, no toast.                                                                                                                     |
 | Q11 Ends of lists                    | Clamp: the highlight or selection stays put.                                                                                                                         |
 | Q12 What search restores             | `Esc` restores the view and its highlight. An account switch that closed search returns to that account's last view.                                                 |
-| Q13 Snooze date and time             | The typed phrase is the date-and-time choice. Recorded in DEVIATIONS.                                                                                                |
+| Q13 Snooze date and time             | The typed phrase is the date-and-time choice (§Snooze).                                                                                                              |
 | Q14 401 after a refresh              | Sign in again.                                                                                                                                                       |
 | Q15 `Shift+J/K` reversal             | Not asserted.                                                                                                                                                        |
 | Q16 Notification click               | Assert the focus heuristic through `gmail.focus()`, plus a web equivalent of `notification-open` (H18).                                                              |
@@ -3878,7 +3877,7 @@ The design agent listed 26 places where the SPEC is silent or ambiguous. Each is
 | Q23 Notification account             | The email address.                                                                                                                                                   |
 | Q24 Gmail edit vs composer edit      | Last writer wins: the next upsert overwrites Gmail's version.                                                                                                        |
 | Q25 Star scope                       | Asserted at thread level only.                                                                                                                                       |
-| Q26 Send with no recipients          | Refused with an "Add a recipient" toast; nothing is sent, the draft stays. Recorded in DEVIATIONS.                                                                   |
+| Q26 Send with no recipients          | Refused with an "Add a recipient" toast; nothing is sent, the draft stays (§Recipients and autocomplete).                                                            |
 
 ## 11. Selector notes and testability gaps
 

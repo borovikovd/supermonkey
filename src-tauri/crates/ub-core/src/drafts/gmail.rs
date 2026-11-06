@@ -37,7 +37,7 @@ pub(crate) struct GmailDraft {
     pub(crate) quote_html: Option<String>,
 }
 
-/// What a draft reconcile knows and since when (DEVIATIONS: Sync). Gmail's
+/// What a draft reconcile knows and since when (SPEC Drafts). Gmail's
 /// answers are only as new as the request: a local draft that changed
 /// after the first request, or is being written to Gmail, is left for the
 /// next reconcile.

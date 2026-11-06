@@ -64,7 +64,7 @@ impl Accounts {
     /// Signs an account in again, to renew a refused grant or add a scope.
     /// It must be the same Google account. An account removed while the
     /// sign-in waited in the browser is added again, under a new id, as Add
-    /// account would (DEVIATIONS).
+    /// account would (SPEC Accounts).
     pub async fn sign_in_again(&self, account: AccountId) -> Result<(), Error> {
         let expected = self
             .writer
