@@ -58,6 +58,8 @@ function SearchField() {
           const c = useChrome.getState();
           c.set({ search: { open: true, query, focus: "field" } });
           if (query.trim()) {
+            // Results replace the screen, which closes its composer as a second Esc would.
+            closeComposerOnScreen();
             c.patchCurrent({
               where: { kind: "search", query },
               highlight: null,

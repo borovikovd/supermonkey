@@ -253,7 +253,9 @@ export function closeSearch() {
     where: { kind: "view", view: { kind: "inbox" } },
     highlight: null,
   };
-  c.set({ search: null, beforeSearch: null, selection: [], inline: null });
+  // Leaving the screen closes its composer as a second Esc would.
+  appHooks.closeComposer();
+  c.set({ search: null, beforeSearch: null, selection: [] });
   c.patchCurrent({ ...before, screen: { kind: "list" } });
 }
 

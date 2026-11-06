@@ -877,3 +877,70 @@ test("NEW-12 opening another composer first closes the current one, as a second 
   expect(kept).toHaveLength(1);
   expect(htmlOf(parseMime(kept[0]?.message.raw ?? ""))).toContain("row four");
 });
+
+// Search's close button took a reply composer off screen without closing it,
+// so an untouched one was never discarded; a new query left it open off
+// screen, taking every key; and another account's Split Inbox settings
+// switched to it with the composer still open.
+test("NEW-13 closing search, a new query, or another account's settings closes the composer as a second Esc would", async ({
+  app,
+  gmail,
+}) => {
+  test.slow();
+  await seeds.standard(gmail, app);
+  const field = app.page.getByPlaceholder("Search");
+  /** Searches for `query` and opens its first result. */
+  const openResult = async (query: string, subject: string) => {
+    await app.press("/");
+    await expect(field).toBeFocused();
+    await field.fill(query);
+    await app.settle();
+    await app.press("Enter", "Enter");
+    await expect(app.conversationTitle).toHaveText(subject);
+    await app.settle();
+  };
+  const nothingLeft = async (row: string) => {
+    await app.settle();
+    expect(await gmailDrafts(gmail, A), `${row}: Gmail drafts`).toHaveLength(0);
+    expect(await draftRows(app), `${row}: Drafts rows`).toEqual([]);
+  };
+
+  // Search's close button, with an untouched reply on a result: discarded.
+  await openResult("Offsite", "Offsite venue");
+  await app.reply("r");
+  await app.page.getByTitle("Close search (Esc)").click();
+  await expect(app.editor).toHaveCount(0);
+  await expect(field).toHaveCount(0);
+  await nothingLeft("search closed");
+
+  // A new query replaces the screen: the reply closes, and keys act on the results.
+  await openResult("Offsite", "Offsite venue");
+  await app.reply("r");
+  await field.fill("Guild");
+  await expect(app.editor).toHaveCount(0);
+  await expect(app.row("Guild meetup")).toHaveCount(1);
+  await app.settle();
+  await app.press("Enter", "Enter");
+  await expect(app.conversationTitle).toHaveText("Guild meetup");
+  await app.press("Escape", "Escape");
+  await expect(field).toHaveCount(0);
+  await nothingLeft("new query");
+
+  // Another account's Split Inbox settings switch to it, closing `c` here.
+  await app.compose();
+  await app.press("Meta+,");
+  await app
+    .sheet("Settings")
+    .locator("div")
+    .filter({ has: app.page.getByText(B, { exact: true }) })
+    .filter({ has: app.page.getByRole("button", { name: "Remove account" }) })
+    .last()
+    .getByRole("button", { name: "Split Inbox settings" })
+    .click();
+  await expect(app.sheet(`Split Inbox · ${B}`)).toBeVisible();
+  await app.press("Escape");
+  await expect(app.highlighted).toContainText("Bea Blue");
+  await app.press("Control+1");
+  await expect(newMessage(app)).toHaveCount(0);
+  await nothingLeft("another account's settings");
+});

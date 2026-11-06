@@ -196,6 +196,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - NEW-10 · P2 · From picker and the sending account · §Addressing, §Switching
 - NEW-11 · P1 · `Cmd+Shift+,` discards locally and in Gmail · §Compose, §Drafts
 - NEW-12 · P2 · Opening another composer first closes the current one, as a second `Esc` would · §Actions
+- NEW-13 · P2 · Closing search, a new query, or another account's Split Inbox settings closes the composer as a second `Esc` would · §Actions, §Search, §Settings
 
 ### recipients.spec.ts (RCP)
 

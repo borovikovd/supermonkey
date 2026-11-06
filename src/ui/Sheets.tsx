@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { switchAccount } from "../accounts";
 import { act, checkSplitRule, signInAgain } from "../ipc/bridge";
 import { reportSignIn } from "./signIn";
 import type { AccountInfo, SplitInfo } from "../ipc/types";
@@ -175,7 +176,8 @@ function AccountBlock({ a }: { a: AccountInfo }) {
         <button
           className="rounded-md border border-border px-2 py-1 text-row hover:bg-fill-half"
           onClick={() => {
-            useChrome.getState().setAccount(a.id);
+            // The account comes on screen as any switch brings it (SPEC Switching).
+            switchAccount(a.id);
             useChrome.getState().set({ sheet: "splits" });
           }}
         >

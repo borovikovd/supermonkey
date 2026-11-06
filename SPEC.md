@@ -557,7 +557,7 @@ Snoozed threads live in the Snoozed view. `z` undoes a snooze by restoring the t
 The palette command `Settings` opens the Settings sheet, as in Superhuman. `Cmd+,` opens it too, as in other Mac apps. It has:
 
 - Remote images: on or off. Default on.
-- One block per account: its address, `Mute notifications`, `Split Inbox settings`, `Sign in again` when the account needs it, and `Remove account`.
+- One block per account: its address, `Mute notifications`, `Split Inbox settings`, `Sign in again` when the account needs it, and `Remove account`. `Split Inbox settings` brings that account on screen, as switching does, and opens its sheet.
 
 Changing a setting is an action, as in UI state. It is not an undo entry. Settings are stored in the `settings` table and apply at once.
 
