@@ -22,10 +22,10 @@ pub(super) fn pin(
         .get(split)?
         .filter(|s| s.account == account)
     else {
-        return Err(ActionError::Invalid("no such split"));
+        return Err(ActionError::Invalid("That split no longer exists"));
     };
     let Some(pin) = Pin::new(kind, value, split) else {
-        return Err(ActionError::Invalid("a pin needs a value"));
+        return Err(ActionError::Invalid("There is nothing to pin"));
     };
     let replaced = ctx.tx.splits().set_pin(account, &pin)?;
     ctx.tx.undo().record(
@@ -73,7 +73,9 @@ pub(super) fn save_splits(
     deleted: &[SplitId],
 ) -> Result<(), ActionError> {
     if ctx.tx.read().accounts().get(account)?.is_none() {
-        return Err(ActionError::Invalid("no such account"));
+        return Err(ActionError::Invalid(
+            "That account is no longer in Ubermensch",
+        ));
     }
     let mut edits = Vec::with_capacity(splits.len());
     for split in splits {

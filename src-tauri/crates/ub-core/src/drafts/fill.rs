@@ -41,20 +41,26 @@ pub(crate) fn create(
         return Ok(());
     }
     let Some(me) = reads.accounts().identity(new.account)? else {
-        return Err(ActionError::Invalid("no such account"));
+        return Err(ActionError::Invalid(
+            "That account is no longer in Ubermensch",
+        ));
     };
     if let Some(thread) = new.thread
         && reads.threads().account_of(thread)? != Some(new.account)
     {
-        return Err(ActionError::Invalid("the thread is not in the account"));
+        return Err(ActionError::Invalid(
+            "That conversation is no longer in this account",
+        ));
     }
     let target = match new.target {
         Some(id) => {
             let Some(message) = reads.messages().get(id)? else {
-                return Err(ActionError::Invalid("no such message"));
+                return Err(ActionError::Invalid("That message no longer exists"));
             };
             if message.account != new.account {
-                return Err(ActionError::Invalid("the message is not in the account"));
+                return Err(ActionError::Invalid(
+                    "That message is no longer in this account",
+                ));
             }
             Some(message)
         }

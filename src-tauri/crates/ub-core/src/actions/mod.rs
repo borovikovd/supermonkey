@@ -15,12 +15,13 @@ mod labels;
 mod mail;
 mod notices;
 mod outbox;
+mod rejected;
 mod settings;
 mod splits;
 mod subscriptions;
 
 pub(crate) use dispatch::ActionCtx;
-pub(crate) use error::ActionError;
+pub(crate) use error::{ActionError, Unsendable};
 pub use handle::Actions;
 pub(crate) use handle::Received;
 pub(crate) use mail::{ThreadsChange, change_threads};

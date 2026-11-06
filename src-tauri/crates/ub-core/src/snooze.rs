@@ -26,7 +26,7 @@ pub(crate) fn wake_due(
     }
     for (account, threads) in by_account {
         let delta = LabelDelta::preset(ModifyKind::ReturnToInbox)
-            .ok_or(ActionError::Invalid("Return to inbox has no label change"))?;
+            .ok_or(ActionError::Invalid("Couldn't return that to the inbox"))?;
         let change = ThreadsChange {
             account,
             kind: ModifyKind::ReturnToInbox,

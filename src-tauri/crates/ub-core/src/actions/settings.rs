@@ -15,17 +15,19 @@ pub(super) fn set_setting(
     value: &str,
 ) -> Result<(), ActionError> {
     if value != setting::ON && value != setting::OFF {
-        return Err(ActionError::Invalid("a setting is on or off"));
+        return Err(ActionError::Invalid("Couldn't change that setting"));
     }
     let account = match (account, key) {
         (None, setting::REMOTE_IMAGES) => AccountId::NONE,
         (Some(account), setting::MUTED) => {
             if ctx.tx.read().accounts().get(account)?.is_none() {
-                return Err(ActionError::Invalid("no such account"));
+                return Err(ActionError::Invalid(
+                    "That account is no longer in Ubermensch",
+                ));
             }
             account
         }
-        _ => return Err(ActionError::Invalid("no such setting")),
+        _ => return Err(ActionError::Invalid("Couldn't change that setting")),
     };
     ctx.tx.settings().set(account, key, value)?;
     Ok(())

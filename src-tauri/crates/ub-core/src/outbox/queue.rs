@@ -8,7 +8,7 @@ use ub_domain::{
 };
 use ub_store::{NewOp, NewOutbox, OpKind, StoreError, UndoAction, WriteTx};
 
-use crate::actions::ActionError;
+use crate::actions::{ActionError, Unsendable};
 use crate::drafts::queue_upsert;
 use crate::effects::Effect;
 use crate::writer::WriterState;
@@ -32,10 +32,10 @@ pub(crate) fn send(
     now: Millis,
 ) -> Result<(), ActionError> {
     let Some(record) = tx.read().drafts().get(id)? else {
-        return Err(ActionError::Invalid("the draft is gone"));
+        return Err(ActionError::Invalid("That draft no longer exists"));
     };
     if record.in_outbox {
-        return Err(ActionError::Invalid("the draft is being sent"));
+        return Err(ActionError::Invalid("That draft is already being sent"));
     }
     let mut draft = record.draft;
     let mut recipients = draft
@@ -45,10 +45,10 @@ pub(crate) fn send(
         .chain(&draft.bcc)
         .peekable();
     if recipients.peek().is_none() {
-        return Err(ActionError::Invalid("the draft has no recipient"));
+        return Err(Unsendable::NoRecipient.into());
     }
-    if !recipients.all(|a| ub_mime::is_valid_email(&a.email)) {
-        return Err(ActionError::Invalid("a recipient is not a valid address"));
+    if let Some(bad) = recipients.find(|a| !ub_mime::is_valid_email(&a.email)) {
+        return Err(Unsendable::BadRecipient(bad.email.clone()).into());
     }
     tx.ops().delete_draft_upserts(id)?;
     if draft.started_fresh {
@@ -84,11 +84,11 @@ pub(crate) fn undo_send(
     now: Millis,
 ) -> Result<(), ActionError> {
     let Some(record) = tx.read().outbox().get(outbox)? else {
-        return Err(ActionError::Invalid("the send is gone"));
+        return Err(ActionError::Invalid("That send can no longer be undone"));
     };
     let mut row = record.outbox;
     if row.account != account {
-        return Err(ActionError::Invalid("the send is not in the account"));
+        return Err(ActionError::Invalid("That send can no longer be undone"));
     }
     match row.state {
         OutboxState::Waiting => {

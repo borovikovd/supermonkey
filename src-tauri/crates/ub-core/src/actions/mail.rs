@@ -49,7 +49,7 @@ pub(super) fn modify(ctx: &mut ActionCtx<'_, '_>, action: ModifyAction) -> Resul
     let delta = LabelDelta::new(add.into_iter().collect(), remove.into_iter().collect())?;
     for label in delta.add().iter().chain(delta.remove()) {
         if ctx.tx.read().labels().get(account, label)?.is_none() {
-            return Err(ActionError::Invalid("no such label"));
+            return Err(ActionError::Invalid("That label no longer exists"));
         }
     }
     let snooze = snooze.map(|s| match s {
@@ -102,7 +102,9 @@ pub(crate) fn change_threads(
             continue;
         };
         if row.account != account {
-            return Err(ActionError::Invalid("a thread is not in the account"));
+            return Err(ActionError::Invalid(
+                "A conversation is no longer in this account",
+            ));
         }
         let facts = Thread::new(tx.read().messages().facts(thread)?);
         let ThreadModify {
@@ -149,7 +151,7 @@ pub(super) fn undo(
     entry: UndoEntryId,
 ) -> Result<(), ActionError> {
     let Some(record) = ctx.tx.read().undo().get(account, entry)? else {
-        return Err(ActionError::Invalid("the undo entry is gone"));
+        return Err(ActionError::Invalid("That change can no longer be undone"));
     };
     ctx.tx.undo().delete(entry)?;
     match record.action {

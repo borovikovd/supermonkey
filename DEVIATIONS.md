@@ -330,3 +330,16 @@ the spec's wording:
   rule for rule, and both are held to one table of cases
   (`src-tauri/crates/ub-mime/tests/fixtures/email-addresses.json`): the
   Rust test reads it, and RCP-11 pastes it into the composer.
+- **An action the core rejects leaves a notice.** SPEC's notices are Gmail
+  rejections and held send undos; the core's own refusals were only logged,
+  so a send to an address the core refused closed the composer, sent
+  nothing, and said nothing. Now a rejected action's writes still roll back
+  and `ack` still moves past it, and the core also adds a notice on the
+  action's account with a sentence for the user, shown as an error toast. A
+  refused send's notice carries its draft, so the draft comes back in a
+  composer as after a send Gmail rejected: a drift between the composer's
+  address check and the core's can't lose mail silently. An action at or
+  below the last number applied is dropped with no notice: it was already
+  applied or refused once. Actions the user never asked for (subscriptions,
+  acks, closing a toast) and a global setting have no account to tell, and
+  are only logged.

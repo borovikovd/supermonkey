@@ -295,7 +295,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `recipients.spec.ts`       | RCP    | chips, autocomplete, ranking, invalid addresses, Cc/Bcc                                      | `contacts`, `standard`                   | H23                         | 11      | 4       | 7      | 0      |
 | `attachments.spec.ts`      | ATT    | attach, download on demand, offline forward, MIME tree                                       | `standard`                               | H4, H9, H23                 | 7       | 6       | 1      | 0      |
 | `drafts.spec.ts`           | DRF    | autosave and upsert, Drafts `Enter`, Gmail-side edits and deletes, offline, reload and crash | `standard`, `drafts`                     | H6, H15, H16                | 19      | 16      | 2      | 1      |
-| `undo-send.spec.ts`        | SND    | the outbox state machine, held undo, rejection, no clear answer, restart                     | `standard`                               | H8a, H8b, H9, H13, H15      | 18      | 15      | 3      | 0      |
+| `undo-send.spec.ts`        | SND    | the outbox state machine, held undo, rejection, no clear answer, restart                     | `standard`                               | H8a, H8b, H9, H13, H15      | 19      | 16      | 3      | 0      |
 | `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 8       | 6       | 2      | 0      |
 | `gmail-errors.spec.ts`     | ERR    | the outcome matrix for actions and `drafts.create`, back-off, 401, 404                       | `standard`                               | H6, H8, H9, H10, H13        | 9       | 5       | 3      | 1      |
 | `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 11      | 5       | 4      | 2      |
@@ -303,7 +303,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `settings.spec.ts`         | SET    | the sheet, remote images                                                                     | `standard`                               | H15, H20                    | 5       | 2       | 2      | 1      |
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 5       | 3       | 2      | 0      |
-| `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
+| `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 6       | 3       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
 | **Total**                  |        |                                                                                              |                                          |                             | **262** | **157** | **95** | **10** |
 
@@ -2928,6 +2928,16 @@ _EG · §Drafts ("Send cancels any queued upsert for that draft, because the out
   - After step 3, the toast says Sent.
   - Exactly one message was sent, with the text. Gmail has no draft left, and Drafts has no row for it: the outbox wrote the draft only after the create landed, so no second Gmail draft carrying the local id was left to come back.
 
+#### SND-19 · P1 · A send the core refuses says it was not sent and brings the draft back
+
+_EG · §Send and undo ("a rejection puts the draft back in a composer"), §UI state (Actions)_
+
+- **Steps:** With `page.route`, rewrite every submit so the core stores `kim@kite.c` where the composer has `kim@kite.test`, as a UI out of step with the core's check would. Press `c`, add Kim, a subject, and a body; `settle()`, send, `settle()`.
+- **Expect:**
+  - An error toast: `Not sent: kim@kite.c isn't a valid email address`.
+  - The user was idle, and the draft is a new message: the `c` screen opens with it, its subject and body intact and the `kim@kite.c` chip in `danger`.
+  - After `advance(10_000)`: no Sending toast and no `drafts.send`.
+
 ### 5.17 `offline.spec.ts` (OFF)
 
 #### OFF-01 · P1 · Airplane mode: read, search, autocomplete, and act; it all lands when the network returns
@@ -3616,6 +3626,19 @@ _EG · §UI state (Actions: "`Cmd+Q` first closes an open composer as a second `
   - While the close is parked, the page has not called `quit_now`: the submit is its only invoke in flight.
   - Gmail has one draft, with the typed line.
 
+#### UIC-06 · P1 · An action the core rejects tells the user why
+
+_EG · §UI state (Actions: "If Rust rejects an action, `ack` still moves past it"; a notice says why)_
+
+- **Seed:** `standard`.
+- **Steps:**
+  1. With `page.route`, answer the sheet's `check_split_rule` with "no problem", as a UI out of step with the core would.
+  2. In the splits sheet, add a split with the rule `from:carol -venue` and save; the sheet closes. `settle()`.
+  3. Reload.
+- **Expect:**
+  - One error toast: `-venue isn't supported in split rules`. Nothing was saved: the header still reads `Important 16 · Other 7`.
+  - After the reload, no error toast: the notice was shown once and acked.
+
 ---
 
 ### 5.25 `unwanted.spec.ts` (UNW)
@@ -3734,7 +3757,7 @@ _EG · AGENTS.md (validate every command's input in Rust; the webview is not tru
 | Addressing                  | REP-03 to REP-06, REP-11, REP-12, ATT-03, NEW-10                                                                                                                            |
 | Recipients and autocomplete | RCP-01 to RCP-11, NEW-09                                                                                                                                                    |
 | Drafts                      | DRF-01 to DRF-17, ATT-01, ATT-04, NEW-11, VIEW-04, SND-13, SND-18                                                                                                           |
-| Send and undo               | SND-01 to SND-18, REP-10, ATT-03                                                                                                                                            |
+| Send and undo               | SND-01 to SND-19, REP-10, ATT-03                                                                                                                                            |
 | Archive, trash, star, read  | TRI-01 to TRI-11, ERR-04                                                                                                                                                    |
 | Labels                      | LAB-01 to LAB-07                                                                                                                                                            |
 | Split Inbox                 | SPL-01 to SPL-11                                                                                                                                                            |
@@ -3746,7 +3769,7 @@ _EG · AGENTS.md (validate every command's input in Rust; the webview is not tru
 | Sync                        | SYN-01 to SYN-07, LAB-07, VIEW-05, ACC-17                                                                                                                                   |
 | Gmail errors                | ERR-01 to ERR-09, ACC-08, SND-05 to SND-08, LAB-05, DRF-04, OFF-05, DRF-13, DRF-14, SND-18                                                                                  |
 | Data                        | ACC-07, ACC-10, SEC-04                                                                                                                                                      |
-| UI state                    | TRI-10, UND-05, UIC-01 to UIC-05, DRF-08, CONV-03, CONV-09, NEW-12                                                                                                          |
+| UI state                    | TRI-10, UND-05, UIC-01 to UIC-06, DRF-08, CONV-03, CONV-09, NEW-12                                                                                                          |
 | Security                    | SEC-01 to SEC-04, ACC-01                                                                                                                                                    |
 | DEVIATIONS                  | TRI-05 (`u` on the latest message only), NEW-07 (an undo-reopened draft is never discarded), NOT-06 (click heuristic), SNZ-04 (wake detection), SYN-02 (re-list on restart) |
 
@@ -3800,7 +3823,7 @@ Also kept, because they test logic the E2E suite can't observe:
 - `src/logging.rs`: the stderr logger drops the HTML parser's warnings and keeps ours (logs are not visible to the E2E suite).
 - `crates/ub-store/src/open.rs`: a database of another schema version, or a file that is not one, is moved aside with its WAL and a fresh one created (there is no migration code).
 - `crates/ub-core/src/outbox/machine.rs`: the send state machine's every event in every state.
-- `crates/ub-core/src/tests/actions.rs`: a draft save that arrives after its send is dropped, and a split whose rule does not parse is not saved (the sheet checks rules before it saves, SPL-11).
+- `crates/ub-core/src/tests/actions.rs`: a draft save that arrives after its send is dropped, and a split whose rule does not parse is not saved (the sheet checks rules before it saves, SPL-11) and leaves one notice; an action sent again under a number already applied is dropped with no second notice (E2E can't resend a number).
 - `crates/ub-mime/tests/addresses.rs`: `is_valid_email` against the shared address table that RCP-11 holds the composer's copy of the rule to.
 - `crates/ub-core/src/tests/writer_channel.rs` (also): a commit whose updates panic while being sent still releases its effects and goes idle, so `settle()` never hangs on it (E2E can't make the core panic).
 - `crates/ub-core/src/tests/badge.rs`: commits that land while the Dock badge is being set make one more count, not one each (the recorded platform keeps only the last badge).

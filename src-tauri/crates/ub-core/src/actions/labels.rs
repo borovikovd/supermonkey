@@ -21,14 +21,18 @@ pub(super) fn create_label(
 ) -> Result<(), ActionError> {
     let name = name.trim();
     if name.is_empty() {
-        return Err(ActionError::Invalid("a label needs a name"));
+        return Err(ActionError::Invalid("A label needs a name"));
     }
     let reads = ctx.tx.read();
     if reads.accounts().get(account)?.is_none() {
-        return Err(ActionError::Invalid("no such account"));
+        return Err(ActionError::Invalid(
+            "That account is no longer in Ubermensch",
+        ));
     }
     if reads.labels().get(account, id)?.is_some() {
-        return Err(ActionError::Invalid("the label id is taken"));
+        return Err(ActionError::Invalid(
+            "Couldn't create that label. Try again.",
+        ));
     }
     // A system label's name is Gmail's to refuse, as a rejection.
     let existing = reads.labels().by_name(account, name)?.filter(|l| !l.system);
@@ -56,7 +60,7 @@ pub(super) fn create_label(
     };
     if apply.account != account {
         return Err(ActionError::Invalid(
-            "a label is applied in its own account",
+            "A label applies only in its own account",
         ));
     }
     for ids in [&mut apply.add, &mut apply.remove] {

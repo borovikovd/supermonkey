@@ -15,7 +15,7 @@ pub(super) fn remove_account(
     account: AccountId,
 ) -> Result<(), ActionError> {
     let Some(record) = ctx.tx.read().accounts().get(account)? else {
-        return Err(ActionError::Invalid("no such account"));
+        return Err(ActionError::Invalid("That account was already removed"));
     };
     let drafts = ctx.tx.read().drafts().for_account(account)?;
     ctx.tx.accounts().remove(account)?;

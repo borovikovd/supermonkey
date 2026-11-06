@@ -796,3 +796,40 @@ test("SND-18 a send while the draft's first upsert is in flight goes out once an
   await app.press("Escape", "g", "d");
   await expect(app.row("Person 3")).toHaveCount(0);
 });
+
+test("SND-19 a send the core refuses says it was not sent and brings the draft back", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  // The core stores an address the composer took for valid, as a UI out of
+  // step with the core's check would.
+  const submit = /\/invoke\/submit$/;
+  await app.page.route(submit, (route) =>
+    route.continue({
+      postData: (route.request().postData() ?? "").replaceAll("kim@kite.test", "kim@kite.c"),
+    }),
+  );
+  await app.compose();
+  await app.type("kim@kite.test,");
+  await app.subject.fill("Refused");
+  await app.editor.click();
+  await app.type("Kept for later");
+  await app.settle();
+  await app.press("Meta+Enter");
+  await app.settle();
+  await app.page.unroute(submit);
+
+  await expect(
+    app.errorToasts.filter({ hasText: "Not sent: kim@kite.c isn't a valid email address" }),
+  ).toHaveCount(1);
+  // Idle, and the draft is a new message: the `c` screen opens with it.
+  await expect(newMessage(app)).toBeVisible();
+  await expect(app.subject).toHaveValue("Refused");
+  await expect(app.editor).toContainText("Kept for later");
+  await expect(app.invalidChips("To")).toHaveAttribute("data-chip", "kim@kite.c");
+  await app.advance(DELAY);
+  await app.settle();
+  await expect(app.toast("Sending…")).toHaveCount(0);
+  expect(await gmail.requests("drafts.send")).toEqual([]);
+});

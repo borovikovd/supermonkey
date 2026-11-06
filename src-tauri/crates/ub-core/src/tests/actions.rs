@@ -568,6 +568,67 @@ async fn a_split_whose_rule_does_not_parse_is_not_saved() {
         .await;
     assert!(names.contains(&"Lists".to_owned()), "{names:?}");
     assert!(!names.contains(&"Broken".to_owned()), "{names:?}");
+    let notices = h
+        .write(move |tx| tx.read().notices().for_account(account))
+        .await;
+    let told: Vec<_> = notices
+        .iter()
+        .map(|n| (n.kind, n.message.as_str()))
+        .collect();
+    assert_eq!(
+        told,
+        [(
+            NoticeKind::Rejected,
+            "from:(ada isn't supported in split rules"
+        )]
+    );
+}
+
+#[tokio::test]
+async fn an_action_sent_again_under_an_applied_number_leaves_no_second_notice() {
+    let h = Harness::start().await;
+    let (account, _) = h.write(seed).await;
+    let broken = NumberedAction {
+        n: ActionNo(h.app.actions().last_received().0 + 1),
+        action: Action::SaveSplits {
+            account,
+            splits: vec![ub_ipc::SplitInfo {
+                id: ub_domain::SplitId(0),
+                name: "Broken".to_owned(),
+                kind: ub_domain::SplitKind::Custom,
+                query: "from:carol -venue".to_owned(),
+                enabled: true,
+                hide_when_empty: true,
+                position: 0,
+            }],
+            deleted: Vec::new(),
+        },
+    };
+    // A page that never saw the ack sends the rejected action again.
+    h.app.actions().submit(vec![broken.clone()]);
+    h.app.actions().submit(vec![broken]);
+    h.app.actions().drained().await.unwrap();
+    let notices = h
+        .write(move |tx| tx.read().notices().for_account(account))
+        .await;
+    let told: Vec<_> = notices.iter().map(|n| n.message.as_str()).collect();
+    assert_eq!(told, ["-venue isn't supported in split rules"]);
+}
+
+#[tokio::test]
+async fn a_rejected_action_for_no_account_leaves_no_notice() {
+    let mut h = Harness::start().await;
+    let (account, _) = h.write(seed).await;
+    h.act(vec![Action::SetSetting {
+        account: None,
+        key: "bogus".to_owned(),
+        value: "on".to_owned(),
+    }])
+    .await;
+    let notices = h
+        .write(move |tx| tx.read().notices().for_account(account))
+        .await;
+    assert_eq!(notices, []);
 }
 
 #[tokio::test]
