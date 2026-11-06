@@ -1,32 +1,9 @@
-// Hooks and refs the keyboard handler reads, set by the components that own
-// them. A leaf module, so nothing here imports back into the UI.
+// DOM that code outside React reaches: the search field to focus, and a
+// scroll request for the list. Set by the components that own them; nothing
+// else lives here.
 
-import type { ConversationData } from "../ipc/types";
-import type { PaletteMode } from "../store/chrome";
+/** The search field while it is mounted. */
+export const dom: { searchInput: HTMLInputElement | null } = { searchInput: null };
 
-/** Set by the conversation view so keys can act on its data. */
-export const conversationRef: { data: ConversationData | null } = { data: null };
-
-/** Set by App: account switching and split lookup. */
-export const appHooks: {
-  switchAccount: (index: number) => void;
-  splitIdOf: (kind: string) => number | null;
-  openPalette: (mode: PaletteMode) => void;
-  focusSearch: () => void;
-  linkKey: (e: KeyboardEvent) => boolean;
-  /** The next highlight move shows its split header at the top of the list. */
-  headerToTop: () => void;
-  /** Closes the composer on screen as a second Esc would (set by main, to avoid an import cycle). */
-  closeComposer: () => void;
-  /** Starts Sign in again on the signed-out account's screen (set by that screen). */
-  signInAgain: () => void;
-} = {
-  switchAccount: () => {},
-  splitIdOf: () => null,
-  openPalette: () => {},
-  focusSearch: () => {},
-  linkKey: () => false,
-  closeComposer: () => {},
-  headerToTop: () => {},
-  signInAgain: () => {},
-};
+/** Set to show the split header at the top of the list on the next highlight move. */
+export const listScroll = { headerToTop: false };

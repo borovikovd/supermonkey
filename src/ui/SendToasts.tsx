@@ -5,11 +5,10 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
-import { openComposer, reopenDraft } from "../compose/start";
-import { reopenWhenGone, undoSend } from "../compose/undo-send";
+import { followOutbox, isSendNotice, takeBackDraft, undoSend } from "../compose/sends";
+import { reopenDraft } from "../compose/start";
 import { act } from "../ipc/bridge";
 import type { Notice, OutboxRow } from "../ipc/types";
-import { useChrome } from "../store/chrome";
 import { useMirror } from "../store/mirror";
 
 type AccountNotice = { account: number; notice: Notice };
@@ -27,10 +26,6 @@ function useSummaries(): { outbox: OutboxRow[]; notices: AccountNotice[] } {
   }
   return { outbox, notices };
 }
-
-const isSendNotice = (n: Notice) => n.kind === "sendFailed" || n.kind === "sendUndone";
-
-const typing = () => openComposer.draft !== null && !useChrome.getState().composeBlurred;
 
 function sendLabel(r: OutboxRow): string {
   if (r.state === "sent") return "Sent";
@@ -88,37 +83,27 @@ export function SendToasts() {
         toast.dismiss(`send-${id}`);
       }
     }
-    for (const [id, target] of reopenWhenGone) {
-      const row = outbox.find((r) => r.id === id);
-      if (row) {
-        target.waiting = row.state === "waiting" && !row.undoRequested;
-        continue;
-      }
-      reopenWhenGone.delete(id);
-      toast.dismiss(`send-${id}`);
-      // A held undo that resolved as not sent comes back through its notice.
-      const noticed = notices.some(({ notice: n }) => isSendNotice(n) && n.draft === target.draft);
-      if (target.waiting && !noticed) reopenDraft(target.account, target.draft, target.thread);
-    }
+    followOutbox(
+      outbox,
+      notices.map((n) => n.notice),
+    );
   }, [outbox, notices]);
 
   // A rejected send, or a held undo that resolved as not sent, puts the draft
-  // back in a composer, unless the user is typing in one.
+  // back in a composer; while the user types in one, its toast offers it.
   useEffect(() => {
     for (const { account, notice: n } of notices) {
       if (!isSendNotice(n) || !n.draft || shown.current.has(n.id)) continue;
       shown.current.add(n.id);
       const { draft, thread } = n;
       if (n.kind === "sendFailed") toast.error(n.message);
-      if (typing()) {
+      if (!takeBackDraft(account, draft, thread)) {
         // It stays until acted on or closed: the draft is otherwise only in Drafts.
         toast(n.kind === "sendFailed" ? "Your message was not sent" : "Send undone", {
           duration: Infinity,
           closeButton: true,
           action: { label: "Open draft", onClick: () => reopenDraft(account, draft, thread) },
         });
-      } else {
-        reopenDraft(account, draft, thread);
       }
       act({ type: "ackNotice", notice: n.id });
     }

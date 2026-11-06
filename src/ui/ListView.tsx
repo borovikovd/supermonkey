@@ -2,11 +2,11 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Paperclip, Star } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 
-import { markReadOnOpenWhenLoaded, openThread } from "../commands";
 import { startReply } from "../compose/start";
 import { act, fetchRows } from "../ipc/bridge";
 import type { ListRow } from "../ipc/types";
-import { appHooks } from "../keyboard/refs";
+import { listScroll } from "../keyboard/refs";
+import { highlight as setHighlight, openConversation } from "../navigation";
 import { useChrome } from "../store/chrome";
 import { marked, searchTerms } from "./highlight";
 import { useAppState, useCurrent } from "../store/hooks";
@@ -189,22 +189,6 @@ export function ListView() {
     }
   }, [items.length]);
 
-  // First visit: the top row is highlighted.
-  useEffect(() => {
-    const top = list.ids[0];
-    if (highlight === null && top && cur?.screen.kind === "list") {
-      useChrome.getState().patchCurrent({ highlight: top.key });
-    }
-  }, [highlight, list.ids, cur?.screen.kind]);
-
-  // A click on a split name asks for its header at the top.
-  const headerToTop = useRef(false);
-  useEffect(() => {
-    appHooks.headerToTop = () => {
-      headerToTop.current = true;
-    };
-  }, []);
-
   // Keep the highlight in view, unless the pointer put it there: that row is
   // already under the mouse, and scrolling would move the list under it.
   const hovered = useRef<string | null>(null);
@@ -214,8 +198,9 @@ export function ListView() {
     if (highlight === null || fromPointer) return;
     const i = items.findIndex((it) => it.type === "row" && it.key === highlight);
     if (i < 0) return;
-    const toTop = headerToTop.current;
-    headerToTop.current = false;
+    // A click on a split name asks for its header at the top.
+    const toTop = listScroll.headerToTop;
+    listScroll.headerToTop = false;
     // Show the split header too when the highlight is its first row. Only a
     // header above the viewport needs scrolling to: scrolling down to the row
     // brings the header just above it into view anyway.
@@ -275,13 +260,12 @@ export function ListView() {
 
   const onClick = useCallback(
     (k: string) => {
-      useChrome.getState().patchCurrent({ highlight: k });
       if (isDrafts) {
+        setHighlight(k);
         startReply("resumeDraft", k);
         return;
       }
-      openThread(Number(k));
-      markReadOnOpenWhenLoaded(Number(k));
+      openConversation(Number(k));
     },
     [isDrafts],
   );
@@ -294,7 +278,7 @@ export function ListView() {
     const c = useChrome.getState();
     if (c.current()?.highlight === k) return;
     hovered.current = k;
-    c.patchCurrent({ highlight: k });
+    setHighlight(k);
   }, []);
 
   const selected = useMemo(() => new Set(selection), [selection]);

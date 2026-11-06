@@ -1,65 +1,18 @@
-// Mail commands shared by the keyboard and the palette. Each resolves its
-// targets, sends a resolved action (never a toggle), and moves the highlight
-// when rows leave the list (SPEC Keyboard).
+// Mail commands shared by the keyboard, the palette, and buttons. Each
+// resolves its targets and sends a resolved action (never a toggle); the
+// highlight then moves on as SPEC Keyboard says (src/navigation.ts).
 
-import { undoSend } from "./compose/undo-send";
 import { toast } from "sonner";
 
-import {
-  act,
-  blockSender,
-  senderThreads,
-  signInAgain,
-  subIdFor,
-  unsubscribeFrom,
-} from "./ipc/bridge";
-import { reportSignIn } from "./ui/signIn";
-import type { ModifyAction, ModifyKind, SubKey, View } from "./ipc/types";
-import { useChrome, type Where } from "./store/chrome";
-import { appHooks } from "./keyboard/refs";
-import { listKey } from "./store/hooks";
-import {
-  accountSummary,
-  undoTarget,
-  viewLabel,
-  viewList,
-  type ListView,
-} from "./store/mirror-core";
+import { undoSend } from "./compose/sends";
+import { act, blockSender, senderThreads, signInAgain, unsubscribeFrom } from "./ipc/bridge";
+import type { ModifyAction, ModifyKind } from "./ipc/types";
+import { moveOn, openPalette } from "./navigation";
+import { useChrome } from "./store/chrome";
+import { currentView, rowOf, visibleIds } from "./store/current";
+import { accountSummary, undoTarget, viewLabel } from "./store/mirror-core";
 import { useMirror } from "./store/mirror";
-
-export function currentListKey(): SubKey | null {
-  const c = useChrome.getState();
-  const cur = c.current();
-  return c.account === null || !cur ? null : listKey(c.account, cur.where);
-}
-
-export function currentView(): View | null {
-  const where = useChrome.getState().current()?.where;
-  return where?.kind === "view" ? where.view : null;
-}
-
-/** The list on screen with pending actions applied, once it is subscribed. */
-export function currentListView(): ListView | null {
-  const key = currentListKey();
-  const id = key ? subIdFor(key) : undefined;
-  return id ? viewList(useMirror.getState(), id) : null;
-}
-
-export function visibleIds(): string[] {
-  return currentListView()?.ids.map((e) => e.key) ?? [];
-}
-
-/** Whether the list on screen has had its first load, so its rows are the truth. */
-export function currentListLoaded(): boolean {
-  const key = currentListKey();
-  const id = key ? subIdFor(key) : undefined;
-  const sub = id ? useMirror.getState().subs[id] : undefined;
-  return sub?.type === "list" && sub.loaded;
-}
-
-export function rowOf(key: string) {
-  return (currentListView()?.rows ?? useMirror.getState().rows)[key];
-}
+import { reportSignIn } from "./ui/signIn";
 
 /**
  * Threads an action applies to: the selection, else the open conversation,
@@ -81,60 +34,6 @@ export function targets(): number[] {
   return [];
 }
 
-/** Opens a conversation from the list. */
-export function openThread(thread: number) {
-  const c = useChrome.getState();
-  const view = currentView();
-  const trashMode = view?.kind === "trash" || view?.kind === "spam";
-  c.patchCurrent({
-    screen: { kind: "conversation", thread, trashMode },
-    highlight: String(thread),
-  });
-  c.set({
-    selectedMessage: null,
-    expanded: [],
-    unfolded: [],
-    expandAll: false,
-    link: null,
-    inline: null,
-    selection: [],
-  });
-}
-
-export function closeThread() {
-  const c = useChrome.getState();
-  c.patchCurrent({ screen: { kind: "list" } });
-  c.set({ inline: null, link: null, selectedMessage: null });
-}
-
-/**
- * After rows leave the list: on the list the highlight moves to the next row
- * (or the previous one if it was last); in an open conversation the next
- * conversation opens; with none left, the empty list.
- */
-function moveAfterRemoval(before: string[], removed: Set<string>) {
-  const c = useChrome.getState();
-  const cur = c.current();
-  if (!cur) return;
-  const shown = new Set(visibleIds());
-  const focus = cur.screen.kind === "conversation" ? String(cur.screen.thread) : cur.highlight;
-  if (focus === null || shown.has(focus) || !removed.has(focus)) return;
-  const at = before.indexOf(focus);
-  // A conversation opened from elsewhere (a draft in Drafts) has no row to move from.
-  if (at < 0) return;
-  const isShown = (k: string) => shown.has(k);
-  const next = before.slice(at + 1).find(isShown) ?? before.slice(0, at).findLast(isShown) ?? null;
-  if (cur.screen.kind === "conversation") {
-    if (next === null) closeThread();
-    else {
-      openThread(Number(next));
-      markReadOnOpenWhenLoaded(Number(next));
-    }
-  } else {
-    c.patchCurrent({ highlight: next });
-  }
-}
-
 export function modify(
   kind: ModifyKind,
   add: string[],
@@ -145,7 +44,6 @@ export function modify(
   if (c.account === null) return;
   const threads = opts.threads ?? targets();
   if (threads.length === 0) return;
-  const before = visibleIds();
   act({
     type: "modify",
     account: c.account,
@@ -156,8 +54,8 @@ export function modify(
     snooze: opts.snooze ?? null,
     undoable: opts.undoable ?? true,
   });
-  if (opts.undoable !== false) c.set({ selection: [] });
-  moveAfterRemoval(before, new Set(threads.map(String)));
+  if (opts.undoable !== false) c.setSelection([]);
+  moveOn(threads);
 }
 
 const isSnoozed = (threads: number[]) => threads.some((t) => rowOf(String(t))?.snoozeUntil != null);
@@ -239,68 +137,6 @@ export function undo() {
   act({ type: "undo", account: c.account, entry });
 }
 
-/** Marks the open thread read; not an undo entry. */
-export function markReadOnOpen(thread: number) {
-  const row = rowOf(String(thread));
-  if (row && !row.unread) return;
-  modify("read", [], ["UNREAD"], { threads: [thread], undoable: false });
-}
-
-/** Closes search and restores the view and highlight it replaced (SPEC Search). */
-export function closeSearch() {
-  const c = useChrome.getState();
-  const before = c.beforeSearch ?? {
-    where: { kind: "view", view: { kind: "inbox" } },
-    highlight: null,
-  };
-  // Leaving the screen closes its composer as a second Esc would.
-  appHooks.closeComposer();
-  c.set({ search: null, beforeSearch: null, selection: [] });
-  c.patchCurrent({ ...before, screen: { kind: "list" } });
-}
-
-export function goTo(where: Where) {
-  const c = useChrome.getState();
-  if (c.account === null) return;
-  // Leaving the screen closes its composer as a second Esc would.
-  appHooks.closeComposer();
-  c.patchCurrent({ where, highlight: null, screen: { kind: "list" } });
-  c.set({ selection: [], inline: null, search: where.kind === "search" ? c.search : null });
-}
-
-/**
- * Marking read on open is an action the UI sends after the conversation's
- * first load, or at once if it was prefetched.
- */
-export function markReadOnOpenWhenLoaded(thread: number) {
-  const loaded = () =>
-    Object.values(useMirror.getState().subs).some(
-      (s) => s.type === "conversation" && s.key.thread === thread && s.data,
-    );
-  if (loaded()) {
-    markReadOnOpen(thread);
-    return;
-  }
-  // Only while it stays open: data that arrives later, say from the prefetch
-  // after the user left, was never on screen.
-  const onScreen = () => {
-    const screen = useChrome.getState().current()?.screen;
-    return screen?.kind === "conversation" && screen.thread === thread;
-  };
-  const stop = () => {
-    unsubMirror();
-    unsubChrome();
-  };
-  const unsubMirror = useMirror.subscribe(() => {
-    if (!loaded()) return;
-    stop();
-    markReadOnOpen(thread);
-  });
-  const unsubChrome = useChrome.subscribe(() => {
-    if (!onScreen()) stop();
-  });
-}
-
 /** What Unsubscribe does to the mail already in the Inbox, as in Superhuman. */
 export type UnsubscribeThen = "keep" | "done" | "trash";
 
@@ -326,7 +162,7 @@ export async function unsubscribe(then: UnsubscribeThen) {
     const r = await unsubscribeFrom(account, thread);
     if (r.kind === "noLink") {
       toast("No unsubscribe link in this email", {
-        action: { label: "Block sender", onClick: () => appHooks.openPalette({ kind: "block" }) },
+        action: { label: "Block sender", onClick: () => openPalette({ kind: "block" }) },
       });
     } else if (r.kind === "openedPage") toast(`Opened the unsubscribe page of ${r.sender}`);
     else toast(`Unsubscribed from ${r.sender}`);

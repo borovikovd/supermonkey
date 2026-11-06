@@ -1,19 +1,9 @@
-import { useEffect } from "react";
-
-import { signInAgain } from "../ipc/bridge";
-import { appHooks } from "../keyboard/refs";
 import { SignInStatus } from "./FirstRun";
-import { useSignIn } from "./signIn";
+import { startSignInAgain, useSignInAgainStatus } from "./signIn";
 
 /** In place of a signed-out account's mail: it looks signed out until it signs in again. */
 export function SignInAgain({ account, email }: { account: number; email: string }) {
-  const { busy, error, start } = useSignIn(() => signInAgain(account));
-  useEffect(() => {
-    appHooks.signInAgain = start;
-    return () => {
-      appHooks.signInAgain = () => {};
-    };
-  });
+  const { busy, error } = useSignInAgainStatus(account);
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
       <div className="text-subject">Sign in again</div>
@@ -23,7 +13,7 @@ export function SignInAgain({ account, email }: { account: number; email: string
       </div>
       <button
         className="mt-2 rounded-md bg-accent px-4 py-2 text-row font-medium text-inverse"
-        onClick={start}
+        onClick={() => startSignInAgain(account)}
       >
         Sign in with Google
       </button>

@@ -1,9 +1,7 @@
 import { Archive, Clock, File, Inbox, Send, Star } from "lucide-react";
 
-import { switchAccount } from "../accounts";
-import { goTo } from "../commands";
 import type { AccountInfo, View } from "../ipc/types";
-import { useChrome } from "../store/chrome";
+import { goTo, openSheet, switchAccount } from "../navigation";
 import { useCurrent } from "../store/hooks";
 import { countLabel } from "./format";
 
@@ -46,7 +44,7 @@ export function Rail({ accounts }: { accounts: AccountInfo[] }) {
           <button
             key={view.kind}
             title={title}
-            onClick={() => goTo({ kind: "view", view })}
+            onClick={() => goTo(view)}
             className={`flex h-8 w-8 items-center justify-center rounded-lg ${
               active === view.kind ? "bg-bg text-text shadow-lift" : "text-text-2 hover:text-text"
             }`}
@@ -62,11 +60,7 @@ export function Rail({ accounts }: { accounts: AccountInfo[] }) {
             key={a.id}
             title={`${a.email} (Ctrl+${i + 1})${status(a)}`}
             // The account on screen opens its settings; another one switches to it.
-            onClick={() =>
-              a.id === account
-                ? useChrome.getState().set({ sheet: "settings", palette: null })
-                : switchAccount(a.id)
-            }
+            onClick={() => (a.id === account ? openSheet("settings") : switchAccount(a.id))}
             className={`relative rounded-full p-0.5 ${
               a.id === account ? "ring-avatar ring-accent" : "hover:ring-avatar hover:ring-border"
             }`}

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { visibleIds } from "../commands";
+import { visibleIds } from "../store/current";
 import { later, subscribe, unsubscribe } from "../ipc/bridge";
 import type { SubKey } from "../ipc/types";
 import { useChrome } from "../store/chrome";

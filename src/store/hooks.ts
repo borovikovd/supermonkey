@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import { keyString, subscribe, unsubscribe } from "../ipc/bridge";
 import type { AccountSummary, AppState, ConversationData, DraftState, SubKey } from "../ipc/types";
-import { useChrome, type Where } from "./chrome";
+import { useChrome } from "./chrome";
+import { conversationData } from "./current";
 import { accountSummary, appState, viewList, type ListView, type MirrorState } from "./mirror-core";
 import { useMirror } from "./mirror";
 
@@ -54,12 +55,6 @@ export function useSummary(account: number | null): AccountSummary | null {
   return useMirror((s) => (account === null ? null : accountSummary(s, account)));
 }
 
-export function listKey(account: number, where: Where): SubKey {
-  return where.kind === "search"
-    ? { type: "search", account, query: where.query }
-    : { type: "list", account, view: where.view };
-}
-
 /** The list as shown, with pending actions applied. */
 export function useListView(key: SubKey | null): ListView & {
   loaded: boolean;
@@ -105,22 +100,7 @@ export function useConversation(
   thread: number | null,
   trashMode: boolean,
 ): ConversationData | null {
-  return useMirror((s) => {
-    if (thread === null) return null;
-    let prefetched: ConversationData | null = null;
-    for (const sub of Object.values(s.subs)) {
-      if (
-        sub.type === "conversation" &&
-        sub.key.thread === thread &&
-        sub.key.trashMode === trashMode &&
-        sub.data
-      ) {
-        if (sub.key.open) return sub.data;
-        prefetched = sub.data;
-      }
-    }
-    return prefetched;
-  });
+  return useMirror((s) => (thread === null ? null : conversationData(s, thread, trashMode)));
 }
 
 export function useDraft(draft: string | null): DraftState | null {

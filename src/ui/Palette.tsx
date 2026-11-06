@@ -1,14 +1,11 @@
 import { Command } from "cmdk";
 import { useEffect, useState } from "react";
 
-import { switchAccount } from "../accounts";
 import {
   applyLabel,
-  goTo,
   markDone,
   removeViewLabel,
   returnToInbox,
-  rowOf,
   snooze,
   unsubscribe,
   block,
@@ -20,13 +17,8 @@ import {
   undo,
 } from "../commands";
 import { formatAddr } from "../compose/RecipientField";
-import {
-  discardOnScreen,
-  openComposer,
-  sendOnScreen,
-  startCompose,
-  startReply,
-} from "../compose/start";
+import { discardOnScreen, draftOnScreen, mountedComposer, sendOnScreen } from "../compose/session";
+import { startCompose, startReply } from "../compose/start";
 import {
   act,
   addAccount,
@@ -38,21 +30,30 @@ import {
 import { toast } from "sonner";
 import { reportSignIn } from "./signIn";
 import type { BlockedSenders, PinKind, SnoozeChoice, View } from "../ipc/types";
-import { appHooks } from "../keyboard/refs";
-import { goSplit, selectAll } from "../keyboard/nav";
+import { selectAll } from "../keyboard/nav";
 import { measure } from "../keyboard/meter";
+import {
+  closePalette,
+  goTo,
+  goToSplit,
+  openPalette,
+  openSearch,
+  openSheet,
+  switchAccount,
+} from "../navigation";
 import { useChrome, type PaletteMode } from "../store/chrome";
+import { rowOf } from "../store/current";
 import { useAppState, useCurrent, useSummary } from "../store/hooks";
 
 type Item = { id: string; label: string; keys?: string; run: () => void; keep?: boolean };
 
-const close = () => useChrome.getState().set({ palette: null });
-const view = (v: View) => () => goTo({ kind: "view", view: v });
+const close = closePalette;
+const view = (v: View) => () => goTo(v);
 
 /** `⌘K` while a composer is blurred. */
 const DRAFT_ACTIONS: Item[] = [
   { id: "send", label: "Send", keys: "⌘ ↵", run: sendOnScreen },
-  { id: "attach", label: "Attach a file", keys: "⌘ ⇧ A", run: () => openComposer.attach() },
+  { id: "attach", label: "Attach a file", keys: "⌘ ⇧ A", run: () => mountedComposer()?.attach() },
   { id: "discard", label: "Discard draft", keys: "⌘ ⇧ ,", run: discardOnScreen },
 ];
 
@@ -117,7 +118,8 @@ function useCommands(mode: PaletteMode, query: string): Commands {
   const muted = summary?.account.muted ?? false;
   switch (mode.kind) {
     case "commands": {
-      if (mode.draftActions) return { items: DRAFT_ACTIONS, placeholder: "Draft actions" };
+      // While a composer is on screen, the palette holds its draft actions.
+      if (draftOnScreen() !== null) return { items: DRAFT_ACTIONS, placeholder: "Draft actions" };
       const items: Item[] = [
         { id: "done", label: "Mark done", keys: "E", run: markDone },
         { id: "inbox", label: "Return to inbox", keys: "⇧ E", run: returnToInbox },
@@ -125,7 +127,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           id: "snooze",
           label: "Snooze",
           keys: "H",
-          run: () => appHooks.openPalette({ kind: "snooze" }),
+          run: () => openPalette({ kind: "snooze" }),
           keep: true,
         },
         { id: "trash", label: "Trash", keys: "#", run: trash },
@@ -133,19 +135,19 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           id: "spam",
           label: "Mark as spam",
           keys: "!",
-          run: () => appHooks.openPalette({ kind: "spam" }),
+          run: () => openPalette({ kind: "spam" }),
           keep: true,
         },
         {
           id: "block",
           label: "Block",
-          run: () => appHooks.openPalette({ kind: "block" }),
+          run: () => openPalette({ kind: "block" }),
           keep: true,
         },
         {
           id: "blocked",
           label: "Blocked senders",
-          run: () => appHooks.openPalette({ kind: "blocked" }),
+          run: () => openPalette({ kind: "blocked" }),
           keep: true,
         },
         { id: "star", label: "Star or unstar", keys: "S", run: toggleStar },
@@ -153,7 +155,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           id: "unsubscribe",
           label: "Unsubscribe",
           keys: "⌘ U",
-          run: () => appHooks.openPalette({ kind: "unsubscribe" }),
+          run: () => openPalette({ kind: "unsubscribe" }),
           keep: true,
         },
         { id: "read", label: "Mark read or unread", keys: "U", run: toggleRead },
@@ -168,7 +170,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           id: "label",
           label: "Add or remove label",
           keys: "L",
-          run: () => appHooks.openPalette({ kind: "labels" }),
+          run: () => openPalette({ kind: "labels" }),
           keep: true,
         },
         { id: "unlabel", label: "Remove current label", keys: "Y", run: removeViewLabel },
@@ -177,19 +179,19 @@ function useCommands(mode: PaletteMode, query: string): Commands {
         { id: "replyall", label: "Reply all", keys: "↵", run: () => startReply("replyAll") },
         { id: "forward", label: "Forward", keys: "F", run: () => startReply("forward") },
         { id: "compose", label: "Compose", keys: "C", run: startCompose },
-        { id: "search", label: "Search", keys: "/", run: () => appHooks.focusSearch() },
+        { id: "search", label: "Search", keys: "/", run: openSearch },
         { id: "g-inbox", label: "Go to Inbox", run: view({ kind: "inbox" }) },
         {
           id: "g-imp",
           label: "Go to Important",
           keys: "G I",
-          run: () => goSplit("important", appHooks.splitIdOf),
+          run: () => goToSplit("important"),
         },
         {
           id: "g-other",
           label: "Go to Other",
           keys: "G O",
-          run: () => goSplit("other", appHooks.splitIdOf),
+          run: () => goToSplit("other"),
         },
         { id: "g-done", label: "Go to Done", keys: "G E", run: view({ kind: "done" }) },
         { id: "g-all", label: "Go to All Mail", keys: "G A", run: view({ kind: "allMail" }) },
@@ -203,36 +205,36 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           id: "g-label",
           label: "Go to label",
           keys: "G L",
-          run: () => appHooks.openPalette({ kind: "goLabel" }),
+          run: () => openPalette({ kind: "goLabel" }),
           keep: true,
         },
         {
           id: "split-add",
           label: "Add to split",
-          run: () => appHooks.openPalette({ kind: "addToSplit" }),
+          run: () => openPalette({ kind: "addToSplit" }),
           keep: true,
         },
         {
           id: "split-imp",
           label: "Move to Important",
-          run: () => appHooks.openPalette({ kind: "addToSplit", preset: "important" }),
+          run: () => openPalette({ kind: "addToSplit", preset: "important" }),
           keep: true,
         },
         {
           id: "split-other",
           label: "Move to Other",
-          run: () => appHooks.openPalette({ kind: "addToSplit", preset: "other" }),
+          run: () => openPalette({ kind: "addToSplit", preset: "other" }),
           keep: true,
         },
         {
           id: "split-settings",
           label: "Split Inbox settings",
-          run: () => useChrome.getState().set({ sheet: "splits" }),
+          run: () => openSheet("splits"),
         },
         {
           id: "switch",
           label: "Switch account",
-          run: () => appHooks.openPalette({ kind: "switchAccount" }),
+          run: () => openPalette({ kind: "switchAccount" }),
           keep: true,
         },
         { id: "add-account", label: "Add account", run: () => reportSignIn(addAccount()) },
@@ -246,13 +248,13 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           id: "settings",
           label: "Settings",
           keys: "⌘ ,",
-          run: () => useChrome.getState().set({ sheet: "settings" }),
+          run: () => openSheet("settings"),
         },
         {
           id: "shortcuts",
           label: "Keyboard shortcuts",
           keys: "?",
-          run: () => useChrome.getState().set({ sheet: "shortcuts" }),
+          run: () => openSheet("shortcuts"),
         },
       ];
       return { items, placeholder: "Type a command" };
@@ -440,7 +442,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
         items: sendAs.map((s) => ({
           id: s.email,
           label: formatAddr(s),
-          run: () => openComposer.setFrom({ name: s.name || null, email: s.email }),
+          run: () => mountedComposer()?.setFrom({ name: s.name || null, email: s.email }),
         })),
         placeholder: "Send from",
       };

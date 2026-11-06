@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { switchAccount } from "../accounts";
 import { act, checkSplitRule, signInAgain } from "../ipc/bridge";
-import { reportSignIn } from "./signIn";
 import type { AccountInfo, SplitInfo } from "../ipc/types";
+import { closeSheet, openSplitSettings } from "../navigation";
 import { useChrome } from "../store/chrome";
+import { reportSignIn } from "./signIn";
 import { useAppState, useCurrent, useSummary } from "../store/hooks";
 
 const SHORTCUTS: [string, [string, string][]][] = [
@@ -71,8 +71,6 @@ const SHORTCUTS: [string, [string, string][]][] = [
     ],
   ],
 ];
-
-const closeSheet = () => useChrome.getState().set({ sheet: null });
 
 function Sheet({
   title,
@@ -175,11 +173,7 @@ function AccountBlock({ a }: { a: AccountInfo }) {
       <div className="flex flex-wrap gap-2 pt-2">
         <button
           className="rounded-md border border-border px-2 py-1 text-row hover:bg-fill-half"
-          onClick={() => {
-            // The account comes on screen as any switch brings it (SPEC Switching).
-            switchAccount(a.id);
-            useChrome.getState().set({ sheet: "splits" });
-          }}
+          onClick={() => openSplitSettings(a.id)}
         >
           Split Inbox settings
         </button>

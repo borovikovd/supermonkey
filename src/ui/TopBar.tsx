@@ -1,10 +1,15 @@
 import { ArrowLeft, ChevronDown, ChevronUp, Search, X } from "lucide-react";
-import { useEffect, useRef } from "react";
 
-import { closeSearch } from "../commands";
-import { closeComposerOnScreen } from "../compose/start";
-import { visibleSplits } from "../keyboard/nav";
-import { appHooks } from "../keyboard/refs";
+import { closeComposerOnScreen, useComposeState } from "../compose/session";
+import { dom } from "../keyboard/refs";
+import {
+  closeSearch,
+  editSearch,
+  highlight as moveHighlightTo,
+  openSearch,
+  showSearchResults,
+  visibleSplits,
+} from "../navigation";
 import { useChrome, viewTitle } from "../store/chrome";
 import { useAppState, useCurrent, useSummary } from "../store/hooks";
 import { useCurrentList, useSplitCounts } from "./current-list";
@@ -17,24 +22,7 @@ function press(key: string) {
 
 function SearchField() {
   const search = useChrome((s) => s.search);
-  const ref = useRef<HTMLInputElement>(null);
   const online = useAppState()?.online ?? true;
-
-  useEffect(() => {
-    appHooks.focusSearch = () => {
-      const c = useChrome.getState();
-      if (!c.search)
-        c.set({
-          search: { open: true, query: "", focus: "field" },
-          beforeSearch: (() => {
-            const cur = c.current();
-            return cur ? { where: cur.where, highlight: cur.highlight } : null;
-          })(),
-        });
-      else c.set({ search: { ...c.search, focus: "field" } });
-      requestAnimationFrame(() => ref.current?.focus());
-    };
-  }, []);
 
   if (!search) return null;
   // As in Superhuman: the query takes the header, in line with the senders
@@ -45,7 +33,9 @@ function SearchField() {
         <span className="absolute top-0 bottom-0 left-0 w-0.75 bg-accent" />
       )}
       <input
-        ref={ref}
+        ref={(el) => {
+          dom.searchInput = el;
+        }}
         // Focus moves into search because the user just pressed `/`.
         // oxlint-disable-next-line jsx-a11y/no-autofocus
         autoFocus
@@ -53,32 +43,15 @@ function SearchField() {
         className="ml-3.25 min-w-0 flex-1 bg-transparent text-search text-text outline-none placeholder:text-text-3"
         placeholder="Search"
         value={search.query}
-        onChange={(e) => {
-          const query = e.target.value;
-          const c = useChrome.getState();
-          c.set({ search: { open: true, query, focus: "field" } });
-          if (query.trim()) {
-            // Results replace the screen, which closes its composer as a second Esc would.
-            closeComposerOnScreen();
-            c.patchCurrent({
-              where: { kind: "search", query },
-              highlight: null,
-              screen: { kind: "list" },
-            });
-          } else if (c.beforeSearch) {
-            c.patchCurrent(c.beforeSearch);
-          }
-        }}
+        onChange={(e) => editSearch(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
             e.preventDefault();
             e.stopPropagation();
-            ref.current?.blur();
             closeSearch();
           } else if (e.key === "Enter" || e.key === "ArrowDown") {
             e.preventDefault();
-            ref.current?.blur();
-            useChrome.getState().set({ search: { ...search, focus: "results" } });
+            showSearchResults();
           }
         }}
       />
@@ -110,10 +83,8 @@ function SplitTitles() {
             // may not have rendered it).
             onClick={() => {
               const first = visibleSplits().find((v) => v.split === s.id)?.first;
-              const c = useChrome.getState();
-              if (!first || c.current()?.highlight === first) return;
-              appHooks.headerToTop();
-              c.patchCurrent({ highlight: first });
+              if (!first || useChrome.getState().current()?.highlight === first) return;
+              moveHighlightTo(first, { headerToTop: true });
             }}
           >
             {s.name}
@@ -141,8 +112,9 @@ function ViewTitle() {
 export function TopBar() {
   const { cur } = useCurrent();
   const searchOpen = useChrome((s) => s.search !== null);
+  const composing = useComposeState((s) => s.onScreen?.thread === null);
 
-  const screen = cur?.screen.kind ?? "list";
+  const screen = composing ? "compose" : (cur?.screen.kind ?? "list");
   if (screen !== "list" && !searchOpen) {
     // Conversation and compose: back to the list, and previous / next conversation.
     return (
@@ -183,9 +155,7 @@ export function TopBar() {
         <>
           <ViewTitle />
           <div className="flex-1" data-tauri-drag-region />
-          {/* Renders nothing while closed; it registers what `/` opens. */}
-          <SearchField />
-          <IconButton title="Search (/)" onClick={() => appHooks.focusSearch()}>
+          <IconButton title="Search (/)" onClick={openSearch}>
             <Search size={16} strokeWidth={1.5} />
           </IconButton>
         </>

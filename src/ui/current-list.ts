@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 
 import { useChrome } from "../store/chrome";
-import { listKey, useCurrent, useListView, useSummary } from "../store/hooks";
+import { listKey } from "../store/current";
+import { useCurrent, useListView, useSummary } from "../store/hooks";
 
 /** The list on screen for the current account: its view or its search. */
 export function useCurrentList() {

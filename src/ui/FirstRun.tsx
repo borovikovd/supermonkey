@@ -1,8 +1,7 @@
-import { addAccount } from "../ipc/bridge";
-import { useSignIn } from "./signIn";
+import { startAddAccount, useAddAccountStatus } from "./signIn";
 
 export function FirstRun() {
-  const { busy, error, start } = useSignIn(addAccount);
+  const { busy, error } = useAddAccountStatus();
   return (
     <div
       data-tauri-drag-region
@@ -12,7 +11,7 @@ export function FirstRun() {
       <div className="text-row text-text-2">A fast, keyboard-first client for Gmail.</div>
       <button
         className="mt-2 rounded-md bg-accent px-4 py-2 text-row font-medium text-inverse"
-        onClick={start}
+        onClick={startAddAccount}
       >
         Add a Gmail account
       </button>

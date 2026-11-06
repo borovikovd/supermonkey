@@ -1,116 +1,27 @@
-// Starting, resuming, sending, and closing composers (SPEC Compose, Reply
-// composer, Keyboard). The open composer registers its pending save here, so
-// send, discard, and close carry it ahead of them in the same invoke.
+// Starting and resuming composers (SPEC Compose, Reply composer, Keyboard):
+// `c`, `r`, `Enter`, `f`, a draft from Drafts or a thread, and a draft that
+// comes back after an undone or refused send.
 
-import { toast } from "sonner";
-
-import { markReadOnOpenWhenLoaded, openThread } from "../commands";
-import { act, forgetSub, subIdFor, subscribe } from "../ipc/bridge";
-import type {
-  Addr,
-  ConversationData,
-  DraftSave,
-  DraftKind,
-  DraftState,
-  SubKey,
-} from "../ipc/types";
-import { conversationRef } from "../keyboard/refs";
-import { useChrome, type Screen } from "../store/chrome";
+import { openConversation, switchAccount } from "../navigation";
+import { act } from "../ipc/bridge";
+import type { ConversationData, DraftKind } from "../ipc/types";
+import { useChrome } from "../store/chrome";
+import { conversationData, openConversationData } from "../store/current";
 import { useMirror } from "../store/mirror";
+import {
+  closeComposerOnScreen,
+  composerOnScreen,
+  mountedComposer,
+  openInline,
+  openScreen,
+} from "./session";
 
 export type ReplyMode = "reply" | "replyAll" | "forward" | "resumeDraft";
 
-/** A save of a composer's fields, with the rev of the draft state they are based on. */
-export type UpdateSave = Extract<DraftSave, { type: "update" }>;
-
-/** The open composer's hooks, set while it is mounted. */
-export const openComposer: {
-  draft: string | null;
-  /** The save of pending fields not yet saved, or null when saved. */
-  pending: () => UpdateSave | null;
-  /** Recipients that are not valid addresses. */
-  invalid: () => string[];
-  focus: () => void;
-  setFrom: (from: Addr) => void;
-  attach: () => void;
-  /** Files still being attached: resolves to whether all of them were; null when none are. */
-  uploads: () => Promise<boolean> | null;
-} = {
-  draft: null,
-  pending: () => null,
-  invalid: () => [],
-  focus: () => {},
-  setFrom: () => {},
-  attach: () => {},
-  uploads: () => null,
-};
-
-const composerKey = (draft: string): SubKey => ({ type: "composer", draft });
-
-/** The composer's draft as its subscription last brought it; null before its first load. */
-export function loadedDraft(draft: string): DraftState | null {
-  for (const sub of Object.values(useMirror.getState().subs)) {
-    if (sub.type === "composer" && sub.key.draft === draft) return sub.draft;
-  }
-  return null;
-}
-
-/**
- * Null when the composer on screen can be saved whole now; else resolves
- * once its first load is in and its files are attached, to whether all of
- * them were.
- */
-function whenReady(draft: string): Promise<boolean> | null {
-  const uploads = openComposer.draft === draft ? openComposer.uploads() : null;
-  const loaded = () => subIdFor(composerKey(draft)) === undefined || loadedDraft(draft) !== null;
-  const load = loaded()
-    ? null
-    : new Promise<void>((resolve) => {
-        const unsub = useMirror.subscribe(() => {
-          if (!loaded()) return;
-          unsub();
-          resolve();
-        });
-      });
-  if (!uploads && !load) return null;
-  return Promise.all([load, uploads]).then(([, ok]) => ok ?? true);
-}
-
-/** Screens a `c` composer returns to, per draft. */
-const returnTo = new Map<string, Screen>();
-
-/** The draft in the composer on screen, inline or full-screen. */
-function draftOnScreen(): string | null {
-  const c = useChrome.getState();
-  const cur = c.current();
-  return c.inline?.draft ?? (cur?.screen.kind === "compose" ? cur.screen.draft : null);
-}
-
-/** Opens a composer that replaces the screen. */
-function openScreen(draft: string) {
-  subscribe(composerKey(draft));
-  const c = useChrome.getState();
-  returnTo.set(draft, c.current()?.screen ?? { kind: "list" });
-  c.patchCurrent({ screen: { kind: "compose", draft } });
-  c.set({ composeBlurred: false, inline: null });
-}
-
-/** Opens the reply composer under the open conversation. */
-function openInline(draft: string, thread: number, target: number | null) {
-  subscribe(composerKey(draft));
-  const c = useChrome.getState();
-  c.set({
-    inline: { draft, thread },
-    composeBlurred: false,
-    // Whenever a reply composer opens, its target message is selected.
-    selectedMessage: target ?? c.selectedMessage,
-  });
-}
-
 /** `c`: a new message that replaces the screen. */
 export function startCompose() {
-  const c = useChrome.getState();
-  if (c.account === null) return;
+  const { account } = useChrome.getState();
+  if (account === null) return;
   closeComposerOnScreen();
   const draft = crypto.randomUUID();
   act({
@@ -118,7 +29,7 @@ export function startCompose() {
     draft,
     save: {
       type: "create",
-      account: c.account,
+      account,
       kind: "new",
       replyAll: false,
       thread: null,
@@ -138,8 +49,7 @@ export function resumeDraft(draft: string, thread: number | null, target: number
   }
   const cur = useChrome.getState().current();
   if (cur?.screen.kind !== "conversation" || cur.screen.thread !== thread) {
-    openThread(thread);
-    markReadOnOpenWhenLoaded(thread);
+    openConversation(thread);
   }
   openInline(draft, thread, target);
 }
@@ -154,8 +64,9 @@ let typedAhead: string | null = null;
 /** Keydown: keeps a key typed while a reply is on its way; true if kept. */
 export function typeAhead(e: KeyboardEvent): boolean {
   if (typedAhead === null || e.metaKey || e.ctrlKey || e.altKey) return false;
-  const c = useChrome.getState();
-  if (c.current()?.screen.kind !== "conversation" || openComposer.draft === c.inline?.draft) {
+  const screen = useChrome.getState().current()?.screen;
+  const onScreen = composerOnScreen();
+  if (screen?.kind !== "conversation" || (onScreen && mountedComposer(onScreen.draft))) {
     // The reply was dropped, or its editor is up and took the text.
     typedAhead = null;
     return false;
@@ -182,12 +93,9 @@ let stopWaiting: (() => void) | null = null;
  * Only the latest reply key waits, or each would start its own draft, and it
  * waits only while that conversation stays on screen.
  */
-function whenLoaded(thread: number, run: (data: ConversationData) => void) {
+function whenLoaded(thread: number, trashMode: boolean, run: (data: ConversationData) => void) {
   stopWaiting?.();
-  const ready = () => {
-    const d = conversationRef.data;
-    return d && d.thread === thread ? d : null;
-  };
+  const ready = () => conversationData(useMirror.getState(), thread, trashMode);
   const now = ready();
   if (now) {
     run(now);
@@ -210,7 +118,7 @@ function whenLoaded(thread: number, run: (data: ConversationData) => void) {
     typedAhead = null;
   });
   const unsubMirror = useMirror.subscribe(() => {
-    // conversationRef updates in an effect after the mirror changes.
+    // Aim once the conversation has rendered its first load.
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => {
       const d = ready();
@@ -229,37 +137,35 @@ function whenLoaded(thread: number, run: (data: ConversationData) => void) {
  */
 export function startReply(mode: ReplyMode, draftId?: string) {
   const c = useChrome.getState();
-  if (c.account === null) return;
+  const { account } = c;
   const cur = c.current();
-  if (!cur) return;
+  if (account === null || !cur) return;
 
   if (mode === "resumeDraft" && draftId) {
-    const row = useMirror.getState().rows[draftId];
-    resumeDraftById(draftId, row?.thread ?? null);
+    resumeDraftById(draftId);
     return;
   }
 
-  let thread: number;
   let fromList = false;
-  if (cur.screen.kind === "conversation") {
-    thread = cur.screen.thread;
-  } else if (cur.screen.kind === "list" && cur.highlight !== null) {
+  if (cur.screen.kind === "list") {
+    if (cur.highlight === null) return;
     if (cur.where.kind === "view" && cur.where.view.kind === "drafts") {
-      resumeDraftById(cur.highlight, useMirror.getState().rows[cur.highlight]?.thread ?? null);
+      resumeDraftById(cur.highlight);
       return;
     }
-    thread = Number(cur.highlight);
+    const thread = Number(cur.highlight);
     if (Number.isNaN(thread)) return;
     // `r` and `f` on the list open the conversation first and aim at its latest message.
-    openThread(thread);
-    markReadOnOpenWhenLoaded(thread);
+    openConversation(thread);
     fromList = true;
-  } else return;
+  }
+  const screen = useChrome.getState().current()?.screen;
+  if (screen?.kind !== "conversation") return;
+  const { thread, trashMode } = screen;
 
   closeComposerOnScreen();
-  const account = c.account;
   typedAhead ??= "";
-  whenLoaded(thread, (data) => {
+  whenLoaded(thread, trashMode, (data) => {
     const msgs = data.messages;
     const latest = msgs.at(-1)?.id ?? null;
     const selected = fromList ? latest : (useChrome.getState().selectedMessage ?? latest);
@@ -292,105 +198,23 @@ export function startReply(mode: ReplyMode, draftId?: string) {
   });
 }
 
-function resumeDraftById(draft: string, thread: number | null) {
-  const data = conversationRef.data;
+/** A draft by id: in the open conversation, aimed at its target; else on its thread from the list row. */
+function resumeDraftById(draft: string) {
+  const data = openConversationData();
   const own = data?.drafts.find((d) => d.id === draft);
-  resumeDraft(draft, own && data ? data.thread : thread, own?.target ?? null);
-}
-
-/** Closes the composer on screen as a second Esc would: kept as a draft, or discarded if untouched. */
-export function closeComposerOnScreen() {
-  const draft = draftOnScreen();
-  if (!draft) return;
-  // This composer's own hook: the close may run after it has left the screen.
-  const pending = openComposer.draft === draft ? openComposer.pending : () => null;
-  const wait = whenReady(draft);
-  const close = () => {
-    const save = pending();
-    if (save) act({ type: "saveDraft", draft, save });
-    act({ type: "closeComposer", draft });
-    forgetSub(composerKey(draft));
-  };
-  // Off screen at once. The close itself waits for the first load and for
-  // files still attaching, or it could discard the draft as untouched.
-  leave(draft, false);
-  if (wait) void wait.then(close);
-  else close();
-}
-
-/** Takes the composer off screen and, unless told not to, drops its subscription. */
-function leave(draft: string, forget = true) {
-  if (forget) forgetSub(composerKey(draft));
-  const c = useChrome.getState();
-  if (c.inline?.draft === draft) c.set({ inline: null, composeBlurred: false });
-  const cur = c.current();
-  if (cur?.screen.kind === "compose" && cur.screen.draft === draft) {
-    c.patchCurrent({ screen: returnTo.get(draft) ?? { kind: "list" } });
-    returnTo.delete(draft);
-    c.set({ composeBlurred: false });
-  }
-  if (openComposer.draft === draft) openComposer.draft = null;
-}
-
-/** Cmd+Enter: refuses with a toast while a recipient is invalid. */
-export function sendOnScreen() {
-  const draft = draftOnScreen();
-  if (!draft) return;
-  // Before the first load or while a file is still attaching, the draft is
-  // not complete: send once it is, and not at all if a file fails. The
-  // composer stays on screen meanwhile.
-  const wait = whenReady(draft);
-  if (wait) {
-    void wait.then((ok) => {
-      if (draftOnScreen() !== draft) return;
-      if (ok) sendOnScreen();
-      else toast.error("Not sent: a file could not be attached");
-    });
+  if (own && data) {
+    resumeDraft(draft, data.thread, own.target);
     return;
   }
-  // Taking the pending save ends it, so it is saved here, before any refusal.
-  // It also turns typed text into chips, which the checks below must see.
-  const save = openComposer.draft === draft ? openComposer.pending() : null;
-  if (save) act({ type: "saveDraft", draft, save });
-  const invalid = openComposer.draft === draft ? openComposer.invalid() : [];
-  if (invalid.length > 0) {
-    toast.error(
-      `Fix ${invalid.length === 1 ? "this address" : "these addresses"}: ${invalid.join(", ")}`,
-    );
-    return;
-  }
-  const draftState = Object.values(useMirror.getState().subs).find(
-    (s) => s.type === "composer" && s.key.type === "composer" && s.key.draft === draft,
-  );
-  const recipients =
-    save?.fields ?? (draftState?.type === "composer" && draftState.draft ? draftState.draft : null);
-  if (recipients && recipients.to.length + recipients.cc.length + recipients.bcc.length === 0) {
-    toast.error("Add a recipient");
-    return;
-  }
-  act({ type: "sendDraft", draft });
-  leave(draft);
-}
-
-/** Cmd+Shift+,: discard locally and on Gmail. */
-export function discardOnScreen() {
-  const draft = draftOnScreen();
-  if (!draft) return;
-  act({ type: "discardDraft", draft });
-  leave(draft);
-  toast("Draft discarded");
+  resumeDraft(draft, useMirror.getState().rows[draft]?.thread ?? null, null);
 }
 
 /**
  * Puts a draft back in a composer after undo, a held undo that resolved as
- * not sent, or a rejection. Switches account and reopens its thread.
+ * not sent, or a rejection. Switches account and reopens its thread, even if
+ * it has left the current view.
  */
 export function reopenDraft(account: number, draft: string, thread: number | null) {
-  const c = useChrome.getState();
-  if (c.account !== account) {
-    closeComposerOnScreen();
-    c.setAccount(account);
-  }
-  // Reopens the thread even if it has left the current view.
+  switchAccount(account);
   resumeDraft(draft, thread, null);
 }

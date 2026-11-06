@@ -1,12 +1,12 @@
 import { Check, Clock, File, Paperclip } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 
-import { markReadOnOpen } from "../commands";
 import { Composer } from "../compose/Composer";
+import { composerOnScreen, useComposeState } from "../compose/session";
 import { startReply } from "../compose/start";
 import { openAttachment } from "../ipc/bridge";
 import type { AttachmentInfo, DraftSummary, MessageSummary, OutboxRow } from "../ipc/types";
-import { appHooks, conversationRef } from "../keyboard/refs";
+import { markReadOnOpen } from "../navigation";
 import { useChrome } from "../store/chrome";
 import { useAppState, useConversation, useCurrent, useSubscription } from "../store/hooks";
 import { useMirror } from "../store/mirror";
@@ -66,74 +66,10 @@ function fullDate(ms: number) {
 }
 
 /** Clicking a message selects it (SPEC Reading). Stable, so frames keep their listeners. */
-const select = (id: number) => useChrome.getState().set({ selectedMessage: id });
+const select = (id: number) => useChrome.getState().selectMessage(id);
 
 /** Expands or collapses a message, and selects it. */
-const toggle = (id: number) => {
-  const c = useChrome.getState();
-  const ex = new Set(c.expanded);
-  if (ex.has(id)) ex.delete(id);
-  else ex.add(id);
-  c.set({ expanded: [...ex], selectedMessage: id });
-};
-
-/** Tab cycles links in expanded messages; Enter opens; Esc clears. */
-function linkKey(e: KeyboardEvent): boolean {
-  const c = useChrome.getState();
-  if (e.key === "Tab") {
-    const frames = Array.from(document.querySelectorAll<HTMLIFrameElement>("iframe[data-frame]"));
-    const links: [number, HTMLAnchorElement][] = [];
-    for (const f of frames) {
-      const id = Number(f.dataset.frame);
-      for (const a of Array.from(
-        f.contentDocument?.querySelectorAll<HTMLAnchorElement>("a[href]") ?? [],
-      )) {
-        links.push([id, a]);
-      }
-    }
-    for (const [, a] of links) a.classList.remove("ub-link-focus");
-    if (links.length === 0) return true;
-    const current = c.link;
-    let at = current
-      ? links.findIndex(
-          ([id], i) => id === current[0] && i - links.findIndex(([x]) => x === id) === current[1],
-        )
-      : -1;
-    at = (at + (e.shiftKey ? -1 : 1) + links.length) % links.length;
-    const picked = links[at];
-    if (!picked) return true;
-    const [id, a] = picked;
-    const first = links.findIndex(([x]) => x === id);
-    a.classList.add("ub-link-focus");
-    a.scrollIntoView({ block: "nearest" });
-    a.ownerDocument.defaultView?.frameElement?.scrollIntoView({
-      block: "nearest",
-    });
-    c.set({ link: [id, at - first] });
-    e.preventDefault();
-    return true;
-  }
-  if (c.link && e.key === "Enter") {
-    const f = document.querySelector<HTMLIFrameElement>(`iframe[data-frame="${c.link[0]}"]`);
-    const a = f?.contentDocument?.querySelectorAll<HTMLAnchorElement>("a[href]")[c.link[1]];
-    a?.click();
-    e.preventDefault();
-    return true;
-  }
-  if (c.link && e.key === "Escape") {
-    for (const f of Array.from(
-      document.querySelectorAll<HTMLIFrameElement>("iframe[data-frame]"),
-    )) {
-      f.contentDocument
-        ?.querySelectorAll(".ub-link-focus")
-        .forEach((x) => x.classList.remove("ub-link-focus"));
-    }
-    c.set({ link: null });
-    e.preventDefault();
-    return true;
-  }
-  return false;
-}
+const toggle = (id: number) => useChrome.getState().toggleExpanded(id, true);
 
 export function ConversationView({ thread, trashMode }: { thread: number; trashMode: boolean }) {
   useSubscription({ type: "conversation", thread, trashMode, open: true });
@@ -142,21 +78,14 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
   const unfoldedArr = useChrome((s) => s.unfolded);
   const expandAll = useChrome((s) => s.expandAll);
   const selected = useChrome((s) => s.selectedMessage);
-  const inline = useChrome((s) => s.inline);
+  /** The reply composer open in this conversation. */
+  const inlineDraft = useComposeState((s) =>
+    s.onScreen?.thread === thread ? s.onScreen.draft : null,
+  );
   const remoteImages = useAppState()?.settings.remoteImages ?? true;
   const own = useOwnAddresses();
   const known = useRef<Set<number> | null>(null);
   const latestRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    conversationRef.data = data;
-  }, [data]);
-  useEffect(() => {
-    appHooks.linkKey = linkKey;
-    return () => {
-      conversationRef.data = null;
-    };
-  }, []);
 
   // Fix expansion and scroll from the unread state when the conversation opens;
   // later arrivals expand when they are the new latest or unread.
@@ -170,12 +99,13 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
       const expanded = msgs.filter((m) => m.unread).map((m) => m.id);
       if (latest !== null) expanded.push(latest);
       // A reply composer opened with the conversation keeps its target selected.
+      const onScreen = composerOnScreen();
       const target =
-        c.inline?.thread === data.thread
-          ? (data.drafts.find((d) => d.id === c.inline?.draft)?.target ?? null)
+        onScreen?.thread === data.thread
+          ? (data.drafts.find((d) => d.id === onScreen.draft)?.target ?? null)
           : null;
       const initial = target !== null && msgs.some((m) => m.id === target) ? target : latest;
-      c.set({ expanded, selectedMessage: initial });
+      c.layoutConversation(expanded, initial);
       latestRef.current = latest;
       const firstUnread = msgs.find((m) => m.unread)?.id ?? latest;
       requestAnimationFrame(() => {
@@ -197,8 +127,7 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
     if (latest !== latestRef.current && sel === latestRef.current) sel = latest;
     if (sel !== null && !msgs.some((m) => m.id === sel)) sel = latest;
     latestRef.current = latest;
-    if (expanded !== c.expanded || sel !== c.selectedMessage)
-      c.set({ expanded, selectedMessage: sel });
+    if (expanded !== c.expanded || sel !== c.selectedMessage) c.layoutConversation(expanded, sel);
     // A message arriving unread while open in the focused window is marked read.
     if (added.some((m) => m.unread) && document.hasFocus()) markReadOnOpen(thread);
   }, [data, thread]);
@@ -251,11 +180,11 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
             <PendingSend key={`ob${o.id}`} row={o} />
           ))}
         {data.drafts
-          .filter((d) => d.id !== inline?.draft)
+          .filter((d) => d.id !== inlineDraft)
           .map((d) => (
             <DraftStub key={d.id} draft={d} />
           ))}
-        {inline?.thread === thread && <Composer key={inline.draft} draft={inline.draft} inline />}
+        {inlineDraft !== null && <Composer key={inlineDraft} draft={inlineDraft} inline />}
       </div>
     </div>
   );
@@ -265,10 +194,7 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
 function Fold({ ids }: { ids: number[] }) {
   return (
     <button
-      onClick={() => {
-        const c = useChrome.getState();
-        c.set({ unfolded: [...c.unfolded, ...ids] });
-      }}
+      onClick={() => useChrome.getState().unfold(ids)}
       // Reads as one more collapsed row.
       className={`${ROW} text-text-2`}
     >

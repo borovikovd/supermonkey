@@ -1,8 +1,11 @@
 import { useEffect } from "react";
 import { Toaster } from "sonner";
 
+import { useComposeState } from "./compose/session";
+import { followAccounts } from "./navigation";
 import { useChrome } from "./store/chrome";
-import { listKey, useAppState, useNeedsSignin, useSubscription } from "./store/hooks";
+import { listKey } from "./store/current";
+import { useAppState, useNeedsSignin, useSubscription } from "./store/hooks";
 import { ConversationView } from "./ui/ConversationView";
 import { ComposeScreen } from "./ui/ComposeScreen";
 import { FirstRun } from "./ui/FirstRun";
@@ -31,17 +34,15 @@ export function App() {
   const screen = useChrome((s) =>
     s.account === null ? null : (s.perAccount[s.account]?.screen ?? null),
   );
+  /** The `c` composer replaces the screen while it is open. */
+  const composing = useComposeState((s) => (s.onScreen?.thread === null ? s.onScreen.draft : null));
   const signedOut = useNeedsSignin(account);
   const searchOpen = useChrome((s) => s.search !== null);
 
   // Pick an account on screen; follow removals.
   useEffect(() => {
-    if (!app) return;
-    const ids = app.accounts.map((a) => a.id);
-    if (account === null || !ids.includes(account)) {
-      useChrome.getState().setAccount(ids[0] ?? null);
-    }
-  }, [app, account]);
+    if (app) followAccounts(app.accounts.map((a) => a.id));
+  }, [app]);
 
   if (!app) return <div className="h-full bg-bg" />;
   if (app.accounts.length === 0) return <FirstRun />;
@@ -57,7 +58,7 @@ export function App() {
         <Rail accounts={app.accounts} />
         {/* The white panel on the off-white canvas, as in Superhuman. */}
         <div className="relative mr-2 mb-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border-2 bg-bg shadow-panel">
-          {signedOut && screen?.kind !== "compose" ? (
+          {signedOut && composing === null ? (
             // A composer already open stays, so nothing typed is lost.
             <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               <SignInAgain
@@ -69,14 +70,14 @@ export function App() {
             <>
               <TopBar />
               <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-                {screen?.kind === "conversation" ? (
+                {composing !== null ? (
+                  <ComposeScreen draft={composing} />
+                ) : screen?.kind === "conversation" ? (
                   <ConversationView
                     key={`${screen.thread}:${screen.trashMode}`}
                     thread={screen.thread}
                     trashMode={screen.trashMode}
                   />
-                ) : screen?.kind === "compose" ? (
-                  <ComposeScreen draft={screen.draft} />
                 ) : searchOpen ? (
                   <div className="flex min-h-0 flex-1">
                     <div className="flex min-w-0 flex-1 flex-col">

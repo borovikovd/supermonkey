@@ -12,20 +12,26 @@ import { toast } from "sonner";
 
 import { act, addAttachment, later } from "../ipc/bridge";
 import type { Addr, DraftAttachment, DraftFields } from "../ipc/types";
+import { openPalette } from "../navigation";
 import { useChrome } from "../store/chrome";
+import { useAppState, useDraft } from "../store/hooks";
 import { frameCsp } from "../ui/frameCsp";
 import { frameTokens } from "../ui/frameTokens";
-import { useAppState, useDraft } from "../store/hooks";
 import { RecipientField, formatAddr, isValidEmail, type RecipientHandle } from "./RecipientField";
 import {
+  blurComposer,
   closeComposerOnScreen,
+  composeBlurred,
+  composerFocused,
   discardOnScreen,
   loadedDraft,
-  openComposer,
-  type UpdateSave,
+  registerComposer,
   sendOnScreen,
-  takeTypedAhead,
-} from "./start";
+  type ComposeField,
+  type UpdateSave,
+  useComposeState,
+} from "./session";
+import { takeTypedAhead } from "./start";
 
 const SAVE_DELAY = 500;
 
@@ -178,7 +184,7 @@ function Footer({ blurred, onAttach }: { blurred: boolean; onAttach: () => void 
 export function Composer({ draft, inline }: { draft: string; inline: boolean }) {
   const state = useDraft(draft);
   const app = useAppState();
-  const blurred = useChrome((s) => s.composeBlurred);
+  const blurred = useComposeState((s) => s.blurred);
   const chromeAccount = useChrome((s) => s.account);
   const [fields, setFields] = useState<DraftFields>({
     from: null,
@@ -202,7 +208,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   const latest = useRef(fields);
   /** Cancels the scheduled save. */
   const timer = useRef<(() => void) | null>(null);
-  /** This composer's pending save (openComposer.pending belongs to whichever composer is open). */
+  /** This composer's pending save. */
   const takePending = useRef<(finish: boolean) => UpdateSave | null>(() => null);
   /**
    * The draft state the fields are based on: its rev, and every attachment id
@@ -280,7 +286,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       const html = ed.getHTML();
       update({ bodyHtml: html === "<p></p>" ? "" : html });
     },
-    onFocus: () => useChrome.getState().set({ composeBlurred: false }),
+    onFocus: composerFocused,
   });
 
   // The first load carries the filled fields (adjusted during render, once).
@@ -325,7 +331,6 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
 
   // Register with the session so send, discard, and close carry the pending save.
   useEffect(() => {
-    openComposer.draft = draft;
     takePending.current = (finish) => {
       // On send or close, text typed in a field but not yet a chip becomes one,
       // and counts as an edit. The autosave leaves an address being typed alone.
@@ -348,21 +353,56 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       dirty.current = false;
       return save;
     };
-    openComposer.pending = () => takePending.current(true);
-    openComposer.invalid = () =>
-      [...latest.current.to, ...latest.current.cc, ...latest.current.bcc]
-        .filter((a) => !isValidEmail(a.email))
-        .map((a) => a.email);
-    openComposer.focus = () => editor?.commands.focus("end");
-    openComposer.setFrom = (from) => update({ from });
-    openComposer.attach = attach;
-    openComposer.uploads = () =>
-      uploads.current.size === 0
-        ? null
-        : Promise.all(uploads.current).then((all) => all.every(Boolean));
-    return () => {
-      if (openComposer.draft === draft) openComposer.draft = null;
+    const focusLater = (el: () => { focus: () => void } | null) =>
+      requestAnimationFrame(() => el()?.focus());
+    const focus = (field: ComposeField) => {
+      switch (field) {
+        case "to":
+          toRef.current?.focus();
+          return;
+        case "cc":
+          setShowCc(true);
+          focusLater(() => ccRef.current);
+          return;
+        case "bcc":
+          setShowBcc(true);
+          focusLater(() => bccRef.current);
+          return;
+        case "subject":
+          setShowSubject(true);
+          focusLater(() => subjectRef.current);
+          return;
+        case "body":
+          editor?.commands.focus("end");
+      }
     };
+    return registerComposer({
+      draft,
+      pending: () => takePending.current(true),
+      invalid: () =>
+        [...latest.current.to, ...latest.current.cc, ...latest.current.bcc]
+          .filter((a) => !isValidEmail(a.email))
+          .map((a) => a.email),
+      uploads: () =>
+        uploads.current.size === 0
+          ? null
+          : Promise.all(uploads.current).then((all) => all.every(Boolean)),
+      setFrom: (from) => update({ from }),
+      attach,
+      focus,
+      editorFocused: () => editor?.isFocused ?? false,
+      openLink: () => {
+        const href: unknown = editor?.getAttributes("link").href;
+        setLink(typeof href === "string" ? href : "");
+        focusLater(() => linkRef.current);
+      },
+      closeLink: () => {
+        if (!linkRef.current) return false;
+        setLink(null);
+        editor?.commands.focus();
+        return true;
+      },
+    });
   }, [draft, editor, update, attach]);
 
   // Text typed after the reply key, before this editor had focus, starts the reply.
@@ -382,7 +422,11 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (useChrome.getState().palette) return;
-      const blurredNow = useChrome.getState().composeBlurred;
+      const blurredNow = composeBlurred();
+      const handle = (f: () => void) => {
+        e.preventDefault();
+        f();
+      };
       if (e.metaKey && e.shiftKey) {
         const k = e.key.toLowerCase();
         const run: Record<string, () => void> = {
@@ -395,7 +439,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
             setShowBcc(true);
             requestAnimationFrame(() => bccRef.current?.focus());
           },
-          f: () => useChrome.getState().set({ palette: { kind: "from", draft } }),
+          f: () => openPalette({ kind: "from" }),
           s: () => {
             setShowSubject(true);
             requestAnimationFrame(() => subjectRef.current?.focus());
@@ -407,15 +451,12 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
         };
         const f = run[k];
         if (f) {
-          e.preventDefault();
-          e.stopPropagation();
-          f();
+          handle(f);
           return;
         }
       }
       if (e.metaKey && e.key === "Enter") {
-        e.preventDefault();
-        sendOnScreen();
+        handle(sendOnScreen);
         return;
       }
       if (e.metaKey && e.key.toLowerCase() === "k") {
@@ -425,7 +466,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
           setLink(typeof href === "string" ? href : "");
           requestAnimationFrame(() => linkRef.current?.focus());
         } else {
-          useChrome.getState().set({ palette: { kind: "commands", draftActions: true } });
+          openPalette({ kind: "commands" });
         }
         return;
       }
@@ -436,13 +477,9 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
           editor?.commands.focus();
           return;
         }
-        if (!blurredNow) {
-          // The first Esc blurs the editor and leaves compose on screen.
-          if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-          useChrome.getState().set({ composeBlurred: true });
-        } else {
-          closeComposerOnScreen();
-        }
+        // The first Esc blurs the editor and leaves compose on screen.
+        if (!blurredNow) blurComposer();
+        else closeComposerOnScreen();
         return;
       }
       if (blurredNow) {
@@ -457,7 +494,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [draft, editor, attach, link]);
+  }, [editor, attach, link]);
 
   const onFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -512,7 +549,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       className={`selectable flex flex-col rounded-xl bg-bg px-10 pt-4 pb-3 shadow-raised ${
         inline ? "-mx-10 mt-6 min-h-composer-inline-min" : "min-h-composer-min"
       } ${blurred ? "opacity-95" : ""}`}
-      onFocusCapture={() => useChrome.getState().set({ composeBlurred: false })}
+      onFocusCapture={composerFocused}
     >
       {sendAs.length > 1 && (
         <div className="flex min-h-10 items-center text-body">
@@ -520,7 +557,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
           <button
             tabIndex={-1}
             className="px-1 text-text-2 hover:text-text"
-            onClick={() => useChrome.getState().set({ palette: { kind: "from", draft } })}
+            onClick={() => openPalette({ kind: "from" })}
           >
             {fields.from ? formatAddr(fields.from) : ""}
           </button>

@@ -1,83 +1,16 @@
-// List and conversation navigation: j/k, x, Shift+J/K, Tab between splits,
-// n/p/o inside a conversation.
+// List and conversation navigation: j/k, x, Shift+J/K, select all, Tab
+// between splits, n/p/o inside a conversation.
 
-import {
-  closeThread,
-  currentListLoaded,
-  currentListView,
-  currentView,
-  goTo,
-  markReadOnOpenWhenLoaded,
-  openThread,
-  visibleIds,
-} from "../commands";
 import type { ConversationData } from "../ipc/types";
+import { focusOf, formerNeighbor, highlight, openConversation, visibleSplits } from "../navigation";
 import { useChrome } from "../store/chrome";
-import { useMirror } from "../store/mirror";
+import { currentListView, visibleIds } from "../store/current";
 import { blocks } from "../ui/folds";
 
-/** Adds `x` if missing, else removes it. */
-function toggled<T>(xs: readonly T[], x: T): T[] {
-  const set = new Set(xs);
-  if (!set.delete(x)) set.add(x);
-  return [...set];
-}
-
-/**
- * Per account, the focused row and the list it was last seen in, so a row
- * that leaves keeps its place, even while another account is on screen.
- */
-const lastSeen = new Map<number, { focus: string; ids: string[] }>();
-
-function focusOf(): string | null {
-  const cur = useChrome.getState().current();
-  if (!cur) return null;
-  return cur.screen.kind === "conversation" ? String(cur.screen.thread) : cur.highlight;
-}
-
-/** From where the focus used to be: the next row still shown, or the previous one. */
-function neighbor(focus: string, ids: string[], forward: boolean): string | null {
-  const { account } = useChrome.getState();
-  const seen = account === null ? undefined : lastSeen.get(account);
-  if (seen?.focus !== focus) return null;
-  const shown = new Set(ids);
-  const at = seen.ids.indexOf(focus);
-  const after = seen.ids.slice(at + 1).find((k) => shown.has(k));
-  const before = seen.ids.slice(0, Math.max(at, 0)).findLast((k) => shown.has(k));
-  return (forward ? (after ?? before) : (before ?? after)) ?? null;
-}
-
-/**
- * Re-anchors the focus, or moves the highlight off a row that left the list.
- * The highlight never rests on a row that is not shown: with no neighbor
- * left it clears, and the list highlights its top row once it has one.
- */
-function followFocus() {
-  const c = useChrome.getState();
-  const focus = focusOf();
-  if (focus === null || c.account === null) return;
-  const ids = visibleIds();
-  if (ids.includes(focus)) {
-    lastSeen.set(c.account, { focus, ids });
-    return;
-  }
-  // Before its first load a list has no rows yet, not no rows.
-  if (c.current()?.screen.kind !== "list" || !currentListLoaded()) return;
-  c.patchCurrent({ highlight: neighbor(focus, ids, true) });
-}
-
-/**
- * When a patch from Rust removes the highlighted row, the highlight moves as
- * after an action. An open conversation whose row left stays open; `j` and
- * `k` then move from its old place (SPEC Keyboard).
- */
-export function trackFocus() {
-  useMirror.subscribe(followFocus);
-  useChrome.subscribe(followFocus);
-}
+const chrome = () => useChrome.getState();
 
 export function moveHighlight(delta: number) {
-  const c = useChrome.getState();
+  const c = chrome();
   const cur = c.current();
   if (!cur) return;
   const ids = visibleIds();
@@ -86,53 +19,56 @@ export function moveHighlight(delta: number) {
   let at = focus === null ? -1 : ids.indexOf(focus);
   if (at < 0 && focus !== null) {
     // The focused row left: step to its old neighbor.
-    const from = neighbor(focus, ids, delta > 0);
-    if (from !== null) at = ids.indexOf(from) - delta;
+    const from = formerNeighbor(focus, ids, delta > 0);
+    if (from != null) at = ids.indexOf(from) - delta;
   }
   if (at < 0) at = delta > 0 ? -1 : ids.length;
   const next = Math.min(ids.length - 1, Math.max(0, at + delta));
   const key = ids[next];
   if (key === undefined) return;
   if (cur.screen.kind === "conversation") {
-    if (key !== focus) {
-      openThread(Number(key));
-      markReadOnOpenWhenLoaded(Number(key));
-    }
+    if (key !== focus) openConversation(Number(key));
     return;
   }
   // Plain j/k replace a selection with the one conversation they move to.
-  c.patchCurrent({ highlight: key });
-  if (c.selection.length > 0) c.set({ selection: [] });
+  highlight(key);
+  if (c.selection.length > 0) c.setSelection([]);
+}
+
+/** Adds `x` if missing, else removes it. */
+function toggled<T>(xs: readonly T[], x: T): T[] {
+  const set = new Set(xs);
+  if (!set.delete(x)) set.add(x);
+  return [...set];
 }
 
 export function toggleSelect() {
-  const c = useChrome.getState();
+  const c = chrome();
   const h = c.current()?.highlight;
   if (!h) return;
-  c.set({ selection: toggled(c.selection, h) });
+  c.setSelection(toggled(c.selection, h));
 }
 
 export function extendSelection(delta: number) {
-  const c = useChrome.getState();
-  const cur = c.current();
+  const cur = chrome().current();
   if (!cur || cur.screen.kind !== "list") return;
   const h = cur.highlight;
-  const sel = new Set(c.selection);
+  const sel = new Set(chrome().selection);
   if (h) sel.add(h);
   moveHighlight(delta);
-  const nh = useChrome.getState().current()?.highlight;
+  const nh = chrome().current()?.highlight;
   if (nh) sel.add(nh);
-  useChrome.getState().set({ selection: [...sel] });
+  chrome().setSelection([...sel]);
 }
 
 /**
  * The rows Select All covers, as in Superhuman: in a split Inbox the split that
  * holds the highlight, otherwise the whole list.
  */
-function selectionScope(highlight: string | null): string[] {
+function selectionScope(highlighted: string | null): string[] {
   const ids = visibleIds();
   const entries = currentListView()?.ids ?? [];
-  const split = entries.find((e) => e.key === highlight)?.split ?? null;
+  const split = entries.find((e) => e.key === highlighted)?.split ?? null;
   if (split === null) return ids;
   const inSplit = new Set(entries.filter((e) => e.split === split).map((e) => e.key));
   return ids.filter((k) => inSplit.has(k));
@@ -140,31 +76,17 @@ function selectionScope(highlight: string | null): string[] {
 
 /** `Cmd+Shift+A` selects every row in scope; `Cmd+A` the highlighted row and those below it. */
 export function selectAll(fromHere: boolean) {
-  const c = useChrome.getState();
-  const cur = c.current();
+  const cur = chrome().current();
   if (!cur || cur.screen.kind !== "list") return;
   const scope = selectionScope(cur.highlight);
   const at = fromHere && cur.highlight !== null ? scope.indexOf(cur.highlight) : 0;
   if (at < 0) return;
-  c.set({ selection: scope.slice(at) });
-}
-
-/** Visible splits of the Inbox list in order, with their first conversation. */
-export function visibleSplits(): { split: number; first: string }[] {
-  const list = currentListView();
-  if (!list || currentView()?.kind !== "inbox") return [];
-  const out: { split: number; first: string }[] = [];
-  for (const e of list.ids) {
-    if (e.split !== null && !out.some((s) => s.split === e.split))
-      out.push({ split: e.split, first: e.key });
-  }
-  return out;
+  chrome().setSelection(scope.slice(at));
 }
 
 /** Tab / Shift+Tab: first conversation of the next / previous visible split. */
 export function jumpSplit(delta: number) {
-  const c = useChrome.getState();
-  const cur = c.current();
+  const cur = chrome().current();
   if (!cur || cur.screen.kind !== "list") return;
   const splits = visibleSplits();
   if (splits.length === 0) return;
@@ -173,41 +95,8 @@ export function jumpSplit(delta: number) {
   const at = splits.findIndex((s) => s.split === hSplit);
   // Outside any split, forward goes to the first one.
   const target = splits[at < 0 && delta > 0 ? 0 : at + delta];
-  if (target) c.patchCurrent({ highlight: target.first });
+  if (target) highlight(target.first);
 }
-
-/** `g i` / `g o`: Inbox on the Important or Other split. */
-export function goSplit(kind: "important" | "other", splitIdOf: (kind: string) => number | null) {
-  goTo({ kind: "view", view: { kind: "inbox" } });
-  const target = splitIdOf(kind);
-  // A hidden empty split shows its header after this jump.
-  useChrome.getState().set({ forcedSplit: target });
-  const highlight = () => {
-    const split = visibleSplits().find((s) => s.split === target);
-    if (split) useChrome.getState().patchCurrent({ highlight: split.first });
-    return split !== undefined;
-  };
-  stopSplitWait?.();
-  if (highlight()) return;
-  // The list loads asynchronously: highlight once rows for the split arrive,
-  // however long that takes, unless the Inbox is left first.
-  const { account } = useChrome.getState();
-  const stop = () => {
-    unsubMirror();
-    unsubChrome();
-    if (stopSplitWait === stop) stopSplitWait = null;
-  };
-  const unsubMirror = useMirror.subscribe(() => {
-    if (highlight()) stop();
-  });
-  const unsubChrome = useChrome.subscribe((s) => {
-    if (s.account !== account || currentView()?.kind !== "inbox") stop();
-  });
-  stopSplitWait = stop;
-}
-
-/** Ends the wait of the last `g i` / `g o` for its split's rows, if one is waiting. */
-let stopSplitWait: (() => void) | null = null;
 
 // ------------------------------------------------------------ conversation
 
@@ -217,7 +106,7 @@ export function selectable(data: ConversationData): number[] {
 }
 
 export function selectMessage(data: ConversationData, delta: number) {
-  const c = useChrome.getState();
+  const c = chrome();
   const ids = selectable(data);
   const last = ids.length - 1;
   const at = c.selectedMessage === null ? -1 : ids.indexOf(c.selectedMessage);
@@ -231,25 +120,19 @@ export function selectMessage(data: ConversationData, delta: number) {
   const fold = blocks(data.messages, expanded, unfolded).find(
     (b) => b.type === "fold" && b.ids.includes(next),
   );
-  c.set({
-    selectedMessage: next,
-    unfolded: fold?.type === "fold" ? [...c.unfolded, ...fold.ids] : c.unfolded,
-  });
+  c.selectMessage(next, fold?.type === "fold" ? fold.ids : undefined);
   requestAnimationFrame(() =>
     document.querySelector(`[data-message="${next}"]`)?.scrollIntoView({ block: "nearest" }),
   );
 }
 
 export function toggleExpand(data: ConversationData) {
-  const c = useChrome.getState();
+  const c = chrome();
   const id = c.selectedMessage ?? data.messages.at(-1)?.id;
   if (id === undefined) return;
-  c.set({ expanded: toggled(c.expanded, id) });
+  c.toggleExpanded(id, false);
 }
 
 export function toggleExpandAll() {
-  const c = useChrome.getState();
-  c.set({ expandAll: !c.expandAll });
+  chrome().toggleExpandAll();
 }
-
-export { closeThread };

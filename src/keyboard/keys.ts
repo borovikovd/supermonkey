@@ -2,13 +2,7 @@
 // has focus, keystrokes go to that field and the table does not apply.
 
 import {
-  applyLabel,
-  closeSearch,
-  closeThread,
-  goTo,
   markDone,
-  markReadOnOpenWhenLoaded,
-  openThread,
   removeViewLabel,
   returnToInbox,
   spam,
@@ -17,14 +11,28 @@ import {
   trash,
   undo,
 } from "../commands";
+import { composerOnScreen } from "../compose/session";
 import { startCompose, startReply, typeAhead } from "../compose/start";
 import type { View } from "../ipc/types";
+import {
+  closeConversation,
+  closeSearch,
+  goTo,
+  goToSplit,
+  openConversation,
+  openPalette,
+  openSearch,
+  openSheet,
+  switchAccountAt,
+} from "../navigation";
 import { useChrome } from "../store/chrome";
+import { openConversationData } from "../store/current";
 import { needsSignin } from "../store/hooks";
+import { signInAgainOnScreen } from "../ui/signIn";
+import { clearLink, cycleLink, openLink } from "./links";
 import { measure } from "./meter";
 import {
   extendSelection,
-  goSplit,
   jumpSplit,
   moveHighlight,
   selectAll,
@@ -33,9 +41,6 @@ import {
   toggleExpandAll,
   toggleSelect,
 } from "./nav";
-import { appHooks, conversationRef } from "./refs";
-
-export { applyLabel };
 
 const isTyping = (el: EventTarget | null) => {
   if (!(el instanceof HTMLElement)) return false;
@@ -59,22 +64,25 @@ const G_VIEWS: Partial<Record<string, Exclude<View, { kind: "label" }>["kind"]>>
   "!": "spam",
 };
 
+/** `g` was pressed; waiting for the second key. */
+let gPending = false;
+
 function handleG(key: string): boolean {
-  useChrome.getState().set({ gPending: false });
+  gPending = false;
   const view = G_VIEWS[key];
   if (view) {
-    goTo({ kind: "view", view: { kind: view } });
+    goTo({ kind: view });
     return true;
   }
   switch (key) {
     case "l":
-      appHooks.openPalette({ kind: "goLabel" });
+      openPalette({ kind: "goLabel" });
       return true;
     case "i":
-      goSplit("important", appHooks.splitIdOf);
+      goToSplit("important");
       return true;
     case "o":
-      goSplit("other", appHooks.splitIdOf);
+      goToSplit("other");
       return true;
   }
   return false;
@@ -82,6 +90,17 @@ function handleG(key: string): boolean {
 
 /** Ends a `g` prefix that no second key followed. */
 let gTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Tab cycles links in the open conversation; Enter opens one reached; Esc clears it. */
+function linkKey(e: KeyboardEvent): boolean {
+  const { link } = useChrome.getState();
+  if (e.key === "Tab") cycleLink(e.shiftKey);
+  else if (link && e.key === "Enter") openLink();
+  else if (link && e.key === "Escape") clearLink();
+  else return false;
+  e.preventDefault();
+  return true;
+}
 
 /**
  * Esc closes the innermost thing: a focused link, then the conversation, then
@@ -91,15 +110,15 @@ let gTimer: ReturnType<typeof setTimeout> | undefined;
 function escape() {
   const c = useChrome.getState();
   if (c.link) {
-    c.set({ link: null });
+    clearLink();
     return;
   }
   if (c.current()?.screen.kind === "conversation") {
-    closeThread();
+    closeConversation();
     return;
   }
   if (c.selection.length > 0) {
-    c.set({ selection: [] });
+    c.setSelection([]);
     return;
   }
   if (c.search) closeSearch();
@@ -115,25 +134,25 @@ export function onKeyDown(e: KeyboardEvent) {
   // composer as a second Esc would.
   if (e.ctrlKey && !e.metaKey && /^Digit[1-9]$/.test(e.code)) {
     e.preventDefault();
-    appHooks.switchAccount(Number(e.code.slice(5)) - 1);
+    switchAccountAt(Number(e.code.slice(5)) - 1);
     measure("account", start);
     return;
   }
   if (e.metaKey && e.key === ",") {
     e.preventDefault();
-    c.set({ sheet: "settings", palette: null });
+    openSheet("settings");
     return;
   }
   // Typed after r, f, or Enter, before the reply editor has focus: the reply's text.
   if (typeAhead(e)) return;
-  if (c.palette || isTyping(e.target) || c.inline || cur?.screen.kind === "compose") {
+  if (c.palette || isTyping(e.target) || composerOnScreen()) {
     // Owned by the palette, a field, or the composer.
     return;
   }
   if (c.sheet) {
     if (e.key === "Escape") {
       e.preventDefault();
-      c.set({ sheet: null });
+      c.closeSheet();
     }
     return;
   }
@@ -145,12 +164,12 @@ export function onKeyDown(e: KeyboardEvent) {
     !needsSignin(c.account)
   ) {
     e.preventDefault();
-    appHooks.openPalette({ kind: "unsubscribe" });
+    openPalette({ kind: "unsubscribe" });
     return;
   }
   if (e.metaKey && e.key.toLowerCase() === "k") {
     e.preventDefault();
-    appHooks.openPalette({ kind: "commands" });
+    openPalette({ kind: "commands" });
     measure("palette", start);
     return;
   }
@@ -171,20 +190,20 @@ export function onKeyDown(e: KeyboardEvent) {
   if (needsSignin(c.account)) {
     if (e.key === "Enter") {
       e.preventDefault();
-      appHooks.signInAgain();
+      signInAgainOnScreen();
     }
     return;
   }
 
-  if (c.gPending) {
+  if (gPending) {
     e.preventDefault();
     if (handleG(e.key)) measure("view", start);
     return;
   }
 
   const inConv = cur?.screen.kind === "conversation";
-  const data = conversationRef.data;
-  if (inConv && appHooks.linkKey(e)) return;
+  const data = openConversationData();
+  if (inConv && linkKey(e)) return;
 
   let handled = true;
   switch (e.key) {
@@ -217,8 +236,7 @@ export function onKeyDown(e: KeyboardEvent) {
         if (view?.kind === "drafts") {
           startReply("resumeDraft", cur.highlight);
         } else {
-          openThread(Number(cur.highlight));
-          markReadOnOpenWhenLoaded(Number(cur.highlight));
+          openConversation(Number(cur.highlight));
           measure("open", start);
         }
       }
@@ -235,7 +253,7 @@ export function onKeyDown(e: KeyboardEvent) {
       measure("e", start);
       break;
     case "h":
-      if (targetsExist()) appHooks.openPalette({ kind: "snooze" });
+      if (targetsExist()) openPalette({ kind: "snooze" });
       break;
     case "c":
       startCompose();
@@ -249,7 +267,7 @@ export function onKeyDown(e: KeyboardEvent) {
       measure(inConv ? "replyInline" : "replyFromList", start);
       break;
     case "/":
-      appHooks.focusSearch();
+      openSearch();
       measure("search", start);
       break;
     case "z":
@@ -273,7 +291,7 @@ export function onKeyDown(e: KeyboardEvent) {
       measure("!", start);
       break;
     case "l":
-      if (targetsExist()) appHooks.openPalette({ kind: "labels" });
+      if (targetsExist()) openPalette({ kind: "labels" });
       break;
     case "y":
       removeViewLabel();
@@ -292,13 +310,15 @@ export function onKeyDown(e: KeyboardEvent) {
       if (inConv) toggleExpandAll();
       break;
     case "g":
-      c.set({ gPending: true });
+      gPending = true;
       // A new `g` restarts the wait; an older timer must not end its prefix.
       clearTimeout(gTimer);
-      gTimer = setTimeout(() => useChrome.getState().set({ gPending: false }), 1500);
+      gTimer = setTimeout(() => {
+        gPending = false;
+      }, 1500);
       break;
     case "?":
-      c.set({ sheet: "shortcuts" });
+      openSheet("shortcuts");
       break;
     case "Escape":
       escape();
