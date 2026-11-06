@@ -213,7 +213,7 @@ test("REP-02 what r, Enter, and f do on the list and in a conversation", async (
 test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
   test.slow();
   const s = await seeds.standard(gmail, app);
-  // Subjects get `Re:` unless they already start with it (Q5): own's latest
+  // Subjects get `Re:` unless they already start with it (SPEC Addressing): own's latest
   // message is "Re: Budget draft".
   const rows = [
     {
@@ -307,7 +307,7 @@ test("REP-03 reply all leaves the To address off Cc", async ({ app, gmail }) => 
   expect(await chipAddresses(app, "Cc")).toEqual(["hal@guild.test"]);
 });
 
-test("REP-03 sent to two of the account's addresses: To wins over Cc, then the first (Q3)", async ({
+test("REP-03 sent to two of the account's addresses: To wins over Cc, then the first", async ({
   app,
   gmail,
 }) => {

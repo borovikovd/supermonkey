@@ -530,7 +530,7 @@ test("SPL-08 empty splits hide themselves, except after g i / g o", async ({ app
   await expectHeader(app, "Other 7");
   await expect(app.section("Important")).toHaveCount(0);
 
-  // Empty, hide off: the name with no count, and no section header (Q22).
+  // Empty, hide off: the name with no count, and no section header (SPEC Split Inbox).
   await editSplits(app, async (s) => {
     await (await sheetRow(s, "Important")).getByRole("checkbox").uncheck();
   });

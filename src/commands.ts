@@ -246,7 +246,7 @@ export function markReadOnOpen(thread: number) {
   modify("read", [], ["UNREAD"], { threads: [thread], undoable: false });
 }
 
-/** Closes search and restores the view and highlight it replaced (Q12). */
+/** Closes search and restores the view and highlight it replaced (SPEC Search). */
 export function closeSearch() {
   const c = useChrome.getState();
   const before = c.beforeSearch ?? {

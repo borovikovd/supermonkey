@@ -223,7 +223,7 @@ test("ACC-03 switching closes overlays and returns each account to its own place
   await expect(app.conversationTitle).toHaveCount(0);
   await expect(app.highlighted).toContainText("Bo Brown");
 
-  // A click on A's avatar: A's last view (Starred, Q12), second row.
+  // A click on A's avatar: A's last view (Starred, SPEC Switching), second row.
   await app.account(A).click();
   await expect(app.page.getByPlaceholder("Search")).toHaveCount(0);
   await expect(app.row("Trip ideas")).toHaveCount(1);

@@ -241,7 +241,7 @@ test("DRF-16 a Gmail edit read back after the draft was reopened and edited does
   await app.settle();
   await app.press("Escape", "Escape");
   await app.settle();
-  // The app's edit wins (Q24): locally and in Gmail.
+  // The app's edit wins, as the last writer (SPEC Drafts): locally and in Gmail.
   await app.reply("r");
   await expect(app.editor).toContainText("Aimed at nobody. Mine.");
   await expect(app.editor).not.toContainText("from web");
@@ -369,7 +369,7 @@ test("DRF-03 edits made to a draft in Gmail, with the draft closed or open", asy
   await expect(app.editor).toContainText("from web");
 
   // Open, and the user types: the editor keeps the user's text, and the
-  // app's next upsert overwrites Gmail's version (Q24).
+  // app's next upsert overwrites Gmail's version (SPEC Drafts: the last writer wins).
   await webEdit("dLatest", "p4", "from web 3");
   await app.settle();
   await expect(app.editor).not.toContainText("from web 3");

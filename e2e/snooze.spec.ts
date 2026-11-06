@@ -29,7 +29,7 @@ async function snoozeNamed(app: App, name: string): Promise<void> {
   await expect(picker(app)).toHaveCount(0);
 }
 
-/** Presses `h`, types a date-and-time phrase (Q13), and picks what it offers. */
+/** Presses `h`, types a date-and-time phrase (SPEC Snooze), and picks what it offers. */
 async function snoozeTyped(app: App, phrase: string, offered: string): Promise<void> {
   await app.press("h");
   await expect(picker(app)).toBeVisible();

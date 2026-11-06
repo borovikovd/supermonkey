@@ -292,7 +292,7 @@ test("SND-05 undo while sending is held until the send resolves", async ({ app, 
   await expect(app.editor).toContainText("held then rejected");
   expect(await sentIn(gmail, s.thread("p5").threadId)).toEqual([]);
 
-  // drop: not sent, and drafts.get finds the draft. The held undo wins (Q6):
+  // drop: not sent, and drafts.get finds the draft. The held undo wins (SPEC Send and undo):
   // no second drafts.send, and the draft is back in a composer.
   await app.press("Escape", "Escape", "Escape", "g", "i");
   hold = await gmail.hold("drafts.send");

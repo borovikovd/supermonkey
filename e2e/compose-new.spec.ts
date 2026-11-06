@@ -541,8 +541,9 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await expect(app.row("Person 2")).toHaveCount(1);
   await expectLeft("r, closed by Ctrl+2", null);
 
-  // Q4: judged by value. Typed, saved to Gmail, then deleted back to empty: the
-  // draft is untouched, so it is discarded here and in Gmail.
+  // Untouched is judged by value (SPEC Keyboard). Typed, saved to Gmail, then
+  // deleted back to empty: the draft is untouched, so it is discarded here and
+  // in Gmail.
   await open(app, "Person 5");
   await app.reply("r");
   await app.type("Second thoughts");
@@ -683,7 +684,7 @@ test("NEW-09 sending with no recipients never loses the draft; text still in To 
 }) => {
   await seeds.standard(gmail, app);
 
-  // Empty To, no chips: refused with a toast (Q26); the draft stays.
+  // Empty To, no chips: refused with a toast (SPEC Recipients and autocomplete); the draft stays.
   await app.compose();
   await focusSubject(app);
   await app.type("Nobody yet");

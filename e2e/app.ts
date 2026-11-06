@@ -543,7 +543,7 @@ export class App {
       .getByRole("button", { description: new RegExp(email.replace(/[.+]/g, "\\$&")) });
   }
 
-  /** The quiet sync status marker on an account's avatar (Q1). */
+  /** The quiet sync status marker on an account's avatar (SPEC Gmail errors). */
   syncMarker(email: string): Locator {
     return this.account(email).locator('[data-marker="retrying"]');
   }

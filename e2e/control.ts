@@ -187,7 +187,7 @@ export type Notification = {
   title: string;
   /** The account's address, then the text. */
   body: string;
-  /** The account's address (Q23). */
+  /** The account's address, which the notification names (SPEC Notifications). */
   account: string;
   /** Gmail thread id; null for a summary. */
   thread: string | null;
@@ -538,7 +538,10 @@ export class Control {
     return this.call("GET", "/__test/hits");
   }
 
-  /** Whether the SQLite files hold `text` anywhere (SEC-04 only, Q21). */
+  /**
+   * Whether the SQLite files hold `text` anywhere. Only for what SPEC promises
+   * with nothing on screen to show it (SEC-04): cases check the UI and Gmail.
+   */
   async dbContains(text: string): Promise<boolean> {
     const q = new URLSearchParams({ text });
     const r = await this.call<{ found: boolean }>("GET", `/__test/db-contains?${q}`);

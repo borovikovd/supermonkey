@@ -48,7 +48,7 @@ Views are reached from the keyboard and the command palette. On Inbox, the list 
 
 Each row is one line: the sender, the subject, the snippet, and the time. Unread rows have a dot and a heavier sender. The highlighted row is a light highlight. `j` and `k` move that highlight, and so does moving the mouse onto a row, as in Superhuman, so `e` acts on the row under the pointer. Rows that scroll under a resting pointer do not take the highlight, and a row the mouse highlights is not scrolled into view. There is no separate hover style. In the Inbox they also cross from one split into the next. Split headers are not selectable.
 
-Empty inbox is a quiet inbox-zero state, not a splash.
+Empty inbox is a quiet inbox-zero state, not a splash: `You're all done.` over `Inbox zero.`. Any other empty view reads `Nothing here.`. Neither shows before the list's first load, or while the list waits on its Gmail listing.
 
 ## Look
 
@@ -94,6 +94,8 @@ HTML mail keeps its own fonts and sizes inside its iframe.
 | `unread` | `#71C0EA` | Unread dot |
 | `hint` | `#EDEEFA` | Hint bar |
 | `danger` | `#CD0037` | Errors, invalid recipients |
+| `match` | `#FDF0C4` (own pick) | Search matches in result rows |
+| `star` | `#E8B339` (own pick) | The star on starred rows |
 
 The palette is dark in the light theme, as in Superhuman. Its colors are own picks: `#1F1E1D` background, `#F2F0EB` text, `#A3A09A` secondary text, `#33312E` highlighted row.
 
@@ -104,15 +106,16 @@ Account avatars use six fixed hues, assigned in the order accounts are added: `#
 - Spacing steps of 4px.
 - List rows are 36px tall with 16px side padding. There are no row dividers. Columns:
   - an unread dot, 5px in `unread`;
-  - the sender, 180px (own pick);
-  - the subject and snippet in the remaining width, sharing one line, separated by a thin dash, and truncated at the end;
-  - the time, right-aligned.
+  - the sender, 180px (own pick), then the message count in `text-3` when the thread has more than one;
+  - a star in `star` on a starred conversation, then the subject and snippet in the remaining width, sharing one line, separated by a thin dash, and truncated at the end. An empty subject reads `(no subject)`;
+  - a paperclip in `text-3` when the thread has attachments;
+  - the time, right-aligned. A snoozed thread shows its wake time instead.
 - The highlighted row is `accent-soft` with a 3px `accent` bar on its left edge. A row that is both highlighted and selected is `fill` with the bar.
 - Split names sit inline at the top of the list, for example `Important 5 · Other 1`. The split holding the highlight is in `text` at 600. The others are in `text-2`. Counts follow each name.
 - Split section headers inside the list are 28px tall: name in `text-2`, count in `text-3`.
 - The icon rail is 56px wide, so its icon pill and account badges have room, with 16px Lucide icons at 1.5 stroke.
 - The content panel is `bg` with a 10px radius, on the `surface` canvas.
-- The hint bar is 18px tall, with hints such as `E to Mark Done · H to snooze · ⌘K for commands`. It shows only hints that work on the screen: in Drafts it reads `Enter to open draft · C to compose · ⌘K for commands`.
+- The hint bar is 18px tall, with hints such as `E to Mark Done · H to snooze · ⌘K for commands`. It shows only hints that work on the screen: in Drafts it reads `Enter to open draft · C to compose · ⌘K for commands`, in a conversation `E to Mark Done · R to Reply · Enter to Reply all · ⌘K for commands`, while a composer is open `⌘Enter to Send · Esc to close · ⌘K for commands`, and on the sign-in screen `Enter to sign in · ⌘K for commands`.
 - The conversation column is at most 768px wide (640px plus 128px of padding) and at least 520px, centered, with 32px top padding.
 - In a conversation, a round back button and a round previous/next pill, white with a soft shadow, sit at the panel's top left, with the subject on the same row. The `c` screen has the back button only. A narrow window moves the column right, so the buttons never cover the subject.
 - Mark Done and Snooze buttons sit at the right of the conversation's subject row and do what `e` and `h` do.
@@ -162,7 +165,7 @@ A debug build shows keydown-to-paint for each shortcut and logs every action ove
 
 Views show the account on screen. Each account has its own views, splits, pins, undo history, last view, and highlight.
 
-A thread's latest message is its newest message that is not a draft and not in trash or spam. If no message qualifies, it is the newest non-draft message, or the draft when that is all the thread has. The row's sender, snippet, and sort time come from it.
+A thread's latest message is its newest message that is not a draft and not in trash or spam. If no message qualifies, it is the newest non-draft message, or the draft when that is all the thread has. The row's sender, snippet, and sort time come from it. Lists show the newest first by that time, Inbox within each split, in split order. Snoozed lists the soonest wake first, and Drafts the latest edit first.
 
 A thread's views come from its messages' labels. It is in Trash or Spam when any of its messages has `TRASH` or `SPAM`. It is in Inbox, Starred, Sent, or a label view when a message that is not in trash or spam has that label. Trashing one message therefore leaves the thread in the views its other messages put it in.
 
@@ -189,22 +192,26 @@ Add an account from the first-run screen or the palette (`Add account`). Sign-in
 
 A redirect to the loopback port with another `state` is answered 400 and ignored, and the sign-in keeps waiting for its own, so a page that finds the port cannot end the sign-in the user is in the middle of. Clicking `Add a Gmail account`, or the palette's `Add account`, while a sign-in waits in the browser starts over: the waiting sign-in is cancelled and its loopback port closed.
 
+With no account, the window shows only the first-run screen: the app's name, a one-line description, and `Add a Gmail account`, with no rail or list. While a sign-in waits in the browser, the first-run and sign-in screens say `Waiting for Google in your browser… Click again to start over.` A sign-in that fails or is denied adds nothing. Its error shows under the button, or as an error toast when it started from the palette or Settings.
+
+Adding an account the app already has signs it in again: it keeps its mail, rail place, and queue, and each queued action reaches Gmail once.
+
 The OAuth client is a Desktop-type client in the user's own Google Cloud project. Its client ID and secret are build-time config. Google treats a desktop secret as not confidential. The consent screen is published In production, not Testing, because Testing expires refresh tokens after 7 days. The app stays unverified, so each sign-in shows Google's unverified-app warning.
 
 Refresh tokens go into `tokens.json` in the app's data folder, keyed by email address. Only the user can read the file (mode 0600), and it is replaced atomically on each change. Not the Keychain: an unsigned build has no stable identity, so macOS would ask for the login password on every launch after an update. Access tokens stay in memory.
 
 An account whose token is missing at launch shows Sign in again, as for `invalid_grant`.
 
-If Google rejects the refresh token (`invalid_grant`), the account is signed out. Its rail avatar shows a Sign in again marker, and its screen shows a sign-in screen in place of its mail: "You're signed out of <email>" and a Sign in with Google button, which `Enter` also presses. Only `Enter`, `Cmd+K`, and account switching work there; a composer already open stays until closed. Its queue and outbox wait until sign-in succeeds, then go out.
+If Google rejects the refresh token (`invalid_grant`), the account is signed out. Its rail avatar shows a Sign in again marker, and its screen shows a sign-in screen in place of its mail: "You're signed out of <email>" and a Sign in with Google button, which `Enter` also presses. Only `Enter`, `Cmd+K`, and account switching work there; a composer already open stays until closed. Its queue and outbox wait until sign-in succeeds, then go out. Only the current grant can sign an account out: an `invalid_grant` on a request made with the grant from before a sign-in changes nothing.
 
 Removing an account deletes its refresh token and its rows from the local database. If it was on screen, the next account in the rail takes its place. An account removed while its Sign in again waits in the browser comes back when that sign-in finishes, under a new id, as Add account would bring it back: the sign-in finished after the removal, so it is the user's last word.
 
 ### Switching
 
-One account is on screen at a time. `Ctrl+1` to `Ctrl+9` switch to the accounts in rail order, as do clicking an avatar and the palette's `Switch account`. Clicking the avatar of the account already on screen opens Settings, where its Sign in again, Split Inbox settings, and Remove are. Each avatar shows that account's unread Inbox count, hidden at zero. Switching:
+One account is on screen at a time. `Ctrl+1` to `Ctrl+9` switch to the accounts in rail order, as do clicking an avatar and the palette's `Switch account`. Clicking the avatar of the account already on screen opens Settings, where its Sign in again, Split Inbox settings, and Remove are. Accounts sit on the rail in the order they were added, and one added again after a removal goes last. An avatar's initial is the first letter of the account's display name, or of its address until the name is known. Each avatar shows that account's count of unread Inbox threads, hidden at zero and capped at `999+`. Switching:
 - closes the palette and search
 - closes an open composer as a second `Esc` would: kept as a draft in its own account, or discarded if it is an untouched fresh composer
-- returns to the new account's last view and highlight, or its Inbox with the top row highlighted on the first visit since launch. An open conversation is not reopened.
+- returns to the new account's last view and highlight, or its Inbox with the top row highlighted on the first visit since launch. An open conversation is not reopened. A switch that closed search leaves the old account on the view search replaced.
 
 Send toasts stay on screen across switches. All accounts keep syncing, notifying, and running their queues and outboxes while another account is on screen.
 
@@ -212,7 +219,7 @@ Reply, reply all, and forward send from the account on screen, which owns the th
 
 ## Keyboard
 
-The shortcut table applies to the list and the conversation view. While compose, search, or the palette is focused, keystrokes go to that field, including keys held with Shift, and the shortcut table does not apply.
+The shortcut table applies to the list and the conversation view. While compose, search, or the palette is focused, keystrokes go to that field, including keys held with Shift, and the shortcut table does not apply. `Ctrl+1`…`Ctrl+9` and `Cmd+,` still work there.
 
 In compose, `Tab` and `Shift+Tab` move between fields, unless the autocomplete list is open. `Cmd+K` inserts a link, and `Cmd+Enter` sends. The first `Esc` blurs the editor and leaves compose on screen. With compose blurred:
 - `Cmd+K` opens the palette with draft actions (send, attach, discard)
@@ -226,9 +233,9 @@ A composer started fresh by `r`, `Enter`, `f`, or `c` is discarded on close, loc
 - subject, body, and attachments are as the composer started them
 - recipients and From are the defaults
 
-A stray `r` leaves nothing behind. A resumed draft, or one reopened by undo, is never discarded this way.
+It is judged by value, so text typed and then deleted leaves a composer untouched. A stray `r` leaves nothing behind. A resumed draft, or one reopened by undo, is never discarded this way.
 
-`Esc` in the palette closes it. Search has its own `Esc` rule below.
+`Esc` in the palette closes it. Search has its own `Esc` rule below. While a sheet (Settings, Split Inbox settings, the shortcut sheet) is open, the shortcut table does not apply, and `Esc` or a click outside closes the sheet.
 
 The palette lists actions and views. Each row shows its shortcut on the right. `?` opens the full shortcut sheet.
 
@@ -261,6 +268,8 @@ The palette lists actions and views. Each row shows its shortcut on the right. `
 | `Esc` | Clear a link reached with `Tab`. Otherwise close the open conversation, palette, search, snooze picker, or compose. On the list, clear the selection |
 | `?` | Shortcut sheet |
 
+`j` on the last conversation and `k` on the first do nothing, on the list and in an open conversation, and so do `n` and `p` at the ends of a conversation.
+
 `x` selects a conversation, and `Shift+J` / `Shift+K` extend the selection. With nothing selected, they select the highlighted row and the row they move to. As in Superhuman, `Cmd+Shift+A` (Select all) selects every conversation in the list, and `Cmd+A` (Select all from here) selects the highlighted one and every one below it; in a split Inbox both stay inside the split that holds the highlight. Both are also palette commands, and they work only on the list, so `Cmd+A` in a conversation still selects text. With a selection, `e`, `Shift+E`, `h`, `s`, `u`, `#`, `!`, `l`, and `y` apply to every selected conversation. `s` and `u` follow the `l` rule: if every selected conversation is already starred (or unread), they all lose it. Otherwise they all get it. Plain `j` and `k` replace that selection with the one conversation they move to. `Esc` clears a selection only when the palette, search, snooze picker, and compose are all closed. Otherwise it only closes the open one.
 
 When the acted-on conversation leaves the current list:
@@ -274,24 +283,24 @@ On the list, an action applies only to rows still shown, so it never touches a c
 
 ### Undo
 
-Every action in the table that changes mail or splits is one undo entry, however many conversations it touched. Sends and pins are entries too. Marking read on open is not. Each account has its own undo history. A send entry points at its outbox row. A pin entry stores the pin it replaced. A mail entry stores the labels and `snooze_until` values the action changed, with their values from before it. Undo reverts only those, so later changes such as read-on-open or edits from another Gmail client stay. So undoing a trash does not bring back a reply whose send was already undone, and undoing `e` on a snoozed thread restores its snooze. Once a send is sent and its toast is gone, its entry leaves the undo history. Closing a send toast is an action that tells Rust, and on launch Rust drops send entries whose row is already sent. A stray `z` later never trashes delivered mail. `z` undoes the newest entry of the account on screen. Pressing it again undoes the one before. A send toast's Undo is the exception: it always undoes its own send and removes that entry, whatever is newer. The last 50 entries per account are kept in SQLite, so `z` survives a restart.
+Every action in the table that changes mail or splits is one undo entry, however many conversations it touched. Sends and pins are entries too. Marking read on open is not. An action that changes nothing, such as `Shift+E` on a conversation already in the inbox, is not an entry and makes no Gmail call, and `e` in Done, `#` in Trash, and `!` in Spam do nothing. Each account has its own undo history. A send entry points at its outbox row. A pin entry stores the pin it replaced. A mail entry stores the labels and `snooze_until` values the action changed, with their values from before it. Undo reverts only those, so later changes such as read-on-open or edits from another Gmail client stay. So undoing a trash does not bring back a reply whose send was already undone, and undoing `e` on a snoozed thread restores its snooze. Once a send is sent and its toast is gone, its entry leaves the undo history. Closing a send toast is an action that tells Rust, and on launch Rust drops send entries whose row is already sent. A stray `z` later never trashes delivered mail. `z` undoes the newest entry of the account on screen. Pressing it again undoes the one before. A send toast's Undo is the exception: it always undoes its own send and removes that entry, whatever is newer. The last 50 entries per account are kept in SQLite, so `z` survives a restart.
 
 ## Reading
 
-Opening a thread marks it read locally and on Gmail. That read change is not an undo entry.
+Opening a thread marks it read locally and on Gmail. That read change is not an undo entry. A conversation left before its first load is not marked read.
 
 The conversation view lists messages oldest first.
 - The latest message and every unread message are expanded.
 - Other messages are collapsed to one line: sender, snippet, and time.
 - When more than four collapsed messages sit together, the ones between the first and the last fold into a single `N older messages` line.
-- Clicking a collapsed line or a fold expands it. Clicking an expanded message's header collapses it.
+- Clicking a collapsed line expands it. Clicking a fold shows its messages as collapsed lines. Clicking an expanded message's header collapses it.
 - The view opens scrolled to the first unread message, or to the latest message when none are unread.
 
 Draft messages are not listed with the others. Outside Trash and Spam, messages in trash or spam are not listed either, so an undone sent reply disappears from the thread. In Trash and Spam, every non-draft message is listed. A reply or forward draft on the thread shows as a collapsed draft below the last message. Clicking it resumes it in the reply composer. `r`, `Enter`, and `f` resume the newest draft of their kind aimed at the selected message (see Reply composer).
 
 In Drafts, `Enter` on a new-message draft opens it on the `c` screen. On a reply or forward draft, it opens the thread with that draft in the reply composer.
 
-One message is selected, drawn as a raised card with an `accent-edge` bar on its left (see Layout). It starts as the latest message, even when the view opens scrolled to an earlier unread one, so `r` from the list and `r` after opening reach the same person. Collapsed drafts and the Sending row are never selected. `n` and `p` select the next and previous message and scroll it into view. Selecting a message inside a fold, by any path, expands the fold. Clicking a message selects it. `o` expands or collapses the selected message. `r`, `Enter`, and `f` act on the selected message.
+One message is selected, drawn as a raised card with an `accent-edge` bar on its left (see Layout). It starts as the latest message, even when the view opens scrolled to an earlier unread one, so `r` from the list and `r` after opening reach the same person. Collapsed drafts and the Sending row are never selected. `n` and `p` select the next and previous message and scroll it into view. Selecting a message inside a fold, by any path, opens the fold. Clicking a message selects it. `o` expands or collapses the selected message. `r`, `Enter`, and `f` act on the selected message.
 
 When a new latest message arrives while the selection is on the previous latest message, the selection moves to the new one. When the selected message leaves the conversation, the latest message is selected. The selection belongs to the open conversation and resets to the latest message whenever a conversation opens, including the same one again.
 
@@ -299,19 +308,21 @@ An expanded message's header reads like Superhuman's: `Carol Chen to Dave, Erin 
 
 Quoted history is collapsed behind a `•••` toggle that expands it on click. `Shift+O` expands every message and all quoted history. Pressing it again returns to the default.
 
-HTML is sanitized in Rust with ammonia before it is stored. The sanitizer keeps `style`, `class`, and `id` attributes, `<style>` blocks, and table and layout attributes, and allows `data:` image URLs. It drops scripts, event handlers, forms, and `javascript:` URLs. Inline images referenced by `cid:` are fetched with the body and rewritten to `data:` URIs before sanitizing.
+HTML is sanitized in Rust with ammonia before it is stored. The sanitizer keeps `style`, `class`, and `id` attributes, `<style>` blocks, and table and layout attributes, and allows `data:` image URLs. It drops scripts, event handlers, forms, nested frames, objects and embeds, SVG, MathML, `<meta>`, `<base>`, `<link>`, and `javascript:` URLs, in CSS `url(…)` too. Inline images referenced by `cid:` are fetched with the body and rewritten to `data:` URIs before sanitizing.
 
-Each expanded message renders in a `srcdoc` iframe with `sandbox="allow-same-origin allow-scripts"`. Its document starts with `<meta http-equiv="Content-Security-Policy" content="script-src 'none'">`, so nothing in the message can run. `allow-scripts` is there only because WebKit does not fire the parent's listeners inside a sandboxed iframe without it (WebKit bug 218086). The parent can reach the iframe's document. The parent:
+A text part whose bytes are valid UTF-8, and not plain ASCII, is read as UTF-8 whatever charset it declares, because Gmail's `format=full` can serve a part in UTF-8 under its original `Content-Type`. Other parts use their declared charset; with none, or one that is not known, they are read as UTF-8, or as windows-1252 when they are not valid UTF-8.
+
+Each expanded message renders in a `srcdoc` iframe with `sandbox="allow-same-origin allow-scripts"`. Its document starts with `<meta http-equiv="Content-Security-Policy" content="script-src 'none'">`, so nothing in the message can run. `allow-scripts` is there only because WebKit does not fire the parent's listeners inside a sandboxed iframe without it (WebKit bug 218086). The iframe always uses the light color scheme, so a message's dark-mode styles never apply, even when macOS is in dark mode. The parent can reach the iframe's document. The parent:
 - sizes each iframe to its content, so the conversation scrolls as one page
 - forwards keystrokes from the iframe to the shortcut handler
 - cycles the iframe's links for `Tab`
-- catches link clicks and opens them in the default browser through the opener plugin
+- catches link clicks and opens `http`, `https`, and `mailto` links, which Rust checks again, in the default browser or mail app through the opener plugin. Other links do nothing
 
 Links never navigate the app window.
 
-Remote images load by default. A setting turns them off. With remote images off, the iframe's CSP also sets `img-src data:`, which blocks remote images in CSS too. Tracking pixels are a consequence of the default.
+Remote images load by default. A setting turns them off. With remote images off, the iframe's CSP is `default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`, so nothing outside the message loads: no remote images, CSS ones included, web fonts, or stylesheets. The composer's quoted text renders in a sandboxed frame under the same policy. Tracking pixels are a consequence of the default.
 
-Attachments download on demand into the app's data folder and open with the default app, quarantined first (see Security). They are not fetched during the initial sync.
+An expanded message lists its attachments, not its inline images, as chips with the file name and size. Clicking one downloads it the first time, into the app's data folder, and opens it with the default app, quarantined first (see Security). Attachments are not fetched during the initial sync.
 
 ## Compose
 
@@ -336,7 +347,7 @@ TipTap's own shortcuts that clash with this table are removed: `Cmd+Shift+B` (bl
 
 ### Reply composer
 
-In a conversation, `r`, `Enter`, and `f` open the reply composer inline, under the last message, aimed at the selected message. `r` and `f` pressed on the list open the conversation first and aim at its latest message. `Enter` on the list only opens the conversation. The thread stays above and scrolls with the mouse or trackpad. The view scrolls so the composer is fully visible, and the editor takes focus. Keys typed after `r`, `f`, or `Enter` before the editor has focus, while the conversation loads or the composer is not yet drawn, are the start of the reply, not shortcuts: printable keys and `Backspace` are kept and go into the editor when it opens. Leaving the conversation first drops them. `c` does not do this.
+In a conversation, `r`, `Enter`, and `f` open the reply composer inline, under the last message, aimed at the selected message. `r` and `f` pressed on the list open the conversation first and aim at its latest message. `Enter` on the list only opens the conversation. The thread stays above and scrolls with the mouse or trackpad. The view scrolls so the composer is fully visible, and the editor takes focus. Keys typed after `r`, `f`, or `Enter` before the editor has focus, while the conversation loads or the composer is not yet drawn, are the start of the reply, not shortcuts: printable keys and `Backspace` are kept and go into the editor when it opens. `Enter` pressed meanwhile is a reply key, not text: it replaces the earlier key, so one composer opens, for reply all. Leaving the conversation first drops the reply and its keys. `c` does not do this.
 
 A forward stays on the thread, like a reply, with thread id, `In-Reply-To`, and `References` set. Drafts on a thread come in two kinds: reply (from `r` or `Enter`) and forward (from `f`). `r` and `Enter` resume the newest reply draft aimed at the selected message, and `f` the newest forward draft aimed at it. With none aimed at the selected message, and the selection on the latest message, they resume the newest draft of their kind that was started on the thread's latest message, so a half-written reply survives new replies. A draft started on an earlier message resumes only from that message, or by clicking it. A draft from Gmail counts as started on the latest message when its target was the newest non-draft message older than the draft. Otherwise they start a new one aimed at the selected message. A draft from Gmail is aimed at the message its `In-Reply-To` names, or at the latest message when none matches. Whenever a reply composer opens, by any path, its target message is selected. A draft this app made keeps the kind it was started with. A draft that first appears from Gmail gets its kind once, at that sync, and keeps it:
 - new, when it is alone in its thread and has no `In-Reply-To`
@@ -347,19 +358,19 @@ A thread can hold several drafts, for example from Gmail web or after an undo. E
 
 Closing the reply composer leaves the conversation open. Sending closes the composer and keeps the conversation open. The pending message shows at the bottom of the thread, marked Sending, until Gmail accepts it. The conversation shows an outbox row until the thread holds the message with that row's sent message id. From then on it shows only the message.
 
-`c` opens a new message that replaces the screen. Closing or sending it returns to the screen it came from.
+`c` opens a new message that replaces the screen. Closing or sending it returns to the screen it came from. The `c` screen is headed `New Message` and opens with focus in To. The reply composer has no Subject row until `Cmd+Shift+S` shows it.
 
 ### Addressing
 
 Reply and reply all address the target message, the one the composer was aimed at, and quote it as a collapsed block under the editor. After forwarding Alice's mail to Bob, the forward is the latest message, so `r` answers Bob. `p` to Alice's message, then `r`, answers Alice.
 
-Reply and reply all send from the `sendAs` address the message was sent to, or the default `sendAs` address when none matches. If this account sent the message, they send from that message's From.
+Reply and reply all send from the `sendAs` address the message was sent to, To before Cc and the first within a field, or the default `sendAs` address when none matches. If this account sent the message, they send from that message's From.
 
 The quote is not part of the TipTap document. The composer shows it as a collapsed, read-only block, and Rust builds it from the stored target message. A reply or forward started before the target's body is stored quotes the target's snippet meanwhile. When the body lands, Rust fills in the whole quote, and for a forward the target's attachments, and the composer shows them. Those attachments count as the draft's defaults, so an untouched forward is still discarded. A save the composer made before it saw them does not remove them, and one the user removes stays removed. Such a draft is never written to Gmail with the snippet's quote: its upsert or send reads the target's body first, at priority 1, so a send made before the body arrived waits for it, and offline it waits as any send does. If Gmail no longer has the target, the snippet's quote goes. Rust wraps its quote in `<div class="gmail_quote">`, as Gmail does. A reply's block starts with an `On <date>, <name> wrote:` line. A forward's block starts with `---------- Forwarded message ---------` and the original From, Date, Subject, and To lines. For a draft read from Gmail, everything from the `gmail_quote` element onward becomes that block, and only the text above it goes into TipTap. This applies to Gmail-made drafts and to this app's own drafts read back, for example after re-adding an account.
 
-When a draft read from Gmail is first opened in a composer, Rust downloads its attachments and inline parts before its first upsert. Offline, the composer still opens, and the downloads run before the queued upsert or the send. `drafts.update` replaces the whole message, so every upsert carries all of the draft's attachments. Forward and new messages send from the default. The From field shows the chosen `sendAs` address, and its picker lists the account's `sendAs` addresses.
+When a draft read from Gmail is first opened in a composer, Rust downloads its attachments and inline parts before its first upsert. Offline, the composer still opens, and the downloads run before the queued upsert or the send. `drafts.update` replaces the whole message, so every upsert carries all of the draft's attachments. Forward and new messages send from the default. The From field shows the chosen `sendAs` address, and its picker lists the account's `sendAs` addresses. The From row shows only when the account has more than one.
 
-Gmail does not show `data:` images. When building the MIME, Rust turns images that came from `cid:` parts, in quotes and forwards, back into `cid:` inline parts, using the original parts. The sent message stays on that thread: same thread id, with `In-Reply-To` and `References` set. Reply sets To to that message's Reply-To, or From if it has no Reply-To. Reply all sets To the same way, then puts the message's other To and Cc on Cc, leaving out this account's addresses. If this account sent the message, Reply and reply all set To from that message's To instead, and reply all still puts the remaining recipients on Cc. Forward quotes the target message, carries its attachments, and starts with an empty To. Attachments not yet cached download when the send is built, so a forward works offline.
+Gmail does not show `data:` images. When building the MIME, Rust turns images that came from `cid:` parts, in quotes and forwards, back into `cid:` inline parts, using the original parts. The sent message stays on that thread: same thread id, with `In-Reply-To` and `References` set. A reply's subject is the target's with `Re: ` before it, unless it already starts with `Re:`, and a forward's has `Fwd: `, unless it already starts with `Fwd:` or `Fw:`, in any case. Reply sets To to that message's Reply-To, or From if it has no Reply-To. Reply all sets To the same way, then puts the message's other To and Cc on Cc, leaving out this account's addresses. If this account sent the message, Reply and reply all set To from that message's To instead, and reply all still puts the remaining recipients on Cc. Forward quotes the target message, carries its attachments, and starts with an empty To. Attachments not yet cached download when the send is built, so a forward works offline.
 
 ### Recipients and autocomplete
 
@@ -370,7 +381,9 @@ As you type, a list of up to six suggestions opens under the field. It shows nam
 - `Enter` or `Tab` accepts the highlighted suggestion
 - `Esc` closes the list without leaving the field
 
-Typing a comma, or a space after a complete address, turns the typed text into a chip. So do `Tab` and `Enter` with no list open, leaving the field, and Send. `Backspace` in an empty field selects the last chip, and a second `Backspace` removes it. Pasting a list of addresses makes one chip each. A chip that is not a valid address shows in `danger`, and Send refuses with a toast naming it until it is fixed. The composer and Rust judge an address by the same rule: at most 254 bytes with one `@`; a local part of at most 64 bytes with no spaces, specials, or leading, trailing, or doubled dots; and a dotted domain whose labels are letters, digits, or inner hyphens, ending in a label of at least two characters that is not all digits. One table of cases holds both to it. Send with no recipients refuses with an `Add a recipient` toast. Either way nothing is sent and the draft stays.
+Suggestions that arrive after the text changed or became a chip are dropped.
+
+Typing a comma or semicolon, or a space after a complete address, turns the typed text into a chip. So do `Tab` and `Enter` with no list open, leaving the field, Send, and closing the composer. The autosave leaves text being typed alone. `Backspace` in an empty field selects the last chip, and a second `Backspace` removes it. Pasting a list of addresses, separated by commas, semicolons, or line breaks, each bare or as `Name <address>`, makes one chip each. A chip that is not a valid address shows in `danger`, and Send refuses with a toast naming it until it is fixed. The composer and Rust judge an address by the same rule: at most 254 bytes with one `@`; a local part of at most 64 bytes with no spaces, specials, or leading, trailing, or doubled dots; and a dotted domain whose labels are letters, digits, or inner hyphens, ending in a label of at least two characters that is not all digits. One table of cases holds both to it. Send with no recipients refuses with an `Add a recipient` toast. Either way nothing is sent and the draft stays.
 
 Suggestions come from the account's own mail, in a local `contacts` table. Every synced message adds its From, To, and Cc addresses. Drafts and spam add nothing.
 - On mail this account sent, each To and Cc address gains a sent count.
@@ -392,7 +405,7 @@ Autocomplete works offline. After the first sync, Rust backfills contacts in the
 
 ### Drafts
 
-Drafts autosave locally. They also upsert to Gmail drafts, through the queue when offline. A draft has at most one queued upsert. It writes the draft as it is when it runs, so fast typing does not queue a write per save, and a save that lands while it runs queues another. Rust stores the message id and thread id each upsert returns. When sync finds that a draft's Gmail message changed to one this app did not write, the draft is read again from Gmail, unless a composer has it open or it has an edit Gmail has not confirmed. While a draft's upsert is queued or waiting to retry, a changed Gmail message is not read over it, even when it is the app's own write whose answer was lost or another client's edit: the upsert then writes the local text over it, and the last writer wins. A change skipped because a composer had the draft open, or opened it while the read was under way, is read when that composer closes, unless the user saved an edit after the change: the last writer wins. Gmail's answers are only as new as the request, so a reconcile (`drafts.list`, then reads) leaves alone a local draft that changed after its first request or is being written to Gmail, as the full resync does for threads. The next reconcile, which the write itself triggers through history, looks again. A draft deleted on Gmail, for example because it was sent from a phone, is deleted locally. If a composer has it open, the local draft is kept with its Gmail id cleared, the composer stays, and a toast says `Draft was sent or deleted elsewhere`. Its next upsert uses `drafts.create`. Send cancels any queued upsert for that draft, because the outbox writes the final version itself. Discard deletes the local draft and the Gmail draft.
+Drafts autosave locally, 500 ms after the last edit. They also upsert to Gmail drafts, through the queue when offline. A draft has at most one queued upsert. It writes the draft as it is when it runs, so fast typing does not queue a write per save, and a save that lands while it runs queues another. Rust stores the message id and thread id each upsert returns. When sync finds that a draft's Gmail message changed to one this app did not write, the draft is read again from Gmail, unless a composer has it open or it has an edit Gmail has not confirmed. While a draft's upsert is queued or waiting to retry, a changed Gmail message is not read over it, even when it is the app's own write whose answer was lost or another client's edit: the upsert then writes the local text over it, and the last writer wins. A change skipped because a composer had the draft open, or opened it while the read was under way, is read when that composer closes, unless the user saved an edit after the change: the last writer wins. Gmail's answers are only as new as the request, so a reconcile (`drafts.list`, then reads) leaves alone a local draft that changed after its first request or is being written to Gmail, as the full resync does for threads. The next reconcile, which the write itself triggers through history, looks again. A draft deleted on Gmail, for example because it was sent from a phone, is deleted locally. If a composer has it open, the local draft is kept with its Gmail id cleared, the composer stays, and a toast says `Draft was sent or deleted elsewhere`. Its next upsert uses `drafts.create`. Send cancels any queued upsert for that draft, because the outbox writes the final version itself. An upsert already running is not cancelled: the send waits for it to land, then writes over the Gmail draft it made. Discard deletes the local draft and the Gmail draft, closes the composer, and shows a `Draft discarded` toast. It is not an undo entry.
 
 Attachments can be added with the composer's attach button or `Cmd+Shift+A`. A file added to a draft is at most 25 MB, Gmail's own limit; a larger one is refused with a toast before it is read. It is copied into the draft's own folder in the app's data folder, as `drafts/<draft>/<n>/<name>`, so it keeps the name the user picked and two files added at once never share a path. The folder goes when the draft is sent or discarded, or its account removed.
 
@@ -402,7 +415,7 @@ The Rust side builds the MIME message with mail-builder, including encoded heade
 
 ## Send and undo
 
-Send does not call Gmail immediately. The draft goes into a local outbox. The row starts as waiting, with `send_after` ten seconds ahead. A toast shows Sending and Undo. The toast's Undo always acts on its own send (see Undo). `z` acts on a send only while that send is the newest undo entry of the account on screen.
+Send does not call Gmail immediately. The draft goes into a local outbox. The row starts as waiting, with `send_after` ten seconds ahead. A toast shows the message's subject and Undo. It reads `Sending…`, `Email delayed` once the send misses its time, then `Sent` when Gmail accepts. While an undo is held it reads `Undoing…` and offers nothing. It stays until closed, except that a `Sent` toast closes itself after 4 s, and a send that leaves the outbox takes its toast with it. After a restart, each send not yet sent shows its toast again. The toast's Undo always acts on its own send (see Undo). `z` acts on a send only while that send is the newest undo entry of the account on screen.
 
 When `send_after` passes, the row becomes sending. Rust then:
 1. Downloads any of the draft's attachments and inline parts not yet cached: forwarded ones, and those of a draft read from Gmail.
@@ -417,7 +430,7 @@ Undo on a send:
 - Sending: the undo commits at once, its entry leaves the history, and Rust marks the row. When the send resolves, Rust trashes the sent message, or, if it was not sent, puts the draft back in a composer through a notice.
 - Sent: trash only that sent message. Other messages keep their labels, and the thread stays in every view they put it in.
 
-If Gmail cannot be reached before `drafts.send` is called, the row goes back to waiting and retries when the app is online. If `drafts.send` gets no clear answer, the row stays sending, and an Undo on it is held as above. When online, Rust calls `drafts.get`. A 404 means the draft was sent, so the row is sent, and its message id is the newest `SENT` message from this account on the thread. If the draft still exists, Rust calls `drafts.send` again, unless an undo is held: then the draft is not sent again and returns as not sent. If Gmail rejects the message, a toast shows the error.
+Any failure before `drafts.send` other than a rejection, such as no connection, no answer, or a 5xx while writing the draft, means Gmail never got the send: the row goes back to waiting and retries, and an undo held on it resolves at once as not sent. If `drafts.send` gets no clear answer, the row stays sending, and an Undo on it is held as above. When online, Rust calls `drafts.get`. A 404 means the draft was sent, so the row is sent, and its message id is the newest `SENT` message from this account on the thread. If the draft still exists, Rust calls `drafts.send` again, unless an undo is held: then the draft is not sent again and returns as not sent. If Gmail rejects the message, a toast reads `Couldn't send: <Gmail's message>`.
 
 Undo on a waiting send, a held undo that resolves as not sent, or a rejection puts the draft back in a composer:
 - The app switches to the send's account if needed.
@@ -426,7 +439,7 @@ Undo on a waiting send, a held undo that resolves as not sent, or a rejection pu
 - A rejection, or a held undo that resolves as not sent, that arrives while the user is typing in a composer does not take over. Its toast, `Your message was not sent` or `Send undone`, offers `Open draft` instead and stays until clicked or closed.
 - For Undo on a waiting send, the composer opens once the channel message whose `ack` covers the undo shows the outbox row gone. If Rust held the undo because the row was already sending, no composer opens until its notice arrives.
 
-`Cmd+Q` does not send waiting rows early. They stay in the outbox and send on the next launch, once online, as Superhuman does. A send that misses its time, offline or across a quit, shows `Email delayed` until Gmail accepts it. A sending row with no answer at quit is settled by `drafts.get` on the next launch.
+`Cmd+Q` does not send waiting rows early. They stay in the outbox and send on the next launch, once online, as Superhuman does. A send misses its time when it starts more than 5 s after `send_after`, goes back to waiting, or finds `send_after` passed at launch. It then shows `Email delayed`, in its toast and in place of Sending in the thread, until Gmail accepts it. A sending row with no answer at quit is settled by `drafts.get` on the next launch. A sending row whose final version had not reached the Gmail draft, for example after a crash during the write, goes back to waiting and starts again from step 1, so an older autosave in the Gmail draft is never sent.
 
 The delay is a fixed ten seconds, as in Superhuman, which does not let users change it.
 
@@ -436,7 +449,7 @@ Archive removes the `INBOX` label and marks the thread read: it removes `UNREAD`
 
 Trash adds `TRASH` and removes `INBOX` and `SPAM`. Spam adds `SPAM` and removes `INBOX` and `TRASH`. Star toggles `STARRED`. Mark unread adds `UNREAD` to the thread's latest message only, as Gmail does, and mark read removes it from every message. Return to inbox adds `INBOX`.
 
-Archive, trash, spam, snooze, and a snooze wake act on the thread's non-draft messages at the time of the action, through `messages.batchModify` with those ids. Gmail does not label drafts, and a draft's message id changes on every update. The op stores the ids, so a delayed replay or retry never touches messages that arrived later. A reply that arrives while an archive is queued still lands in the inbox.
+Archive, trash, spam, star, read changes, return to inbox, label changes, snooze, and a snooze wake act on the thread's non-draft messages at the time of the action (mark unread on the latest of them only), through `messages.batchModify` with those ids. Gmail does not label drafts, and a draft's message id changes on every update. The op stores the ids, so a delayed replay or retry never touches messages that arrived later. A reply that arrives while an archive is queued still lands in the inbox.
 
 Every one of these updates the list in the same frame, writes SQLite, then calls Gmail. Label changes and snooze do the same. If Gmail cannot be reached, the local change stays and the action queues. If Gmail rejects it, as defined in Gmail errors, the row rolls back and a toast shows the error.
 
@@ -462,7 +475,7 @@ An account signed in before the app asked for `gmail.settings.basic` gets a 403 
 
 Labels come from Gmail, per account. System labels map onto the views above. User labels appear in the `l` picker and in `Go to label`.
 
-`l` opens a palette picker of the account's user labels. If every selected thread has the chosen label, it is removed from all of them. Otherwise it is added to all of them. The picker can create a label. If `labels.create` reports that the name already exists, Rust refreshes `labels.list` and uses that label. This is not a rejection, unless `labels.list` then shows no label of that name. Queued actions and undo entries that named the label made here then name that one, so they keep naming a label that exists. A `labels.list` answer read before a label made here got its Gmail id keeps every label made here; the next refresh drops any that Gmail no longer has.
+`l` opens a palette picker of the account's user labels. If every selected thread has the chosen label, it is removed from all of them. Otherwise it is added to all of them. A label every acted-on conversation already has shows a ✓. The picker can create a label: when the typed name matches no label, ignoring case, it offers `Create label "<name>"`. Creating a label and applying it is one action. `z` takes the label off the conversations and keeps the label. If Gmail rejects the create, the label goes, and the queued changes that use it roll back. If `labels.create` reports that the name already exists, Rust refreshes `labels.list` and uses that label. This is not a rejection, unless `labels.list` then shows no label of that name. Queued actions and undo entries that named the label made here then name that one, so they keep naming a label that exists. A `labels.list` answer read before a label made here got its Gmail id keeps every label made here; the next refresh drops any that Gmail no longer has.
 
 `y` removes the current view's label when that label is a user label, `INBOX`, `STARRED`, `TRASH`, or `SPAM`. It does nothing in Sent, Drafts, Done, Snoozed, and Search.
 
@@ -472,9 +485,9 @@ Label colors and nested-label editing wait. Nested labels display as the path Gm
 
 Each account's Inbox is one list divided into sections. A conversation appears in exactly one section. Custom splits come first, then Important, then Other. Other is the catch-all, always last, and cannot be deleted.
 
-Each account starts with Important and Other only. The palette command `Split Inbox settings` opens a sheet for the account on screen. The sheet can add, rename, reorder, turn off, and delete custom splits. Its edits apply when the user presses Save. Save first checks every custom rule with Rust: a refused rule keeps the sheet open with every edit, and its message shows under the rule until the rule changes. A save is not an undo entry. Important can be turned off and cannot be deleted. Other cannot be deleted. Turning a split off keeps its definition and skips it. Deleting a custom split drops its rules and pins, and those conversations fall through.
+Each account starts with Important and Other only. The palette command `Split Inbox settings` opens a sheet for the account on screen. The sheet can add, rename, reorder, turn off, and delete custom splits. Its edits apply when the user presses Save. Save first checks every custom rule with Rust: a refused rule keeps the sheet open with every edit, and its message shows under the rule until the rule changes. A save is not an undo entry. Splits and pins live only on this Mac: saving or pinning makes no Gmail request. Important can be turned off and cannot be deleted. Other cannot be turned off or deleted. Turning a split off keeps its definition and skips it. Deleting a custom split drops its rules and pins, and those conversations fall through.
 
-Each section header in the list and each split name in the list header shows the split name and the conversation count. The count is hidden at zero and caps at `999+`. A split can hide itself while empty, which hides both its name in the list header and its section. That option defaults on.
+Each section header in the list and each split name in the list header shows the split name and the conversation count. The count is hidden at zero and caps at `999+`. A split can hide itself while empty, which hides both its name in the list header and its section. That option defaults on. With it off, an empty split keeps its name in the list header, with no count, and has no section header in the list. The list shows section headers only while more than one split is visible.
 
 With the list focused, `Tab` selects the first conversation of the next visible split and scrolls its header into view. `Shift+Tab` goes to the previous one. `Tab` on the last split and `Shift+Tab` on the first do nothing. `g` then `i` and `g` then `o` do that move inside Inbox.
 
@@ -493,7 +506,7 @@ First match wins:
 
 Person-to-person means the message is not list mail, and that message has `CATEGORY_PERSONAL` or no category label. List mail is anything with a `List-Id` or `List-Unsubscribe` header, stored as a flag at ingest. `CATEGORY_PROMOTIONS`, `CATEGORY_SOCIAL`, `CATEGORY_UPDATES`, and `CATEGORY_FORUMS` on that same message are not Important. Each message stores its own label ids.
 
-`Cmd+K` → `Add to split` pins the message's sender, that sender's domain, or one of the thread's user labels to a split you pick. `Move to Important` and `Move to Other` offer that same choice and pin it to Important or Other. A new pin replaces any pin of the same kind and value, so one sender or domain or label is pinned to at most one split. `z` removes the new pin and restores the one it replaced.
+`Cmd+K` → `Add to split` pins the message's sender, that sender's domain, or one of the thread's user labels to a split you pick. `Move to Important` and `Move to Other` offer that same choice and pin it to Important or Other. A new pin replaces any pin of the same kind and value, so one sender or domain or label is pinned to at most one split. A label pin holds the label's name, ignoring case, so it does not follow a rename. `z` removes the new pin and restores the one it replaced.
 
 ### Custom rules
 
@@ -519,9 +532,11 @@ Turning every custom split off, and turning Important off, leaves a flat inbox w
 ## Snooze
 
 `h` opens a picker: later today, tomorrow morning, next week, and a date and time typed as a phrase, for example `fri 9am`.
-- Later today is 18:00 local. It is omitted after that time.
+- Later today is 18:00 local. It is omitted from 18:00 on.
 - Tomorrow morning is 08:00 local on the next calendar day.
 - Next week is 08:00 local on the coming Monday, or on the Monday after when today is Monday.
+
+Each option shows its time. Typing lists the time the text names first, then the fixed options whose name contains the text. `Enter` takes the first option for the text typed so far, even before the list on screen catches up.
 
 Snooze removes `INBOX` on Gmail and stores `snooze_until` locally, so the thread leaves the inbox on other Gmail clients too. Only this app wakes it. While the app is not running, a due thread stays out of every Gmail inbox until the next launch.
 
@@ -549,12 +564,12 @@ Changing a setting is an action, as in UI state. It is not an undo entry. Settin
 `Remove account` asks to confirm. If the account's queue or outbox is not empty, the confirmation says how many actions and sends will be lost. Removing an account:
 - drops its queue and outbox, and stops its sync
 - deletes its rows from every table and its downloaded attachments
-- deletes its refresh token and revokes it with Google when online
+- deletes its refresh token and revokes it with Google. The revoke is tried once: offline, or if it fails, the token is only deleted. A sign-in started while a removed account's token is being revoked waits for the revoke before it opens the browser, since the revoke would end the new grant too. Nothing else waits for it
 - if it was on screen, switches to the next account on the rail, or shows the first-run screen if none are left
 
 ## Search
 
-`/` focuses search for the account on screen. As in Superhuman, the query takes the list header: left-aligned with the senders below, at 16px, with no box, the accent edge while the field has focus, and a close button (`Esc`) on the right. While the field has focus the hint bar reads `Enter to see results · Esc to close search`. Results replace the list, and their subjects and snippets mark the query's bare words and quoted phrases (not operator values) on `match`. When the window is wide enough, a Tips column on the right lists search operators. `Enter` or `↓` moves focus from the field to the results, where the shortcut table applies. `Esc` in the field or on the results restores the previous view.
+`/` focuses search for the account on screen. As in Superhuman, the query takes the list header: left-aligned with the senders below, at 16px, with no box, the accent edge while the field has focus, and a close button (`Esc`) on the right. While the field has focus the hint bar reads `Enter to see results · Esc to close search`. Results replace the list, and their subjects and snippets mark the query's bare words and quoted phrases (not operator values) on `match`. When the window is wide enough, a Tips column on the right lists search operators. `Enter` or `↓` moves focus from the field to the results, where the shortcut table applies. `Esc` in the field or on the results restores the previous view and its highlight.
 
 The first results come from local full-text search, and they appear immediately, including offline. The local query language is the custom-rule language plus the Gmail operators below, with Gmail's meaning. A bare word matches the sender, the subject, or the body text. As in Gmail, a conversation matches when one of its messages matches the whole query.
 
@@ -573,9 +588,9 @@ The first results come from local full-text search, and they appear immediately,
 
 Like Gmail search, local search skips drafts and messages in trash and spam, and so conversations with no other message. A query that names `in:trash`, `in:spam`, or `in:anywhere` looks there too, and one that names `in:drafts` looks at drafts, even when the term is negated, as in Gmail.
 
-Gmail applies the full query. Any other operator, such as `filename:` or `larger:`, needs data only Gmail has. Local search lists nothing for a query that holds one, rather than ignore the operator and show mail it may not match. The list shows `Searching Gmail…` until Gmail answers. Offline it says the search needs Gmail.
+Gmail applies the full query. Any other operator, such as `filename:` or `larger:`, needs data only Gmail has. Local search lists nothing for a query that holds one, rather than ignore the operator and show mail it may not match. Offline it says the search needs Gmail.
 
-While online, the app also runs the query through Gmail `threads.list` and merges anything the local index does not have yet. Gmail gets the query without `is:list`, which it does not know. A hit from that list has only ids. The row appears once a metadata fetch has the sender, subject, snippet, and time. The body fills in after that.
+While online, the app also runs the query through Gmail `threads.list` and merges anything the local index does not have yet. While nothing is listed and Gmail has not answered, the list shows `Searching Gmail…`. If the listing cannot finish, because Gmail is unreachable or refuses it, or the account signs out or signs in again meanwhile, the search ends with the local results. Gmail gets the query without `is:list`, which it does not know. A hit from that list has only ids. The row appears once a metadata fetch has the sender, subject, snippet, and time. The body fills in after that.
 
 The Gmail query runs once typing pauses for 300 ms, and a newer query cancels the older one's queued fetches. Gmail search and the `threads.list` of Label, Trash, and Spam views ask for 15 threads at a time and fetch the next page when the list nears its oldest Gmail hit, not its end. A page costs about 610 units, so it fits in the quota bucket in Sync. A hit's body is fetched at priority 5, or at once when it is opened. A hit already cached needs no fetch.
 
@@ -591,15 +606,15 @@ The queue is SQLite, not memory. A restart does not drop it. A queued action app
 
 ## Notifications
 
-A message that `history.list` reports as added with `INBOX` and `UNREAD` raises a macOS notification, for any account, whichever is on screen. The notification names the account. There are two exceptions:
+A message that `history.list` reports as added with `INBOX` and `UNREAD` raises a macOS notification, for any account, whichever is on screen. Its title is the sender, and its text names the account by address, then the subject and snippet. There are two exceptions:
 - its From address is one of the connected accounts
 - the focused window is already showing that thread
 
-The connect sync and a full resync do not notify. More than three new messages for one account in one poll become one summary notification.
+The connect sync and a full resync do not notify. Polls do, including the first after a launch, which finds mail that arrived while the app was closed. More than three new messages for one account in one poll become one summary notification, titled `<n> new messages`.
 
 macOS does not tell the app which notification was clicked; a click only brings the app forward. So when the window gains focus within 30 s of a notification shown while the app was in the background, the app treats it as a click on that notification: it switches to that account, opens Inbox, and highlights the thread. For a summary it switches to that account and opens Inbox.
 
-The Dock badge is the sum of unread Inbox threads across accounts that are not muted. It is recounted after every commit that can change unread counts.
+The Dock badge is the sum of unread Inbox threads across accounts that are not muted. It is recounted after every commit that can change unread counts, and cleared at zero.
 
 Notifications are on for each account until that account is muted. The palette's `Mute notifications` and `Unmute notifications` act on the account on screen. A muted account still shows its count on its avatar but does not add to the Dock badge.
 
@@ -620,7 +635,7 @@ Older mail arrives when search or an open hits it.
 
 Each list is fetched newest first. Metadata uses `threads.get` with `format=metadata`, and bodies use `threads.get` with `format=full`. Gmail requests take this priority, highest first:
 1. UI actions, sends, and draft upserts
-2. A thread the user opens whose bodies are not stored yet, then its prefetched neighbors. Search, the `threads.list` of Label, Trash, and Spam views and the metadata of their hits, attachment downloads, and draft reconciliation reads rank here too
+2. A thread the user opens whose bodies are not stored yet, then its prefetched neighbors. Search, the `threads.list` of Label, Trash, and Spam views and the metadata of their hits, attachment downloads, and a poll's draft reconciliation reads rank here too
 3. `history.list` polls, and the metadata fetches for the messages and threads they report
 4. Bodies of new messages from a poll or a full resync, then inbox metadata, including a full resync's thread list and its refetch of Inbox threads, then drafts and starred metadata, then inbox bodies
 5. Bodies of Gmail search hits and of hits from the `threads.list` of Label, Trash, and Spam views. Sent, the bodies of drafts and starred threads, and a full resync's refetch of other threads
@@ -630,9 +645,9 @@ With the quota below, a 2,000-thread inbox has all its rows in about 20 minutes 
 
 Polling `users.history.list` from the stored cursor starts as soon as the connect `historyId` is stored, and runs alongside the fetches above at its priority, for every account. It runs every 45 seconds while the app runs, on focus, and on wake from sleep. This app polls Gmail for changes. A gap of more than three poll intervals between two ticks of the poll timer counts as a wake from sleep.
 
-A poll applies each message's latest `labelIds` from the history records directly, and fetches thread metadata only for messages the app does not know yet. Pending actions are applied on top, so a queued action wins. A poll that sees a draft change reconciles the drafts only (see Drafts). The connect sync and a full resync also queue each Gmail draft's thread for metadata and bodies.
+A poll applies each message's latest `labelIds` from the history records directly, and fetches thread metadata only for messages the app does not know yet. Pending actions are applied on top, so a queued action wins, and so does one that reached Gmail while the poll or a thread read was on its way, since the answer may predate it. A message that history reports deleted, for example deleted forever in Gmail web, is deleted here too. A Gmail answer never undoes a newer one already stored: a thread read whose `historyId` is older than the stored one keeps only the bodies it brought, and of two `labels.list` or `sendAs` reads, the one started later wins. A poll that sees a draft change reconciles the drafts only (see Drafts). The connect sync and a full resync also queue each Gmail draft's thread for metadata and bodies.
 
-After a restart, the app lists Inbox again, skipping threads whose `historyId` has not changed, and fetches the Inbox bodies not stored yet. If the connect sync had not finished, it runs again.
+After a restart, the app lists Inbox again, skipping threads whose `historyId` has not changed, and fetches the Inbox bodies not stored yet. If the connect sync had not finished, it runs again. A connect sync that fails tries again every 10 s, keeping the `historyId` its first attempt stored, so changes made in between still arrive by poll.
 
 If `history.list` returns 404 because the cursor is too old, run a full resync:
 1. Store a fresh `historyId` from `getProfile`, so polling resumes at once.
@@ -659,12 +674,14 @@ Every Gmail call ends in one of these outcomes. Of these, only a rejection rolls
 | No connection, or the request failed before it was sent | The account is offline. The action stays queued and replays when the network returns |
 | Sent, but no response (timeout or dropped connection) | Retry, except where the spec says otherwise: `drafts.send` follows Send and undo, and `drafts.create` follows the rule below |
 | `drafts.send` or `drafts.create` gets a 5xx | Gmail may have done the write. For `drafts.send`, a 5xx is no clear answer and a 404 means sent, as in Send and undo. For `drafts.create`, a 5xx follows the rule below |
-| 401 | Refresh the access token once and retry. If the refresh gets `invalid_grant`, the account shows Sign in again |
+| 401 | Refresh the access token once and retry. If the refresh gets `invalid_grant`, the account shows Sign in again. A 401 that survives the refresh does not sign the account out: a queued action backs off and retries, and a sync read is dropped |
 | 429, 5xx, or 403 with reason `rateLimitExceeded`, `userRateLimitExceeded`, or `backendError` | Back off and retry: 1 s doubling to 60 s, with jitter, or `Retry-After` when given. The action stays pending, the row stays as the user left it, and the account shows a quiet sync status after 30 s of retrying |
 | 404 on a message, thread, or label an action names | It was deleted elsewhere. Rust drops it from the action. If nothing is left, the action is done. `messages.batchModify` does not say which id is missing, so Rust checks the ids with `messages.get` (`format=minimal`), drops the missing ones, and retries with the rest. If every message still exists, a label it names is gone, and the 404 is a rejection. Drafts follow the draft rules |
 | 404 on a sync, search, or body fetch | The item is gone, for example a draft version Gmail web already replaced. Rust drops it, with no toast. A 404 from `history.list` runs the full resync in Sync |
 | 409 on `labels.create` | The label exists. Use it, as Labels says. If `labels.list` then shows no label of that name, the 409 is a rejection |
 | Any other 4xx | A rejection |
+
+The quiet sync status is a muted dot on the account's rail avatar, whose title gains ` · Can't reach Gmail`. Gmail's next answer clears it.
 
 When Gmail rejects a queued action, its toast reads `Gmail rejected a change (<status>): <Gmail's message>`. The 404 and 409 above count as rejections so that the change rolls back instead of retrying forever, and their toasts say what is gone or taken.
 
@@ -720,7 +737,7 @@ One Rust thread does every SQLite write: UI actions, sync results, and queue and
 
 After each commit, the writer thread sends one message on a Tauri channel shared by all subscriptions: the commit's `rev`, its `ack`, and the patches for every open subscription the commit affects, possibly none. It builds them from the same snapshot, then applies the next job. The mirror applies a whole message at once. A new subscription's first load is a job on the writer thread too. It is sent on the channel as its own message, with the current `rev`, `ack`, and the subscription's ids and rows, so it is ordered with the patches. The subscribe invoke returns nothing. The mirror ignores patches for a subscription until its first load arrives. UI actions and first loads run before any queued sync job. Sync and queue results commit in small transactions of a few milliseconds each, and sanitizing and other parsing happen before a job reaches the writer thread.
 
-Window fetches and bodies are read on separate connections in WAL mode and return each row with its `rev`. Only channel messages carry `ack`. A fetch reply never changes pending actions. The mirror keeps a row, fetched or pushed, unless its own copy has a newer `rev`. A message body never changes, so a loaded body stays with its message whatever the `rev`. Each message row says whether its body is stored. A body read for a message with no stored body returns nothing and is not kept. An expanded message without its body shows a loading line and reads the body when a patch says it is stored. List membership and order come only from the channel, so a stale fetch can never bring back a row that left the list.
+Window fetches and bodies are read on separate connections in WAL mode and return each row with its `rev`. Only channel messages carry `ack`. A fetch reply never changes pending actions. The mirror keeps a row, fetched or pushed, unless its own copy has a newer `rev`. A message body never changes, so a loaded body stays with its message whatever the `rev`. Each message row says whether its body is stored. A body read for a message with no stored body returns nothing and is not kept. An expanded message without its body shows its snippet under a thin loading bar, which appears only after 300 ms, and reads the body when a patch says it is stored. List membership and order come only from the channel, so a stale fetch can never bring back a row that left the list.
 
 ### Actions
 
@@ -765,6 +782,7 @@ The thread list is virtualized. The conversation view does not virtualize a thre
 - HTML is sanitized before insert. The message iframe's CSP is `script-src 'none'`.
 - The app CSP allows inline styles and `img-src https: http: data:`, because `srcdoc` iframes inherit it. Tauri's nonce injection is turned off for `style-src` (`dangerousDisableAssetCspModification`), because a nonce makes browsers ignore `'unsafe-inline'`.
 - The webview has no Gmail credentials and cannot call Gmail.
+- Outside the message frames, text from mail (subjects, names, addresses, snippets) is shown only as text, never as markup.
 - OAuth uses the system browser via loopback, then returns to the app. A redirect with another `state` is refused (see Accounts).
 - A draft's files are read only from the app's own folders, because the paths in a save come from the webview: a file added to a draft only from that draft's folder, and an attachment the draft carries only from the account's downloads, else it is downloaded again. An added file that is gone, or outside its folder, rejects the write with a toast instead of sending without it.
 - Every attachment the app writes to disk gets the `com.apple.quarantine` flag (flags `0081`, the time, `Ubermensch`, an event UUID) before it can be opened, so Gatekeeper checks it as it checks a browser download. A file that cannot be flagged is deleted.
