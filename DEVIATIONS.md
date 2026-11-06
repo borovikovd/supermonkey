@@ -258,6 +258,12 @@ the spec's wording:
   as any send waits). If Gmail no longer has the target, the snippet's
   quote goes. SPEC says only that Rust builds the quote from the stored
   target. A draft read from Gmail keeps Gmail's quote.
+- **A draft edit Gmail has not confirmed wins over what sync reads.** While
+  a draft's upsert is queued or waiting to retry, a changed Gmail message
+  is not read back over it, even when it is the app's own write whose
+  answer was lost or another client's edit: the upsert then writes the
+  local text over it (last writer wins). SPEC reads a change back unless a
+  composer has the draft open.
 
 ## Decided in the review of the rewrite
 

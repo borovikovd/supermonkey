@@ -728,3 +728,61 @@ test("DRF-11 typing before a reply's first load keeps its filled fields", async 
   expect(kept?.message.headers.to).toContain("carol@corp.test");
   expect(bodyOf(kept)).toMatch(/Early words[\s\S]*More words/);
 });
+
+test("DRF-19 an edit still waiting to reach Gmail is not replaced by an older Gmail version", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const p3 = s.thread("p3");
+  await openThread(app, "Person 3");
+  await app.reply();
+  await app.type("one");
+  await app.settle();
+  expect(bodyOf((await draftsIn(gmail, p3.threadId))[0])).toContain("one");
+
+  // Gmail applies the next update, but its answer is lost: the save waits to retry.
+  await gmail.fault("drafts.update", { kind: "noResponse" }, { times: 1 });
+  await app.type(" two");
+  await app.settle();
+  expect(bodyOf((await draftsIn(gmail, p3.threadId))[0])).toContain("one two");
+  await app.type(" three");
+  await app.press("Escape", "Escape");
+  await app.settle();
+  await expect(stub(app, "one two three")).toHaveCount(1);
+
+  // A poll sees the draft's new Gmail message: the app's own lost write.
+  await gmail.poll();
+  await app.settle();
+  await expect(stub(app, "one two three")).toHaveCount(1);
+  await app.advance(120_000, { stepwise: true });
+  await app.settle();
+  const [draft] = await draftsIn(gmail, p3.threadId);
+  expect(bodyOf(draft)).toContain("one two three");
+
+  // Another client edits the draft while a save waits to retry after a 503.
+  await gmail.fault("drafts.update", { kind: "status", status: 503 }, { times: 1 });
+  await app.reply("r");
+  await expect(app.editor).toHaveText("one two three");
+  await app.type(" four");
+  await app.press("Escape", "Escape");
+  await app.settle();
+  await gmail.updateDraft(
+    A,
+    draft?.id ?? "",
+    {
+      subject: `Re: ${p3.subject}`,
+      threadId: p3.threadId,
+      inReplyTo: s.latest("p3").messageId,
+      html: "<p>from web</p>",
+    },
+    { poll: true },
+  );
+  await app.settle();
+  await expect(stub(app, "one two three four")).toHaveCount(1);
+  await app.advance(120_000, { stepwise: true });
+  await app.settle();
+  expect(bodyOf((await draftsIn(gmail, p3.threadId))[0])).toContain("one two three four");
+  await app.reply("r");
+  await expect(app.editor).toHaveText("one two three four");
+});

@@ -68,10 +68,12 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
         .read(move |r| {
             let drafts = r.drafts().for_account(account)?;
             let sending = r.outbox().gmail_draft_ids(account)?;
-            Ok((drafts, sending))
+            let unconfirmed: HashSet<DraftId> =
+                r.ops().upserted_drafts(account)?.into_iter().collect();
+            Ok((drafts, sending, unconfirmed))
         })
         .await;
-    let (local, sending) = match local {
+    let (local, sending, unconfirmed) = match local {
         Ok(local) => local,
         Err(e) => {
             tracing::warn!(account = account.0, error = %e, "couldn't read the drafts to reconcile");
@@ -116,7 +118,11 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
             continue;
         }
         if let Some((local, message)) = known.remove(&listed.id) {
-            if message.as_ref() == Some(&listed.message.id) || reconcile.writing.is_busy(&local) {
+            // Unchanged, or a local edit Gmail has not confirmed wins over it.
+            if message.as_ref() == Some(&listed.message.id)
+                || reconcile.writing.is_busy(&local)
+                || unconfirmed.contains(&local)
+            {
                 continue;
             }
             if defer(ctx, local).await {

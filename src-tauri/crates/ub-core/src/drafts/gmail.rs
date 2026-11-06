@@ -221,6 +221,11 @@ pub(crate) fn apply_gmail_draft(
                 }
             };
         }
+        // An edit Gmail has not confirmed (its upsert waits to run or to
+        // retry) wins over what Gmail has: the upsert writes it over it.
+        if tx.read().ops().upserts_draft(&local.id)? {
+            return Ok(());
+        }
         // Opened since the list was read: read once its composer closes.
         if defer_if_open(tx, state, &local.id)? {
             return Ok(());

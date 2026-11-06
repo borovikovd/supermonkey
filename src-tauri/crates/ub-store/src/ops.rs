@@ -232,6 +232,31 @@ impl<'c> OpReads<'c> {
             |r| r.get("queued"),
         )
     }
+
+    /// Whether an upsert of the local draft is queued: it holds an edit Gmail
+    /// has not confirmed, waiting to run or to retry.
+    pub fn upserts_draft(self, draft: &DraftId) -> Result<bool, StoreError> {
+        self.db.one(
+            "check for a queued draft upsert",
+            "SELECT EXISTS (SELECT 1 FROM ops
+                            WHERE kind = 'draft_upsert' AND draft_id = ?1) AS queued",
+            [draft],
+            |r| r.get("queued"),
+        )
+    }
+
+    /// The account's local drafts with a queued upsert (see
+    /// [`Self::upserts_draft`]).
+    pub fn upserted_drafts(self, account: AccountId) -> Result<Vec<DraftId>, StoreError> {
+        self.db.all(
+            "read the drafts with a queued upsert",
+            "SELECT DISTINCT draft_id FROM ops
+             WHERE account_id = ?1 AND kind = 'draft_upsert' AND draft_id IS NOT NULL
+             ORDER BY draft_id",
+            [account],
+            |r| r.get("draft_id"),
+        )
+    }
 }
 
 /// Writes to the op queue. Each records the account's summary, which counts

@@ -294,7 +294,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `compose-new.spec.ts`      | NEW    | `c` screen, formatting, shortcuts, `Esc` machine, untouched rule, discard                    | `standard`                               | H4                          | 12      | 7       | 5      | 0      |
 | `recipients.spec.ts`       | RCP    | chips, autocomplete, ranking, invalid addresses, Cc/Bcc                                      | `contacts`, `standard`                   | H23                         | 10      | 3       | 7      | 0      |
 | `attachments.spec.ts`      | ATT    | attach, download on demand, offline forward, MIME tree                                       | `standard`                               | H4, H9, H23                 | 7       | 6       | 1      | 0      |
-| `drafts.spec.ts`           | DRF    | autosave and upsert, Drafts `Enter`, Gmail-side edits and deletes, offline, reload and crash | `standard`, `drafts`                     | H6, H15, H16                | 18      | 15      | 2      | 1      |
+| `drafts.spec.ts`           | DRF    | autosave and upsert, Drafts `Enter`, Gmail-side edits and deletes, offline, reload and crash | `standard`, `drafts`                     | H6, H15, H16                | 19      | 16      | 2      | 1      |
 | `undo-send.spec.ts`        | SND    | the outbox state machine, held undo, rejection, no clear answer, restart                     | `standard`                               | H8a, H8b, H9, H13, H15      | 18      | 15      | 3      | 0      |
 | `offline.spec.ts`          | OFF    | airplane mode, replay order, restart, conflicts, rejection during replay                     | `standard`                               | H9, H15                     | 8       | 6       | 2      | 0      |
 | `gmail-errors.spec.ts`     | ERR    | the outcome matrix for actions and `drafts.create`, back-off, 401, 404                       | `standard`                               | H6, H8, H9, H10, H13        | 9       | 5       | 3      | 1      |
@@ -305,7 +305,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 5       | 3       | 2      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **261** | **156** | **95** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **262** | **157** | **95** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -2660,6 +2660,18 @@ _EG · §Gmail errors (`drafts.create` is unsafe to repeat; the `X-Ubermensch-Dr
 - **Expect:**
   - The log has one `drafts.create`: the replayed upsert looks for the draft by its header before it creates one.
   - Gmail has only the draft from step 1, with the typed text, and Drafts lists one row for it.
+
+#### DRF-19 · P1 · An edit still waiting to reach Gmail is not replaced by an older Gmail version
+
+_EG · §Drafts ("When sync finds that a draft's Gmail message changed …"), AGENTS.md (local changes win), Q24 (last writer wins)_
+
+- **Steps:**
+  1. In `p3`, press `r`, type "one", `settle()`. Fault the next `drafts.update` with `noResponse` (Gmail applies it, the answer is lost), type " two", `settle()`: the save waits to retry. Type " three", `Esc` `Esc`, `settle()`.
+  2. `poll()`, `settle()`: the poll sees the draft's new Gmail message, the app's own lost write. Then `advance(120_000)` stepwise, `settle()`.
+  3. Fault the next `drafts.update` with a 503. Press `r`, type " four", `Esc` `Esc`, `settle()`. Another client edits the draft to "from web", with a poll, `settle()`. `advance(120_000)` stepwise, `settle()`, then `r`.
+- **Expect:**
+  - After the polls, the draft stub still reads "one two three" (step 2) and "one two three four" (step 3).
+  - After each retry, Gmail's draft holds the newest text, and the composer resumes it: the edit not yet confirmed won over what the poll read.
 
 ### 5.16 `undo-send.spec.ts` (SND)
 
