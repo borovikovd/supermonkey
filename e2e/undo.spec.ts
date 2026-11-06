@@ -361,7 +361,6 @@ test("UND-08 undoing a trash does not bring back a reply whose send was undone",
   await highlight(app, "Offsite venue");
   await app.reply("r");
   await app.type("Count me in.");
-  // Let the autosave run: a send within its delay loses the typed text (known bug 2).
   await app.settle();
   await app.press("Meta+Enter");
   // Two steps, so the page's fast-forward does not also fire the Sent toast's

@@ -346,7 +346,6 @@ test("ACC-06 accounts off screen keep syncing, notifying, and sending", async ({
   await expect(badge(app, A)).toHaveText("9");
   await replyTo(app, "Person 2");
   await app.type("Sent while away");
-  // Let the autosave run first: a send within its delay loses the typed text (a known bug).
   await app.settle();
   await app.press("Meta+Enter");
   await expect(app.toast("Sending")).toBeVisible();

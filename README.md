@@ -87,7 +87,7 @@ Perf fixture (two accounts × 20,000 threads):
 ```sh
 cargo run --manifest-path src-tauri/Cargo.toml --release --features fake --bin perf-fixture -- /tmp/perf.db perf
 UBERMENSCH_DB=/tmp/perf.db vp run tauri dev
-UBERMENSCH_PERF_DB=/tmp/perf.db cargo test --manifest-path src-tauri/Cargo.toml --release --test perf_search -- --ignored --nocapture
+UBERMENSCH_PERF_DB=/tmp/perf.db cargo test --manifest-path src-tauri/Cargo.toml -p ub-core --release --lib perf -- --ignored --nocapture
 ```
 
 Debug builds log keydown-to-paint for each shortcut and warn when one is over
@@ -97,11 +97,16 @@ against the real core.
 
 ### Layout
 
-- `src-tauri/src` — writer thread, subscriptions, mail actions, drafts,
-  outbox, splits, and the async engine (sync, op queue, outbox runner).
-- `src-tauri/crates` — `ub-mime`, `ub-gmail`, `ub-fake-gmail`, `ub-rules`.
-- `src` — the React UI: mirror and chrome stores, keyboard, palette, list,
-  conversation, composer. `src/bindings` is generated from Rust by ts-rs.
+- `src-tauri/src` — the Tauri shell, and the `e2e-server` and `perf-fixture`
+  binaries.
+- `src-tauri/crates`, lowest layer first: `ub-domain` (newtypes, mail model,
+  views, splits, the query language), `ub-mime`, `ub-gmail` (client, quota,
+  OAuth, token store), `ub-store` (schema, writer, read pool), `ub-ipc` (IPC
+  types), `ub-core` (actions, subscriptions, per-account workers), `ub-bridge`
+  (command dispatch for Tauri and the debug web bridge), `ub-testkit` (E2E
+  server, demo, perf fixture), `ub-fake-gmail`.
+- `src` — the React UI: `store/` (mirror and chrome state), `keyboard/`, `ui/`,
+  `compose/`, `ipc/`. `src/bindings` is generated from `ub-ipc` by ts-rs.
 - `e2e` — the end-to-end suite and its test plan, `COVERAGE.md`.
 
 How to work on the code, for people and coding agents, is in

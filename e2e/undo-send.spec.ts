@@ -39,11 +39,7 @@ async function highlight(app: App, text: string | RegExp, left = 40): Promise<vo
   await highlight(app, text, left - 1);
 }
 
-/**
- * From the list: opens the thread, replies with `text`, and sends. The
- * autosave runs first, so the send carries the text (a send within its delay
- * loses it: a known bug covered elsewhere).
- */
+/** From the list: opens the thread, replies with `text`, and sends. */
 async function sendReply(app: App, subject: string, text: string): Promise<void> {
   await openThread(app, subject);
   await app.reply();

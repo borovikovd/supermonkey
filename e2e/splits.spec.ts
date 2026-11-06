@@ -86,10 +86,7 @@ async function pin(app: App, how: string, choice: string): Promise<void> {
   await expect(picker).toHaveCount(0);
 }
 
-/**
- * A history poll of A that really ran: `poll()` can wake another account's
- * loop instead (known bug: poll_kick wakes only one waiter).
- */
+/** Polls until a history poll of A has really run. */
 async function pollA(app: App, gmail: Control): Promise<void> {
   const polls = async () =>
     (await gmail.requests("history.list", { account: A })).filter((r) => r.answer === 200).length;

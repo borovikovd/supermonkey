@@ -382,12 +382,29 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 - `crates/ub-domain/src/query/tests.rs`: lenient and strict parsing and its errors, operator case and precedence, search operators and scope, split rules refusing search terms, FTS5 translation and escaping, `is:list` stripped for Gmail (E2E: SRC-02, SRC-11, SRC-12, SPL-06).
 - `crates/ub-domain/src/tests.rs`: person-to-person over categories and list mail, the starters, pin precedence, the latest message from someone else (SPL-01, SPL-03, SPL-07).
 - `crates/ub-domain/src/snooze/options.rs` and `crates/ub-domain/src/snooze/text.rs`: options before and after 18:00 and on every weekday, DST gaps and folds, the phrase grammar (SNZ-01, SNZ-02).
+- `crates/ub-domain/src/addressing.rs` and `crates/ub-domain/src/identity.rs`: reply, reply all, and forward recipients and From, and which addresses are this account's.
+- `crates/ub-domain/src/contacts.rs`: autocomplete matching, ranking, and no-reply addresses.
+- `crates/ub-domain/src/drafts.rs`: when a draft is untouched, and Gmail draft kinds.
+- `crates/ub-domain/src/labels.rs`, `crates/ub-domain/src/kinds_text.rs`, and `crates/ub-domain/src/hue.rs`: system label ids, label set operations, kind text round trips, label hue slots.
 - `crates/ub-mime/tests/sanitize.rs`: the hostile fixture, what is kept and dropped, `rel=noopener`, `cid:` to `data:`, text extraction (SEC-01).
 - `crates/ub-mime/tests/no_panic.rs`: 3,000 seeded random inputs through every parser and the sanitizer.
-- `crates/ub-core/src/tests/writer_channel.rs`: proptest that a list built from its first load and patches equals a fresh load at that `rev`; action numbers after a reload, first loads after a failed commit, `ack` never moving back, a panicking commit still going idle, searches and label reads whose commit failed (UIC-01).
+- `crates/ub-mime/tests/addresses.rs`: `is_valid_email` against the address table the composer's copy of the rule is held to (RCP-11).
+- `crates/ub-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser and when one-click applies.
+- `crates/ub-mime/src/outgoing.rs`: user text can't add headers to an outgoing message.
 - `crates/ub-gmail/tests/gmail/scheduler.rs`: priorities, concurrency, quota, back-off, and a removed account starting afresh.
-- `crates/ub-gmail/tests/gmail/oauth.rs`: the `state` check, token caching and early refresh, one refresh shared by concurrent 401s, secrets out of debug output.
+- `crates/ub-gmail/tests/gmail/oauth.rs` and `crates/ub-gmail/src/oauth/tokens.rs`: the `state` check, token caching and early refresh, one refresh shared by concurrent 401s, secrets out of debug output.
+- `crates/ub-gmail/tests/gmail/token_store.rs`: the token file is owner-only and keeps every account.
 - `crates/ub-gmail/tests/gmail/client.rs`: one-click unsubscribe posts only to `https` and follows no redirect.
+- `crates/ub-fake-gmail/tests/holds.rs`: a release racing a held reply never strands it.
+- `crates/ub-store/tests/store/writer.rs`, `crates/ub-store/src/writer.rs`, and `crates/ub-store/src/reply.rs`: writer priority and order, rollbacks and savepoints, panics, `rev`, stopping, awaiting results.
+- `crates/ub-store/tests/store/threads.rs` and `crates/ub-store/tests/store/views.rs`: a thread's row from its messages, refetches and deletes, and every view's rule and order.
+- `crates/ub-store/tests/store/routing.rs`: split routing, pins, and custom splits.
+- `crates/ub-store/tests/store/search.rs`: the FTS index and what search skips.
+- `crates/ub-store/tests/store/drafts.rs`: drafts and the outbox, undo history, local labels, settings, contacts.
+- `crates/ub-store/tests/store/ids.rs`: ids are never reused.
+- `crates/ub-store/src/open.rs`: a database of another schema version, or not a database, is moved aside and a fresh one made.
+- `crates/ub-core/src/tests/writer_channel.rs`: proptest that a list built from its first load and patches equals a fresh load at that `rev`; action numbers after a reload, first loads after a failed commit, `ack` never moving back, a panicking commit still going idle, searches and label reads whose commit failed (UIC-01).
+- `crates/ub-core/src/subs/tests.rs`, `crates/ub-core/src/subs/diff.rs`, and `crates/ub-core/src/subs/affects.rs`: first loads and patches, list diffs as moves, and which subscriptions a commit reaches.
 - `crates/ub-core/src/tests/clock.rs`: the activity tracking `settle()` relies on, a closed `Kick` waking a loop, and a stopping task group waiting for the groups inside it.
 - `crates/ub-core/src/tests/actions.rs`: a save after its send is dropped, an unparsable split rule is not saved, an action number already applied is dropped silently, a file over the attachment limit is refused.
 - `crates/ub-core/src/tests/badge.rs`: commits during a badge update make one more count, not one each.
@@ -395,15 +412,14 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 - `crates/ub-core/src/tests/notify.rs`: a poll that reads a whole thread notifies only for the mail history reported added.
 - `crates/ub-core/src/tests/snooze.rs`: a new snooze time re-arms the snooze timer.
 - `crates/ub-core/src/outbox/machine.rs`: every send event in every outbox state.
+- `crates/ub-core/src/ops/landed.rs`: a read sees the ops that landed while it was in flight.
+- `crates/ub-core/src/workers/account/history.rs`: reducing `history.list` records to what changed.
+- `crates/ub-core/src/workers/account/ingest.rs`: a poll older than a thread read stored meanwhile leaves that read's labels.
 - `crates/ub-core/src/workers/unwanted.rs`: Blocked senders lists only filters that trash one sender.
 - `crates/ub-core/src/workers/attachments.rs`: two attachments of one message with one name keep their own files.
-- `crates/ub-core/src/workers/account/ingest.rs`: a poll older than a thread read stored meanwhile leaves that read's labels.
-- `crates/ub-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser and when one-click applies.
-- `crates/ub-mime/tests/addresses.rs`: `is_valid_email` against the address table the composer's copy of the rule is held to (RCP-11).
-- `crates/ub-store/src/open.rs`: a database of another schema version, or not a database, is moved aside and a fresh one made.
+- `crates/ub-core/src/tests/perf.rs` (ignored; needs `UBERMENSCH_PERF_DB`): local search and autocomplete against §Performance.
 - `crates/ub-bridge/src/commands.rs`: a file over 25 MB is refused before its base64 is decoded.
 - `crates/ub-bridge/src/web.rs`: the debug web bridge answers only loopback hosts and its own origins (SEC-05).
-- `crates/ub-core/src/tests/perf.rs` (ignored; needs `UBERMENSCH_PERF_DB`): local search and autocomplete against §Performance.
 - `src/logging.rs`: the stderr logger drops the HTML parser's warnings.
 - `tests/layers.rs`: the crate layering in ARCHITECTURE.md.
 
