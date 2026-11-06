@@ -119,6 +119,7 @@ pub fn run() {
             commands::quit,
             commands::perf_report,
             commands::snooze_options,
+            commands::check_split_rule,
         ])
         .build(tauri::generate_context!());
     let app = match built {

@@ -288,7 +288,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `undo.spec.ts`             | UND    | the `z` stack, partial revert, per-account history, persistence                              | `standard`                               | H15                         | 8       | 4       | 3      | 1      |
 | `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 8       | 2       | 6      | 0      |
 | `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 12      | 4       | 7      | 1      |
-| `splits.spec.ts`           | SPL    | routing, `Tab`, pins, own reply, custom splits, starters, hiding, cap                        | `standard`, `splits`, `bulk`, `bulk1000` | H10, H12, H15               | 10      | 6       | 3      | 1      |
+| `splits.spec.ts`           | SPL    | routing, `Tab`, pins, own reply, custom splits, starters, hiding, cap                        | `standard`, `splits`, `bulk`, `bulk1000` | H10, H12, H15               | 11      | 7       | 3      | 1      |
 | `snooze.spec.ts`           | SNZ    | picker, snooze, wake triggers, clearing rules, history echo, undo                            | `standard`                               | H13, H14, H15               | 8       | 6       | 1      | 1      |
 | `compose-reply.spec.ts`    | REP    | inline composer, addressing, quoting, forward, resume rules, Gmail drafts                    | `standard`, `drafts`                     | H4, H6                      | 18      | 12      | 6      | 0      |
 | `compose-new.spec.ts`      | NEW    | `c` screen, formatting, shortcuts, `Esc` machine, untouched rule, discard                    | `standard`                               | H4                          | 12      | 7       | 5      | 0      |
@@ -1743,6 +1743,19 @@ _EP · §Window_
 - **Seed:** `bulk`.
 - **Steps:** Click "Other" in the list header.
 - **Expect:** the Other section header is at the top of the list's viewport, and Other is now the active split name.
+
+#### SPL-11 · P1 · A rule the core refuses keeps the sheet open with every edit
+
+_EG · §Custom rules ("refused, with the message `<term> isn't supported in split rules`")_
+
+- **Seed:** `standard`.
+- **Steps:**
+  1. Open the sheet. Add Receipts (`label:receipts`), turn Important off, and add Carol (`from:carol -venue`).
+  2. Save.
+  3. Change Carol's rule to `from:carol` and save.
+- **Expect:**
+  - After step 2, the sheet stays open. Under Carol's rule: `-venue isn't supported in split rules`, and the field is marked invalid and described by it. Every edit is still there: Receipts, Carol with its rule as typed, Important off. Nothing was saved: the header still reads `Important 16 · Other 7`.
+  - Editing the rule clears the message. After step 3, the sheet closes and the splits apply: `addr` in Carol, `receipt` in Receipts, and Important's threads in Other.
 
 ### 5.10 `snooze.spec.ts` (SNZ)
 
@@ -3713,7 +3726,7 @@ _EG · AGENTS.md (validate every command's input in Rust; the webview is not tru
 | Send and undo               | SND-01 to SND-18, REP-10, ATT-03                                                                                                                                            |
 | Archive, trash, star, read  | TRI-01 to TRI-11, ERR-04                                                                                                                                                    |
 | Labels                      | LAB-01 to LAB-07                                                                                                                                                            |
-| Split Inbox                 | SPL-01 to SPL-10                                                                                                                                                            |
+| Split Inbox                 | SPL-01 to SPL-11                                                                                                                                                            |
 | Snooze                      | SNZ-01 to SNZ-07, SYN-04, TRI-08                                                                                                                                            |
 | Settings                    | SET-01, SET-02, ACC-07, NOT-04, UND-03                                                                                                                                      |
 | Search                      | SRC-01 to SRC-12                                                                                                                                                            |
@@ -3776,7 +3789,7 @@ Also kept, because they test logic the E2E suite can't observe:
 - `src/logging.rs`: the stderr logger drops the HTML parser's warnings and keeps ours (logs are not visible to the E2E suite).
 - `crates/ub-store/src/open.rs`: a database of another schema version, or a file that is not one, is moved aside with its WAL and a fresh one created (there is no migration code).
 - `crates/ub-core/src/outbox/machine.rs`: the send state machine's every event in every state.
-- `crates/ub-core/src/tests/actions.rs`: a draft save that arrives after its send is dropped, and a split whose rule does not parse is not saved (the sheet checks rules before it saves).
+- `crates/ub-core/src/tests/actions.rs`: a draft save that arrives after its send is dropped, and a split whose rule does not parse is not saved (the sheet checks rules before it saves, SPL-11).
 - `crates/ub-core/src/tests/writer_channel.rs` (also): a commit whose updates panic while being sent still releases its effects and goes idle, so `settle()` never hangs on it (E2E can't make the core panic).
 - `crates/ub-core/src/tests/badge.rs`: commits that land while the Dock badge is being set make one more count, not one each (the recorded platform keeps only the last badge).
 - `crates/ub-core/src/tests/accounts.rs`: a sign-out reported for a grant older than the last sign-in changes nothing, even when its writer job runs after the sign-in's (the sign-in's job has the UI's priority; E2E can't hold the writer between the two).

@@ -1,6 +1,6 @@
 //! Split Inbox pins and the splits sheet (SPEC Split Inbox).
 
-use ub_domain::{AccountId, Pin, PinKind, Query, SplitId, SplitKind, UndoEntryId};
+use ub_domain::{AccountId, Pin, PinKind, SplitId, SplitKind, UndoEntryId, check_split_rule};
 use ub_ipc::SplitInfo;
 use ub_store::{SplitEdit, UndoAction};
 
@@ -77,8 +77,8 @@ pub(super) fn save_splits(
     }
     let mut edits = Vec::with_capacity(splits.len());
     for split in splits {
-        if split.kind == SplitKind::Custom && !split.query.trim().is_empty() {
-            Query::parse_rule(&split.query)?;
+        if split.kind == SplitKind::Custom {
+            check_split_rule(&split.query)?;
         }
         edits.push(SplitEdit {
             id: split.id,

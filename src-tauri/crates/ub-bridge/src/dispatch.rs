@@ -80,6 +80,7 @@ pub async fn dispatch(app: &App, command: &str, mut args: Value) -> CmdResult<Re
             Value::Null
         }
         "snooze_options" => json(commands::snooze_options(app, &arg::<String>(args, "text")?))?,
+        "check_split_rule" => json(commands::check_split_rule(&arg::<String>(args, "query")?))?,
         other => return Err(format!("unknown command {other}")),
     }))
 }

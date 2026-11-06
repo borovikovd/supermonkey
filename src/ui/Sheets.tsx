@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
+import { toast } from "sonner";
 
-import { act, signInAgain } from "../ipc/bridge";
+import { act, checkSplitRule, signInAgain } from "../ipc/bridge";
 import { reportSignIn } from "./signIn";
 import type { AccountInfo, SplitInfo } from "../ipc/types";
 import { useChrome } from "../store/chrome";
@@ -245,6 +246,18 @@ function Settings() {
   );
 }
 
+/** Why the core would refuse each custom split's rule, by split id; empty when it takes them all. */
+async function refusedRules(rows: SplitInfo[]): Promise<Record<number, string>> {
+  const custom = rows.filter((r) => r.kind === "custom");
+  const answers = await Promise.all(custom.map((r) => checkSplitRule(r.query)));
+  const found: Record<number, string> = {};
+  custom.forEach((r, i) => {
+    const why = answers[i];
+    if (why) found[r.id] = why;
+  });
+  return found;
+}
+
 const STARTERS: [string, string][] = [
   ["Newsletters", "is:list"],
   ["Promotions", "label:CATEGORY_PROMOTIONS"],
@@ -258,12 +271,38 @@ function Splits() {
   // Unedited, the sheet shows the live splits; the first edit takes a copy.
   const [edited, setEdited] = useState<SplitInfo[] | null>(null);
   const [deleted, setDeleted] = useState<number[]>([]);
+  // Why the core would refuse a rule, by split id, from the last Save.
+  const [refused, setRefused] = useState<Record<number, string>>({});
+  const [saving, setSaving] = useState(false);
   // New splits get negative ids until saved.
   const nextNewId = useRef(-1);
   if (!summary || account === null) return null;
   const rows = edited ?? summary.splits;
-  const update = (i: number, patch: Partial<SplitInfo>) =>
+  const update = (i: number, patch: Partial<SplitInfo>) => {
+    const id = rows[i]?.id;
+    // Editing a refused rule clears its message until the next Save.
+    if (patch.query !== undefined && id !== undefined && id in refused) {
+      setRefused(Object.fromEntries(Object.entries(refused).filter(([k]) => k !== String(id))));
+    }
     setEdited(rows.map((r, j) => (i === j ? { ...r, ...patch } : r)));
+  };
+  // The core checks each custom rule before the sheet closes, so a refused
+  // rule keeps the sheet and every edit on screen (SPEC Custom rules).
+  const save = () => {
+    if (saving) return;
+    setSaving(true);
+    void refusedRules(rows)
+      .then(
+        (found) => {
+          setRefused(found);
+          if (Object.keys(found).length > 0) return;
+          act({ type: "saveSplits", account, splits: rows, deleted });
+          closeSheet();
+        },
+        (e: unknown) => toast.error(`Couldn't check the rules: ${String(e)}`),
+      )
+      .finally(() => setSaving(false));
+  };
   const move = (i: number, d: number) => {
     const j = i + d;
     const a = rows[i];
@@ -296,57 +335,69 @@ function Splits() {
   return (
     <Sheet title={`Split Inbox · ${summary.account.email}`}>
       {rows.map((s, i) => (
-        <div key={s.id} className="flex items-center gap-2 border-b border-border-2 py-2 text-row">
-          <div className="flex flex-col">
-            <button className="text-hint text-text-3" onClick={() => move(i, -1)}>
-              ▲
-            </button>
-            <button className="text-hint text-text-3" onClick={() => move(i, 1)}>
-              ▼
-            </button>
-          </div>
-          <input
-            className="w-28 rounded-md border border-border px-1.5 py-0.5"
-            value={s.name}
-            onChange={(e) => update(i, { name: e.target.value })}
-          />
-          {s.kind === "custom" ? (
+        <div key={s.id} className="border-b border-border-2 py-2 text-row">
+          <div className="flex items-center gap-2">
+            <div className="flex flex-col">
+              <button className="text-hint text-text-3" onClick={() => move(i, -1)}>
+                ▲
+              </button>
+              <button className="text-hint text-text-3" onClick={() => move(i, 1)}>
+                ▼
+              </button>
+            </div>
             <input
-              className="flex-1 rounded-md border border-border px-1.5 py-0.5 font-mono text-code"
-              value={s.query}
-              placeholder="from:boss@acme.com OR label:Receipts"
-              onChange={(e) => update(i, { query: e.target.value })}
+              className="w-28 rounded-md border border-border px-1.5 py-0.5"
+              value={s.name}
+              onChange={(e) => update(i, { name: e.target.value })}
             />
-          ) : (
-            <span className="flex-1 text-text-3">
-              {s.kind === "important" ? "Person-to-person mail" : "Everything else"}
-            </span>
-          )}
-          <label className="flex items-center gap-1 text-hint text-text-2" title="Hide while empty">
-            <input
-              type="checkbox"
-              checked={s.hideWhenEmpty}
-              onChange={(e) => update(i, { hideWhenEmpty: e.target.checked })}
-            />
-            hide empty
-          </label>
-          {s.kind !== "other" && (
-            <Toggle
-              label={`Turn ${s.name} on or off`}
-              on={s.enabled}
-              onChange={(on) => update(i, { enabled: on })}
-            />
-          )}
-          {s.kind === "custom" && (
-            <button
-              className="text-danger"
-              onClick={() => {
-                if (s.id > 0) setDeleted([...deleted, s.id]);
-                setEdited(rows.filter((_, j) => j !== i));
-              }}
+            {s.kind === "custom" ? (
+              <input
+                className="flex-1 rounded-md border border-border px-1.5 py-0.5 font-mono text-code"
+                value={s.query}
+                placeholder="from:boss@acme.com OR label:Receipts"
+                aria-invalid={s.id in refused || undefined}
+                aria-describedby={s.id in refused ? `split-rule-${s.id}` : undefined}
+                onChange={(e) => update(i, { query: e.target.value })}
+              />
+            ) : (
+              <span className="flex-1 text-text-3">
+                {s.kind === "important" ? "Person-to-person mail" : "Everything else"}
+              </span>
+            )}
+            <label
+              className="flex items-center gap-1 text-hint text-text-2"
+              title="Hide while empty"
             >
-              ×
-            </button>
+              <input
+                type="checkbox"
+                checked={s.hideWhenEmpty}
+                onChange={(e) => update(i, { hideWhenEmpty: e.target.checked })}
+              />
+              hide empty
+            </label>
+            {s.kind !== "other" && (
+              <Toggle
+                label={`Turn ${s.name} on or off`}
+                on={s.enabled}
+                onChange={(on) => update(i, { enabled: on })}
+              />
+            )}
+            {s.kind === "custom" && (
+              <button
+                className="text-danger"
+                onClick={() => {
+                  if (s.id > 0) setDeleted([...deleted, s.id]);
+                  setEdited(rows.filter((_, j) => j !== i));
+                }}
+              >
+                ×
+              </button>
+            )}
+          </div>
+          {refused[s.id] !== undefined && (
+            <p id={`split-rule-${s.id}`} role="alert" className="mt-1 text-hint text-danger">
+              {refused[s.id]}
+            </p>
           )}
         </div>
       ))}
@@ -367,13 +418,7 @@ function Splits() {
           </button>
         ))}
         <div className="flex-1" />
-        <button
-          className="rounded-md bg-accent px-3 py-1 text-row text-inverse"
-          onClick={() => {
-            act({ type: "saveSplits", account, splits: rows, deleted });
-            closeSheet();
-          }}
-        >
+        <button className="rounded-md bg-accent px-3 py-1 text-row text-inverse" onClick={save}>
           Save
         </button>
       </div>

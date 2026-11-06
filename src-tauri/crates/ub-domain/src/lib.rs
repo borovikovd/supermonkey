@@ -61,7 +61,7 @@ pub use modify::{
 pub use query::{Query, RuleError};
 pub use splits::{
     IMPORTANT_POSITION, OTHER_POSITION, Pin, Router, STARTER_SPLITS, Split, StarterSplit,
-    email_domain, split_position,
+    check_split_rule, email_domain, split_position,
 };
 pub use thread::{Thread, ThreadDigest};
 pub use time::Millis;

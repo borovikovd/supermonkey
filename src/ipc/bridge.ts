@@ -296,5 +296,8 @@ export const unblockSender = (account: AccountId, id: string) =>
 export const perfReport = (action: string, ms: number, budget: number) =>
   invoke<void>("perf_report", { action, ms, budget });
 export const snoozeOptions = (text: string) => invoke<SnoozeChoice[]>("snooze_options", { text });
+/** Why the core would refuse this custom split rule, or null when it takes it. */
+export const checkSplitRule = (query: string) =>
+  invoke<string | null>("check_split_rule", { query });
 export const addAttachment = (draft: string, filename: string, mimeType: string, data: string) =>
   invoke<DraftAttachment>("add_attachment", { draft, filename, mimeType, data });

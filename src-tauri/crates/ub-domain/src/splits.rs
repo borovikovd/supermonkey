@@ -7,13 +7,23 @@ use crate::{
     Identity, LabelSet, MessageFacts, PinKind, SplitId, SplitKind, SystemLabel, Thread,
     ThreadDigest,
     labels::is_category_id,
-    query::{MatchTarget, Query},
+    query::{MatchTarget, Query, RuleError},
 };
 
 /// Where Important sits in split order: after every custom split.
 pub const IMPORTANT_POSITION: i32 = 900_000;
 /// Where Other sits: last.
 pub const OTHER_POSITION: i32 = 1_000_000;
+
+/// Checks a custom split's rule as the splits sheet saves it: a blank rule
+/// is kept and matches nothing; any other must parse strictly. The sheet
+/// asks this before it saves, and the save asks it again.
+pub fn check_split_rule(query: &str) -> Result<(), RuleError> {
+    if query.trim().is_empty() {
+        return Ok(());
+    }
+    Query::parse_rule(query).map(drop)
+}
 
 /// The position the settings sheet's save gives a split: custom splits by
 /// their place among custom splits (`custom_rank`, from 0), then Important,

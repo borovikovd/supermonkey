@@ -167,3 +167,8 @@ pub(crate) fn perf_report(action: String, ms: f64, budget: f64) {
 pub(crate) fn snooze_options(shell: State<'_, Shell>, text: String) -> Vec<SnoozeChoice> {
     cmd::snooze_options(&shell.core, &text)
 }
+
+#[tauri::command]
+pub(crate) fn check_split_rule(query: String) -> Option<String> {
+    cmd::check_split_rule(&query)
+}

@@ -603,3 +603,38 @@ test("SPL-10 clicking a split name scrolls to its section", async ({ app, gmail 
     .toBe(0);
   await expect(app.activeSplit).toHaveText("Other");
 });
+
+test("SPL-11 a rule the core refuses keeps the sheet open with every edit", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const sheet = await openSheet(app);
+  await addSplit(sheet, "Receipts", "label:receipts");
+  await toggle(sheet, "Important");
+  await addSplit(sheet, "Carol", "from:carol -venue");
+  const rule = (await sheetRow(sheet, "Carol")).locator("input").nth(1);
+
+  // Refused with the core's message under the rule; nothing is saved.
+  await sheet.getByRole("button", { name: "Save", exact: true }).click();
+  await app.settle();
+  await expect(sheet).toBeVisible();
+  await expect(sheet.getByRole("alert")).toHaveText("-venue isn't supported in split rules");
+  await expect(rule).toHaveAttribute("aria-invalid", "true");
+  await expect(rule).toHaveAccessibleDescription("-venue isn't supported in split rules");
+  expect(await sheetNames(sheet)).toEqual(["Receipts", "Carol", "Important", "Other"]);
+  await expect(rule).toHaveValue("from:carol -venue");
+  await expect((await sheetRow(sheet, "Important")).getByRole("switch")).toHaveAttribute(
+    "aria-checked",
+    "false",
+  );
+  await expectHeader(app, "Important 16 · Other 7");
+
+  // Fixed: the message goes as soon as the rule changes, and the save lands.
+  await rule.fill("from:carol");
+  await expect(sheet.getByRole("alert")).toHaveCount(0);
+  await save(app, sheet);
+  await expectSplit(app, "Offsite venue", "Carol");
+  await expectSplit(app, "Your receipt", "Receipts");
+  await expectSplit(app, "Person 1", "Other", "with Important off");
+});

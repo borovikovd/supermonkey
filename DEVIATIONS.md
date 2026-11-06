@@ -317,3 +317,10 @@ the spec's wording:
   changing, so a rule on them would leave conversations in a stale split;
   `in:` adds nothing to rules that only see Inbox mail. Negation would make
   sense in a rule but is left for when rules need it.
+
+## Decided when refused actions became visible
+
+- **The splits sheet asks the core before it closes.** Save sends each custom
+  rule to the `check_split_rule` command, the same check `saveSplits` makes.
+  A refused rule keeps the sheet open with every edit, and its message shows
+  under the rule until the rule changes.
