@@ -281,10 +281,10 @@ Files are independent and can be written in parallel. Each depends only on the s
 | File                       | Prefix | Scope                                                                                        | Main seeds                               | Harness beyond H1–H3        | Cases   | P1      | P2     | P3     |
 | -------------------------- | ------ | -------------------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------- | ------- | ------- | ------ | ------ |
 | `accounts.spec.ts`         | ACC    | first run, add, switch, avatars, remove, re-auth, isolation                                  | `none`, `standard`                       | H10, H11, H15, H21          | 18      | 13      | 5      | 0      |
-| `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 10      | 5       | 5      | 0      |
+| `inbox-navigation.spec.ts` | NAV    | rows, `j`/`k`, open and close, `g` jumps, rail, empty states                                 | `standard`, `bulk`, `empty`              | H12                         | 12      | 7       | 5      | 0      |
 | `views.spec.ts`            | VIEW   | latest-message rule, view membership, Done, Drafts, Label/Trash/Spam from Gmail              | `standard`, `drafts`                     | H9                          | 6       | 4       | 2      | 0      |
 | `conversation.spec.ts`     | CONV   | expand, fold, scroll, select, quotes, read on open, arrivals, links                          | `standard`                               | H18, H19                    | 22      | 6       | 15     | 1      |
-| `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 13      | 9       | 4      | 0      |
+| `triage-actions.spec.ts`   | TRI    | `e`, `Shift+E`, `#`, `!`, `s`, `u`, selection, removal table, recorded ids                   | `standard`, `empty`                      | H8a, H9                     | 14      | 10      | 4      | 0      |
 | `undo.spec.ts`             | UND    | the `z` stack, partial revert, per-account history, persistence                              | `standard`                               | H15                         | 8       | 4       | 3      | 1      |
 | `labels.spec.ts`           | LAB    | `l`, create, offline create, 409, `y`, labels learned from history                           | `standard`                               | H8a, H9                     | 8       | 2       | 6      | 0      |
 | `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 12      | 4       | 7      | 1      |
@@ -305,7 +305,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 5       | 3       | 2      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **255** | **151** | **94** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **258** | **154** | **94** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -673,6 +673,29 @@ _EP · §Layout (rows), §Keyboard_
   - `j` moves on to `p4`; the move that does not change position leaves `p4` highlighted.
   - `e` archives `p2`, the row under the pointer, in Gmail.
   - The cut-off row is highlighted and the list does not scroll.
+
+#### NAV-11 · P1 · A poll that empties the list clears the highlight, so `#` acts on the mail that arrives next
+
+_ST, EG · §Keyboard ("If none remain, the app returns to the empty list"; "When a patch from Rust removes the highlighted row…")_
+
+- **Seed:** `empty`, then deliver "Old one" to `A`.
+- **Steps:** with "Old one" highlighted, `other(...)` removes its `INBOX`, `poll()`, `settle()`. Deliver "New one", `settle()`, press `#`, `settle()`.
+- **Expect:**
+  - After the poll, Inbox zero shows and no row is highlighted.
+  - "New one" arrives highlighted, as the top row of a first visit is, and `#` trashes it in Gmail.
+  - "Old one", which no row shows, stays archived and out of Trash.
+- **Why:** the highlight stayed on the gone row, so the new row showed no highlight and `#` trashed the archived mail the user could not see.
+
+#### NAV-12 · P1 · A row removed while another account is on screen moves that account's highlight
+
+_ST, EG · §Switching ("returns to the new account's last view and highlight"), §Keyboard ("When a patch from Rust removes the highlighted row…")_
+
+- **Seed:** `standard`.
+- **Steps:** `j` `j` highlight `p3` on `A`. Switch to `B` and press `j`. `other(...)` removes `p3`'s `INBOX`, `poll()`, `settle()`. Switch back to `A` and press `#`, `settle()`.
+- **Expect:**
+  - Back on `A`, `p3`'s row is gone and the highlight is on `p4`, the row that followed it, not the top row.
+  - `#` trashes `p4` in Gmail; `p3` stays archived and out of Trash.
+- **Why:** where the highlighted row sat was remembered once for all accounts, so `B` overwrote `A`'s. Back on `A` no row was highlighted and `#` trashed the archived thread.
 
 ### 5.3 `views.spec.ts` (VIEW)
 
@@ -1180,6 +1203,17 @@ _EP, BVA · §Keyboard (selection)_
   - The first `e` leaves "Important 1 · Other 7": the first row stays, Other is untouched.
   - `Cmd+Shift+A` on Other selects its 7 rows, and `e` leaves "Important 1"; one Inbox thread is left in Gmail.
   - In Done the palette's Select all selects every row; `Esc` clears it.
+
+#### TRI-14 · P1 · A selected row that a poll removes is not acted on
+
+_EG · §Keyboard (selection), §Keyboard ("When a patch from Rust removes the highlighted row…")_
+
+- **Seed:** `standard`.
+- **Steps:** `j`, `x`, `Shift+J` select `p2` and `p3`. `other(...)` removes `p2`'s `INBOX`, `poll()`, `settle()`. Press `#`, `settle()`.
+- **Expect:**
+  - After the poll one row, `p3`, shows as selected.
+  - `#` trashes `p3` in Gmail; `p2` stays archived and out of Trash.
+- **Why:** an action applies to what the user can see. The selection kept `p2` after its row left, and `#` trashed it too.
 
 ### 5.6 `undo.spec.ts` (UND)
 

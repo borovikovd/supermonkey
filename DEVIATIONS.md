@@ -181,6 +181,14 @@ the spec's wording:
   close unless the user saved an edit after it (last writer wins).
 - **`Shift+J` / `Shift+K` with nothing selected** extend from the highlighted
   row: it and the row moved to are both selected.
+- **A highlighted row that leaves with no neighbor known** (the list emptied,
+  or the place it sat was never seen) leaves no highlight, so the list
+  highlights its top row once it has one, as on a first visit. Each account
+  remembers its own place, so a row removed while another account is on
+  screen moves the highlight as it would on screen.
+- **A selected row that leaves without the user acting on it** is no longer
+  acted on. On the list, actions apply only to rows still shown; with none
+  of the selection shown, they apply to the highlight.
 - **"Requests for the account on screen go first."** Request slots and the
   quota bucket are per account, so requests of different accounts never wait
   on each other, and there is no ordering by the account on screen: it

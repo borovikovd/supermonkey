@@ -3,6 +3,7 @@
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
+import type { Control } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A } from "./seeds.ts";
@@ -454,4 +455,64 @@ test("NAV-10 the highlight follows the mouse, so e acts on the row under it", as
   await app.page.mouse.move(500, cut?.y ?? 0);
   await expect(app.highlighted).toHaveAttribute("data-row", cut?.key ?? "");
   expect(await scroller.evaluate((el) => el.scrollTop)).toBe(before);
+});
+
+/** Labels of message `id` in A's Gmail. */
+async function labelsOf(gmail: Control, id: string): Promise<string[]> {
+  return (await gmail.gmail(A)).messages.find((m) => m.id === id)?.labels ?? [];
+}
+
+test("NAV-11 a poll that empties the list clears the highlight, so # acts on the mail that arrives next", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.empty(gmail, app);
+  const old = await gmail.deliver({ account: A, from: "Old <old@x.test>", subject: "Old one" });
+  await expect(app.highlighted).toContainText("Old one");
+
+  // Archived in another client: the poll takes the only row away.
+  await gmail.modify(A, old.id, [], ["INBOX"], { poll: true });
+  await app.settle();
+  await expect(app.page.getByText("You're all done.")).toBeVisible();
+  await expect(app.highlighted).toHaveCount(0);
+
+  const fresh = await gmail.deliver({ account: A, from: "New <new@x.test>", subject: "New one" });
+  await expect(app.highlighted).toContainText("New one");
+  await app.settle();
+  await app.press("#");
+  await expect(app.row("New one")).toHaveCount(0);
+  await app.settle();
+  expect(await labelsOf(gmail, fresh.id)).toContain("TRASH");
+  const oldLabels = await labelsOf(gmail, old.id);
+  expect(oldLabels).not.toContain("TRASH");
+  expect(oldLabels).not.toContain("INBOX");
+});
+
+test("NAV-12 a row removed while another account is on screen moves that account's highlight", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  // A middle row, so the row that followed it is not the top row.
+  await repeat(app, "j", 2);
+  await expect(app.highlighted).toContainText("Person 3");
+  await app.account(seeds.B).click();
+  await expect(app.row("B 1")).toHaveCount(1);
+  // B's own highlight is what was last seen of any account.
+  await app.press("j");
+  await expect(app.highlighted).toContainText("B 2");
+
+  // Archived in another client while B is on screen.
+  await gmail.modify(A, s.latest("p3").id, [], ["INBOX"], { poll: true });
+  await app.settle();
+
+  await app.account(A).click();
+  await expect(app.row("Person 4")).toHaveCount(1);
+  await expect(app.row("Person 3")).toHaveCount(0);
+  await expect(app.highlighted).toContainText("Person 4");
+  await app.press("#");
+  await expect(app.row("Person 4")).toHaveCount(0);
+  await app.settle();
+  expect(await labelsOf(gmail, s.latest("p4").id)).toContain("TRASH");
+  expect(await labelsOf(gmail, s.latest("p3").id)).not.toContain("TRASH");
 });

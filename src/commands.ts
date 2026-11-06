@@ -49,20 +49,32 @@ export function visibleIds(): string[] {
   return currentListView()?.ids.map((e) => e.key) ?? [];
 }
 
+/** Whether the list on screen has had its first load, so its rows are the truth. */
+export function currentListLoaded(): boolean {
+  const key = currentListKey();
+  const id = key ? subIdFor(key) : undefined;
+  const sub = id ? useMirror.getState().subs[id] : undefined;
+  return sub?.type === "list" && sub.loaded;
+}
+
 export function rowOf(key: string) {
   return (currentListView()?.rows ?? useMirror.getState().rows)[key];
 }
 
-/** Threads an action applies to: the selection, else the open conversation, else the highlight. */
+/**
+ * Threads an action applies to: the selection, else the open conversation,
+ * else the highlight. On the list only rows still shown count, so a row a
+ * poll took away is never acted on.
+ */
 export function targets(): number[] {
   const c = useChrome.getState();
   const cur = c.current();
   if (!cur) return [];
-  if (c.selection.length > 0 && cur.screen.kind === "list") {
-    return c.selection.map(Number).filter((n) => !Number.isNaN(n));
-  }
   if (cur.screen.kind === "conversation") return [cur.screen.thread];
-  if (cur.highlight !== null && currentView()?.kind !== "drafts") {
+  const shown = new Set(visibleIds());
+  const selection = c.selection.filter((k) => shown.has(k));
+  if (selection.length > 0) return selection.map(Number).filter((n) => !Number.isNaN(n));
+  if (cur.highlight !== null && shown.has(cur.highlight) && currentView()?.kind !== "drafts") {
     const n = Number(cur.highlight);
     return Number.isNaN(n) ? [] : [n];
   }

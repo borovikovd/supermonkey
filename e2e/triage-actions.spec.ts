@@ -778,3 +778,24 @@ test("TRI-13 Cmd+A selects from the highlight to the end of its split; Cmd+Shift
   await app.press("Escape");
   await expect(app.selected).toHaveCount(0);
 });
+
+test("TRI-14 a selected row that a poll removes is not acted on", async ({ app, gmail }) => {
+  const s = await seeds.standard(gmail, app);
+  await app.press("j", "x", "Shift+J");
+  await expect(app.selected).toHaveCount(2);
+
+  // p2 is archived in another client while selected.
+  await gmail.modify(A, s.latest("p2").id, [], ["INBOX"], { poll: true });
+  await app.settle();
+  await expect(app.row("Person 2")).toHaveCount(0);
+  await expect(app.selected).toHaveCount(1);
+  await expect(app.row("Person 3")).toHaveAttribute("data-selected", "true");
+
+  await app.press("#");
+  await expect(app.row("Person 3")).toHaveCount(0);
+  await app.settle();
+  const labels = async (key: string) =>
+    (await gmail.gmail(A)).messages.find((m) => m.id === s.latest(key).id)?.labels ?? [];
+  expect(await labels("p3")).toContain("TRASH");
+  expect(await labels("p2")).not.toContain("TRASH");
+});

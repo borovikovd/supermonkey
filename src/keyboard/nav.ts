@@ -3,6 +3,7 @@
 
 import {
   closeThread,
+  currentListLoaded,
   currentListView,
   currentView,
   goTo,
@@ -22,8 +23,11 @@ function toggled<T>(xs: readonly T[], x: T): T[] {
   return [...set];
 }
 
-/** The focused row and the list it was last seen in, so a row that leaves keeps its place. */
-let lastSeen: { focus: string; ids: string[] } | null = null;
+/**
+ * Per account, the focused row and the list it was last seen in, so a row
+ * that leaves keeps its place, even while another account is on screen.
+ */
+const lastSeen = new Map<number, { focus: string; ids: string[] }>();
 
 function focusOf(): string | null {
   const cur = useChrome.getState().current();
@@ -33,26 +37,33 @@ function focusOf(): string | null {
 
 /** From where the focus used to be: the next row still shown, or the previous one. */
 function neighbor(focus: string, ids: string[], forward: boolean): string | null {
-  if (lastSeen?.focus !== focus) return null;
+  const { account } = useChrome.getState();
+  const seen = account === null ? undefined : lastSeen.get(account);
+  if (seen?.focus !== focus) return null;
   const shown = new Set(ids);
-  const at = lastSeen.ids.indexOf(focus);
-  const after = lastSeen.ids.slice(at + 1).find((k) => shown.has(k));
-  const before = lastSeen.ids.slice(0, Math.max(at, 0)).findLast((k) => shown.has(k));
+  const at = seen.ids.indexOf(focus);
+  const after = seen.ids.slice(at + 1).find((k) => shown.has(k));
+  const before = seen.ids.slice(0, Math.max(at, 0)).findLast((k) => shown.has(k));
   return (forward ? (after ?? before) : (before ?? after)) ?? null;
 }
 
-/** Re-anchors the focus, or moves the highlight off a row that left the list. */
+/**
+ * Re-anchors the focus, or moves the highlight off a row that left the list.
+ * The highlight never rests on a row that is not shown: with no neighbor
+ * left it clears, and the list highlights its top row once it has one.
+ */
 function followFocus() {
+  const c = useChrome.getState();
   const focus = focusOf();
-  if (focus === null) return;
+  if (focus === null || c.account === null) return;
   const ids = visibleIds();
   if (ids.includes(focus)) {
-    lastSeen = { focus, ids };
+    lastSeen.set(c.account, { focus, ids });
     return;
   }
-  if (useChrome.getState().current()?.screen.kind !== "list") return;
-  const next = neighbor(focus, ids, true);
-  if (next !== null) useChrome.getState().patchCurrent({ highlight: next });
+  // Before its first load a list has no rows yet, not no rows.
+  if (c.current()?.screen.kind !== "list" || !currentListLoaded()) return;
+  c.patchCurrent({ highlight: neighbor(focus, ids, true) });
 }
 
 /**
