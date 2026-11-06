@@ -46,7 +46,10 @@ mod writer;
 pub use accounts::{AccountReads, AccountRecord, AccountWrites};
 pub use changes::{Changes, Commit, Table};
 pub use contacts::{ContactReads, ContactRecord, ContactWrites, Sighting};
-pub use drafts::{Draft, DraftAttachment, DraftNeed, DraftReads, DraftRecord, DraftWrites};
+pub use drafts::{
+    Draft, DraftAttachment, DraftLifecycle, DraftReads, DraftRecord, DraftStage, DraftWait,
+    DraftWrites,
+};
 pub use error::StoreError;
 pub use labels::{GmailLabel, LabelReads, LabelRecord, LabelWrites};
 pub use messages::{

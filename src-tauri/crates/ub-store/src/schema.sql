@@ -183,7 +183,6 @@ CREATE TABLE drafts (
   thread_id          INTEGER REFERENCES threads (id) ON DELETE SET NULL,
   target_message_id  INTEGER REFERENCES messages (id) ON DELETE SET NULL,
   started_on_latest  INTEGER NOT NULL,
-  started_fresh      INTEGER NOT NULL,
   from_addr          TEXT NOT NULL,            -- JSON mailbox or null
   to_addrs           TEXT NOT NULL,            -- JSON
   cc_addrs           TEXT NOT NULL,            -- JSON
@@ -193,17 +192,22 @@ CREATE TABLE drafts (
   snippet            TEXT NOT NULL,            -- the body as text, for list rows
   quote_html         TEXT,                     -- the kept quote block
   attachments        TEXT NOT NULL,            -- JSON [DraftAttachment]
-  defaults           TEXT,                     -- JSON DraftContent the composer started with
   in_reply_to        TEXT,
   references_hdr     TEXT NOT NULL,
+  updated_at         INTEGER NOT NULL,
+  -- Its lifecycle (DraftLifecycle), which core's draft lifecycle module owns.
+  stage              TEXT NOT NULL             -- DraftStage: fresh, opened, or kept
+                     CHECK (stage IN ('fresh', 'opened', 'kept')),
+  defaults           TEXT,                     -- JSON DraftContent its composer started with; null when kept
+  waits_for          TEXT                      -- DraftWait before it is written to Gmail, if any
+                     CHECK (waits_for IN ('parts', 'target_body')),
   gmail_draft_id     TEXT,
   gmail_message_id   TEXT,
   gmail_thread_id    TEXT,
-  pending_gmail_read INTEGER NOT NULL,         -- a Gmail change skipped while a composer had it open
-  needs_parts        INTEGER NOT NULL,         -- DraftNeed: 0 none, 1 parts (read from Gmail), 2 target's body
   gmail_create_sent  INTEGER NOT NULL,         -- a drafts.create went out; its answer is not stored
-  updated_at         INTEGER NOT NULL,
-  rev                INTEGER NOT NULL
+  gmail_change_skipped INTEGER NOT NULL,       -- a Gmail change skipped while a composer had it open
+  rev                INTEGER NOT NULL,
+  CHECK ((stage = 'kept') = (defaults IS NULL))
 );
 CREATE INDEX drafts_account ON drafts (account_id, updated_at);
 CREATE INDEX drafts_thread  ON drafts (thread_id);

@@ -4,9 +4,10 @@
 
 use ub_domain::{AccountId, GmailListing, SubId};
 use ub_ipc::SubKey;
-use ub_store::{DraftNeed, Reads, StoreError};
+use ub_store::{Reads, StoreError};
 
 use super::{ActionCtx, ActionError};
+use crate::drafts::lifecycle;
 use crate::effects::{Effect, GmailQuery};
 
 /// A reloaded page's first action: closes every subscription of the
@@ -46,7 +47,7 @@ pub(super) fn subscribe(
         }
         SubKey::Composer { draft } => {
             if let Some(record) = reads.drafts().get(draft)?
-                && record.draft.needs == Some(DraftNeed::Parts)
+                && lifecycle::awaits_parts(&record.draft)
             {
                 effects.push(Effect::DraftParts {
                     account: record.draft.account,

@@ -414,6 +414,7 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 - `crates/ub-core/src/tests/notify.rs`: a poll that reads a whole thread notifies only for the mail history reported added.
 - `crates/ub-core/src/tests/snooze.rs`: a new snooze time re-arms the snooze timer.
 - `crates/ub-core/src/outbox/machine.rs`: every send event in every outbox state.
+- `crates/ub-core/src/drafts/lifecycle/state.rs`: every draft transition in every stage: the untouched rule, waits for parts and a target's body, Gmail's ids and a create in question, a skipped Gmail change.
 - `crates/ub-core/src/ops/landed.rs`: a read sees the ops that landed while it was in flight.
 - `crates/ub-core/src/workers/account/history.rs`: reducing `history.list` records to what changed.
 - `crates/ub-core/src/workers/account/ingest.rs`: a poll older than a thread read stored meanwhile leaves that read's labels.

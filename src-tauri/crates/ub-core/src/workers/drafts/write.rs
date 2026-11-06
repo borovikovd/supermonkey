@@ -7,10 +7,11 @@ use std::path::{Path, PathBuf};
 use ub_domain::{Addr, DraftId, GmailDraftId, GmailThreadId};
 use ub_gmail::{Format, GmailError, Outcome, PageToken, Priority};
 use ub_mime::{InlinePart, OutAttachment, Outgoing};
-use ub_store::{Draft, DraftNeed, Priority as WritePriority, StoreError};
+use ub_store::{Draft, Priority as WritePriority, StoreError};
 
 use super::WriteFailure;
 use crate::Error;
+use crate::drafts::lifecycle::{self, GmailWrite};
 use crate::drafts::settle;
 use crate::read::read;
 use crate::workers::account::{AccountCtx, fetch_thread, parse};
@@ -41,7 +42,7 @@ pub(crate) async fn write(
     draft: &Draft,
 ) -> Result<ub_gmail::Draft, WriteFailure> {
     let filled;
-    let draft = if draft.needs == Some(DraftNeed::TargetBody) {
+    let draft = if lifecycle::awaits_target_body(draft) {
         filled = with_target_body(ctx, draft).await?;
         &filled
     } else {
@@ -49,10 +50,10 @@ pub(crate) async fn write(
     };
     let raw = build_raw(ctx, draft).await?;
     let thread = gmail_thread(&ctx.deps.pool, draft).await?;
-    let existing = match &draft.gmail_draft_id {
-        Some(id) => Some(id.clone()),
-        None if draft.create_sent => recover_create(ctx, &draft.id).await?.map(|d| d.id),
-        None => None,
+    let existing = match lifecycle::gmail_write(draft) {
+        GmailWrite::Update(id) => Some(id.clone()),
+        GmailWrite::Recover => recover_create(ctx, &draft.id).await?.map(|d| d.id),
+        GmailWrite::Create => None,
     };
     if let Some(id) = existing {
         match ctx
@@ -104,13 +105,12 @@ async fn gmail_thread(
     pool: &Arc<ReadPool>,
     draft: &Draft,
 ) -> Result<Option<GmailThreadId>, WriteFailure> {
+    let last = lifecycle::gmail_thread(draft).cloned();
     let Some(thread) = draft.thread else {
-        return Ok(draft.gmail_thread_id.clone());
+        return Ok(last);
     };
     let row = read(pool, move |r| r.threads().row(thread)).await?;
-    Ok(row
-        .map(|row| row.gmail_id)
-        .or_else(|| draft.gmail_thread_id.clone()))
+    Ok(row.map(|row| row.gmail_id).or(last))
 }
 
 /// `drafts.create`, which is unsafe to repeat: the draft is marked as sent
@@ -148,12 +148,11 @@ async fn create(
 async fn mark_create_sent(ctx: &AccountCtx, local: DraftId) -> Result<(), Error> {
     ctx.writer()
         .call(WritePriority::Sync, move |tx, _| {
-            if let Some(record) = tx.read().drafts().get(&local)?
-                && !record.draft.create_sent
-            {
+            if let Some(record) = tx.read().drafts().get(&local)? {
                 let mut draft = record.draft;
-                draft.create_sent = true;
-                tx.drafts().put(&draft)?;
+                if lifecycle::begin_create(&mut draft) {
+                    tx.drafts().put(&draft)?;
+                }
             }
             Ok::<_, StoreError>(())
         })
@@ -172,7 +171,7 @@ async fn recover_create(
 ) -> Result<Option<ub_gmail::Draft>, WriteFailure> {
     if let Some(stored) = load(&ctx.deps.pool, local.clone())
         .await?
-        .and_then(|d| d.gmail_draft_id)
+        .and_then(|d| lifecycle::gmail_draft(&d).cloned())
     {
         let found = ctx
             .gmail
@@ -185,7 +184,7 @@ async fn recover_create(
         .read(move |r| r.drafts().for_account(account))
         .await?
         .into_iter()
-        .filter_map(|record| record.draft.gmail_draft_id)
+        .filter_map(|record| lifecycle::gmail_draft(&record.draft).cloned())
         .collect();
     let mut ours = Vec::new();
     for id in list_all(ctx)

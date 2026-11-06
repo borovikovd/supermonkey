@@ -12,6 +12,7 @@ use ub_store::{Priority as WritePriority, StoreError};
 
 use super::write::list_drafts;
 use crate::Error;
+use crate::drafts::lifecycle;
 use crate::drafts::{GmailDraft, Reconcile, apply_gmail_draft, defer_if_open, drop_gone};
 use crate::read::read;
 use crate::workers::account::{AccountCtx, LATE, OTHER_META, Work, draft_message, fetch_thread};
@@ -89,13 +90,14 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
     let mut gone = Vec::new();
     for record in local {
         let draft = record.draft;
-        let Some(gmail) = draft.gmail_draft_id else {
+        let Some(gmail) = lifecycle::gmail_draft(&draft).cloned() else {
             continue;
         };
         if record.in_outbox {
             sending.insert(gmail);
         } else if reconcile.live.contains(&gmail) {
-            known.insert(gmail, (draft.id, draft.gmail_message_id));
+            let message = lifecycle::gmail_message(&draft).cloned();
+            known.insert(gmail, (draft.id, message));
         } else {
             gone.push(draft.id);
         }
@@ -154,7 +156,7 @@ pub(crate) async fn read_skipped(ctx: &AccountCtx, id: &DraftId) {
     let account = ctx.account;
     let draft = super::write::load(&ctx.deps.pool, id.clone()).await;
     let gmail = match draft {
-        Ok(Some(draft)) => draft.gmail_draft_id,
+        Ok(Some(draft)) => lifecycle::gmail_draft(&draft).cloned(),
         Ok(None) => None,
         Err(e) => {
             tracing::warn!(account = account.0, error = %e, "couldn't read a draft to read back");

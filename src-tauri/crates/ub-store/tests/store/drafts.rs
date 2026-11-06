@@ -1,11 +1,13 @@
 //! Drafts, the outbox, the undo history, notices, ops, labels, and settings.
 
 use ub_domain::{
-    AccountId, Addr, DraftContent, DraftId, DraftKind, LabelId, LabelSet, Millis, OutboxState,
-    PinKind, Rev, SplitId, ThreadChange, ThreadId, UndoEntryId, UndoKind, View,
+    AccountId, Addr, DraftContent, DraftId, DraftKind, GmailDraftId, GmailMessageId, GmailThreadId,
+    LabelId, LabelSet, Millis, OutboxState, PinKind, Rev, SplitId, ThreadChange, ThreadId,
+    UndoEntryId, UndoKind, View,
 };
 use ub_store::{
-    Draft, DraftAttachment, DraftNeed, NewOutbox, StoreError, Table, UNDO_KEPT, UndoAction,
+    Draft, DraftAttachment, DraftLifecycle, DraftStage, DraftWait, NewOutbox, StoreError, Table,
+    UNDO_KEPT, UndoAction,
 };
 
 use crate::common::{Harness, fetched, msg};
@@ -38,9 +40,52 @@ fn reply(account: AccountId, id: &str, thread: ThreadId, at: i64) -> Draft {
         source: None,
         added: Some(Rev(4)),
     }];
-    d.defaults = Some(DraftContent::default());
-    d.needs = Some(DraftNeed::TargetBody);
+    d.lifecycle = DraftLifecycle {
+        stage: DraftStage::Opened {
+            defaults: DraftContent::default(),
+        },
+        waits_for: Some(DraftWait::TargetBody),
+        gmail_draft_id: Some(GmailDraftId::from("r1")),
+        gmail_message_id: Some(GmailMessageId::from("gm1")),
+        gmail_thread_id: Some(GmailThreadId::from("gt1")),
+        create_sent: true,
+        gmail_change_skipped: true,
+    };
     d
+}
+
+#[test]
+fn fresh_drafts_and_drafts_waiting_for_a_body_are_found_by_their_lifecycle() {
+    let h = Harness::start();
+    let account = h.account("me@example.com");
+    let t = thread(&h, account);
+    let target = h.read(move |r| r.messages().for_thread(t)).remove(0).id;
+    let mut fresh = reply(account, "d-fresh", t, 5);
+    fresh.target = Some(target);
+    fresh.lifecycle = DraftLifecycle {
+        stage: DraftStage::Fresh {
+            defaults: DraftContent::default(),
+        },
+        waits_for: Some(DraftWait::Parts),
+        ..DraftLifecycle::default()
+    };
+    let mut waiting = reply(account, "d-waiting", t, 6);
+    waiting.target = Some(target);
+    let kept = Draft::new(DraftId::from("d-kept"), account, DraftKind::New, Millis(7));
+    let stored = [fresh.clone(), waiting, kept.clone()];
+    h.write(move |tx| stored.iter().try_for_each(|d| tx.drafts().put(d)));
+    assert_eq!(h.read(|r| r.drafts().fresh()), [fresh.id]);
+    assert_eq!(
+        h.read(move |r| r.drafts().awaiting_body(target)),
+        [DraftId::from("d-waiting")],
+        "waiting for parts is not waiting for a body"
+    );
+    let id = kept.id.clone();
+    assert_eq!(
+        h.read(move |r| r.drafts().get(&id)).unwrap().draft,
+        kept,
+        "a kept draft has no defaults"
+    );
 }
 
 #[test]

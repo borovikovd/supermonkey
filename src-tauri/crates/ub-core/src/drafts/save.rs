@@ -4,7 +4,7 @@ use ub_domain::{AccountId, DraftId, MessageId, Millis, Rev};
 use ub_ipc::DraftFields;
 use ub_store::{DraftAttachment, NewOp, OpKind, Reads, StoreError, WriteTx};
 
-use super::close::is_untouched;
+use super::lifecycle;
 use super::text::snippet;
 use crate::effects::Effect;
 use crate::writer::WriterState;
@@ -72,11 +72,9 @@ pub(crate) fn update(
     draft.body_html = body_html;
     draft.attachments = attachments;
     draft.updated_at = now;
-    // An edit made after a Gmail change was skipped wins over it (last
-    // writer wins), so that change is not read on close.
-    draft.pending_gmail_read = false;
+    lifecycle::edited(&mut draft);
     tx.drafts().put(&draft)?;
-    if !is_untouched(&draft) {
+    if !lifecycle::is_untouched(&draft) {
         queue_upsert(tx, state, draft.account, id, now)?;
     }
     Ok(())

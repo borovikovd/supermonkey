@@ -6,10 +6,11 @@
 use std::collections::HashMap;
 
 use ub_domain::DraftId;
-use ub_store::{DraftNeed, Priority as WritePriority, StoreError};
+use ub_store::{Priority as WritePriority, StoreError};
 
 use super::WriteFailure;
 use super::write::{download, load};
+use crate::drafts::lifecycle;
 use crate::workers::account::AccountCtx;
 
 /// Downloads every attachment the draft carries that has no file yet, and
@@ -38,9 +39,7 @@ pub(crate) async fn download_parts(ctx: &AccountCtx, id: DraftId) -> Result<(), 
                     a.path = paths.get(&a.id).cloned();
                 }
             }
-            if draft.needs == Some(DraftNeed::Parts) {
-                draft.needs = None;
-            }
+            lifecycle::parts_downloaded(&mut draft);
             tx.drafts().put(&draft)
         })
         .await

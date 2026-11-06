@@ -4,6 +4,8 @@ use ub_domain::{AccountId, DraftId, DraftKind, Rev};
 use ub_ipc::{Addr, DraftAttachment, DraftState};
 use ub_store::{Reads, StoreError};
 
+use crate::drafts::lifecycle;
+
 /// The draft for a composer subscription. A draft that is gone gives
 /// `gone`, which closes the composer.
 pub(crate) fn draft_state(reads: Reads<'_>, id: &DraftId) -> Result<DraftState, StoreError> {
@@ -29,6 +31,7 @@ pub(crate) fn draft_state(reads: Reads<'_>, id: &DraftId) -> Result<DraftState, 
         });
     };
     let d = record.draft;
+    let resumed = !lifecycle::is_fresh(&d);
     let addrs = |list: Vec<ub_domain::Addr>| list.into_iter().map(Addr::from).collect();
     Ok(DraftState {
         id: d.id,
@@ -56,7 +59,7 @@ pub(crate) fn draft_state(reads: Reads<'_>, id: &DraftId) -> Result<DraftState, 
                 source: a.source,
             })
             .collect(),
-        resumed: !d.started_fresh,
+        resumed,
         gone: false,
         rev: record.rev,
     })

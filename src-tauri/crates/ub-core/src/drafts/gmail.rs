@@ -6,14 +6,14 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use ub_domain::{
-    AccountId, DraftId, DraftKind, GmailDraftId, GmailMessageId, GmailThreadId, Millis, NoticeKind,
-    Rev, Thread, gmail_draft_aim, gmail_draft_kind,
+    AccountId, DraftId, DraftKind, GmailDraftId, GmailThreadId, Millis, NoticeKind, Rev, Thread,
+    gmail_draft_aim, gmail_draft_kind,
 };
-use ub_store::{Draft, DraftNeed, NewNotice, NewOp, OpKind, Reads, StoreError, WriteTx};
+use ub_store::{Draft, NewNotice, NewOp, OpKind, Reads, StoreError, WriteTx};
 
+use super::lifecycle::{self, DraftsWriting, GmailIds};
 use super::save::message_attachments;
 use super::text::snippet;
-use super::writing::DraftsWriting;
 use crate::effects::Effect;
 use crate::workers::{ReadMessage, store_draft_message};
 use crate::writer::WriterState;
@@ -37,6 +37,17 @@ pub(crate) struct GmailDraft {
     pub(crate) quote_html: Option<String>,
 }
 
+impl GmailDraft {
+    /// Its Gmail ids.
+    fn ids(&self) -> GmailIds {
+        GmailIds {
+            draft: self.id.clone(),
+            message: self.message.message.gmail_id.clone(),
+            thread: self.thread.clone(),
+        }
+    }
+}
+
 /// What a draft reconcile knows and since when (SPEC Drafts). Gmail's
 /// answers are only as new as the request: a local draft that changed
 /// after the first request, or is being written to Gmail, is left for the
@@ -58,29 +69,25 @@ impl Reconcile {
     }
 }
 
-/// Stores the Gmail ids an upsert returned. With `orphan`, a draft
-/// discarded while its upsert was in flight has the Gmail draft that upsert
-/// made deleted too, or sync would bring it back.
+/// Stores the Gmail ids a write returned. With `orphan`, a draft discarded
+/// while its upsert was in flight has the Gmail draft that upsert made
+/// deleted too, or sync would bring it back.
 pub(crate) fn store_ids(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
     local: &DraftId,
-    ids: (&GmailDraftId, &GmailMessageId, &GmailThreadId),
+    ids: GmailIds,
     orphan: Option<AccountId>,
     now: Millis,
 ) -> Result<(), StoreError> {
-    let (draft, message, thread) = ids;
     let Some(record) = tx.read().drafts().get(local)? else {
         if let Some(account) = orphan {
-            delete_gmail_draft(tx, state, account, draft, now)?;
+            delete_gmail_draft(tx, state, account, &ids.draft, now)?;
         }
         return Ok(());
     };
     let mut d = record.draft;
-    d.gmail_draft_id = Some(draft.clone());
-    d.gmail_message_id = Some(message.clone());
-    d.gmail_thread_id = Some(thread.clone());
-    d.create_sent = false;
+    lifecycle::written(&mut d, ids);
     tx.drafts().put(&d)
 }
 
@@ -123,18 +130,14 @@ pub(crate) fn drop_gone(
         let Some(record) = tx.read().drafts().get(id)? else {
             continue;
         };
-        let still_gone = record
-            .draft
-            .gmail_draft_id
-            .as_ref()
-            .is_some_and(|g| !reconcile.live.contains(g));
+        let still_gone =
+            lifecycle::gmail_draft(&record.draft).is_some_and(|g| !reconcile.live.contains(g));
         if !still_gone || record.in_outbox || reconcile.moved(id, record.rev) {
             continue;
         }
         let mut draft = record.draft;
         if state.subs.has_composer(id) {
-            draft.gmail_draft_id = None;
-            draft.gmail_message_id = None;
+            lifecycle::gmail_gone(&mut draft);
             tx.drafts().put(&draft)?;
             tx.notices().add(&NewNotice {
                 account: draft.account,
@@ -163,12 +166,11 @@ pub(crate) fn defer_if_open(
     if !state.subs.has_composer(id) {
         return Ok(false);
     }
-    if let Some(record) = tx.read().drafts().get(id)?
-        && !record.draft.pending_gmail_read
-    {
+    if let Some(record) = tx.read().drafts().get(id)? {
         let mut draft = record.draft;
-        draft.pending_gmail_read = true;
-        tx.drafts().put(&draft)?;
+        if lifecycle::gmail_changed(&mut draft) {
+            tx.drafts().put(&draft)?;
+        }
     }
     Ok(true)
 }
@@ -206,17 +208,14 @@ pub(crate) fn apply_gmail_draft(
         if record.in_outbox || reconcile.moved(&local.id, record.rev) {
             return Ok(());
         }
-        if local.gmail_draft_id.as_ref() != Some(&gmail.id) {
-            return match &local.gmail_draft_id {
+        if lifecycle::gmail_draft(local) != Some(&gmail.id) {
+            return match lifecycle::gmail_draft(local) {
                 Some(other) if reconcile.live.contains(other) => {
                     delete_gmail_draft(tx, state, account, &gmail.id, now)
                 }
                 _ => {
                     let mut adopted = local.clone();
-                    adopted.gmail_draft_id = Some(gmail.id);
-                    adopted.gmail_message_id = Some(gmail.message.message.gmail_id);
-                    adopted.gmail_thread_id = Some(gmail.thread);
-                    adopted.create_sent = false;
+                    lifecycle::written(&mut adopted, gmail.ids());
                     tx.drafts().put(&adopted)
                 }
             };
@@ -245,6 +244,7 @@ pub(crate) fn apply_gmail_draft(
         Some(record) => record.draft,
         None => new_gmail_draft(reads, account, &gmail, thread)?,
     };
+    lifecycle::read_from_gmail(&mut draft, gmail.ids(), !attachments.is_empty());
     draft.thread = (draft.kind != DraftKind::New).then_some(thread);
     draft.from = Some(message.from.clone());
     draft.to.clone_from(&message.to);
@@ -254,13 +254,7 @@ pub(crate) fn apply_gmail_draft(
     draft.snippet = snippet(&gmail.editor_html);
     draft.body_html = gmail.editor_html;
     draft.quote_html = gmail.quote_html;
-    draft.needs = (!attachments.is_empty()).then_some(DraftNeed::Parts);
     draft.attachments = attachments;
-    draft.gmail_draft_id = Some(gmail.id);
-    draft.gmail_message_id = Some(message.gmail_id.clone());
-    draft.gmail_thread_id = Some(gmail.thread);
-    draft.create_sent = false;
-    draft.pending_gmail_read = false;
     draft.updated_at = message.date;
     tx.drafts().put(&draft)
 }

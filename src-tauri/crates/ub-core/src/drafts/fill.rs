@@ -5,12 +5,12 @@
 //! lands (SPEC Addressing).
 
 use ub_domain::{
-    AccountId, DraftContent, DraftId, DraftKind, MessageId, Millis, ReplyTarget, ThreadId,
-    addressing,
+    AccountId, DraftId, DraftKind, MessageId, Millis, ReplyTarget, ThreadId, addressing,
 };
 use ub_mime::QuoteSource;
-use ub_store::{Draft, DraftNeed, MessageRecord, Reads, StoreError, WriteTx};
+use ub_store::{Draft, MessageRecord, Reads, StoreError, WriteTx};
 
+use super::lifecycle;
 use super::save::message_attachments;
 use super::text::{escape_text, local_offset};
 use crate::actions::ActionError;
@@ -82,7 +82,6 @@ pub(crate) fn create(
     draft.thread = new.thread;
     draft.target = new.target;
     draft.started_on_latest = new.started_on_latest;
-    draft.started_fresh = true;
     draft.from = Some(filled.from);
     draft.to = filled.to;
     draft.cc = filled.cc;
@@ -98,14 +97,11 @@ pub(crate) fn create(
             if quote(reads, &mut draft, t)? {
                 draft.attachments = forwarded(reads, &draft, t)?;
             } else {
-                draft.needs = Some(DraftNeed::TargetBody);
+                lifecycle::await_target_body(&mut draft);
             }
         }
     }
-    draft.defaults = Some(DraftContent {
-        body_html: String::new(),
-        ..draft.content()
-    });
+    lifecycle::start_fresh(&mut draft);
     tx.drafts().put(&draft)?;
     Ok(())
 }
@@ -125,11 +121,11 @@ pub(crate) fn complete(tx: &mut WriteTx<'_>, message: MessageId) -> Result<(), S
 pub(crate) fn settle(tx: &mut WriteTx<'_>, id: &DraftId) -> Result<Option<Draft>, StoreError> {
     if !complete_draft(tx, id)?
         && let Some(record) = tx.read().drafts().get(id)?
-        && record.draft.needs == Some(DraftNeed::TargetBody)
     {
         let mut draft = record.draft;
-        draft.needs = None;
-        tx.drafts().put(&draft)?;
+        if lifecycle::target_body_gone(&mut draft) {
+            tx.drafts().put(&draft)?;
+        }
     }
     Ok(tx.read().drafts().get(id)?.map(|r| r.draft))
 }
@@ -144,7 +140,7 @@ fn complete_draft(tx: &mut WriteTx<'_>, id: &DraftId) -> Result<bool, StoreError
         return Ok(false);
     };
     let mut draft = record.draft;
-    if draft.needs != Some(DraftNeed::TargetBody) {
+    if !lifecycle::awaits_target_body(&draft) {
         return Ok(false);
     }
     let Some(target) = draft
@@ -167,13 +163,8 @@ fn complete_draft(tx: &mut WriteTx<'_>, id: &DraftId) -> Result<bool, StoreError
             a
         })
         .collect();
-    if let Some(defaults) = &mut draft.defaults {
-        defaults
-            .attachments
-            .extend(added.iter().map(|a| a.id.clone()));
-    }
+    lifecycle::body_landed(&mut draft, &added);
     draft.attachments.extend(added);
-    draft.needs = None;
     tx.drafts().put(&draft)?;
     Ok(true)
 }

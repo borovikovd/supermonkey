@@ -10,7 +10,7 @@ use crate::StoreError;
 /// The `user_version` of a database made by this `schema.sql`. Change it with
 /// any change to the schema: a file with another version is moved aside and a
 /// fresh one created, since there are no migrations (ARCHITECTURE.md, section 6).
-pub const SCHEMA_VERSION: i32 = 3;
+pub const SCHEMA_VERSION: i32 = 4;
 
 const SCHEMA: &str = include_str!("schema.sql");
 

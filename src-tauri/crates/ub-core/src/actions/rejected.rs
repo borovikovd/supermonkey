@@ -8,6 +8,7 @@ use ub_ipc::{Action, DraftSave};
 use ub_store::{NewNotice, StoreError, WriteTx};
 
 use super::ActionError;
+use crate::drafts::lifecycle;
 
 /// Who hears of an action's rejection.
 pub(super) enum Owner {
@@ -71,9 +72,7 @@ pub(super) fn notify(
     }
     let (kind, draft, thread) = match (error, draft) {
         (ActionError::Unsendable(_), Some(mut draft)) => {
-            // The user meant to send it: never discarded as untouched.
-            draft.started_fresh = false;
-            draft.defaults = None;
+            lifecycle::keep(&mut draft);
             tx.drafts().put(&draft)?;
             (NoticeKind::SendFailed, Some(draft.id), draft.thread)
         }

@@ -2,22 +2,11 @@
 //! Drafts).
 
 use ub_domain::{DraftId, Millis};
-use ub_store::{Draft, NewOp, OpKind, StoreError, WriteTx};
+use ub_store::{NewOp, OpKind, StoreError, WriteTx};
 
-use super::text::is_blank;
+use super::lifecycle;
 use crate::effects::Effect;
 use crate::writer::WriterState;
-
-/// Whether the draft is as its composer started it: the defaults' From,
-/// recipients, subject, and attachments, and the same body or a blank one.
-/// A draft with no defaults (read from Gmail, or brought back by an undo)
-/// is never untouched.
-pub(crate) fn is_untouched(draft: &Draft) -> bool {
-    draft
-        .defaults
-        .as_ref()
-        .is_some_and(|d| d.is_untouched_by(&draft.content(), is_blank(&draft.body_html)))
-}
 
 /// A composer closed, as a second `Esc` closes it: a draft started fresh
 /// and untouched is discarded, here and on Gmail; any other loses its
@@ -36,14 +25,13 @@ pub(crate) fn close(
         return Ok(());
     }
     let mut draft = record.draft;
-    if draft.started_fresh && is_untouched(&draft) {
+    if lifecycle::discards_on_close(&draft) {
         return discard(tx, state, id, now);
     }
-    if draft.started_fresh {
-        draft.started_fresh = false;
+    if lifecycle::composer_closed(&mut draft) {
         tx.drafts().put(&draft)?;
     }
-    if draft.pending_gmail_read {
+    if lifecycle::has_skipped_gmail_change(&draft) {
         state.effect(Effect::ReadDraft {
             account: draft.account,
             draft: draft.id,
@@ -70,7 +58,7 @@ pub(crate) fn discard(
     let draft = record.draft;
     tx.ops().delete_draft_upserts(id)?;
     tx.drafts().delete(id)?;
-    if let Some(gmail) = &draft.gmail_draft_id {
+    if let Some(gmail) = lifecycle::gmail_draft(&draft) {
         tx.ops().push(&NewOp {
             account: draft.account,
             action: None,
@@ -95,7 +83,7 @@ pub(crate) fn on_launch(
     state: &mut WriterState,
     now: Millis,
 ) -> Result<(), StoreError> {
-    for id in tx.read().drafts().started_fresh()? {
+    for id in tx.read().drafts().fresh()? {
         close(tx, state, &id, now)?;
     }
     Ok(())

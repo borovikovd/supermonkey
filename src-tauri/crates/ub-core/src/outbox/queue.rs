@@ -9,7 +9,7 @@ use ub_domain::{
 use ub_store::{NewOp, NewOutbox, OpKind, StoreError, UndoAction, WriteTx};
 
 use crate::actions::{ActionError, Unsendable};
-use crate::drafts::queue_upsert;
+use crate::drafts::{lifecycle, queue_upsert};
 use crate::effects::Effect;
 use crate::writer::WriterState;
 
@@ -51,8 +51,7 @@ pub(crate) fn send(
         return Err(Unsendable::BadRecipient(bad.email.clone()).into());
     }
     tx.ops().delete_draft_upserts(id)?;
-    if draft.started_fresh {
-        draft.started_fresh = false;
+    if lifecycle::composer_closed(&mut draft) {
         tx.drafts().put(&draft)?;
     }
     let delay = i64::try_from(SEND_DELAY.as_millis()).unwrap_or(i64::MAX);
@@ -95,8 +94,7 @@ pub(crate) fn undo_send(
             tx.outbox().delete(outbox)?;
             if let Some(draft) = tx.read().drafts().get(&row.draft)? {
                 let mut draft = draft.draft;
-                draft.started_fresh = false;
-                draft.defaults = None;
+                lifecycle::keep(&mut draft);
                 tx.drafts().put(&draft)?;
                 // A send made before any autosave never wrote it to Gmail.
                 queue_upsert(tx, state, account, &draft.id, now)?;

@@ -5,6 +5,7 @@ use ub_store::{NewNotice, StoreError, WriteTx};
 
 use super::machine::{Event, Step, step};
 use super::queue::{finish, trash_sent};
+use crate::drafts::lifecycle;
 use crate::writer::WriterState;
 
 /// Applies what the outbox runner saw (`event`) to send `outbox`, and
@@ -49,10 +50,8 @@ pub(crate) fn resolve(
             tx.outbox().delete(outbox)?;
             let thread = match tx.read().drafts().get(&row.draft)? {
                 Some(draft) => {
-                    // Back as a draft: never discarded as untouched.
                     let mut draft = draft.draft;
-                    draft.started_fresh = false;
-                    draft.defaults = None;
+                    lifecycle::keep(&mut draft);
                     tx.drafts().put(&draft)?;
                     draft.thread
                 }

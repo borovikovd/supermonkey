@@ -18,6 +18,7 @@ use ub_store::{Outbox, Priority as WritePriority, StoreError};
 use super::account::{AccountCtx, OFFLINE_RETRY, fetch_thread};
 use super::drafts::{WriteFailure, load, write};
 use crate::Error;
+use crate::drafts::lifecycle::GmailIds;
 use crate::drafts::store_ids;
 use crate::outbox::{Event, resolve};
 use crate::read::read;
@@ -189,8 +190,7 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
     );
     ctx.writer()
         .call(WritePriority::Sync, move |tx, state| {
-            let ids = (&stored.id, &stored.message.id, &stored.message.thread_id);
-            store_ids(tx, state, &local, ids, None, now)?;
+            store_ids(tx, state, &local, GmailIds::of(&stored), None, now)?;
             resolve(tx, state, id, Event::Written(stored.id.clone()), now)
         })
         .await?;

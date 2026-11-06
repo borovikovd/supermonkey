@@ -8,6 +8,7 @@ use ub_gmail::{Format, GmailError, Outcome, Priority};
 use ub_store::{OpId, OpKind, OpRecord, Priority as WritePriority, StoreError};
 
 use crate::Error;
+use crate::drafts::lifecycle::GmailIds;
 use crate::drafts::{WritingDraft, store_ids};
 use crate::effects::Effect;
 use crate::ops::{LabelCreateOp, ModifyOp, reject, relabel};
@@ -316,7 +317,7 @@ async fn write(ctx: &AccountCtx, id: OpId, answer: Answer) -> Result<(), Error> 
             // updates this Gmail draft instead of making another.
             Answer::Done(Landing::Draft { draft, written }) => {
                 if let Some(written) = &written {
-                    let ids = (&written.id, &written.message.id, &written.message.thread_id);
+                    let ids = GmailIds::of(written);
                     store_ids(tx, state, &draft, ids, Some(account), now)?;
                 }
                 tx.ops().delete(id)

@@ -1,5 +1,6 @@
-//! Drafts: the composer's state, its defaults, and its Gmail copy's ids
-//! (SPEC Drafts, Reply composer).
+//! Drafts: the composer's state and the draft's lifecycle (SPEC Drafts,
+//! Reply composer). The lifecycle is plain persistence here: core's draft
+//! lifecycle module is the only code that reads or changes it.
 
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{Row, named_params};
@@ -38,7 +39,7 @@ pub struct DraftAttachment {
 
 /// What a draft waits for before it is written to Gmail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DraftNeed {
+pub enum DraftWait {
     /// Read from Gmail: its parts, downloaded.
     Parts,
     /// Filled while its target had no stored body, so it quotes the target's
@@ -47,38 +48,119 @@ pub enum DraftNeed {
     TargetBody,
 }
 
-/// The `needs_parts` column: `0`, `1` for [`DraftNeed::Parts`], or `2` for
-/// [`DraftNeed::TargetBody`].
-struct NeedColumn(Option<DraftNeed>);
-
-impl ToSql for NeedColumn {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::from(match self.0 {
-            None => 0,
-            Some(DraftNeed::Parts) => 1,
-            Some(DraftNeed::TargetBody) => 2,
-        }))
+impl DraftWait {
+    /// The stored text.
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Parts => "parts",
+            Self::TargetBody => "target_body",
+        }
     }
 }
 
-impl FromSql for NeedColumn {
+impl ToSql for DraftWait {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(self.as_str()))
+    }
+}
+
+impl FromSql for DraftWait {
     fn column_result(v: ValueRef<'_>) -> FromSqlResult<Self> {
-        match i64::column_result(v)? {
-            0 => Ok(Self(None)),
-            1 => Ok(Self(Some(DraftNeed::Parts))),
-            2 => Ok(Self(Some(DraftNeed::TargetBody))),
-            other => Err(FromSqlError::OutOfRange(other)),
+        let text = v.as_str()?;
+        [Self::Parts, Self::TargetBody]
+            .into_iter()
+            .find(|w| w.as_str() == text)
+            .ok_or(FromSqlError::InvalidType)
+    }
+}
+
+/// How far a draft's first composer got, for the untouched rule (SPEC UI
+/// state, Actions; Drafts).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum DraftStage {
+    /// Its first composer is still open. `defaults` is the content it
+    /// started with.
+    Fresh {
+        /// The content its composer started with.
+        defaults: DraftContent,
+    },
+    /// Its first composer closed. `defaults` is the content it started
+    /// with.
+    Opened {
+        /// The content its composer started with.
+        defaults: DraftContent,
+    },
+    /// It has no defaults: the user meant to keep it, or it came from Gmail.
+    #[default]
+    Kept,
+}
+
+impl DraftStage {
+    /// The stored text of the `stage` column.
+    const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Fresh { .. } => "fresh",
+            Self::Opened { .. } => "opened",
+            Self::Kept => "kept",
         }
     }
+
+    /// The `defaults` column.
+    const fn defaults(&self) -> Option<&DraftContent> {
+        match self {
+            Self::Fresh { defaults } | Self::Opened { defaults } => Some(defaults),
+            Self::Kept => None,
+        }
+    }
+
+    /// The stage from its two columns.
+    fn from_columns(stage: &str, defaults: Option<DraftContent>) -> rusqlite::Result<Self> {
+        match (stage, defaults) {
+            ("fresh", Some(defaults)) => Ok(Self::Fresh { defaults }),
+            ("opened", Some(defaults)) => Ok(Self::Opened { defaults }),
+            ("kept", None) => Ok(Self::Kept),
+            (stage, defaults) => Err(rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                format!(
+                    "draft stage {stage} {} defaults",
+                    if defaults.is_some() {
+                        "with"
+                    } else {
+                        "without"
+                    }
+                )
+                .into(),
+            )),
+        }
+    }
+}
+
+/// A draft's lifecycle as stored: its stage, what it waits for, and its
+/// Gmail copy. Core's draft lifecycle module is the only code that reads or
+/// changes it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DraftLifecycle {
+    /// How far its first composer got.
+    pub stage: DraftStage,
+    /// What it waits for before it is written to Gmail.
+    pub waits_for: Option<DraftWait>,
+    /// Gmail's draft id from the last write.
+    pub gmail_draft_id: Option<GmailDraftId>,
+    /// Gmail's message id from the last write.
+    pub gmail_message_id: Option<GmailMessageId>,
+    /// Gmail's thread id from the last write.
+    pub gmail_thread_id: Option<GmailThreadId>,
+    /// A `drafts.create` was sent for it and its answer never stored (the
+    /// app quit, or the write was cancelled).
+    pub create_sent: bool,
+    /// A Gmail change was skipped while a composer had it open.
+    pub gmail_change_skipped: bool,
 }
 
 /// A draft's whole stored state. Read it, change it, and write it back with
 /// `DraftWrites::put`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "independent stored flags of one draft"
-)]
 pub struct Draft {
     /// The local id, made by the UI.
     pub id: DraftId,
@@ -94,8 +176,6 @@ pub struct Draft {
     pub target: Option<MessageId>,
     /// Started on the thread's latest message.
     pub started_on_latest: bool,
-    /// Its first composer is still open (SPEC Actions).
-    pub started_fresh: bool,
     /// The From mailbox.
     pub from: Option<Addr>,
     /// The `To` mailboxes.
@@ -114,32 +194,19 @@ pub struct Draft {
     pub quote_html: Option<String>,
     /// Its attachments.
     pub attachments: Vec<DraftAttachment>,
-    /// The content its composer started with, for the untouched check.
-    pub defaults: Option<DraftContent>,
     /// The `In-Reply-To` it sends.
     pub in_reply_to: Option<String>,
     /// The `References` it sends.
     pub references: String,
-    /// Gmail's draft id from the last upsert.
-    pub gmail_draft_id: Option<GmailDraftId>,
-    /// Gmail's message id from the last upsert.
-    pub gmail_message_id: Option<GmailMessageId>,
-    /// Gmail's thread id from the last upsert.
-    pub gmail_thread_id: Option<GmailThreadId>,
-    /// A Gmail change was skipped while a composer had it open.
-    pub pending_gmail_read: bool,
-    /// What it waits for before it is written to Gmail.
-    pub needs: Option<DraftNeed>,
-    /// A `drafts.create` was sent for it and its answer never stored (the
-    /// app quit, or the write was cancelled): Gmail may have the draft, so
-    /// the next write looks for it by its `X-Ubermensch-Draft` header first.
-    pub create_sent: bool,
     /// The last edit; the Drafts list sorts by it.
     pub updated_at: Millis,
+    /// Its lifecycle, which only core's draft lifecycle module reads or
+    /// changes.
+    pub lifecycle: DraftLifecycle,
 }
 
 impl Draft {
-    /// An empty draft, as a fresh composer's first save starts it.
+    /// An empty draft, kept, with no Gmail copy.
     pub fn new(id: DraftId, account: AccountId, kind: DraftKind, now: Millis) -> Self {
         Self {
             id,
@@ -149,7 +216,6 @@ impl Draft {
             thread: None,
             target: None,
             started_on_latest: false,
-            started_fresh: false,
             from: None,
             to: Vec::new(),
             cc: Vec::new(),
@@ -159,16 +225,10 @@ impl Draft {
             snippet: String::new(),
             quote_html: None,
             attachments: Vec::new(),
-            defaults: None,
             in_reply_to: None,
             references: String::new(),
-            gmail_draft_id: None,
-            gmail_message_id: None,
-            gmail_thread_id: None,
-            pending_gmail_read: false,
-            needs: None,
-            create_sent: false,
             updated_at: now,
+            lifecycle: DraftLifecycle::default(),
         }
     }
 
@@ -198,7 +258,8 @@ pub struct DraftRecord {
 }
 
 fn draft_row(r: &Row<'_>) -> rusqlite::Result<DraftRecord> {
-    let defaults = json_column_opt(r, "defaults")?;
+    let stage: String = r.get("stage")?;
+    let stage = DraftStage::from_columns(&stage, json_column_opt(r, "defaults")?)?;
     Ok(DraftRecord {
         draft: Draft {
             id: r.get("id")?,
@@ -208,7 +269,6 @@ fn draft_row(r: &Row<'_>) -> rusqlite::Result<DraftRecord> {
             thread: r.get("thread_id")?,
             target: r.get("target_message_id")?,
             started_on_latest: r.get("started_on_latest")?,
-            started_fresh: r.get("started_fresh")?,
             from: json_column(r, "from_addr")?,
             to: json_column(r, "to_addrs")?,
             cc: json_column(r, "cc_addrs")?,
@@ -218,16 +278,18 @@ fn draft_row(r: &Row<'_>) -> rusqlite::Result<DraftRecord> {
             snippet: r.get("snippet")?,
             quote_html: r.get("quote_html")?,
             attachments: json_column(r, "attachments")?,
-            defaults,
             in_reply_to: r.get("in_reply_to")?,
             references: r.get("references_hdr")?,
-            gmail_draft_id: r.get("gmail_draft_id")?,
-            gmail_message_id: r.get("gmail_message_id")?,
-            gmail_thread_id: r.get("gmail_thread_id")?,
-            pending_gmail_read: r.get("pending_gmail_read")?,
-            needs: r.get::<_, NeedColumn>("needs_parts")?.0,
-            create_sent: r.get("gmail_create_sent")?,
             updated_at: r.get("updated_at")?,
+            lifecycle: DraftLifecycle {
+                stage,
+                waits_for: r.get("waits_for")?,
+                gmail_draft_id: r.get("gmail_draft_id")?,
+                gmail_message_id: r.get("gmail_message_id")?,
+                gmail_thread_id: r.get("gmail_thread_id")?,
+                create_sent: r.get("gmail_create_sent")?,
+                gmail_change_skipped: r.get("gmail_change_skipped")?,
+            },
         },
         rev: r.get("rev")?,
         in_outbox: r.get("in_outbox")?,
@@ -321,24 +383,24 @@ impl<'c> DraftReads<'c> {
         )
     }
 
-    /// Drafts whose first composer never closed, for the untouched rule on
-    /// launch.
-    pub fn started_fresh(self) -> Result<Vec<DraftId>, StoreError> {
+    /// Drafts whose first composer never closed ([`DraftStage::Fresh`]), for
+    /// the untouched rule on launch.
+    pub fn fresh(self) -> Result<Vec<DraftId>, StoreError> {
         self.db.all(
             "read the fresh drafts",
-            "SELECT id FROM drafts WHERE started_fresh = 1 ORDER BY id",
+            "SELECT id FROM drafts WHERE stage = 'fresh' ORDER BY id",
             [],
             |r| r.get("id"),
         )
     }
 
     /// Drafts aimed at `message` that wait for its body
-    /// ([`DraftNeed::TargetBody`]).
+    /// ([`DraftWait::TargetBody`]).
     pub fn awaiting_body(self, message: MessageId) -> Result<Vec<DraftId>, StoreError> {
         self.db.all(
             "read the drafts waiting for a message's body",
-            "SELECT id FROM drafts WHERE target_message_id = ?1 AND needs_parts = ?2 ORDER BY id",
-            (message, NeedColumn(Some(DraftNeed::TargetBody))),
+            "SELECT id FROM drafts WHERE target_message_id = ?1 AND waits_for = ?2 ORDER BY id",
+            (message, DraftWait::TargetBody),
             |r| r.get("id"),
         )
     }
@@ -367,40 +429,40 @@ impl<'t, 'c> DraftWrites<'t, 'c> {
             )));
         }
         let rev = self.tx.stamp();
-        let defaults = draft
-            .defaults
-            .as_ref()
+        let life = &draft.lifecycle;
+        let defaults = life
+            .stage
+            .defaults()
             .map(|d| to_json("defaults", d))
             .transpose()?;
         self.tx.db().execute(
             "store a draft",
             "INSERT INTO drafts (id, account_id, kind, reply_all, thread_id, target_message_id,
-                 started_on_latest, started_fresh, from_addr, to_addrs, cc_addrs, bcc_addrs,
-                 subject, body_html, snippet, quote_html, attachments, defaults, in_reply_to,
-                 references_hdr, gmail_draft_id, gmail_message_id, gmail_thread_id,
-                 pending_gmail_read, needs_parts, gmail_create_sent, updated_at, rev)
-             VALUES (:id, :account, :kind, :reply_all, :thread, :target, :on_latest, :fresh,
-                 :from, :to, :cc, :bcc, :subject, :body, :snippet, :quote, :attachments,
-                 :defaults, :in_reply_to, :references, :gmail_draft, :gmail_message,
-                 :gmail_thread, :pending_read, :needs_parts, :create_sent, :updated_at, :rev)
+                 started_on_latest, from_addr, to_addrs, cc_addrs, bcc_addrs, subject,
+                 body_html, snippet, quote_html, attachments, in_reply_to, references_hdr,
+                 updated_at, stage, defaults, waits_for, gmail_draft_id, gmail_message_id,
+                 gmail_thread_id, gmail_create_sent, gmail_change_skipped, rev)
+             VALUES (:id, :account, :kind, :reply_all, :thread, :target, :on_latest, :from,
+                 :to, :cc, :bcc, :subject, :body, :snippet, :quote, :attachments,
+                 :in_reply_to, :references, :updated_at, :stage, :defaults, :waits_for,
+                 :gmail_draft, :gmail_message, :gmail_thread, :create_sent, :change_skipped,
+                 :rev)
              ON CONFLICT (id) DO UPDATE SET
                  kind = excluded.kind, reply_all = excluded.reply_all,
                  thread_id = excluded.thread_id, target_message_id = excluded.target_message_id,
-                 started_on_latest = excluded.started_on_latest,
-                 started_fresh = excluded.started_fresh, from_addr = excluded.from_addr,
+                 started_on_latest = excluded.started_on_latest, from_addr = excluded.from_addr,
                  to_addrs = excluded.to_addrs, cc_addrs = excluded.cc_addrs,
                  bcc_addrs = excluded.bcc_addrs, subject = excluded.subject,
                  body_html = excluded.body_html, snippet = excluded.snippet,
                  quote_html = excluded.quote_html, attachments = excluded.attachments,
-                 defaults = excluded.defaults, in_reply_to = excluded.in_reply_to,
-                 references_hdr = excluded.references_hdr,
+                 in_reply_to = excluded.in_reply_to, references_hdr = excluded.references_hdr,
+                 updated_at = excluded.updated_at, stage = excluded.stage,
+                 defaults = excluded.defaults, waits_for = excluded.waits_for,
                  gmail_draft_id = excluded.gmail_draft_id,
                  gmail_message_id = excluded.gmail_message_id,
                  gmail_thread_id = excluded.gmail_thread_id,
-                 pending_gmail_read = excluded.pending_gmail_read,
-                 needs_parts = excluded.needs_parts,
                  gmail_create_sent = excluded.gmail_create_sent,
-                 updated_at = excluded.updated_at,
+                 gmail_change_skipped = excluded.gmail_change_skipped,
                  rev = excluded.rev",
             named_params! {
                 ":id": draft.id,
@@ -410,7 +472,6 @@ impl<'t, 'c> DraftWrites<'t, 'c> {
                 ":thread": draft.thread,
                 ":target": draft.target,
                 ":on_latest": draft.started_on_latest,
-                ":fresh": draft.started_fresh,
                 ":from": to_json("from_addr", &draft.from)?,
                 ":to": to_json("to_addrs", &draft.to)?,
                 ":cc": to_json("cc_addrs", &draft.cc)?,
@@ -420,16 +481,17 @@ impl<'t, 'c> DraftWrites<'t, 'c> {
                 ":snippet": draft.snippet,
                 ":quote": draft.quote_html,
                 ":attachments": to_json("attachments", &draft.attachments)?,
-                ":defaults": defaults,
                 ":in_reply_to": draft.in_reply_to,
                 ":references": draft.references,
-                ":gmail_draft": draft.gmail_draft_id,
-                ":gmail_message": draft.gmail_message_id,
-                ":gmail_thread": draft.gmail_thread_id,
-                ":pending_read": draft.pending_gmail_read,
-                ":needs_parts": NeedColumn(draft.needs),
-                ":create_sent": draft.create_sent,
                 ":updated_at": draft.updated_at,
+                ":stage": life.stage.as_str(),
+                ":defaults": defaults,
+                ":waits_for": life.waits_for,
+                ":gmail_draft": life.gmail_draft_id,
+                ":gmail_message": life.gmail_message_id,
+                ":gmail_thread": life.gmail_thread_id,
+                ":create_sent": life.create_sent,
+                ":change_skipped": life.gmail_change_skipped,
                 ":rev": rev,
             },
         )?;
