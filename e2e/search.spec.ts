@@ -330,7 +330,7 @@ test("SRC-06 actions on search results follow the removal table", async ({ app, 
   expect((await gmail.requests()).slice(writes)).toEqual([]);
 });
 
-test("SRC-07 Gmail results come 15 at a time; the next page loads near the oldest Gmail hit", async ({
+test("SRC-07 Gmail results come 15 at a time, and each page is asked for once", async ({
   app,
   gmail,
 }) => {
@@ -363,6 +363,43 @@ test("SRC-07 Gmail results come 15 at a time; the next page loads near the oldes
   // Each page is asked for once.
   const tokens = (await pages((p) => p.q === "invoice")).map((r) => r.params.pageToken ?? "");
   expect(tokens).toEqual(["", "15", "30"]);
+});
+
+test("SRC-13 the next Gmail page loads near the oldest Gmail hit, not the list's end", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.paging(gmail, app);
+  const pages = async (match: (p: Record<string, string>) => boolean) =>
+    (await gmail.requests("threads.list", { account: A }))
+      .filter((r) => match(r.params))
+      .map((r) => r.params.pageToken ?? "");
+  // Gmail's two pages of newer hits, then the local rows below them.
+  const top = [
+    ...Array.from({ length: 30 }, (_, i) => `Remote ${String(i + 1).padStart(2, "0")}`),
+    "Local 01",
+  ];
+  const shown = async () => (await app.subjects()).slice(0, top.length);
+
+  // Search: 80 older local matches sit below Gmail's first page, so its
+  // oldest hit is on screen while the list's end is far below. The second
+  // page loads without scrolling, and its hits land above the local rows.
+  await search(app, "ledger");
+  await app.advance(300);
+  await app.settle();
+  await expect.poll(() => pages((p) => p.q === "ledger")).toContain("15");
+  await expect.poll(shown).toEqual(top);
+
+  // The Ledgers label view pages the same way.
+  await app.press("Escape");
+  await app.press("Meta+k");
+  await app.palette.getByRole("option", { name: /^Go to label/ }).click();
+  const picker = app.page.getByRole("dialog", { name: "Go to label" });
+  await picker.getByRole("option", { name: "Ledgers" }).click();
+  await app.settle();
+  const label = s.label(A, "Ledgers");
+  await expect.poll(() => pages((p) => p.labelIds === label)).toContain("15");
+  await expect.poll(shown).toEqual(top);
 });
 
 test("SRC-08 a sent reply is found by local search", async ({ app, gmail }) => {

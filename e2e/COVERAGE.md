@@ -127,12 +127,13 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SRC-04 · P2 · The Gmail query waits for a 300 ms pause · §Search
 - SRC-05 · P1 · Offline search shows cached mail and says the results are from this Mac · §Search, §Offline, §Done when
 - SRC-06 · P2 · Actions on search results follow the removal table · §Actions
-- SRC-07 · P3 · Gmail results come 15 at a time; the next page loads near the oldest Gmail hit · §Search, §Views
+- SRC-07 · P3 · Gmail results come 15 at a time, and each page is asked for once · §Search, §Views
 - SRC-08 · P2 · A sent reply is found by local search · §Search, §Send and undo
 - SRC-09 · P2 · Search takes the header as in Superhuman, marks matches, and lists tips · §Search
 - SRC-10 · P2 · A Gmail search stops searching when its account signs in again under it · §Search, §Accounts
 - SRC-11 · P1 · Local search applies Gmail's operators before Gmail answers · §Search
 - SRC-12 · P2 · A query local search can't evaluate waits for Gmail; offline it says the search needs Gmail · §Search, §Offline
+- SRC-13 · P2 · The next Gmail page loads near the oldest Gmail hit, not the list's end · §Search, §Views, §Subscriptions
 
 ### splits.spec.ts (SPL)
 
@@ -425,5 +426,4 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 
 ## Known gaps
 
-- SRC-07 can't tell paging near the oldest Gmail hit (§Search) from paging near the end of the list, since its seed holds only Gmail hits; the app pages near the end.
 - No case brings the network back under a search or a Gmail-listed view opened offline. The app runs its Gmail listing only when the list opens, so the offline note's "Results show when it can be reached" waits for the list to be opened again.

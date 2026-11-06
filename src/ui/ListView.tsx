@@ -252,17 +252,26 @@ export function ListView() {
     return () => clearTimeout(t);
   }, [virtual, items, rows, isDrafts]);
 
-  // Gmail pages: fetch the next one as the list nears its end.
-  const asked = useRef(0);
+  // Gmail pages: fetch the next one as the list nears its oldest Gmail hit,
+  // not its end. The next page may hold mail newer than the local rows below
+  // that hit. With no hit listed (or one a pending action hid), the end stands
+  // in. Asked once per list, hit, and length: a page moves the hit or the length.
+  const asked = useRef("");
+  const oldestHit = list.oldestHit;
+  const anchor = useMemo(() => {
+    const i =
+      oldestHit === null ? -1 : items.findIndex((it) => it.type === "row" && it.key === oldestHit);
+    return i < 0 ? items.length - 1 : i;
+  }, [items, oldestHit]);
   useEffect(() => {
     const tail = virtual.at(-1);
     if (!list.more || !list.sub || !tail) return;
-    const last = tail.index;
-    if (last >= items.length - 15 && asked.current !== items.length) {
-      asked.current = items.length;
+    const at = `${list.sub}:${oldestHit ?? ""}:${items.length}`;
+    if (tail.index >= anchor - 14 && asked.current !== at) {
+      asked.current = at;
       act({ type: "moreResults", sub: list.sub });
     }
-  }, [virtual, items.length, list.more, list.sub]);
+  }, [virtual, anchor, oldestHit, items.length, list.more, list.sub]);
 
   const onClick = useCallback(
     (k: string) => {

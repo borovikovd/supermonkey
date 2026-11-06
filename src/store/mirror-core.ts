@@ -32,6 +32,8 @@ export type ListSub = {
   needsGmail: boolean;
   /** Gmail has another page (Search, Label, Trash, Spam). */
   more: boolean;
+  /** The lowest row from Gmail's pages: the next page loads near it. */
+  oldestHit: string | null;
 };
 export type ConversationSub = {
   type: "conversation";
@@ -80,6 +82,7 @@ export function subForKey(key: SubKey): Sub {
         searching: false,
         needsGmail: false,
         more: false,
+        oldestHit: null,
       };
     case "conversation":
       return { type: "conversation", key, data: null };
@@ -185,6 +188,7 @@ export function applyChannel(
           searching: u.searching,
           needsGmail: u.needsGmail,
           more: u.more,
+          oldestHit: u.oldestHit,
         };
         break;
       }

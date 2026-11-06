@@ -66,6 +66,7 @@ export function useListView(key: SubKey | null): ListView & {
   searching: boolean;
   needsGmail: boolean;
   more: boolean;
+  oldestHit: string | null;
   sub?: string;
 } {
   const id = useSubId(key);
@@ -84,6 +85,7 @@ export function useListView(key: SubKey | null): ListView & {
         searching: false,
         needsGmail: false,
         more: false,
+        oldestHit: null,
       };
     }
     const view = viewList({ ack: 0, rev: 0, subs: { [id]: sub }, rows, pending, removals }, id);
@@ -93,6 +95,7 @@ export function useListView(key: SubKey | null): ListView & {
       searching: sub.searching,
       needsGmail: sub.needsGmail,
       more: sub.more,
+      oldestHit: sub.oldestHit,
       sub: id,
     };
   }, [id, sub, rows, pending, removals]);

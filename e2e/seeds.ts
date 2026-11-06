@@ -924,6 +924,34 @@ export async function bulk(gmail: Control, app: App, opts: SeedOptions = {}): Pr
   return finish(b, app, opts);
 }
 
+/**
+ * A signed in, with mail that matches `ledger` and carries the Ledgers label:
+ * 30 archived threads only Gmail has (Remote 01…30, 1–30 days old, two Gmail
+ * pages), and 80 older Inbox threads the connect sync stores (Local 01…80,
+ * 41–120 days old). Gmail's first page leaves its oldest hit far above the
+ * list's end, and its second page belongs above every local row.
+ */
+export async function paging(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
+  const b = new Builder(gmail);
+  await b.identity("A", signedIn(opts, "A", ["A"]));
+  await b.labels(A, ["Ledgers"]);
+  const ledgers = b.label(A, "Ledgers");
+  const one = (key: string, subject: string, labels: string[], days: number) =>
+    b.thread(key, A, subject, [
+      {
+        from: `Books <books@ledger.test>`,
+        to: [A],
+        text: "The quarterly ledger.",
+        labels: [...labels, ledgers],
+        date: dates.daysAgo(days),
+      },
+    ]);
+  for (let i = 1; i <= 30; i++) one(`remote${i}`, `Remote ${two(i)}`, ["CATEGORY_PERSONAL"], i);
+  for (let i = 1; i <= 80; i++) one(`local${i}`, `Local ${two(i)}`, inbox(), 40 + i);
+  await b.deliver();
+  return finish(b, app, opts);
+}
+
 /** A signed in with 999 Important Inbox threads. Fast quota; its connect sync takes a while. */
 export async function bulk1000(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);

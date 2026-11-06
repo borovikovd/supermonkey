@@ -20,4 +20,11 @@ needsGmail: boolean,
 /**
  * Gmail has another page for this list.
  */
-more: boolean, } | { "type": "conversation", sub: string, first: boolean, data: ConversationData, } | { "type": "composer", sub: string, first: boolean, draft: DraftState, } | { "type": "account", sub: string, first: boolean, summary: AccountSummary, } | { "type": "app", sub: string, first: boolean, state: AppState, };
+more: boolean, 
+/**
+ * The key of the lowest row that came from Gmail's pages, if any
+ * is listed: the next page loads as the list nears it (SPEC
+ * Search), since that page may hold mail newer than the local rows
+ * below it.
+ */
+oldestHit: string | null, } | { "type": "conversation", sub: string, first: boolean, data: ConversationData, } | { "type": "composer", sub: string, first: boolean, draft: DraftState, } | { "type": "account", sub: string, first: boolean, summary: AccountSummary, } | { "type": "app", sub: string, first: boolean, state: AppState, };

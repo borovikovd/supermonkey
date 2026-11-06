@@ -1,6 +1,8 @@
 //! First loads and patches, built from the committed snapshot.
 
-use ub_domain::{Millis, SubId, View};
+use std::collections::HashSet;
+
+use ub_domain::{Millis, SubId, ThreadId, View};
 use ub_ipc::{ListEntry, SubKey, SubUpdate};
 use ub_store::{Changes, Reads, StoreError};
 
@@ -151,6 +153,7 @@ fn list_first(
         .map(|e| e.key.as_str())
         .collect();
     let rows = views::rows_for_keys(reads, drafts, &window)?;
+    let oldest_hit = oldest_hit(&ids, &sub.gmail_hits);
     sub.ids.clone_from(&ids);
     Ok(SubUpdate::List {
         sub: sub_id,
@@ -162,6 +165,7 @@ fn list_first(
         searching: sub.searching,
         needs_gmail: kind.needs_gmail(),
         more: sub.next_page.is_some(),
+        oldest_hit,
     })
 }
 
@@ -188,6 +192,7 @@ fn list_patch(
         return Ok(None);
     }
     let rows = views::rows_for_keys(reads, drafts, &d.changed)?;
+    let oldest_hit = oldest_hit(&ids, &sub.gmail_hits);
     sub.ids = ids;
     Ok(Some(SubUpdate::List {
         sub: sub_id,
@@ -199,5 +204,18 @@ fn list_patch(
         searching: sub.searching,
         needs_gmail: kind.needs_gmail(),
         more: sub.next_page.is_some(),
+        oldest_hit,
     }))
+}
+
+/// The key of the last entry that is one of the list's Gmail hits.
+fn oldest_hit(ids: &[ListEntry], hits: &[ThreadId]) -> Option<String> {
+    if hits.is_empty() {
+        return None;
+    }
+    let hits: HashSet<&ThreadId> = hits.iter().collect();
+    ids.iter()
+        .rev()
+        .find(|e| e.key.parse().is_ok_and(|t: ThreadId| hits.contains(&t)))
+        .map(|e| e.key.clone())
 }

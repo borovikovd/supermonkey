@@ -55,6 +55,11 @@ pub enum SubUpdate {
         needs_gmail: bool,
         /// Gmail has another page for this list.
         more: bool,
+        /// The key of the lowest row that came from Gmail's pages, if any
+        /// is listed: the next page loads as the list nears it (SPEC
+        /// Search), since that page may hold mail newer than the local rows
+        /// below it.
+        oldest_hit: Option<String>,
     },
     /// The whole conversation, on a first load and on every change.
     Conversation {
