@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import { act, addAttachment, later } from "../ipc/bridge";
 import type { Addr, DraftAttachment, DraftFields } from "../ipc/types";
 import { useChrome } from "../store/chrome";
+import { frameCsp } from "../ui/frameCsp";
 import { frameTokens } from "../ui/frameTokens";
 import { useAppState, useDraft } from "../store/hooks";
 import { RecipientField, formatAddr, isValidEmail, type RecipientHandle } from "./RecipientField";
@@ -41,6 +42,7 @@ const HardBreakKeys = HardBreak.extend({
 
 function QuoteBlock({ html }: { html: string }) {
   const [open, setOpen] = useState(false);
+  const remoteImages = useAppState()?.settings.remoteImages ?? true;
   return (
     <div className="mt-1">
       <button
@@ -56,7 +58,7 @@ function QuoteBlock({ html }: { html: string }) {
           title="quoted"
           sandbox="allow-same-origin"
           className="mt-2 w-full border-0"
-          srcDoc={`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="script-src 'none'"><style>${frameTokens()}body{margin:0;font:13px/20px var(--font-sans);color:var(--color-text-2)}</style></head><body>${html}</body></html>`}
+          srcDoc={`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${frameCsp(remoteImages)}"><style>${frameTokens()}body{margin:0;font:13px/20px var(--font-sans);color:var(--color-text-2)}</style></head><body>${html}</body></html>`}
           onLoad={(e) => {
             const el = e.currentTarget;
             const doc = el.contentDocument;

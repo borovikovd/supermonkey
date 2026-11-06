@@ -244,3 +244,39 @@ test("SET-04 shortcut sheet rows never overlap, even when a description wraps", 
   });
   expect(overlaps).toEqual([]);
 });
+
+test("SET-05 with remote images off, nothing remote loads in a message or a reply's quote", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await app.press("Meta+,");
+  await remoteImages(app).click();
+  await expect(remoteImages(app)).toHaveAttribute("aria-checked", "false");
+  await app.press("Escape");
+
+  await gmail.deliver({
+    account: A,
+    from: "Tia Tracker <tia@tracker.test>",
+    subject: "Tracked",
+    html:
+      `<style>@import url(${gmail.url}/img/import.css);` +
+      `@font-face{font-family:tracked;src:url(${gmail.url}/img/font.woff)}</style>` +
+      `<p style="font-family:tracked">Opened yet?</p>` +
+      `<p><img src="${gmail.url}/img/tracked.png" alt="remote pixel"></p>`,
+  });
+  await app.row("Tracked").click();
+  await expect(
+    app.conversation.locator("iframe[data-frame]").contentFrame().locator("body"),
+  ).toContainText("Opened yet?");
+  await app.settle();
+  expect(await imageHits(app)).toEqual([]);
+
+  await app.press("r");
+  await app.page.getByTitle("Show quoted text").click();
+  await expect(
+    app.page.locator('iframe[title="quoted"]').contentFrame().locator("body"),
+  ).toContainText("Opened yet?");
+  await app.settle();
+  expect(await imageHits(app)).toEqual([]);
+});

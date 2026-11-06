@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { getBodies, openUrlInCore } from "../ipc/bridge";
 import type { MessageBody } from "../ipc/types";
+import { frameCsp } from "./frameCsp";
 import { frameTokens } from "./frameTokens";
 
 /** Bodies never change, so a loaded body is kept for the session. */
@@ -52,7 +53,7 @@ a.ub-link-focus{outline:2px solid var(--color-accent);outline-offset:2px;border-
 `;
 
 function srcdoc(body: MessageBody, remoteImages: boolean, quoteOpen: boolean): string {
-  const csp = remoteImages ? "script-src 'none'" : "script-src 'none'; img-src data:";
+  const csp = frameCsp(remoteImages);
   const quote = body.quoteHtml
     ? `<div class="ub-toggle" data-ub-toggle>•••</div><div class="ub-quote${quoteOpen ? " ub-open" : ""}">${body.quoteHtml}</div>`
     : "";

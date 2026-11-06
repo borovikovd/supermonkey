@@ -300,12 +300,12 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `gmail-errors.spec.ts`     | ERR    | the outcome matrix for actions and `drafts.create`, back-off, 401, 404                       | `standard`                               | H6, H8, H9, H10, H13        | 9       | 5       | 3      | 1      |
 | `sync.spec.ts`             | SYN    | connect, closed-app catch-up, polls, full resync, focus refresh                              | `standard`, `drafts`, `bulk`             | H6, H8c, H10, H12, H13, H15 | 11      | 5       | 4      | 2      |
 | `notifications.spec.ts`    | NOT    | when to notify, summary, mute, Dock badge, click                                             | `standard`                               | H17, H18                    | 6       | 5       | 1      | 0      |
-| `settings.spec.ts`         | SET    | the sheet, remote images                                                                     | `standard`                               | H15, H20                    | 4       | 1       | 2      | 1      |
+| `settings.spec.ts`         | SET    | the sheet, remote images                                                                     | `standard`                               | H15, H20                    | 5       | 2       | 2      | 1      |
 | `palette.spec.ts`          | PAL    | the palette, and its commands matching their keys                                            | `standard`                               | –                           | 2       | 1       | 1      | 0      |
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 5       | 3       | 2      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **254** | **150** | **94** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **255** | **151** | **94** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -3328,6 +3328,15 @@ _EG · §Look_
 
 - **Steps:** press `?`.
 - **Expect:** no row's description runs past its row, and no row overlaps the next, including the long "Next / previous split · cycle links in a conversation".
+
+#### SET-05 · P1 · With remote images off, nothing remote loads in a message or a reply's quote
+
+_EG · §Reading, §Settings_
+
+- **Seed:** `standard`, with Load remote images off. Deliver "Tracked" to A: a remote `<img>`, a `<style>` with `@import` of a remote stylesheet and an `@font-face` whose font is on the remote host, and text in that font.
+- **Steps:** open it. Press `r`, then click "Show quoted text" in the composer.
+- **Expect:** the remote host logs no fetch, neither after opening nor with the quote shown in the composer.
+- **Why:** the message frame blocked only images, so a sender's web font still told them the mail was opened; the composer's quote frame blocked nothing, so its images loaded too.
 
 ### 5.22 `palette.spec.ts` (PAL)
 
