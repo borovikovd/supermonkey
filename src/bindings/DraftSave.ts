@@ -6,4 +6,9 @@ export type DraftSave = { "type": "create", account: number, kind: DraftKind, re
 /**
  * The composer was aimed at the thread's latest message.
  */
-startedOnLatest: boolean, } | { "type": "update", fields: DraftFields, };
+startedOnLatest: boolean, } | { "type": "update", fields: DraftFields, 
+/**
+ * The `rev` of the draft state the fields were based on: an
+ * attachment Rust added after it stays, though the fields lack it.
+ */
+rev: number, };

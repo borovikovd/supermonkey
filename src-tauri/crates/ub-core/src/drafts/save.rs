@@ -1,6 +1,6 @@
 //! A composer's later saves, and the Gmail upsert they queue (SPEC Drafts).
 
-use ub_domain::{AccountId, DraftId, MessageId, Millis};
+use ub_domain::{AccountId, DraftId, MessageId, Millis, Rev};
 use ub_ipc::DraftFields;
 use ub_store::{DraftAttachment, NewOp, OpKind, Reads, StoreError, WriteTx};
 
@@ -17,6 +17,7 @@ pub(crate) fn update(
     state: &mut WriterState,
     id: &DraftId,
     fields: DraftFields,
+    seen: Rev,
     now: Millis,
 ) -> Result<(), StoreError> {
     let Some(record) = tx.read().drafts().get(id)? else {
@@ -37,12 +38,13 @@ pub(crate) fn update(
     } = fields;
     // The composer holds attachments as it first loaded them; a file stored
     // since (a download of a Gmail draft's parts) is kept.
-    let attachments = attachments
+    let mut attachments: Vec<DraftAttachment> = attachments
         .into_iter()
         .map(|a| {
             let stored = draft.attachments.iter().find(|s| s.id == a.id);
             DraftAttachment {
                 path: a.path.or_else(|| stored.and_then(|s| s.path.clone())),
+                added: stored.and_then(|s| s.added),
                 id: a.id,
                 filename: a.filename,
                 mime_type: a.mime_type,
@@ -51,6 +53,16 @@ pub(crate) fn update(
             }
         })
         .collect();
+    // One Rust added after the state the composer saved from (a forward's,
+    // once its target's body landed) was never shown there, so not removed.
+    let unseen: Vec<DraftAttachment> = draft
+        .attachments
+        .iter()
+        .filter(|s| s.added.is_some_and(|added| added > seen))
+        .filter(|s| attachments.iter().all(|a| a.id != s.id))
+        .cloned()
+        .collect();
+    attachments.extend(unseen);
     draft.from = from.map(Into::into);
     draft.to = to.into_iter().map(Into::into).collect();
     draft.cc = cc.into_iter().map(Into::into).collect();
@@ -114,6 +126,7 @@ pub(crate) fn message_attachments(
             size: a.size,
             path: a.local_path,
             source: Some(a.id),
+            added: None,
         })
         .collect())
 }

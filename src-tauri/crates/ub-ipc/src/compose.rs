@@ -64,7 +64,12 @@ pub enum DraftSave {
         started_on_latest: bool,
     },
     /// The composer's fields after an edit.
-    Update { fields: DraftFields },
+    Update {
+        fields: DraftFields,
+        /// The `rev` of the draft state the fields were based on: an
+        /// attachment Rust added after it stays, though the fields lack it.
+        rev: Rev,
+    },
 }
 
 // One attachment of a draft.

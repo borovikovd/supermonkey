@@ -47,9 +47,9 @@ pub(super) fn save_draft(
             },
             ctx.now,
         ),
-        DraftSave::Update { fields } => {
-            Ok(drafts::update(ctx.tx, ctx.state, draft, fields, ctx.now)?)
-        }
+        DraftSave::Update { fields, rev } => Ok(drafts::update(
+            ctx.tx, ctx.state, draft, fields, rev, ctx.now,
+        )?),
     }
 }
 

@@ -11,7 +11,7 @@ use crate::drafts::WritingDraft;
 use crate::read::read;
 use crate::workers::account::AccountCtx;
 use std::sync::Arc;
-use ub_store::ReadPool;
+use ub_store::{DraftNeed, ReadPool};
 
 /// What an upsert did.
 #[derive(Debug)]
@@ -52,7 +52,7 @@ pub(crate) async fn upsert(ctx: &AccountCtx, id: &DraftId) -> Result<Upserted, W
     }
     if load(&ctx.deps.pool, id.clone())
         .await?
-        .is_some_and(|d| d.needs_parts)
+        .is_some_and(|d| d.needs == Some(DraftNeed::Parts))
     {
         download_parts(ctx, id.clone()).await?;
     }

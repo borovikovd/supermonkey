@@ -4,7 +4,7 @@
 
 use ub_domain::{AccountId, GmailListing, SubId};
 use ub_ipc::SubKey;
-use ub_store::{Reads, StoreError};
+use ub_store::{DraftNeed, Reads, StoreError};
 
 use super::{ActionCtx, ActionError};
 use crate::effects::{Effect, GmailQuery};
@@ -46,7 +46,7 @@ pub(super) fn subscribe(
         }
         SubKey::Composer { draft } => {
             if let Some(record) = reads.drafts().get(draft)?
-                && record.draft.needs_parts
+                && record.draft.needs == Some(DraftNeed::Parts)
             {
                 effects.push(Effect::DraftParts {
                     account: record.draft.account,

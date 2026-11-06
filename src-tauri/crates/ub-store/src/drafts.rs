@@ -1,6 +1,7 @@
 //! Drafts: the composer's state, its defaults, and its Gmail copy's ids
 //! (SPEC Drafts, Reply composer).
 
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{Row, named_params};
 use serde::{Deserialize, Serialize};
 use ub_domain::{
@@ -28,6 +29,47 @@ pub struct DraftAttachment {
     /// The stored attachment it was carried from (a forward, or a draft
     /// read from Gmail).
     pub source: Option<AttachmentId>,
+    /// The `rev` at which Rust added it to a draft its composer had already
+    /// loaded (a forward's attachments, once the target's body landed). A
+    /// save based on an older `rev` never saw it, so it does not remove it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added: Option<Rev>,
+}
+
+/// What a draft waits for before it is written to Gmail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftNeed {
+    /// Read from Gmail: its parts, downloaded.
+    Parts,
+    /// Filled while its target had no stored body, so it quotes the target's
+    /// snippet: the target's body, to quote it whole and carry a forward's
+    /// attachments.
+    TargetBody,
+}
+
+/// The `needs_parts` column: `0`, `1` for [`DraftNeed::Parts`], or `2` for
+/// [`DraftNeed::TargetBody`].
+struct NeedColumn(Option<DraftNeed>);
+
+impl ToSql for NeedColumn {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(match self.0 {
+            None => 0,
+            Some(DraftNeed::Parts) => 1,
+            Some(DraftNeed::TargetBody) => 2,
+        }))
+    }
+}
+
+impl FromSql for NeedColumn {
+    fn column_result(v: ValueRef<'_>) -> FromSqlResult<Self> {
+        match i64::column_result(v)? {
+            0 => Ok(Self(None)),
+            1 => Ok(Self(Some(DraftNeed::Parts))),
+            2 => Ok(Self(Some(DraftNeed::TargetBody))),
+            other => Err(FromSqlError::OutOfRange(other)),
+        }
+    }
 }
 
 /// A draft's whole stored state. Read it, change it, and write it back with
@@ -86,8 +128,8 @@ pub struct Draft {
     pub gmail_thread_id: Option<GmailThreadId>,
     /// A Gmail change was skipped while a composer had it open.
     pub pending_gmail_read: bool,
-    /// Read from Gmail; its parts are not downloaded yet.
-    pub needs_parts: bool,
+    /// What it waits for before it is written to Gmail.
+    pub needs: Option<DraftNeed>,
     /// A `drafts.create` was sent for it and its answer never stored (the
     /// app quit, or the write was cancelled): Gmail may have the draft, so
     /// the next write looks for it by its `X-Ubermensch-Draft` header first.
@@ -124,7 +166,7 @@ impl Draft {
             gmail_message_id: None,
             gmail_thread_id: None,
             pending_gmail_read: false,
-            needs_parts: false,
+            needs: None,
             create_sent: false,
             updated_at: now,
         }
@@ -183,7 +225,7 @@ fn draft_row(r: &Row<'_>) -> rusqlite::Result<DraftRecord> {
             gmail_message_id: r.get("gmail_message_id")?,
             gmail_thread_id: r.get("gmail_thread_id")?,
             pending_gmail_read: r.get("pending_gmail_read")?,
-            needs_parts: r.get("needs_parts")?,
+            needs: r.get::<_, NeedColumn>("needs_parts")?.0,
             create_sent: r.get("gmail_create_sent")?,
             updated_at: r.get("updated_at")?,
         },
@@ -289,6 +331,17 @@ impl<'c> DraftReads<'c> {
             |r| r.get("id"),
         )
     }
+
+    /// Drafts aimed at `message` that wait for its body
+    /// ([`DraftNeed::TargetBody`]).
+    pub fn awaiting_body(self, message: MessageId) -> Result<Vec<DraftId>, StoreError> {
+        self.db.all(
+            "read the drafts waiting for a message's body",
+            "SELECT id FROM drafts WHERE target_message_id = ?1 AND needs_parts = ?2 ORDER BY id",
+            (message, NeedColumn(Some(DraftNeed::TargetBody))),
+            |r| r.get("id"),
+        )
+    }
 }
 
 /// Writes to drafts. Each stamps the draft and the threads it is on.
@@ -374,7 +427,7 @@ impl<'t, 'c> DraftWrites<'t, 'c> {
                 ":gmail_message": draft.gmail_message_id,
                 ":gmail_thread": draft.gmail_thread_id,
                 ":pending_read": draft.pending_gmail_read,
-                ":needs_parts": draft.needs_parts,
+                ":needs_parts": NeedColumn(draft.needs),
                 ":create_sent": draft.create_sent,
                 ":updated_at": draft.updated_at,
                 ":rev": rev,

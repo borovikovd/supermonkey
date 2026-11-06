@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use ub_domain::DraftId;
-use ub_store::{Priority as WritePriority, StoreError};
+use ub_store::{DraftNeed, Priority as WritePriority, StoreError};
 
 use super::WriteFailure;
 use super::write::{download, load};
@@ -38,7 +38,9 @@ pub(crate) async fn download_parts(ctx: &AccountCtx, id: DraftId) -> Result<(), 
                     a.path = paths.get(&a.id).cloned();
                 }
             }
-            draft.needs_parts = false;
+            if draft.needs == Some(DraftNeed::Parts) {
+                draft.needs = None;
+            }
             tx.drafts().put(&draft)
         })
         .await

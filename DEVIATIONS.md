@@ -246,6 +246,18 @@ the spec's wording:
 - **A file added to a draft is at most 25 MB**, Gmail's own limit for
   attachments; SPEC sets none. A larger one is refused with a toast before
   its content is decoded or written.
+- **A reply or forward started before its target's body is stored** quotes
+  the target's snippet meanwhile, so the composer shows what is known. When
+  the body lands, Rust fills the draft: the whole quote, and for a forward
+  the target's attachments, which the composer then lists. Those count as
+  the draft's defaults, so an untouched forward is still discarded, and a
+  save the composer made before it saw them does not remove them; one the
+  person removes stays removed. Such a draft is never written to Gmail with
+  the snippet's quote: its upsert or send reads the target's body first, at
+  priority 1, so a send made before the body arrived waits for it (offline,
+  as any send waits). If Gmail no longer has the target, the snippet's
+  quote goes. SPEC says only that Rust builds the quote from the stored
+  target. A draft read from Gmail keeps Gmail's quote.
 
 ## Decided in the review of the rewrite
 

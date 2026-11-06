@@ -498,6 +498,7 @@ async fn a_save_that_arrives_after_the_send_is_dropped() {
                 body_html: body.to_owned(),
                 attachments: Vec::new(),
             },
+            rev: ub_domain::Rev(0),
         },
     };
     h.act(vec![

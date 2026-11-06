@@ -13,6 +13,7 @@ use ub_store::{FetchedThread, Reads, StoreError, WriteTx};
 use super::contacts::sightings;
 use super::history::HistoryBatch;
 use super::read::{ReadMessage, ReadThread};
+use crate::drafts;
 use crate::effects::Effect;
 use crate::ops::{LocalChanges, ReadTicket};
 use crate::writer::WriterState;
@@ -235,7 +236,8 @@ fn stored_history(reads: Reads<'_>, thread: ThreadId) -> Result<Option<HistoryId
     Ok(reads.threads().row(thread)?.and_then(|row| row.history_id))
 }
 
-/// Stores the bodies a read brought for messages that have none yet.
+/// Stores the bodies a read brought for messages that have none yet, and
+/// fills the drafts that quote one's snippet.
 fn store_bodies(
     tx: &mut WriteTx<'_>,
     account: AccountId,
@@ -254,6 +256,7 @@ fn store_bodies(
         };
         if !record.has_body {
             tx.messages().store_body(record.id, body)?;
+            drafts::complete(tx, record.id)?;
         }
     }
     Ok(())

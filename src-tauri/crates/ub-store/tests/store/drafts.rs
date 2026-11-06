@@ -2,9 +2,9 @@
 
 use ub_domain::{
     AccountId, Addr, DraftContent, DraftId, DraftKind, LabelId, LabelSet, Millis, OutboxState,
-    PinKind, SplitId, ThreadChange, ThreadId, UndoEntryId, UndoKind, View,
+    PinKind, Rev, SplitId, ThreadChange, ThreadId, UndoEntryId, UndoKind, View,
 };
-use ub_store::{Draft, DraftAttachment, NewOutbox, StoreError, UNDO_KEPT, UndoAction};
+use ub_store::{Draft, DraftAttachment, DraftNeed, NewOutbox, StoreError, UNDO_KEPT, UndoAction};
 
 use crate::common::{Harness, fetched, msg};
 
@@ -34,8 +34,10 @@ fn reply(account: AccountId, id: &str, thread: ThreadId, at: i64) -> Draft {
         size: 3,
         path: None,
         source: None,
+        added: Some(Rev(4)),
     }];
     d.defaults = Some(DraftContent::default());
+    d.needs = Some(DraftNeed::TargetBody);
     d
 }
 

@@ -9,7 +9,7 @@ import { act, forgetSub, subIdFor, subscribe } from "../ipc/bridge";
 import type {
   Addr,
   ConversationData,
-  DraftFields,
+  DraftSave,
   DraftKind,
   DraftState,
   SubKey,
@@ -20,11 +20,14 @@ import { useMirror } from "../store/mirror";
 
 export type ReplyMode = "reply" | "replyAll" | "forward" | "resumeDraft";
 
+/** A save of a composer's fields, with the rev of the draft state they are based on. */
+export type UpdateSave = Extract<DraftSave, { type: "update" }>;
+
 /** The open composer's hooks, set while it is mounted. */
 export const openComposer: {
   draft: string | null;
-  /** Pending fields not yet saved, or null when saved. */
-  pending: () => DraftFields | null;
+  /** The save of pending fields not yet saved, or null when saved. */
+  pending: () => UpdateSave | null;
   /** Recipients that are not valid addresses. */
   invalid: () => string[];
   focus: () => void;
@@ -303,8 +306,8 @@ export function closeComposerOnScreen() {
   const pending = openComposer.draft === draft ? openComposer.pending : () => null;
   const wait = whenReady(draft);
   const close = () => {
-    const fields = pending();
-    if (fields) act({ type: "saveDraft", draft, save: { type: "update", fields } });
+    const save = pending();
+    if (save) act({ type: "saveDraft", draft, save });
     act({ type: "closeComposer", draft });
     forgetSub(composerKey(draft));
   };
@@ -347,8 +350,8 @@ export function sendOnScreen() {
   }
   // Taking the pending save ends it, so it is saved here, before any refusal.
   // It also turns typed text into chips, which the checks below must see.
-  const fields = openComposer.draft === draft ? openComposer.pending() : null;
-  if (fields) act({ type: "saveDraft", draft, save: { type: "update", fields } });
+  const save = openComposer.draft === draft ? openComposer.pending() : null;
+  if (save) act({ type: "saveDraft", draft, save });
   const invalid = openComposer.draft === draft ? openComposer.invalid() : [];
   if (invalid.length > 0) {
     toast.error(
@@ -360,7 +363,7 @@ export function sendOnScreen() {
     (s) => s.type === "composer" && s.key.type === "composer" && s.key.draft === draft,
   );
   const recipients =
-    fields ?? (draftState?.type === "composer" && draftState.draft ? draftState.draft : null);
+    save?.fields ?? (draftState?.type === "composer" && draftState.draft ? draftState.draft : null);
   if (recipients && recipients.to.length + recipients.cc.length + recipients.bcc.length === 0) {
     toast.error("Add a recipient");
     return;

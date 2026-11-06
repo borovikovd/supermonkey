@@ -2,8 +2,8 @@
 // which draft each key resumes, and drafts that come from Gmail
 // (COVERAGE 5.11; SPEC Reply composer, Addressing).
 import type { App } from "./app.ts";
-import type { Control, GmailMessage } from "./control.ts";
-import { files } from "./files.ts";
+import type { Control, GmailMessage, Hold } from "./control.ts";
+import { attachment, files } from "./files.ts";
 import { expect, test } from "./fixtures.ts";
 import { attachments, findPart, htmlOf, parseMime } from "./mime.ts";
 import * as seeds from "./seeds.ts";
@@ -952,4 +952,159 @@ test("REP-15 text typed before the reply opens goes into the reply", async ({ ap
   await app.press("f");
   await app.type("ok");
   await expect(app.editor).toHaveText("ok");
+});
+
+// ------------------------------------------- a target whose body downloads
+
+/** Text long enough that a marker after it is past the snippet. */
+const LONG = "This sentence pads the message well past the length of its snippet. ".repeat(4);
+
+/** Parks every body read, delivers a message, and waits until its body read is parked. */
+async function deliverWhileBodyHeld(
+  gmail: Control,
+  d: { subject: string; text: string; withContract?: boolean },
+): Promise<Hold> {
+  const body = await gmail.hold({ api: "threads.get", query: { format: "full" } });
+  await gmail.deliver({
+    account: A,
+    from: PERSONS[0] ?? "",
+    subject: d.subject,
+    text: d.text,
+    attachments: d.withContract ? [attachment(files.contractPdf)] : [],
+  });
+  await expect
+    .poll(async () => (await gmail.requests("threads.get")).some((r) => r.held))
+    .toBe(true);
+  return body;
+}
+
+/** Opens a conversation whose body may still be downloading. */
+async function openDownloading(app: App, subject: string): Promise<void> {
+  await app.row(subject).first().click();
+  await expect(app.conversationTitle).toHaveText(subject);
+}
+
+/** The composer's quote block, opened once: it follows the draft's quote. */
+async function openQuote(app: App) {
+  await app.page.getByTitle("Show quoted text").click();
+  const body = app.page.locator('iframe[title="quoted"]').contentFrame().locator("body");
+  await expect(body).not.toBeEmpty();
+  return body;
+}
+
+test("REP-16 a reply started while the message's body downloads quotes all of it", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const first = await deliverWhileBodyHeld(gmail, {
+    subject: "Long body",
+    text: `${LONG}The decision is TAILONE.`,
+  });
+  await openDownloading(app, "Long body");
+  await app.reply("r");
+  await app.type("My answer");
+  const quote = await openQuote(app);
+  await expect(quote).toContainText("This sentence pads");
+  await expect(quote).not.toContainText("TAILONE");
+
+  await first.release();
+  await app.settle();
+  await expect(quote).toContainText("TAILONE");
+  await send(app);
+  expect(htmlOf(parseMime((await sentWith(gmail, A, "My answer")).raw))).toContain("TAILONE");
+
+  // Sent before the body arrives: the send waits for it.
+  await app.press("Escape");
+  const second = await deliverWhileBodyHeld(gmail, {
+    subject: "Second long body",
+    text: `${LONG}The second decision is TAILTWO.`,
+  });
+  await openDownloading(app, "Second long body");
+  await app.reply("r");
+  await app.type("Early send");
+  await app.press("Meta+Enter");
+  await expect(app.editor).toHaveCount(0);
+  await app.advance(10_000);
+  await app.settle();
+  const early = await sentByApp(gmail, A);
+  expect(early.filter((m) => htmlOf(parseMime(m.raw)).includes("Early send"))).toHaveLength(0);
+
+  await second.release();
+  await app.settle();
+  expect(htmlOf(parseMime((await sentWith(gmail, A, "Early send")).raw))).toContain("TAILTWO");
+});
+
+test("REP-17 a forward started while the message's body downloads carries all of it and its attachments", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const body = await deliverWhileBodyHeld(gmail, {
+    subject: "Signed contract",
+    text: `${LONG}The wire details are TAILMARK.`,
+    withContract: true,
+  });
+  await openDownloading(app, "Signed contract");
+  await app.reply("f");
+  const remove = app.page.getByRole("button", { name: "Remove contract.pdf" });
+  await expect(remove).toHaveCount(0);
+
+  // A save based on the draft from before the body, parked until the body is in.
+  const saves = await app.park("submit", (b) => b.includes('"saveDraft"'));
+  await app.type("Forwarding the contract");
+  await app.press("Meta+Shift+o");
+  await app.type("kim@kite.test,");
+  await app.page.clock.runFor(500);
+
+  await body.release();
+  await expect(remove).toHaveCount(1);
+  await saves();
+  await app.settle();
+  await expect(remove).toHaveCount(1);
+
+  await send(app);
+  const sent = parseMime((await sentWith(gmail, A, "Forwarding the contract")).raw);
+  expect(htmlOf(sent)).toContain("TAILMARK");
+  const pdf = attachments(sent).find((p) => p.filename === "contract.pdf");
+  expect(pdf?.body.equals(files.contractPdf.buffer)).toBe(true);
+});
+
+test("REP-18 a forwarded attachment that arrives with the body can be removed, and an untouched forward is still discarded", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const remove = app.page.getByRole("button", { name: "Remove contract.pdf" });
+  const first = await deliverWhileBodyHeld(gmail, {
+    subject: "Untouched forward",
+    text: "Nothing to add.",
+    withContract: true,
+  });
+  await openDownloading(app, "Untouched forward");
+  await app.reply("f");
+  await first.release();
+  await expect(remove).toHaveCount(1);
+  await closeComposer(app);
+  await expect(stubs(app)).toHaveCount(0);
+  expect((await gmail.gmail(A)).drafts).toHaveLength(0);
+
+  await app.press("Escape");
+  const second = await deliverWhileBodyHeld(gmail, {
+    subject: "Trimmed forward",
+    text: "Only the text matters.",
+    withContract: true,
+  });
+  await openDownloading(app, "Trimmed forward");
+  await app.reply("f");
+  await app.type("Just the text");
+  await app.press("Meta+Shift+o");
+  await app.type("kim@kite.test,");
+  await second.release();
+  await remove.click();
+  await expect(remove).toHaveCount(0);
+  await app.settle();
+  await expect(remove).toHaveCount(0);
+  await send(app);
+  expect(attachments(parseMime((await sentWith(gmail, A, "Just the text")).raw))).toHaveLength(0);
 });

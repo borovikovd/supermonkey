@@ -290,7 +290,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `search.spec.ts`           | SRC    | local, Gmail merge, debounce, offline, query language, paging                                | `standard`, `bulk`                       | H9, H13                     | 12      | 4       | 7      | 1      |
 | `splits.spec.ts`           | SPL    | routing, `Tab`, pins, own reply, custom splits, starters, hiding, cap                        | `standard`, `splits`, `bulk`, `bulk1000` | H10, H12, H15               | 10      | 6       | 3      | 1      |
 | `snooze.spec.ts`           | SNZ    | picker, snooze, wake triggers, clearing rules, history echo, undo                            | `standard`                               | H13, H14, H15               | 8       | 6       | 1      | 1      |
-| `compose-reply.spec.ts`    | REP    | inline composer, addressing, quoting, forward, resume rules, Gmail drafts                    | `standard`, `drafts`                     | H4, H6                      | 15      | 10      | 5      | 0      |
+| `compose-reply.spec.ts`    | REP    | inline composer, addressing, quoting, forward, resume rules, Gmail drafts                    | `standard`, `drafts`                     | H4, H6                      | 18      | 12      | 6      | 0      |
 | `compose-new.spec.ts`      | NEW    | `c` screen, formatting, shortcuts, `Esc` machine, untouched rule, discard                    | `standard`                               | H4                          | 12      | 7       | 5      | 0      |
 | `recipients.spec.ts`       | RCP    | chips, autocomplete, ranking, invalid addresses, Cc/Bcc                                      | `contacts`, `standard`                   | H23                         | 10      | 3       | 7      | 0      |
 | `attachments.spec.ts`      | ATT    | attach, download on demand, offline forward, MIME tree                                       | `standard`                               | H4, H9, H23                 | 7       | 6       | 1      | 0      |
@@ -305,7 +305,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `security.spec.ts`         | SEC    | hostile HTML, markup in metadata, links, no credentials in the webview                       | `security`, `standard`                   | H19, H20, H21               | 5       | 3       | 2      | 0      |
 | `ui-consistency.spec.ts`   | UIC    | no flash-back, reload continuity, a failed submit, rows, quit                                | `bulk`, `standard`, `empty`              | H8a, H15, H16, H23          | 5       | 2       | 3      | 0      |
 | `unwanted.spec.ts`         | UNW    | `⌘U` unsubscribe (one-click, email, page), mark done or trash all, block, blocked senders    | `empty`                                  | H11                         | 9       | 7       | 2      | 0      |
-| **Total**                  |        |                                                                                              |                                          |                             | **258** | **154** | **94** | **10** |
+| **Total**                  |        |                                                                                              |                                          |                             | **261** | **156** | **95** | **10** |
 
 **Order to build.** Write all P1 cases first. They cover every Done-when item except performance (section 6) and every data-loss risk the SPEC names. The harness items most P1 cases depend on are H8a (`hold`), H9 (the request log), H13 (the clock), H15 (restart), and H22 (`settle`). Build those first.
 
@@ -2043,6 +2043,42 @@ _EG · §Keyboard ("while compose … is focused, keystrokes go to that field"),
 - **Expect:**
   - After step 1, the editor has focus and reads "thanks"; no dialog opened (`h` was not taken as snooze), and `p3` is open.
   - After step 2, the forward's editor reads "ok".
+
+#### REP-16 · P1 · A reply started while the message's body downloads quotes all of it
+
+_EG · §Addressing ("Rust builds it from the stored target message when it builds the MIME"), DEVIATIONS (Compose: a quote filled before the body)_
+
+- **Steps:**
+  1. `hold(threads.get, format=full)`. Deliver a message whose text ends, past the snippet, with a marker. Once its body read is parked, open it, press `r`, type, and show the quote.
+  2. Release, `settle()`. Send, `advance(10_000)`, `settle()`.
+  3. Variant, the send before the body: hold again, deliver a second such message, open it, press `r`, type, and send at once. `advance(10_000)`, `settle()`. Then release, `settle()`.
+- **Expect:**
+  - In step 1 the composer quotes the snippet, without the marker; after the release its quote shows the marker.
+  - The sent reply's quote holds the marker.
+  - In step 3, nothing is sent while the body read is parked; after the release, the sent reply's quote holds the second marker.
+
+#### REP-17 · P1 · A forward started while the message's body downloads carries all of it and its attachments
+
+_EG · §Addressing ("Forward quotes the target message, carries its attachments"), DEVIATIONS (Compose: a quote filled before the body)_
+
+- **Steps:**
+  1. `hold(threads.get, format=full)`. Deliver a message with a marker past the snippet and `contract.pdf`. Once its body read is parked, open it, press `f`.
+  2. Park the page's draft saves, type, add Kim, and let the autosave fire: its save, based on the draft before the body, is parked.
+  3. Release the body read. Once the composer lists `contract.pdf`, release the save, `settle()`. Send, `advance(10_000)`, `settle()`.
+- **Expect:**
+  - Before the release, the composer lists no attachment; after it, `contract.pdf`.
+  - The sent forward carries the marker and `contract.pdf` with the original bytes: the save from before the body did not remove it.
+
+#### REP-18 · P2 · A forwarded attachment that arrives with the body can be removed, and an untouched forward is still discarded
+
+_EG · §Addressing, §Actions (untouched rule), DEVIATIONS (Compose: a quote filled before the body)_
+
+- **Steps:**
+  1. Hold the body read of a delivered message with `contract.pdf`, open it, press `f`. Release, wait for `contract.pdf` in the composer, then `Esc` `Esc`, `settle()`.
+  2. Hold again and deliver a second such message. Open it, press `f`, type, add Kim. Release, wait for `contract.pdf`, remove it, send, `advance(10_000)`, `settle()`.
+- **Expect:**
+  - After step 1, the conversation shows no draft stub and Gmail has no draft.
+  - After step 2, the sent forward has no attachment.
 
 ### 5.12 `compose-new.spec.ts` (NEW)
 

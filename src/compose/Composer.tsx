@@ -22,6 +22,7 @@ import {
   discardOnScreen,
   loadedDraft,
   openComposer,
+  type UpdateSave,
   sendOnScreen,
   takeTypedAhead,
 } from "./start";
@@ -202,7 +203,13 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   /** Cancels the scheduled save. */
   const timer = useRef<(() => void) | null>(null);
   /** This composer's pending save (openComposer.pending belongs to whichever composer is open). */
-  const takePending = useRef<(finish: boolean) => DraftFields | null>(() => null);
+  const takePending = useRef<(finish: boolean) => UpdateSave | null>(() => null);
+  /**
+   * The draft state the fields are based on: its rev, and every attachment id
+   * the fields have held. Rust can add attachments later (a forward's, once
+   * its target's body lands); one removed here never comes back.
+   */
+  const seen = useRef({ rev: 0, ids: new Set<string>() });
   const root = useRef<HTMLDivElement>(null);
   const toRef = useRef<RecipientHandle>(null);
   const ccRef = useRef<RecipientHandle>(null);
@@ -224,8 +231,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     timer.current?.();
     timer.current = later(() => {
       timer.current = null;
-      const pending = takePending.current(false);
-      if (pending) act({ type: "saveDraft", draft, save: { type: "update", fields: pending } });
+      const save = takePending.current(false);
+      if (save) act({ type: "saveDraft", draft, save });
     }, SAVE_DELAY);
   }, [draft]);
 
@@ -287,7 +294,20 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   }
   useEffect(() => {
     latest.current = fields;
+    for (const a of fields.attachments) seen.current.ids.add(a.id);
   }, [fields]);
+  // Attachments Rust added since the fields were based on an older state join
+  // them. Its other fields are the echo of saves and stay as typed.
+  useEffect(() => {
+    if (!loaded || !state || state.gone) return;
+    const added = state.attachments.filter((a) => !seen.current.ids.has(a.id));
+    seen.current.rev = state.rev;
+    if (added.length === 0) return;
+    for (const a of added) seen.current.ids.add(a.id);
+    const attachments = [...latest.current.attachments, ...added];
+    latest.current = { ...latest.current, attachments };
+    setFields((f) => ({ ...f, attachments: [...f.attachments, ...added] }));
+  }, [loaded, state]);
   // Edits made before the load are saved now, merged with it.
   useEffect(() => {
     if (!loaded || loadedRef.current) return;
@@ -317,11 +337,11 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       const typed = { ...latest.current, to, cc, bcc };
       // Before the composer has rendered its first load, merge it here; with
       // no load yet there is nothing safe to save (send and close wait for it).
-      let save: DraftFields = typed;
+      let save: UpdateSave = { type: "update", fields: typed, rev: seen.current.rev };
       if (!loadedRef.current) {
         const first = loadedDraft(draft);
         if (!first || first.gone) return null;
-        save = withLoaded(typed, first);
+        save = { type: "update", fields: withLoaded(typed, first), rev: first.rev };
       }
       timer.current?.();
       timer.current = null;

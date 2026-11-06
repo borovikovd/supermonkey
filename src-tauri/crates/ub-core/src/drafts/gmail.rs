@@ -9,7 +9,7 @@ use ub_domain::{
     AccountId, DraftId, DraftKind, GmailDraftId, GmailMessageId, GmailThreadId, Millis, NoticeKind,
     Rev, Thread, gmail_draft_aim, gmail_draft_kind,
 };
-use ub_store::{Draft, NewNotice, NewOp, OpKind, Reads, StoreError, WriteTx};
+use ub_store::{Draft, DraftNeed, NewNotice, NewOp, OpKind, Reads, StoreError, WriteTx};
 
 use super::save::message_attachments;
 use super::text::snippet;
@@ -249,7 +249,7 @@ pub(crate) fn apply_gmail_draft(
     draft.snippet = snippet(&gmail.editor_html);
     draft.body_html = gmail.editor_html;
     draft.quote_html = gmail.quote_html;
-    draft.needs_parts = !attachments.is_empty();
+    draft.needs = (!attachments.is_empty()).then_some(DraftNeed::Parts);
     draft.attachments = attachments;
     draft.gmail_draft_id = Some(gmail.id);
     draft.gmail_message_id = Some(message.gmail_id.clone());

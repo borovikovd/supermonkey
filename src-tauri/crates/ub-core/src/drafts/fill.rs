@@ -1,12 +1,15 @@
 //! A fresh composer's first save (SPEC UI state, Actions; Addressing): it
-//! carries only its kind and target, and Rust fills the rest.
+//! carries only its kind and target, and Rust fills the rest. A reply or
+//! forward started before its target's body was stored quotes the snippet,
+//! and gets the whole quote, and a forward its attachments, once the body
+//! lands (DEVIATIONS: Compose).
 
 use ub_domain::{
     AccountId, DraftContent, DraftId, DraftKind, MessageId, Millis, ReplyTarget, ThreadId,
     addressing,
 };
 use ub_mime::QuoteSource;
-use ub_store::{Draft, MessageRecord, Reads, StoreError, WriteTx};
+use ub_store::{Draft, DraftNeed, MessageRecord, Reads, StoreError, WriteTx};
 
 use super::save::message_attachments;
 use super::text::{escape_text, local_offset};
@@ -80,26 +83,17 @@ pub(crate) fn create(
     if let Some(t) = &target {
         draft.in_reply_to.clone_from(&t.message_id_header);
         draft.references = references(t);
-        let quoted = quoted_html(reads, t)?;
-        let source = QuoteSource {
-            from: &t.from,
-            to: &t.to,
-            cc: &t.cc,
-            date: t.date,
-            subject: &t.subject,
-            html: &quoted,
-        };
         match new.kind {
-            DraftKind::Reply => {
-                draft.subject = ub_mime::reply_subject(&t.subject);
-                draft.quote_html = Some(ub_mime::reply_quote_html(&source, local_offset()));
-            }
-            DraftKind::Forward => {
-                draft.subject = ub_mime::forward_subject(&t.subject);
-                draft.quote_html = Some(ub_mime::forward_quote_html(&source, local_offset()));
-                draft.attachments = message_attachments(reads, t.id)?;
-            }
+            DraftKind::Reply => draft.subject = ub_mime::reply_subject(&t.subject),
+            DraftKind::Forward => draft.subject = ub_mime::forward_subject(&t.subject),
             DraftKind::New => {}
+        }
+        if new.kind != DraftKind::New {
+            if quote(reads, &mut draft, t)? {
+                draft.attachments = forwarded(reads, &draft, t)?;
+            } else {
+                draft.needs = Some(DraftNeed::TargetBody);
+            }
         }
     }
     draft.defaults = Some(DraftContent {
@@ -110,17 +104,81 @@ pub(crate) fn create(
     Ok(())
 }
 
-/// The `References` a reply to `target` sends: the target's, then its own id.
-fn references(target: &MessageRecord) -> String {
-    let own = target.message_id_header.as_deref().unwrap_or_default();
-    format!("{} {own}", target.references).trim().to_owned()
+/// The body of `message` landed: each draft aimed at it that quotes its
+/// snippet gets the whole quote, and a forward the message's attachments.
+pub(crate) fn complete(tx: &mut WriteTx<'_>, message: MessageId) -> Result<(), StoreError> {
+    for id in tx.read().drafts().awaiting_body(message)? {
+        complete_draft(tx, &id)?;
+    }
+    Ok(())
 }
 
-/// The HTML a quote of `target` shows: its stored body with its own quoted
-/// history, or its snippet when the body is not stored yet.
-fn quoted_html(reads: Reads<'_>, target: &MessageRecord) -> Result<String, StoreError> {
+/// Ends the draft's wait for its target's body before a write to Gmail: the
+/// whole quote when the body is stored now, else the snippet's quote stays
+/// (Gmail no longer has the target). Returns the draft as it is then.
+pub(crate) fn settle(tx: &mut WriteTx<'_>, id: &DraftId) -> Result<Option<Draft>, StoreError> {
+    if !complete_draft(tx, id)?
+        && let Some(record) = tx.read().drafts().get(id)?
+        && record.draft.needs == Some(DraftNeed::TargetBody)
+    {
+        let mut draft = record.draft;
+        draft.needs = None;
+        tx.drafts().put(&draft)?;
+    }
+    Ok(tx.read().drafts().get(id)?.map(|r| r.draft))
+}
+
+/// Fills a draft that waits for its target's body, if that body is stored.
+/// Attachments it adds count as defaults, so an untouched forward stays
+/// untouched, and are marked with this `rev`, so a save from a composer
+/// that has not seen them yet keeps them. Returns whether it filled it.
+fn complete_draft(tx: &mut WriteTx<'_>, id: &DraftId) -> Result<bool, StoreError> {
+    let reads = tx.read();
+    let Some(record) = reads.drafts().get(id)? else {
+        return Ok(false);
+    };
+    let mut draft = record.draft;
+    if draft.needs != Some(DraftNeed::TargetBody) {
+        return Ok(false);
+    }
+    let Some(target) = draft
+        .target
+        .map(|t| reads.messages().get(t))
+        .transpose()?
+        .flatten()
+    else {
+        return Ok(false);
+    };
+    if !quote(reads, &mut draft, &target)? {
+        return Ok(false);
+    }
+    let rev = tx.rev();
+    let added: Vec<_> = forwarded(reads, &draft, &target)?
+        .into_iter()
+        .filter(|a| draft.attachments.iter().all(|have| have.id != a.id))
+        .map(|mut a| {
+            a.added = Some(rev);
+            a
+        })
+        .collect();
+    if let Some(defaults) = &mut draft.defaults {
+        defaults
+            .attachments
+            .extend(added.iter().map(|a| a.id.clone()));
+    }
+    draft.attachments.extend(added);
+    draft.needs = None;
+    tx.drafts().put(&draft)?;
+    Ok(true)
+}
+
+/// Sets the draft's quote of `target` by its kind: from the stored body, or
+/// from the snippet when none is stored yet. Returns whether the body was
+/// stored.
+fn quote(reads: Reads<'_>, draft: &mut Draft, target: &MessageRecord) -> Result<bool, StoreError> {
     let body = reads.messages().bodies(&[target.id])?.into_iter().next();
-    Ok(match body {
+    let whole = body.is_some();
+    let html = match body {
         Some(body) => {
             let html = body
                 .html
@@ -128,5 +186,38 @@ fn quoted_html(reads: Reads<'_>, target: &MessageRecord) -> Result<String, Store
             format!("{html}{}", body.quote_html.unwrap_or_default())
         }
         None => escape_text(&target.snippet),
-    })
+    };
+    let source = QuoteSource {
+        from: &target.from,
+        to: &target.to,
+        cc: &target.cc,
+        date: target.date,
+        subject: &target.subject,
+        html: &html,
+    };
+    draft.quote_html = match draft.kind {
+        DraftKind::Reply => Some(ub_mime::reply_quote_html(&source, local_offset())),
+        DraftKind::Forward => Some(ub_mime::forward_quote_html(&source, local_offset())),
+        DraftKind::New => None,
+    };
+    Ok(whole)
+}
+
+/// The attachments a forward of `target` carries: the target's. None for a
+/// reply.
+fn forwarded(
+    reads: Reads<'_>,
+    draft: &Draft,
+    target: &MessageRecord,
+) -> Result<Vec<ub_store::DraftAttachment>, StoreError> {
+    match draft.kind {
+        DraftKind::Forward => message_attachments(reads, target.id),
+        DraftKind::Reply | DraftKind::New => Ok(Vec::new()),
+    }
+}
+
+/// The `References` a reply to `target` sends: the target's, then its own id.
+fn references(target: &MessageRecord) -> String {
+    let own = target.message_id_header.as_deref().unwrap_or_default();
+    format!("{} {own}", target.references).trim().to_owned()
 }

@@ -7,12 +7,13 @@ use std::path::{Path, PathBuf};
 use ub_domain::{Addr, DraftId, GmailDraftId, GmailThreadId};
 use ub_gmail::{Format, GmailError, Outcome, PageToken, Priority};
 use ub_mime::{InlinePart, OutAttachment, Outgoing};
-use ub_store::{Draft, Priority as WritePriority, StoreError};
+use ub_store::{Draft, DraftNeed, Priority as WritePriority, StoreError};
 
 use super::WriteFailure;
 use crate::Error;
+use crate::drafts::settle;
 use crate::read::read;
-use crate::workers::account::{AccountCtx, parse};
+use crate::workers::account::{AccountCtx, fetch_thread, parse};
 use crate::workers::attachments::{DownloadError, ensure};
 use crate::workers::files::{attachments_dir, draft_dir, is_inside};
 use std::sync::Arc;
@@ -39,6 +40,13 @@ pub(crate) async fn write(
     ctx: &AccountCtx,
     draft: &Draft,
 ) -> Result<ub_gmail::Draft, WriteFailure> {
+    let filled;
+    let draft = if draft.needs == Some(DraftNeed::TargetBody) {
+        filled = with_target_body(ctx, draft).await?;
+        &filled
+    } else {
+        draft
+    };
     let raw = build_raw(ctx, draft).await?;
     let thread = gmail_thread(&ctx.deps.pool, draft).await?;
     let existing = match &draft.gmail_draft_id {
@@ -58,6 +66,36 @@ pub(crate) async fn write(
         }
     }
     create(ctx, &draft.id, &raw, thread.as_ref()).await
+}
+
+/// A draft that quotes its target's snippet is never written so (DEVIATIONS:
+/// Compose): the target's body is read now, ahead of other reads, and fills
+/// the draft as it lands. Offline, the write waits like any other. If Gmail
+/// no longer has the target, the snippet's quote goes.
+async fn with_target_body(ctx: &AccountCtx, draft: &Draft) -> Result<Draft, WriteFailure> {
+    if let Some(target) = draft.target {
+        let thread = ctx
+            .read(move |r| {
+                let Some(message) = r.messages().get(target)? else {
+                    return Ok(None);
+                };
+                if message.has_body {
+                    return Ok(None);
+                }
+                Ok(r.threads().row(message.thread)?.map(|row| row.gmail_id))
+            })
+            .await?;
+        if let Some(thread) = thread {
+            fetch_thread(ctx, &thread, Format::Full, Priority::P1).await?;
+        }
+    }
+    let id = draft.id.clone();
+    let settled = ctx
+        .writer()
+        .call(WritePriority::Sync, move |tx, _| settle(tx, &id))
+        .await
+        .map_err(Error::from)?;
+    Ok(settled.unwrap_or_else(|| draft.clone()))
 }
 
 /// The Gmail thread the draft goes on: its thread's, else the one its last
