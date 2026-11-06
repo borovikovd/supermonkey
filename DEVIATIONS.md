@@ -324,3 +324,9 @@ the spec's wording:
   rule to the `check_split_rule` command, the same check `saveSplits` makes.
   A refused rule keeps the sheet open with every edit, and its message shows
   under the rule until the rule changes.
+- **The composer checks addresses with a copy of the core's rule.** A chip's
+  color and the space-after-an-address shortcut run on each keystroke, so
+  they can't wait on a command. `isValidEmail` ports `ub_mime::is_valid_email`
+  rule for rule, and both are held to one table of cases
+  (`src-tauri/crates/ub-mime/tests/fixtures/email-addresses.json`): the
+  Rust test reads it, and RCP-11 pastes it into the composer.

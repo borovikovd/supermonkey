@@ -6,8 +6,51 @@ import { autocomplete } from "../ipc/bridge";
 import type { Addr, ContactSuggestion } from "../ipc/types";
 import { measure } from "../keyboard/meter";
 
-const EMAIL = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
-export const isValidEmail = (s: string) => EMAIL.test(s.trim());
+const utf8 = new TextEncoder();
+const byteLength = (s: string) => utf8.encode(s).length;
+// Rust's `char::is_whitespace`, `is_control`, and `is_alphanumeric`.
+const BAD_LOCAL = /[\p{White_Space}\p{Cc}<>()[\],;:\\"@]/u;
+const LABEL = /^[\p{Alphabetic}\p{N}-]+$/u;
+
+/**
+ * Whether the core would send to this address: `ub_mime::is_valid_email`,
+ * ported rule for rule, so a chip shows in `danger` exactly when Send would
+ * be refused. It runs on every chip and keystroke, so it can't wait on a
+ * command. Both are held to one table of cases
+ * (`src-tauri/crates/ub-mime/tests/fixtures/email-addresses.json`, RCP-11).
+ */
+export function isValidEmail(s: string): boolean {
+  const at = s.lastIndexOf("@");
+  if (at < 0) return false;
+  const local = s.slice(0, at);
+  const domain = s.slice(at + 1);
+  if (
+    byteLength(s) > 254 ||
+    local === "" ||
+    byteLength(local) > 64 ||
+    BAD_LOCAL.test(local) ||
+    local.startsWith(".") ||
+    local.endsWith(".") ||
+    local.includes("..")
+  )
+    return false;
+  const labels = domain.split(".");
+  const tld = labels.at(-1) ?? "";
+  return (
+    labels.length >= 2 &&
+    labels.every(
+      (label) =>
+        label !== "" &&
+        byteLength(label) <= 63 &&
+        !label.startsWith("-") &&
+        !label.endsWith("-") &&
+        LABEL.test(label),
+    ) &&
+    // At least two characters (code points, as Rust counts them).
+    /^.{2,}$/su.test(tld) &&
+    !/^[0-9]*$/.test(tld)
+  );
+}
 
 /** Parses `Name <a@b.c>` or a bare address. */
 export function parseAddr(text: string): Addr | null {

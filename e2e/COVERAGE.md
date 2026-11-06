@@ -292,7 +292,7 @@ Files are independent and can be written in parallel. Each depends only on the s
 | `snooze.spec.ts`           | SNZ    | picker, snooze, wake triggers, clearing rules, history echo, undo                            | `standard`                               | H13, H14, H15               | 8       | 6       | 1      | 1      |
 | `compose-reply.spec.ts`    | REP    | inline composer, addressing, quoting, forward, resume rules, Gmail drafts                    | `standard`, `drafts`                     | H4, H6                      | 18      | 12      | 6      | 0      |
 | `compose-new.spec.ts`      | NEW    | `c` screen, formatting, shortcuts, `Esc` machine, untouched rule, discard                    | `standard`                               | H4                          | 12      | 7       | 5      | 0      |
-| `recipients.spec.ts`       | RCP    | chips, autocomplete, ranking, invalid addresses, Cc/Bcc                                      | `contacts`, `standard`                   | H23                         | 10      | 3       | 7      | 0      |
+| `recipients.spec.ts`       | RCP    | chips, autocomplete, ranking, invalid addresses, Cc/Bcc                                      | `contacts`, `standard`                   | H23                         | 11      | 4       | 7      | 0      |
 | `attachments.spec.ts`      | ATT    | attach, download on demand, offline forward, MIME tree                                       | `standard`                               | H4, H9, H23                 | 7       | 6       | 1      | 0      |
 | `drafts.spec.ts`           | DRF    | autosave and upsert, Drafts `Enter`, Gmail-side edits and deletes, offline, reload and crash | `standard`, `drafts`                     | H6, H15, H16                | 19      | 16      | 2      | 1      |
 | `undo-send.spec.ts`        | SND    | the outbox state machine, held undo, rejection, no clear answer, restart                     | `standard`                               | H8a, H8b, H9, H13, H15      | 18      | 15      | 3      | 0      |
@@ -2377,6 +2377,17 @@ _EG · §Recipients, §Drafts (autosave)_
   2. Let the autosave the chip scheduled fire (page clock `runFor(500)`), `settle()`.
 - **Expect:** To still holds only Kim's chip, and its input still reads "lee@ki" with focus. Only send and close turn typed text into a chip.
 
+#### RCP-11 · P1 · Every address the core would refuse shows in `danger` and blocks Send
+
+_DT · §Recipients ("A chip that is not a valid address shows in `danger`, and Send refuses with a toast until it is fixed")_
+
+- **Seed:** `standard`.
+- **Table:** `src-tauri/crates/ub-mime/tests/fixtures/email-addresses.json`, the cases `ub_mime::is_valid_email` is held to by `crates/ub-mime/tests/addresses.rs`: a one-letter or all-digit top-level label, `..` or an edge dot in the local part, a hyphen at a label's edge, empty labels, and the 64-, 63-, and 254-byte limits, with valid neighbors of each.
+- **Steps:** Press `c`, paste every address in the table into To, one per line, add a subject and body, and press `Cmd+Enter`.
+- **Expect:**
+  - Each chip is marked invalid exactly when the table says the core refuses it.
+  - Send is refused with an error toast naming every refused address, and the composer stays. After `advance(10_000)`: no Sending toast and no `drafts.send`.
+
 ### 5.14 `attachments.spec.ts` (ATT)
 
 #### ATT-01 · P1 · Attach files and send them
@@ -3721,7 +3732,7 @@ _EG · AGENTS.md (validate every command's input in Rust; the webview is not tru
 | Compose                     | NEW-02 to NEW-04, NEW-08, NEW-11                                                                                                                                            |
 | Reply composer              | REP-01, REP-02, REP-07 to REP-10, NEW-01                                                                                                                                    |
 | Addressing                  | REP-03 to REP-06, REP-11, REP-12, ATT-03, NEW-10                                                                                                                            |
-| Recipients and autocomplete | RCP-01 to RCP-08, NEW-09                                                                                                                                                    |
+| Recipients and autocomplete | RCP-01 to RCP-11, NEW-09                                                                                                                                                    |
 | Drafts                      | DRF-01 to DRF-17, ATT-01, ATT-04, NEW-11, VIEW-04, SND-13, SND-18                                                                                                           |
 | Send and undo               | SND-01 to SND-18, REP-10, ATT-03                                                                                                                                            |
 | Archive, trash, star, read  | TRI-01 to TRI-11, ERR-04                                                                                                                                                    |
@@ -3790,6 +3801,7 @@ Also kept, because they test logic the E2E suite can't observe:
 - `crates/ub-store/src/open.rs`: a database of another schema version, or a file that is not one, is moved aside with its WAL and a fresh one created (there is no migration code).
 - `crates/ub-core/src/outbox/machine.rs`: the send state machine's every event in every state.
 - `crates/ub-core/src/tests/actions.rs`: a draft save that arrives after its send is dropped, and a split whose rule does not parse is not saved (the sheet checks rules before it saves, SPL-11).
+- `crates/ub-mime/tests/addresses.rs`: `is_valid_email` against the shared address table that RCP-11 holds the composer's copy of the rule to.
 - `crates/ub-core/src/tests/writer_channel.rs` (also): a commit whose updates panic while being sent still releases its effects and goes idle, so `settle()` never hangs on it (E2E can't make the core panic).
 - `crates/ub-core/src/tests/badge.rs`: commits that land while the Dock badge is being set make one more count, not one each (the recorded platform keeps only the last badge).
 - `crates/ub-core/src/tests/accounts.rs`: a sign-out reported for a grant older than the last sign-in changes nothing, even when its writer job runs after the sign-in's (the sign-in's job has the UI's priority; E2E can't hold the writer between the two).

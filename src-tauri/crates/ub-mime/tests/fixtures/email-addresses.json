@@ -1,0 +1,167 @@
+[
+  {
+    "address": "kim@kite.test",
+    "valid": true,
+    "why": "a plain address"
+  },
+  {
+    "address": "kim.lee@kite.test",
+    "valid": true,
+    "why": "a dot inside the local part"
+  },
+  {
+    "address": "kim+news@kite.test",
+    "valid": true,
+    "why": "a plus tag"
+  },
+  {
+    "address": "o'brien_1-x@kite.test",
+    "valid": true,
+    "why": "an apostrophe, underscore, and hyphen in the local part"
+  },
+  {
+    "address": "kim@mail.kite-air.co.uk",
+    "valid": true,
+    "why": "several labels, an inner hyphen"
+  },
+  {
+    "address": "kim@kite.io",
+    "valid": true,
+    "why": "a two-letter top-level label"
+  },
+  {
+    "address": "kim@123.test",
+    "valid": true,
+    "why": "an all-digit label that is not the top-level one"
+  },
+  {
+    "address": "kim@kite.t1",
+    "valid": true,
+    "why": "a top-level label of letters and digits"
+  },
+  {
+    "address": "kim@xn--kte-yla.test",
+    "valid": true,
+    "why": "a punycode label"
+  },
+  {
+    "address": "kim@例え.テスト",
+    "valid": true,
+    "why": "labels in another script"
+  },
+  {
+    "address": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk@kite.test",
+    "valid": true,
+    "why": "a 64-byte local part"
+  },
+  {
+    "address": "kim@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.test",
+    "valid": true,
+    "why": "a 63-byte label"
+  },
+  {
+    "address": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.cccccccccccccccccccccccccccccccccccccccccccccccccccccccc.test",
+    "valid": true,
+    "why": "254 bytes in all"
+  },
+  {
+    "address": "kim@kite",
+    "valid": false,
+    "why": "no dot in the domain"
+  },
+  {
+    "address": "kim@kite.c",
+    "valid": false,
+    "why": "a one-letter top-level label"
+  },
+  {
+    "address": "kim@kite.123",
+    "valid": false,
+    "why": "an all-digit top-level label"
+  },
+  {
+    "address": "kim..lee@kite.test",
+    "valid": false,
+    "why": "two dots in a row in the local part"
+  },
+  {
+    "address": ".kim@kite.test",
+    "valid": false,
+    "why": "a local part that starts with a dot"
+  },
+  {
+    "address": "kim.@kite.test",
+    "valid": false,
+    "why": "a local part that ends with a dot"
+  },
+  {
+    "address": "kim@-kite.test",
+    "valid": false,
+    "why": "a label that starts with a hyphen"
+  },
+  {
+    "address": "kim@kite-.test",
+    "valid": false,
+    "why": "a label that ends with a hyphen"
+  },
+  {
+    "address": "kim@kite..test",
+    "valid": false,
+    "why": "an empty label"
+  },
+  {
+    "address": "kim@.kite.test",
+    "valid": false,
+    "why": "a domain that starts with a dot"
+  },
+  {
+    "address": "kim@kite.test.",
+    "valid": false,
+    "why": "a domain that ends with a dot"
+  },
+  {
+    "address": "kim@kite_air.test",
+    "valid": false,
+    "why": "an underscore in the domain"
+  },
+  {
+    "address": "kim(lee)@kite.test",
+    "valid": false,
+    "why": "parentheses in the local part"
+  },
+  {
+    "address": "kim@lee@kite.test",
+    "valid": false,
+    "why": "an @ in the local part"
+  },
+  {
+    "address": "@kite.test",
+    "valid": false,
+    "why": "no local part"
+  },
+  {
+    "address": "kim@",
+    "valid": false,
+    "why": "no domain"
+  },
+  {
+    "address": "kim",
+    "valid": false,
+    "why": "no @"
+  },
+  {
+    "address": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk@kite.test",
+    "valid": false,
+    "why": "a 65-byte local part"
+  },
+  {
+    "address": "kim@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.test",
+    "valid": false,
+    "why": "a 64-byte label"
+  },
+  {
+    "address": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.ccccccccccccccccccccccccccccccccccccccccccccccccccccccccc.test",
+    "valid": false,
+    "why": "255 bytes in all"
+  }
+]

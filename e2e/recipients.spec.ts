@@ -1,5 +1,6 @@
 // Recipient chips, autocomplete and its ranking, invalid addresses, and Cc/Bcc
 // (COVERAGE 5.13; SPEC Recipients and autocomplete, Keyboard).
+import ADDRESSES from "../src-tauri/crates/ub-mime/tests/fixtures/email-addresses.json" with { type: "json" };
 import type { App } from "./app.ts";
 import type { Control, GmailMessage } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
@@ -443,4 +444,36 @@ test("RCP-10 the autosave leaves an address being typed alone", async ({ app, gm
   expect(await chipAddresses(app, "To")).toEqual(["kim@kite.test"]);
   await expect(app.field("To")).toHaveValue("lee@ki");
   await expect(app.field("To")).toBeFocused();
+});
+
+test("RCP-11 every address the core would refuse shows in danger and blocks send", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await app.compose();
+  await app.paste(ADDRESSES.map((c) => c.address).join("\n"));
+  await expect(app.chips("To")).toHaveCount(ADDRESSES.length);
+  const flagged = await app
+    .chips("To")
+    .evaluateAll((els) =>
+      els.map((el) => [el.getAttribute("data-chip") ?? "", el.getAttribute("aria-invalid")]),
+    );
+  expect(Object.fromEntries(flagged)).toEqual(
+    Object.fromEntries(ADDRESSES.map((c) => [c.address, c.valid ? null : "true"])),
+  );
+  await subjectAndBody(app, "Table", "Hello");
+
+  // Refused before anything closes, with a toast naming every refused address.
+  await app.settle();
+  await app.press("Meta+Enter");
+  const refused = app.errorToasts.filter({ hasText: "Fix these addresses" });
+  await expect(refused).toBeVisible();
+  const named = await refused.innerText();
+  expect(ADDRESSES.filter((c) => !c.valid && !named.includes(c.address))).toEqual([]);
+  await expect(app.editor).toBeVisible();
+  await app.advance(10_000);
+  await app.settle();
+  await expect(app.toast("Sending…")).toHaveCount(0);
+  expect(await gmail.requests("drafts.send")).toEqual([]);
 });
