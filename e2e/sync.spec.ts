@@ -1,4 +1,4 @@
-// Sync (COVERAGE 5.19, SPEC §Sync): the connect sync, catching up after the
+// Sync (SPEC §Sync): the connect sync, catching up after the
 // app was closed, polls on app time and on focus, the full resync after
 // history expires, and refreshing sendAs and labels on focus.
 import type { App } from "./app.ts";

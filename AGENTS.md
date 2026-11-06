@@ -218,8 +218,8 @@ its id. A new user-visible behavior adds a case and a test. Plan along these axe
   the race.
 - Unit tests only for complex pure logic the end-to-end suite can't reach (parsers,
   schedulers, rule engines).
-- The gate checks the test plan against the suite: counts match, every case has a
-  test, every test id is a case.
+- The gate checks the test plan against the suite: every case has a test, and
+  every test id is a case.
 
 ## Review and QA
 
@@ -269,11 +269,11 @@ The only section that changes from project to project.
     fixture), `ub-fake-gmail`.
   - `src`: the UI: `store/` (mirror and chrome state), `keyboard/`, `ui/`,
     `compose/`, `ipc/`; `src/theme.css` holds the design tokens.
-- **Tests.** [e2e/COVERAGE.md](e2e/COVERAGE.md) is the test plan; section 9 lists the
-  allowed unit tests. `e2e/plan.spec.ts` checks it (on a count mismatch, copy the
-  values it prints into the section 4 table) and `e2e/tokens.spec.ts` checks the
-  tokens. Harness: `e2e/app.ts`, `e2e/control.ts` (faults, held replies),
-  `e2e/seeds.ts`. `app.advance()` moves time; `app.settle()` waits for idle.
+- **Tests.** [e2e/COVERAGE.md](e2e/COVERAGE.md) is the test plan, one line per case;
+  its "Kept unit and property tests" list holds the allowed unit tests.
+  `e2e/plan.spec.ts` checks it and `e2e/tokens.spec.ts` checks the tokens.
+  Harness: `e2e/app.ts`, `e2e/control.ts` (faults, held replies), `e2e/seeds.ts`.
+  `app.advance()` moves time; `app.settle()` waits for idle.
 - **Releases.** `.github/workflows/release.yml` keeps a "release X.Y.Z" pull request
   open on `main`; merging it builds the universal `.dmg` and publishes the release.
   Only the user merges it. The build reads the OAuth client from the

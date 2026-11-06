@@ -1,52 +1,52 @@
-// Checks COVERAGE.md against itself and the specs: the counts table matches
-// the case headings, every case has a test in its file, every test id is a
-// case, and the traceability tables name only real cases. Runs in Node; no app.
-import { readdirSync, readFileSync } from "node:fs";
+// Checks COVERAGE.md against SPEC.md and the specs: every case line parses,
+// ids are unique and sit in their file's group, every § is a SPEC heading,
+// every case has a test in its file, every test id is a case, and the lists
+// of what is covered elsewhere name only real cases and files. Runs in Node;
+// no app.
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { expect, test } from "@playwright/test";
 
 const DIR = import.meta.dirname;
 const plan = readFileSync(path.join(DIR, "COVERAGE.md"), "utf8").split("\n");
+const spec = readFileSync(path.join(DIR, "..", "SPEC.md"), "utf8").split("\n");
 
-/** Lines from the `## N.` heading up to the next `## ` heading. */
-function section(n: number): string[] {
-  const start = plan.findIndex((l) => l.startsWith(`## ${n}. `));
-  expect(start, `COVERAGE.md has a section ${n}`).toBeGreaterThan(-1);
+/** SPEC.md's headings, without their `#`s. */
+const headings = new Set(spec.flatMap((l) => /^#{2,4} (.+)$/.exec(l)?.[1]?.trim() ?? []));
+
+/** Lines under the `## title` heading, up to the next `## ` heading. */
+function section(title: string): string[] {
+  const start = plan.indexOf(`## ${title}`);
+  expect(start, `COVERAGE.md has a "## ${title}" section`).toBeGreaterThan(-1);
   const end = plan.findIndex((l, i) => i > start && l.startsWith("## "));
   return plan.slice(start + 1, end === -1 ? undefined : end);
 }
 
-type Case = { id: string; priority: string; file: string };
+type Case = { id: string; file: string; sections: string[] };
 
-/** Section 5: `### 5.N `file` (PREFIX)` groups `#### ID · Pn · title` cases. */
+/** `### file.spec.ts (PREFIX)` groups `- ID · Pn · title · §Section, …` lines. */
 function cases(): Case[] {
   const out: Case[] = [];
   let file = "";
   let prefix = "";
-  for (const line of section(5)) {
-    const group = /^### 5\.\d+ `([\w.-]+)` \((\w+)\)/.exec(line);
+  for (const line of section("Cases")) {
+    if (line.trim() === "") continue;
+    const group = /^### ([\w.-]+\.spec\.ts) \(([A-Z]+)\)$/.exec(line);
     if (group) {
       file = group[1] ?? "";
       prefix = group[2] ?? "";
       continue;
     }
-    if (!line.startsWith("#### ")) continue;
-    const m = /^#### ([A-Z]+)-(\d+) · (P[123]) · \S/.exec(line);
-    expect(m, `case heading is "#### ID · Pn · title": ${line}`).not.toBeNull();
+    const m = /^- ([A-Z]+)-(\d+) · (P[123]) · (\S.*?) · (§.+)$/.exec(line);
+    expect(m, `a case line is "- ID · Pn · title · §Section, …": ${line}`).not.toBeNull();
     if (!m) continue;
+    expect(file, `${m[1]}-${m[2]} sits under a "### file (PREFIX)" group`).not.toBe("");
     expect(m[1], `${m[1]}-${m[2]} sits under the ${prefix} group`).toBe(prefix);
-    out.push({ id: `${m[1]}-${m[2]}`, priority: m[3] ?? "", file });
+    const sections = (m[5] ?? "").split(/, (?=§)/).map((s) => s.slice(1));
+    out.push({ id: `${m[1]}-${m[2]}`, file, sections });
   }
   return out;
-}
-
-/** Table cells of a markdown row, trimmed, without bold markers. */
-function cells(row: string): string[] {
-  return row
-    .split("|")
-    .slice(1, -1)
-    .map((c) => c.trim().replaceAll("**", ""));
 }
 
 /** Test ids per spec file, from `test("ID …"` titles (describe blocks excluded). */
@@ -63,27 +63,17 @@ function testIds(): Map<string, Set<string>> {
   return out;
 }
 
-test("the counts table matches the case headings", () => {
-  // [cases, P1, P2, P3] per file, and the total.
-  const counted: Record<string, number[]> = { Total: [0, 0, 0, 0] };
-  for (const c of cases()) {
-    counted[c.file] ??= [0, 0, 0, 0];
-    for (const row of [counted[c.file], counted["Total"]]) {
-      for (const i of [0, Number(c.priority.slice(1))]) {
-        if (row) row[i] = (row[i] ?? 0) + 1;
-      }
-    }
-  }
-
-  const table: Record<string, number[]> = {};
-  for (const line of section(4)) {
-    const c = cells(line);
-    const name = c[0]?.replaceAll("`", "");
-    if (!name || !(name.endsWith(".spec.ts") || name === "Total")) continue;
-    table[name] = c.slice(5, 9).map(Number);
-  }
-  // [cases, P1, P2, P3] per file. On a mismatch, copy the counted values.
-  expect(table).toEqual(counted);
+test("every case line parses, has a unique id, and names SPEC headings", () => {
+  const all = cases();
+  expect(all.length).toBeGreaterThan(0);
+  const counts = new Map<string, number>();
+  for (const c of all) counts.set(c.id, (counts.get(c.id) ?? 0) + 1);
+  const repeated = [...counts].filter(([, n]) => n > 1).map(([id]) => id);
+  expect(repeated, "ids used twice").toEqual([]);
+  const unknown = all.flatMap((c) =>
+    c.sections.filter((s) => !headings.has(s)).map((s) => `${c.id} §${s}`),
+  );
+  expect(unknown, "sections that are not SPEC.md headings").toEqual([]);
 });
 
 test("every case has a test in its file, and every test id is a case", () => {
@@ -99,11 +89,36 @@ test("every case has a test in its file, and every test id is a case", () => {
   expect(stray, "tests whose id is not a case in their file").toEqual([]);
 });
 
-test("the traceability tables name only real cases", () => {
-  const known = new Set(cases().map((c) => c.id));
-  const named = [...section(6), ...section(7)].flatMap((l) =>
-    l.startsWith("|") ? [...l.matchAll(/\b([A-Z]{2,4}-\d+)\b/g)].map((m) => m[1] ?? "") : [],
+test("the lists of what is covered elsewhere name only real cases, files, and headings", () => {
+  const all = cases();
+  const known = new Set(all.map((c) => c.id));
+  const prefixes = [...new Set(all.map((c) => c.id.split("-")[0]))].join("|");
+  const lines = [
+    ...section("Not covered end-to-end, and why"),
+    ...section("Kept unit and property tests"),
+  ];
+  const ids = lines.flatMap((l) =>
+    [...l.matchAll(new RegExp(`\\b((?:${prefixes})-\\d+)\\b`, "g"))].map((m) => m[1] ?? ""),
   );
-  expect(named.length).toBeGreaterThan(0);
-  expect(named.filter((id) => !known.has(id))).toEqual([]);
+  expect(ids.length).toBeGreaterThan(0);
+  expect(
+    ids.filter((id) => !known.has(id)),
+    "case ids that are not cases",
+  ).toEqual([]);
+
+  const files = lines.flatMap((l) => [...l.matchAll(/`([\w./-]+\.rs)`/g)].map((m) => m[1] ?? ""));
+  expect(files.length).toBeGreaterThan(0);
+  const tauri = path.join(DIR, "..", "src-tauri");
+  expect(
+    files.filter((f) => !existsSync(path.join(tauri, f))),
+    "files that are not under src-tauri/",
+  ).toEqual([]);
+
+  const named = lines.flatMap((l) =>
+    [...l.matchAll(/§([A-Za-z][A-Za-z -]*[a-z])/g)].map((m) => m[1] ?? ""),
+  );
+  expect(
+    named.filter((s) => !headings.has(s)),
+    "sections that are not SPEC.md headings",
+  ).toEqual([]);
 });

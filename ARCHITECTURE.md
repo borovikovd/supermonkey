@@ -194,7 +194,7 @@ Every task, timer, kick, and queued job counts in one `Activity`, so the E2E ser
 ## 10. Testing
 
 - **E2E** (unchanged) is the main judge, through `testkit`'s `e2e-server`.
-- **Pure unit tests**, ported from the old code with the same cases (COVERAGE section 9):
+- **Pure unit tests**, ported from the old code with the same cases (the kept unit tests in e2e/COVERAGE.md):
   - `domain`: query language, splits, snooze;
   - `mime`: sanitize, no-panic fuzz, unsubscribe header;
   - `gmail`: scheduler, OAuth.

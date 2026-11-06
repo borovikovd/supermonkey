@@ -1,4 +1,4 @@
-// The conversation view (COVERAGE 5.4, SPEC Reading): expansion, folds,
+// The conversation view (SPEC Reading): expansion, folds,
 // scroll, selection, quotes, read on open, arrivals, and links.
 import type { App } from "./app.ts";
 import { expect, test } from "./fixtures.ts";
@@ -655,6 +655,7 @@ test.describe("conversation", () => {
     await expect(text).toHaveCSS("color", "rgb(60, 64, 67)");
   });
 
+  // In one batch the writer kept the first of two equal body-read effects, so the reopened conversation read nothing.
   test("CONV-20 a conversation opened, closed, and opened again in one batch still reads its body", async ({
     app,
     gmail,
@@ -709,6 +710,7 @@ test.describe("conversation", () => {
   });
 });
 
+// The message used to show only a faint "Downloading message…" line, which read as an empty email.
 test("CONV-21 a message still downloading shows its snippet and a loading bar, then its body", async ({
   app,
   gmail,
@@ -739,6 +741,7 @@ test("CONV-21 a message still downloading shows its snippet and a loading bar, t
   await expect(loading).toHaveCount(0);
 });
 
+// UTF-8 bytes decoded as the declared KOI8-R showed as box-drawing characters ("п■п╬п╠").
 test("CONV-22 a message labelled with a legacy charset but served as UTF-8 reads correctly", async ({
   app,
   gmail,

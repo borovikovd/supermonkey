@@ -1,5 +1,5 @@
 // The latest-message rule, view membership by message labels, Done, Drafts,
-// and Label / Trash / Spam views that also list from Gmail (COVERAGE 5.3).
+// and Label / Trash / Spam views that also list from Gmail.
 import type { App } from "./app.ts";
 import type { Delivery } from "./control.ts";
 import { expect, test } from "./fixtures.ts";

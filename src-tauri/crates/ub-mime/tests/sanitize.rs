@@ -1,4 +1,4 @@
-//! The sanitizer against hostile HTML (COVERAGE section 9).
+//! The sanitizer against hostile HTML (e2e/COVERAGE.md, kept unit tests).
 
 use ub_mime::{CidImages, html_to_text, sanitize_html};
 

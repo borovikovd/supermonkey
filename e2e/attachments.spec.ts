@@ -1,4 +1,4 @@
-// Attachments (COVERAGE 5.14, SPEC Reading, Drafts, Addressing, Send and undo):
+// Attachments (SPEC Reading, Drafts, Addressing, Send and undo):
 // attach and send, download on demand, offline forwards, the MIME tree.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";

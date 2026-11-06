@@ -1,4 +1,4 @@
-// Triage actions (COVERAGE 5.5, TRI): archive, return to inbox, trash, spam,
+// Triage actions (TRI): archive, return to inbox, trash, spam,
 // star, read, selection, the removal table, and the ids an action records.
 import type { Route } from "@playwright/test";
 
@@ -18,7 +18,7 @@ function threadMessages(state: GmailState, threadId: string) {
 }
 
 /**
- * Whether Gmail puts the thread in a label's view (COVERAGE 1): TRASH and SPAM
+ * Whether Gmail puts the thread in a label's view (SPEC Views): TRASH and SPAM
  * on any message; anything else on a message outside trash and spam.
  */
 function threadHas(state: GmailState, threadId: string, label: string): boolean {

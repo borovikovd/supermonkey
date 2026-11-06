@@ -1,5 +1,5 @@
-//! The crate's tests that the end-to-end suite can't observe (COVERAGE
-//! section 9): scheduling, OAuth, and how calls classify, against the fake.
+//! The crate's tests that the end-to-end suite can't observe (e2e/COVERAGE.md,
+//! kept unit tests): scheduling, OAuth, and how calls classify, against the fake.
 
 #![expect(
     clippy::unwrap_used,

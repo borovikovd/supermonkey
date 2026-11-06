@@ -1,5 +1,5 @@
 // The command palette: open, filter, run, close, and each command doing what
-// its key does (COVERAGE 5.22).
+// its key does.
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";

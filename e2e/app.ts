@@ -43,6 +43,18 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** The Mac's poll interval: after a sleep, the poll timer notices the gap. */
 const POLL_MS = 45_000;
 
+/**
+ * How a case asserts:
+ * - What the user sees first; then `settle()` and read Gmail with
+ *   `gmail.gmail(email)`.
+ * - "Before Gmail answers": park the request with `gmail.hold`, assert, then
+ *   release it. Never sleep.
+ * - Time moves only through `advance`; nothing waits on the wall clock.
+ * - A negative assertion (no request, no toast, nothing changed) needs
+ *   `settle()` first, or it passes vacuously.
+ * - A label is on a thread in Gmail when a message outside trash and spam
+ *   carries it (SPEC Views).
+ */
 export class App {
   readonly page: Page;
   readonly gmail: Control;
@@ -104,7 +116,7 @@ export class App {
     await this.launch();
   }
 
-  /** Reloads the webview against the live core (H16). */
+  /** Reloads the webview against the live core. */
   async reload(): Promise<void> {
     await this.page.reload();
     await this.ready();
@@ -208,7 +220,8 @@ export class App {
    * `stepwise`, timers fire one by one at their own times and the core settles
    * between them, so a back-off runs every retry it would in that time.
    * Settles first, so what the user did so far happens before time moves;
-   * returns once the core has settled again.
+   * returns once the core has settled again. A Gmail search, for one, runs
+   * only after `advance(300)` (SPEC Search).
    */
   async advance(ms: number, opts: { stepwise?: boolean } = {}): Promise<void> {
     await this.settle();
@@ -264,7 +277,11 @@ export class App {
   /**
    * Parks the page's `/invoke/<cmd>` requests whose JSON body passes `which`
    * (all by default) until the returned release, which sends them on in
-   * order and lets later ones through.
+   * order and lets later ones through. `settle()` waits on a parked invoke,
+   * so release first. To keep page timers (the autosave, prefetch) from
+   * firing meanwhile, `page.clock.pauseAt(await app.now())`; before
+   * `settle()`, which needs animation frames, `page.clock.resume()` and
+   * `page.clock.setFixedTime(await app.now())`.
    */
   async park(
     cmd: string,
@@ -316,7 +333,7 @@ export class App {
   }
 
   /**
-   * Starts recording every list row added to the DOM (H23). `added()` returns
+   * Starts recording every list row added to the DOM. `added()` returns
    * their keys (`data-row`) in order; see `rowKey`.
    */
   async watchRows(): Promise<{ added: () => Promise<string[]> }> {

@@ -1,6 +1,9 @@
-// Seed scenarios (e2e/COVERAGE.md, section 2). Each builds fake-Gmail state
-// through the control API, then opens the app and waits for the connect sync
-// to settle. Each returns handles: threads by key, label ids, and drafts.
+// Seed scenarios. Each builds fake-Gmail state through the control API, then
+// opens the app and waits for the connect sync to settle (`{ open: false }`
+// to add state first and call `app.open()` yourself). Each returns handles:
+// threads by key, label ids, and drafts; lookups throw on an unknown key.
+// Unless a thread says otherwise, Inbox mail is CATEGORY_PERSONAL from the
+// last few days, dated relative to ANCHOR.
 //
 //   const s = await seeds.standard(gmail, app);
 //   await app.row(s.thread("p1").subject).click();
@@ -242,7 +245,21 @@ function signedIn(opts: SeedOptions, id: Identity, byDefault: Identity[]): boole
 
 // ------------------------------------------------------------------ standard
 
-/** Queues A's Inbox (COVERAGE `standard`). Rows from newest: p1…p6, plan, … trashedLatest. */
+/**
+ * Queues A's Inbox. Rows from newest: p1…p6, plan, … trashedLatest.
+ *
+ * Important: p1…p6 (one message each; p1, p3, p5 unread; p3 mentions
+ * "quokka"), plan (12 messages, m10–m12 unread, two of A's own replies),
+ * fold (11 messages, only m5 unread), addr (To A and Dave, Cc Erin), replyto
+ * (a Reply-To), alias (to A's alias), own and ownAlias (A sent the latest
+ * message, so rules read Kim's), fwd (a `gmail_quote`, an inline `cid:`
+ * image, and contract.pdf), links (links, remote and `data:` images), and
+ * trashedLatest (its newer message is in Trash).
+ *
+ * Other: news1…news3 (list mail sent to the list, not to A; news2 is
+ * CATEGORY_PERSONAL, so the list header beats the category), promo, social,
+ * forum, and receipt (Promotions and the Receipts label).
+ */
 function queueInbox(b: Builder): void {
   for (const [i, from] of PERSONS.entries()) {
     const n = i + 1;
@@ -463,7 +480,13 @@ function queueInbox(b: Builder): void {
   );
 }
 
-/** Queues A's mail outside Inbox. */
+/**
+ * Queues A's mail outside Inbox. The connect sync fetches starredOld
+ * (starred) and sent10 and sent89 (inside its 90 days of Sent); sent91,
+ * archivedOld (never seen in Inbox), projOld1…3, trashOld, spamOld, and
+ * invoiceOld (400 days old) wait for a view that lists from Gmail, a search,
+ * or an open.
+ */
 function queueArchive(b: Builder): void {
   const old = (
     key: string,
@@ -522,7 +545,11 @@ function queueArchive(b: Builder): void {
   );
 }
 
-/** Queues B's and C's mail. */
+/**
+ * Queues B's and C's mail: B's b1 and b2 unread, b4 labeled Family; C's
+ * c1…c3 unread. C is only in Gmail unless `connect` names it (for Add
+ * account).
+ */
 function queueOthers(b: Builder): void {
   const bMail: [string, string, boolean, number, string[]][] = [
     ["b1", "Bea Blue <bea@blue.test>", true, 15, []],
@@ -554,7 +581,7 @@ function queueOthers(b: Builder): void {
   }
 }
 
-/** A's, B's, and C's mail (COVERAGE `standard`), without opening the app. */
+/** A's, B's, and C's mail (`standard`), without opening the app. */
 async function standardMail(b: Builder, opts: SeedOptions, byDefault: Identity[]): Promise<void> {
   await b.identity("A", signedIn(opts, "A", byDefault));
   await b.identity("B", signedIn(opts, "B", byDefault));
@@ -601,14 +628,20 @@ export async function empty(gmail: Control, app: App, opts: SeedOptions = {}): P
   return finish(b, app, opts);
 }
 
-/** A and B signed in; C only in Gmail (COVERAGE `standard`). */
+/** A and B signed in; C only in Gmail. No drafts. */
 export async function standard(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await standardMail(b, opts, ["A", "B"]);
   return finish(b, app, opts);
 }
 
-/** `standard`, plus Gmail-made drafts on A. */
+/**
+ * `standard`, plus Gmail-made drafts on A: dNew (alone in its thread, no
+ * `In-Reply-To`), dFwd ("Fwd: Contract" in fwd's thread), dLatest (a reply
+ * to p4's latest, with a `gmail_quote` and spec.pdf), dEarly (aimed at plan's
+ * m3), dUnknown (an `In-Reply-To` that matches nothing), and dTwoA and dTwoB
+ * (both aimed at p2's latest; dTwoB is newer).
+ */
 export async function drafts(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await standardMail(b, opts, ["A", "B"]);
@@ -687,7 +720,14 @@ export async function drafts(gmail: Control, app: App, opts: SeedOptions = {}): 
   return finish(b, app, opts);
 }
 
-/** A signed in, with mail built to exercise autocomplete (COVERAGE `contacts`). */
+/**
+ * A signed in, with mail built to exercise autocomplete. Every name starts
+ * with S, so one query reaches every tier: Sam (sent to five times), Sara
+ * (sent to 200 days ago, so only after the contacts backfill), Sue (received
+ * from), and Sid (a co-recipient on Cc). Never suggested: Sly (only on list
+ * mail), the noreply and no-reply senders, Spam Sam (only in Spam), Sy Draft
+ * (only in a draft), and A's own alias.
+ */
 export async function contacts(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await b.identity("A", signedIn(opts, "A", ["A"]));

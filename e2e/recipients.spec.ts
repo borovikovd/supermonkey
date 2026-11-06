@@ -1,5 +1,5 @@
 // Recipient chips, autocomplete and its ranking, invalid addresses, and Cc/Bcc
-// (COVERAGE 5.13; SPEC Recipients and autocomplete, Keyboard).
+// (SPEC Recipients and autocomplete, Keyboard).
 import ADDRESSES from "../src-tauri/crates/ub-mime/tests/fixtures/email-addresses.json" with { type: "json" };
 import type { App } from "./app.ts";
 import type { Control, GmailMessage } from "./control.ts";

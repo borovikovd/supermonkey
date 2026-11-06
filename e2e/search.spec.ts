@@ -1,4 +1,4 @@
-// Search (COVERAGE 5.8, SPEC §Search): local results at once, the Gmail
+// Search (SPEC §Search): local results at once, the Gmail
 // merge, the 300 ms debounce, offline search, the query language, actions on
 // results, and paging.
 import type { App } from "./app.ts";
@@ -421,6 +421,7 @@ test("SRC-09 search takes the header as in Superhuman, marks matches, and lists 
   await expect(app.splitTitles().first()).toBeVisible();
 });
 
+// A listing run on the account worker's tasks died with it, leaving "Searching Gmail…" up forever.
 test("SRC-10 a Gmail search stops searching when its account signs in again under it", async ({
   app,
   gmail,
@@ -457,6 +458,7 @@ test("SRC-10 a Gmail search stops searching when its account signs in again unde
   await expect(app.page.getByText("Nothing here.")).toBeVisible();
 });
 
+// Local search matched everything on an operator it didn't know, so `in:sent venue` listed incoming mail.
 test("SRC-11 local search applies Gmail's operators before Gmail answers", async ({
   app,
   gmail,

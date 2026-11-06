@@ -1,4 +1,4 @@
-// Undo (COVERAGE 5.6, UND): the `z` stack, partial revert, entries that are
+// Undo (UND): the `z` stack, partial revert, entries that are
 // not made, per-account history, persistence, and the 50-entry cap.
 import type { Route } from "@playwright/test";
 
@@ -11,7 +11,7 @@ import { A, B, type Seeded } from "./seeds.ts";
 // ------------------------------------------------------------------ helpers
 
 /**
- * Whether Gmail puts the thread in a label's view (COVERAGE 1): TRASH and SPAM
+ * Whether Gmail puts the thread in a label's view (SPEC Views): TRASH and SPAM
  * on any message; anything else on a message outside trash and spam.
  */
 function threadHas(state: GmailState, threadId: string, label: string): boolean {

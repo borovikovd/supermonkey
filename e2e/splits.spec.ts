@@ -1,4 +1,4 @@
-// Split Inbox (COVERAGE 5.9, SPEC §Split Inbox): routing, Tab between
+// Split Inbox (SPEC §Split Inbox): routing, Tab between
 // splits, pins, your own reply, custom splits, starters, hiding, and the
 // count cap. Rules and pins read the latest message from someone else.
 import type { Locator } from "@playwright/test";
@@ -196,8 +196,8 @@ test("SPL-01 default routing to Important and Other, with counts in the header",
 
 test("SPL-02 Tab and Shift+Tab move between visible splits", async ({ app, gmail }) => {
   await seeds.splits(gmail, app);
-  // COVERAGE says `from:carol`, but rules read plan's latest message from
-  // someone else (Dave's m12), so Dave is added to keep two rows in VIP.
+  // Rules read plan's latest message from someone else (Dave's m12), so
+  // Dave is in the rule to keep two rows in VIP.
   await editSplits(app, (sheet) => addSplit(sheet, "VIP", "from:carol OR from:dave"));
   await expectHeader(app, "VIP 2 · Important 16 · Other 7");
   const sections = await app.sections();

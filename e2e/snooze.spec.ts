@@ -1,4 +1,4 @@
-// Snooze (COVERAGE 5.10, SPEC §Snooze): the picker, snoozing, the wake
+// Snooze (SPEC §Snooze): the picker, snoozing, the wake
 // triggers, the clearing rules, the history echo, and undo. The clock starts
 // on Monday 2026-11-02 10:00 in New York.
 import type { App } from "./app.ts";

@@ -1,4 +1,4 @@
-// Labels (COVERAGE 5.7, LAB): `l` add and remove, selections, creating a label
+// Labels (LAB): `l` add and remove, selections, creating a label
 // from the picker (online, offline, and when Gmail already has it), `y`, and
 // labels first seen in history.
 import type { App } from "./app.ts";
@@ -10,7 +10,7 @@ import { A, type Seeded } from "./seeds.ts";
 // ------------------------------------------------------------------ helpers
 
 /**
- * Whether Gmail puts the thread in a label's view (COVERAGE 1): TRASH and SPAM
+ * Whether Gmail puts the thread in a label's view (SPEC Views): TRASH and SPAM
  * on any message; anything else on a message outside trash and spam.
  */
 function threadHas(state: GmailState, threadId: string, label: string): boolean {

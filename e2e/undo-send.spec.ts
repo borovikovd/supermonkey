@@ -1,4 +1,4 @@
-// Send and undo (COVERAGE 5.16, SPEC §Send and undo, §Undo): the outbox
+// Send and undo (SPEC §Send and undo, §Undo): the outbox
 // state machine, held undo, rejection, no clear answer, and restart.
 import type { Locator, Route } from "@playwright/test";
 

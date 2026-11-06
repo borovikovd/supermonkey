@@ -1,4 +1,4 @@
-// Gmail errors (COVERAGE 5.18, SPEC §Gmail errors): each outcome of a Gmail
+// Gmail errors (SPEC §Gmail errors): each outcome of a Gmail
 // call, for mail actions, `drafts.create`, and body fetches. Only a rejection
 // rolls an action back and shows a toast; transient failures retry silently.
 import type { App } from "./app.ts";

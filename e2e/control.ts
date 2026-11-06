@@ -1,5 +1,7 @@
 // A typed client for the E2E server's `/__test` control API
-// (src-tauri/src/engine/testserver.rs).
+// (src-tauri/crates/ub-testkit/src/control). Changes made as another Gmail
+// client don't poll unless asked (`{ poll: true }` or `poll()`); `deliver`
+// polls unless `poll: false`.
 
 export type Attachment = {
   filename: string;
@@ -467,7 +469,11 @@ export class Control {
     return this.call("POST", "/__test/clear-faults");
   }
 
-  /** The network goes away (every Gmail request fails to connect) or comes back. */
+  /**
+   * The network goes away (every Gmail request fails to connect) or comes
+   * back. Coming back retries what is backing off at once, as a network
+   * change would.
+   */
   offline(on: boolean): Promise<null> {
     return this.call("POST", "/__test/offline", { on });
   }

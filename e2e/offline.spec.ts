@@ -1,4 +1,4 @@
-// Offline (COVERAGE 5.17, SPEC §Offline): the cached mailbox stays usable,
+// Offline (SPEC §Offline): the cached mailbox stays usable,
 // actions queue in SQLite and replay in order per account when the network
 // returns, and a rejection during replay rolls back only its own action.
 import type { App } from "./app.ts";
@@ -393,6 +393,7 @@ test("OFF-04 a poll during the replay keeps the queued change on the messages it
   await expect(app.row("Person 1")).toHaveCount(0);
 });
 
+// Re-applying only queued actions let a stale answer undo an action that had left the queue (the snooze-at-launch bug).
 test("OFF-07 a Gmail answer read before an action landed does not undo it", async ({
   app,
   gmail,

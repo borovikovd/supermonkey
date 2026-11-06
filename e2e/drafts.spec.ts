@@ -1,4 +1,4 @@
-// Drafts (COVERAGE 5.15, SPEC §Drafts, §Reading, §UI state): autosave and
+// Drafts (SPEC §Drafts, §Reading, §UI state): autosave and
 // upsert, `Enter` in Drafts, Gmail-side edits and deletes, offline, reload
 // and crash, and the app's own drafts read back.
 import type { App } from "./app.ts";

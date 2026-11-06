@@ -1,5 +1,5 @@
 // Inbox rows, j / k across splits, opening and closing conversations, g jumps
-// and the rail, empty states, and the highlight after a poll (COVERAGE 5.2).
+// and the rail, empty states, and the highlight after a poll.
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
@@ -462,6 +462,7 @@ async function labelsOf(gmail: Control, id: string): Promise<string[]> {
   return (await gmail.gmail(A)).messages.find((m) => m.id === id)?.labels ?? [];
 }
 
+// The highlight stayed on the gone row, so `#` trashed the archived mail the user could not see.
 test("NAV-11 a poll that empties the list clears the highlight, so # acts on the mail that arrives next", async ({
   app,
   gmail,
@@ -488,6 +489,7 @@ test("NAV-11 a poll that empties the list clears the highlight, so # acts on the
   expect(oldLabels).not.toContain("INBOX");
 });
 
+// Where the highlighted row sat was kept once for all accounts, so B's overwrote A's.
 test("NAV-12 a row removed while another account is on screen moves that account's highlight", async ({
   app,
   gmail,

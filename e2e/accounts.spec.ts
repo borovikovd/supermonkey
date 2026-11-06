@@ -1,5 +1,5 @@
 // First run, adding and switching accounts, avatars, removal, Sign in again,
-// and isolation between accounts (COVERAGE 5.1).
+// and isolation between accounts.
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
@@ -8,7 +8,7 @@ import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A, B, C } from "./seeds.ts";
 
-/** A's Inbox in the `standard` mail (COVERAGE §2), sorted. */
+/** A's Inbox in the `standard` seed, sorted. */
 const A_INBOX = [
   "Alias note",
   "Big sale",
@@ -739,6 +739,7 @@ test("ACC-13 adding an account that is already signed in replays its queue once"
   await expect(app.row("Person 1")).toHaveCount(0);
 });
 
+// Accounts signed in before tokens moved from the Keychain to the token file start with none.
 test("ACC-14 an account with no stored token at launch shows Sign in again", async ({
   app,
   gmail,
@@ -770,6 +771,7 @@ test("ACC-14 an account with no stored token at launch shows Sign in again", asy
   expect(await labelsOf(gmail, A, s.latest("p1").id)).not.toContain("INBOX");
 });
 
+// With one account, its avatar did nothing on a click, so it looked broken.
 test("ACC-15 clicking the account on screen opens Settings; another account switches", async ({
   app,
   gmail,
@@ -865,6 +867,7 @@ test("ACC-17 a first sign-in shows the whole Inbox before reading the account's 
   expect(drafts.length).toBeLessThan(DRAFTS / 2);
 });
 
+// The sign-in made a new row for A but started the worker for the removed row's id, so A never synced.
 test("ACC-18 an account removed while its Sign in again waits in the browser comes back and syncs", async ({
   app,
   gmail,

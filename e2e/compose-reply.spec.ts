@@ -1,6 +1,6 @@
 // The inline reply composer: opening it, addressing, quoting, forwarding,
 // which draft each key resumes, and drafts that come from Gmail
-// (COVERAGE 5.11; SPEC Reply composer, Addressing).
+// (SPEC Reply composer, Addressing).
 import type { App } from "./app.ts";
 import type { Control, GmailMessage, Hold } from "./control.ts";
 import { attachment, files } from "./files.ts";
@@ -245,7 +245,7 @@ test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
       subject: "Re: Budget draft",
     },
     { key: "ownAlias", to: ["kim@kite.test"], cc: [], from: A_ALIAS, subject: "Re: Alias note" },
-    // COVERAGE lists no Cc here, but SPEC Addressing puts the message's other To on Cc.
+    // SPEC Addressing puts the message's other To on Cc.
     {
       key: "news1",
       to: ["news@letters.test"],

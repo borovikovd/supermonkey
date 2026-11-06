@@ -1,5 +1,5 @@
 //! Random input built from the characters these parsers care about must never
-//! panic (COVERAGE section 9).
+//! panic (e2e/COVERAGE.md, kept unit tests).
 
 use serde_json::json;
 use ub_mime::{

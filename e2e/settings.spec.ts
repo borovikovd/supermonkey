@@ -1,4 +1,4 @@
-// The Settings sheet and the remote images setting (COVERAGE 5.21).
+// The Settings sheet and the remote images setting.
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
@@ -190,6 +190,7 @@ function contrast(a: string, b: string): number {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
 
+// A color and a text size were both named `hint`; the color won, so hints were 13px and chip keys near-white.
 test("SET-03 hint text is 11px and the shortcut chips are readable", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   const hintBar = app.page.getByText("E to Mark Done").locator("..");
@@ -245,6 +246,7 @@ test("SET-04 shortcut sheet rows never overlap, even when a description wraps", 
   expect(overlaps).toEqual([]);
 });
 
+// The message frame blocked only images, so a web font still told the sender, and the quote frame blocked nothing.
 test("SET-05 with remote images off, nothing remote loads in a message or a reply's quote", async ({
   app,
   gmail,

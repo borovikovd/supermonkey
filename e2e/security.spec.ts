@@ -1,4 +1,4 @@
-// Security (COVERAGE 5.23, SPEC Reading and Security): hostile HTML, markup in
+// Security (SPEC Reading and Security): hostile HTML, markup in
 // metadata, links, and no Gmail credentials in the webview.
 import type { Dialog } from "@playwright/test";
 
@@ -226,6 +226,7 @@ test.describe("security", () => {
     ).toEqual([]);
   });
 
+  // A cross-site `<img>` sends no `Origin`, and opening `/events` takes the channel from the page that had it.
   test("SEC-05 another page cannot take the app's channel from the core", async ({
     app,
     gmail,

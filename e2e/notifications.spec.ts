@@ -1,4 +1,4 @@
-// Notifications and the Dock badge (COVERAGE 5.20, SPEC Notifications).
+// Notifications and the Dock badge (SPEC Notifications).
 import type { App } from "./app.ts";
 import type { Control, Delivery } from "./control.ts";
 import { expect, test } from "./fixtures.ts";

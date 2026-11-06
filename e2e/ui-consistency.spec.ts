@@ -1,5 +1,5 @@
 // Rows never flash back during fast triage or a poll, and a reload keeps
-// queued actions and their numbers (COVERAGE 5.24).
+// queued actions and their numbers.
 import type { Route } from "@playwright/test";
 import type { App } from "./app.ts";
 import { expect, test } from "./fixtures.ts";

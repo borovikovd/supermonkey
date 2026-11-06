@@ -1,6 +1,6 @@
 // The `c` screen, formatting and compose shortcuts, the Esc machine, the
 // untouched rule, discard, and what takes a composer off screen
-// (COVERAGE 5.12; SPEC Compose, Keyboard, UI state).
+// (SPEC Compose, Keyboard, UI state).
 import type { App } from "./app.ts";
 import type { Control, GmailMessage } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
@@ -853,7 +853,7 @@ test("NEW-12 opening another composer first closes the current one, as a second 
   expect(await draftRows(app)).toContain("Rail kept");
 
   // c, untouched: the rail click closes it as a second Esc would, so it is
-  // discarded. Not a COVERAGE row; the same rule as the untouched reply above.
+  // discarded. Not a case of its own; the same rule as the untouched reply above.
   const rowsBefore = await draftRows(app);
   await app.compose();
   await rail(app, "Inbox").click();
