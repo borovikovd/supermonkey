@@ -1,17 +1,21 @@
 //! Gmail listings for list subscriptions (SPEC Search, Views): a search's or
 //! a Done, All Mail, label, Trash, or Spam view's `threads.list`, a page at a
 //! time. Each page's hits are stored, then merged into the subscription,
-//! which stops showing `searching` and offers the next page.
+//! which stops showing `searching` and offers the next page. A listing that
+//! can't reach Gmail, opened offline or cut off, waits for it while its
+//! subscription shows the local results, and runs once Gmail answers again.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::future::join_all;
 use ub_domain::{AccountId, GmailThreadId, SubId, ThreadId};
-use ub_gmail::{Format, PageToken, Priority, ThreadQuery};
+use ub_gmail::{Format, Outcome, PageToken, Priority, ThreadQuery};
 use ub_store::Priority as WritePriority;
 
-use super::account::{AccountCtx, LATE, Work, fetch_thread, is_current, needs_bodies};
+use super::account::{
+    AccountCtx, LATE, OFFLINE_RETRY, Work, fetch_thread, is_current, needs_bodies,
+};
 use super::registry::AccountWorkers;
 use super::runs::{Run, Runs};
 use crate::clock::sleep;
@@ -49,14 +53,19 @@ impl Searches {
         };
         let listing = Listing {
             run: self.running.replace(sub.clone()),
-            to_settle: Some((workers.writer().clone(), sub)),
+            to_settle: Some((workers.writer().clone(), sub.clone())),
+        };
+        let progress = Progress {
+            writer: workers.writer().clone(),
+            sub,
+            first: page.is_none(),
         };
         let ctx = Arc::clone(worker.ctx());
         worker.ctx().tasks.spawn("gmail listing", async move {
             let stopped = listing.run.stopped().clone();
             tokio::select! {
                 () = stopped.cancelled() => {}
-                (hits, next) = list_page(&ctx, query, page) => listing.settle(hits, next),
+                (hits, next) = list_page(&ctx, &progress, query, page) => listing.settle(hits, next),
             }
         });
     }
@@ -98,22 +107,71 @@ impl Drop for Listing {
     }
 }
 
+/// Tells a subscription, before its listing settles, whether it is
+/// searching Gmail: not while the listing waits for Gmail, and again once
+/// it asks.
+struct Progress {
+    writer: CoreWriter,
+    sub: SubId,
+    /// It lists the first page, the only one the list shows as searching.
+    first: bool,
+}
+
+impl Progress {
+    fn searching(&self, searching: bool) {
+        if !self.first {
+            return;
+        }
+        let sub = self.sub.clone();
+        self.writer.queue(
+            WritePriority::Sync,
+            "show whether a listing searches Gmail",
+            move |_, state| {
+                state.subs.set_searching(&sub, searching);
+                Ok(())
+            },
+        );
+    }
+}
+
 /// Lists one page, reads the metadata of hits not cached at their history
 /// id, and queues their bodies at priority 5. Returns the hits to merge into
-/// the subscription, and the next page; a failed listing has none.
+/// the subscription, and the next page; a failed listing has none. While
+/// Gmail can't be reached, the listing waits for it (SPEC Search).
 async fn list_page(
     ctx: &AccountCtx,
+    progress: &Progress,
     query: GmailQuery,
     page: Option<PageToken>,
 ) -> (Vec<ThreadId>, Option<PageToken>) {
     if matches!(query, GmailQuery::Search(_)) && page.is_none() {
         sleep(ctx.clock(), TYPING_PAUSE).await;
     }
-    let listed = ctx
-        .gmail
-        .list_threads(Priority::P2, &thread_query(query, page))
-        .await;
-    ctx.note(&listed);
+    let request = thread_query(query, page);
+    let network = &ctx.deps.network;
+    let listed = loop {
+        if !network.is_online() {
+            progress.searching(false);
+            network.until_online(ctx.clock(), OFFLINE_RETRY).await;
+            progress.searching(true);
+        }
+        let listed = ctx.gmail.list_threads(Priority::P2, &request).await;
+        ctx.note(&listed);
+        match listed {
+            Err(e) if *e.outcome() == Outcome::Offline => {
+                tracing::info!(
+                    account = ctx.account.0,
+                    "a Gmail listing can't reach Gmail; it runs when it can"
+                );
+                if network.is_online() {
+                    // Another call reached Gmail meanwhile: try again after
+                    // the usual offline wait, not at once.
+                    network.wait(ctx.clock(), OFFLINE_RETRY).await;
+                }
+            }
+            listed => break listed,
+        }
+    };
     let (threads, next) = match listed {
         Ok(listed) => (listed.threads, listed.next_page_token),
         Err(e) => {

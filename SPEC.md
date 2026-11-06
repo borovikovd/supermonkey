@@ -48,7 +48,7 @@ Views are reached from the keyboard and the command palette. On Inbox, the list 
 
 Each row is one line: the sender, the subject, the snippet, and the time. Unread rows have a dot and a heavier sender. The highlighted row is a light highlight. `j` and `k` move that highlight, and so does moving the mouse onto a row, as in Superhuman, so `e` acts on the row under the pointer. Rows that scroll under a resting pointer do not take the highlight, and a row the mouse highlights is not scrolled into view. There is no separate hover style. In the Inbox they also cross from one split into the next. Split headers are not selectable.
 
-Empty inbox is a quiet inbox-zero state, not a splash: `You're all done.` over `Inbox zero.`. Any other empty view reads `Nothing here.`. Neither shows before the list's first load, or while the list waits on its Gmail listing.
+Empty inbox is a quiet inbox-zero state, not a splash: `You're all done.` over `Inbox zero.`. Any other empty view reads `Nothing here.`. Neither shows before the list's first load, or while the list's Gmail listing is asking Gmail.
 
 ## Look
 
@@ -182,7 +182,7 @@ A thread's views come from its messages' labels. It is in Trash or Spam when any
 | Search | Local matches, then Gmail matches while online |
 | Trash, Spam | Threads in Trash or Spam by the rule above |
 
-Most archived, labeled, trashed, and spam mail is older than the first sync. Opening Done, All Mail, a Label, Trash, or Spam view while online therefore also runs `threads.list` and merges the results the way Search does: Done with `q=-in:inbox -in:draft`, All Mail with `q=-in:draft`, the others with that label's id. Trash and Spam set `includeSpamTrash=true`.
+Most archived, labeled, trashed, and spam mail is older than the first sync. Opening Done, All Mail, a Label, Trash, or Spam view therefore also runs `threads.list` and merges the results the way Search does: Done with `q=-in:inbox -in:draft`, All Mail with `q=-in:draft`, the others with that label's id. Trash and Spam set `includeSpamTrash=true`. Opened offline, the view lists its cached mail, and the listing waits for Gmail as a search's does.
 
 `g` then a letter jumps to a view: `e` done, `a` All Mail, `h` snoozed, `s` starred, `t` sent, `d` drafts, `l` label picker, `#` trash, `!` spam. From any view, `g` then `i` and `g` then `o` open Inbox on the Important and Other splits. The header stays `Inbox`. If that split is hidden because it is empty, the jump shows its header. If Important is turned off, `g` then `i` opens Inbox and does not show that split.
 
@@ -590,7 +590,7 @@ Like Gmail search, local search skips drafts and messages in trash and spam, and
 
 Gmail applies the full query. Any other operator, such as `filename:` or `larger:`, needs data only Gmail has. Local search lists nothing for a query that holds one, rather than ignore the operator and show mail it may not match. Offline it says the search needs Gmail.
 
-While online, the app also runs the query through Gmail `threads.list` and merges anything the local index does not have yet. While nothing is listed and Gmail has not answered, the list shows `Searching Gmail…`. If the listing cannot finish, because Gmail is unreachable or refuses it, or the account signs out or signs in again meanwhile, the search ends with the local results. Gmail gets the query without `is:list`, which it does not know. A hit from that list has only ids. The row appears once a metadata fetch has the sender, subject, snippet, and time. The body fills in after that.
+The app also runs the query through Gmail `threads.list` and merges anything the local index does not have yet. While nothing is listed and Gmail has been asked but has not answered, the list shows `Searching Gmail…`. While Gmail is unreachable, whether the search opened offline or the network went away under it, the listing waits and the list shows the local results. Once a Gmail call reaches Gmail again, the listing runs if its search is still open, and the list shows `Searching Gmail…` again until it answers. A search closed or replaced by a newer query meanwhile never runs. If Gmail refuses the listing, or the account signs out or signs in again meanwhile, the search ends with the local results. Gmail gets the query without `is:list`, which it does not know. A hit from that list has only ids. The row appears once a metadata fetch has the sender, subject, snippet, and time. The body fills in after that.
 
 The Gmail query runs once typing pauses for 300 ms, and a newer query cancels the older one's queued fetches. Gmail search and the `threads.list` of Done, All Mail, Label, Trash, and Spam views ask for 15 threads at a time and fetch the next page when the list nears its oldest Gmail hit, not its end: local matches older than that hit may sit below it, and the next page may hold mail that belongs above them. A page costs about 610 units, so it fits in the quota bucket in Sync. A hit's body is fetched at priority 5, or at once when it is opened. A hit already cached needs no fetch.
 
@@ -598,7 +598,7 @@ Offline, the search field notes that results are from this Mac.
 
 ## Offline
 
-The cached mailbox stays readable with no network: list, thread, search of cached mail, and recipient autocomplete.
+The cached mailbox stays readable with no network: list, thread, search of cached mail, and recipient autocomplete. A search, or a Done, All Mail, Label, Trash, or Spam view, still open when the network returns then runs its Gmail listing, as Search says.
 
 These actions queue and replay in order per account when the network returns: archive, trash, spam, star, read-state, return to inbox, label changes, label create, snooze, unsnooze, draft upsert, and discard. A label created offline gets a local id, and replay maps it to the Gmail id. Sends wait in the outbox instead.
 

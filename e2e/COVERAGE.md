@@ -134,6 +134,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SRC-11 · P1 · Local search applies Gmail's operators before Gmail answers · §Search
 - SRC-12 · P2 · A query local search can't evaluate waits for Gmail; offline it says the search needs Gmail · §Search, §Offline
 - SRC-13 · P2 · The next Gmail page loads near the oldest Gmail hit, not the list's end · §Search, §Views, §Subscriptions
+- SRC-14 · P1 · A search or Gmail-listed view opened offline lists from Gmail when the network returns · §Search, §Views, §Offline
 
 ### splits.spec.ts (SPL)
 
@@ -423,7 +424,3 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 - `crates/ub-bridge/src/web.rs`: the debug web bridge answers only loopback hosts and its own origins (SEC-05).
 - `src/logging.rs`: the stderr logger drops the HTML parser's warnings.
 - `tests/layers.rs`: the crate layering in ARCHITECTURE.md.
-
-## Known gaps
-
-- No case brings the network back under a search or a Gmail-listed view opened offline. The app runs its Gmail listing only when the list opens, so the offline note's "Results show when it can be reached" waits for the list to be opened again.

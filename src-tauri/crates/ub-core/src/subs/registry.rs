@@ -137,6 +137,18 @@ impl Registry {
         self.app_forced = true;
     }
 
+    /// A list subscription's Gmail listing waits for Gmail, or asks it: the
+    /// list shows `searching` only while it asks. A subscription closed
+    /// meanwhile is left alone.
+    pub(crate) fn set_searching(&mut self, id: &SubId, searching: bool) {
+        if let Some(sub) = self.subs.get_mut(id)
+            && sub.searching != searching
+        {
+            sub.searching = searching;
+            sub.forced = true;
+        }
+    }
+
     /// A Gmail listing page for a list subscription finished: its hits join
     /// the ones it holds, it offers `next`, and it stops searching. The
     /// subscription gets a patch with the next commit. A subscription closed

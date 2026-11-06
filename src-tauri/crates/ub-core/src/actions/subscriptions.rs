@@ -57,8 +57,10 @@ pub(super) fn subscribe(
         SubKey::List { .. } | SubKey::Search { .. } | SubKey::App | SubKey::Account { .. } => {}
     }
     let gmail = gmail_query(reads, &key)?;
+    // Offline, the listing waits for Gmail, and the list does not show it
+    // searching meanwhile (SPEC Search).
     let online = ctx.state.online();
-    if online && let Some((account, query)) = &gmail {
+    if let Some((account, query)) = &gmail {
         effects.push(Effect::GmailList {
             sub: sub.clone(),
             account: *account,
@@ -117,7 +119,7 @@ pub(super) fn more_results(ctx: &mut ActionCtx<'_, '_>, sub: &SubId) -> Result<(
     Ok(())
 }
 
-/// The Gmail listing a subscription merges in while online: Search, and the
+/// The Gmail listing a subscription merges in: Search, and the
 /// Done, All Mail, label, Trash, and Spam views (SPEC Views). A label Gmail
 /// has no id for yet has none.
 fn gmail_query(

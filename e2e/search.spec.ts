@@ -584,3 +584,65 @@ test("SRC-12 a query local search can't evaluate waits for Gmail, and offline sa
   await expect(app.row("Contract")).toHaveCount(1);
   await expect(app.page.getByText("This search needs Gmail")).toHaveCount(0);
 });
+
+test("SRC-14 a search or Gmail-listed view opened offline lists from Gmail when the network returns", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const projects = s.label(A, "Projects");
+  /** A's Gmail listings since the mark. */
+  const listings = async (since: number) =>
+    (await gmail.requests())
+      .slice(since)
+      .filter((r) => r.api === "threads.list" && r.account === A);
+  await gmail.offline(true);
+  // The next poll fails, so the app knows it is offline.
+  await app.advance(45_000);
+  const offline = await mark(gmail);
+
+  // A replaced search and a closed one never reach Gmail; the view still
+  // open does, once Gmail can be reached.
+  await search(app, "zebra crossing");
+  await app.advance(300);
+  await search(app, "invoice 2019");
+  await app.advance(300);
+  await app.press("Escape");
+  await app.press("g", "l");
+  await app.type("Projects");
+  await app.press("Enter");
+  await app.settle();
+  await expect(app.row("Project alpha")).toHaveCount(0);
+  await gmail.offline(false);
+  await app.settle();
+  await expect(app.row("Project alpha")).toHaveCount(1);
+  await expect(app.row("Project beta")).toHaveCount(1);
+  const back = await listings(offline);
+  expect(back.filter((r) => r.params.labelIds === projects)).toHaveLength(1);
+  expect(back.flatMap((r) => r.params.q ?? []).filter((q) => /zebra|invoice/.test(q))).toEqual([]);
+
+  // A search open while offline searches Gmail again once it can.
+  await gmail.offline(true);
+  await app.advance(45_000);
+  const offlineAgain = await mark(gmail);
+  await search(app, "invoice 2019");
+  await app.advance(300);
+  await app.settle();
+  await expect(app.rows).toHaveCount(0);
+  await expect(app.page.getByText("Results from this Mac")).toBeVisible();
+  await expect(app.page.getByText("Searching Gmail…")).toHaveCount(0);
+  const listing = await gmail.hold({ api: "threads.list", query: { q: "invoice 2019" } });
+  await gmail.offline(false);
+  await expect
+    .poll(async () => (await gmail.requests("threads.list")).some((r) => r.held))
+    .toBe(true);
+  await expect(app.page.getByText("Searching Gmail…")).toBeVisible();
+  await expect(app.page.getByText("Results from this Mac")).toHaveCount(0);
+  await listing.release();
+  await app.settle();
+  await expect(app.row("Invoice 2019")).toHaveCount(1);
+  await expect(app.page.getByText("Searching Gmail…")).toHaveCount(0);
+  expect((await listings(offlineAgain)).filter((r) => r.params.q === "invoice 2019")).toHaveLength(
+    1,
+  );
+});

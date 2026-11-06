@@ -64,4 +64,14 @@ impl Network {
     pub(crate) async fn wait(&self, clock: &dyn Clock, timeout: Duration) {
         self.back.wait(clock, timeout).await;
     }
+
+    /// Waits until a Gmail call reaches Gmail again, which another task's
+    /// call reports (the poller retries every `retry` while offline).
+    pub(crate) async fn until_online(&self, clock: &dyn Clock, retry: Duration) {
+        while !self.is_online() {
+            self.back
+                .wait_unless(clock, retry, || self.is_online())
+                .await;
+        }
+    }
 }

@@ -57,6 +57,17 @@ impl Signal {
     /// Waits until the signal fires, or for `timeout` of app time on `clock`.
     /// The task is not busy while it waits.
     pub async fn wait(&self, clock: &dyn Clock, timeout: Duration) {
+        self.wait_unless(clock, timeout, || false).await;
+    }
+
+    /// Waits as [`Signal::wait`] does, unless `ready` holds once the wait is
+    /// in place: a firing that makes it hold is never missed in between.
+    pub async fn wait_unless(
+        &self,
+        clock: &dyn Clock,
+        timeout: Duration,
+        ready: impl FnOnce() -> bool,
+    ) {
         let waiter = Arc::new(Waiter::default());
         let id = {
             let mut state = self.state.lock();
@@ -66,6 +77,9 @@ impl Signal {
             id
         };
         let _registered = Registered { signal: self, id };
+        if ready() {
+            return;
+        }
         // Held until the task has resumed, so activity never drops to zero between.
         let _woken = parked(async {
             tokio::select! {
