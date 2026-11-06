@@ -114,7 +114,7 @@ An action handler is a plain function `fn(&mut WriteTx, &Action) -> Result<(), A
 
 ### 5.2 A subscription
 
-`subscribe` is an action, so it is ordered with the others. The writer computes the first load from the committed snapshot and emits it as its own message. The subscription registry lives on the writer thread, so no lock guards it. After each commit, the registry asks which subscriptions the commit's `Changes` can affect, using thread, draft, outbox, account, and label ids, and builds patches only for those. The patch builders are pure functions over read models: old ids plus new ids give moves, and changed rows are listed whether or not they are in the window.
+`subscribe` is an action, so it is ordered with the others. The writer computes the first load from the committed snapshot and emits it as its own message. The subscription registry lives on the writer thread, so no lock guards it. After each commit, the registry asks which subscriptions the commit's `Changes` can affect and builds patches only for those. The store's `Changes` say only what was written: thread, message, draft, and outbox ids, and which tables of which account (`Table`). Core alone maps that to read models (`subs/affects.rs`): each read model lists the tables it reads next to the code that builds it (`APP_READS` and `SUMMARY_READS` in `views/account.rs`, the list and search ones in `subs/lists.rs`), and conversations and composers go by the thread and draft ids. A new summary field or view is a change to core only. The patch builders are pure functions over read models: old ids plus new ids give moves, and changed rows are listed whether or not they are in the window.
 
 ### 5.3 Sync
 
@@ -125,7 +125,7 @@ A worker fetches from Gmail, parses and sanitizes the result off the writer thre
 - **Schema:** one `schema.sql`, created fresh. A `user_version` pragma guards it. An unknown older file is moved aside and a new one created; there is no migration code.
 - **`Writer`:** the actor handle. `call(priority, job) -> impl Future<Output = Result<T, StoreError>>`. Jobs are closures `FnOnce(&mut WriteTx) -> Result<T>`, run in order of priority, then arrival.
 - **`WriteTx`:** wraps the transaction. It is the only way to write, and has no raw `execute`. Repositories hang off it: `tx.threads()`, `tx.messages()`, `tx.drafts()`, `tx.outbox()`, `tx.ops()`, `tx.labels()`, `tx.accounts()`, `tx.splits()`, `tx.contacts()`, `tx.settings()`.
-  - Every write method stamps `rev` and records the id in the transaction's `Changes`. Change tracking is a property of the write, not something callers remember to do.
+  - Every write method stamps `rev` and records in the transaction's `Changes` the rows and the account's tables it wrote, never which read models that makes stale. Change tracking is a property of the write, not something callers remember to do.
   - Writing a message re-derives its thread's labels and stamps the thread, by the domain rule.
   - Effects (`tx.effect(Effect::Ops(account))`) are collected on the transaction and released only after commit.
 - **Reads:** `ReadPool::with(|r: &ReadTx| ..)`. `ReadTx` exposes the same read-only repository methods as `WriteTx`, which returns domain types or read models (`ListRow`-like core types), never `rusqlite::Row`.

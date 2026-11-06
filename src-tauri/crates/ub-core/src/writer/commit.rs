@@ -7,6 +7,7 @@ use ub_store::{Commit, Snapshot};
 
 use super::WriterState;
 use crate::effects::Effect;
+use crate::subs::affects_badge;
 
 /// `on_commit`: builds the commit's updates from its snapshot and sends
 /// them, then releases the job's effects. The commit has landed, so they go
@@ -43,8 +44,7 @@ pub(crate) fn on_commit(state: &mut WriterState, snapshot: &Snapshot<'_>, commit
         });
     }
     state.sent_ack = ack;
-    // Unread counts, accounts, and mutes are what the badge counts.
-    if commit.changes.app || !commit.changes.settings.is_empty() {
+    if affects_badge(&commit.changes) {
         state.effect(Effect::Badge);
     }
 }

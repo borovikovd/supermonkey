@@ -11,9 +11,9 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use ub_domain::{AccountId, ActionNo, DraftId, GmailDraftId, Millis, UnknownKind};
 
-use crate::StoreError;
 use crate::db::{Db, to_json};
 use crate::tx::WriteTx;
+use crate::{StoreError, Table};
 
 /// A queued op's id. Never reused: an op deleted while its runner works on
 /// it must not lend its id to a new op the runner would then delete.
@@ -259,8 +259,7 @@ impl<'c> OpReads<'c> {
     }
 }
 
-/// Writes to the op queue. Each records the account's summary, which counts
-/// queued ops.
+/// Writes to the op queue.
 pub struct OpWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
@@ -283,18 +282,21 @@ impl<'t, 'c> OpWrites<'t, 'c> {
                 ":payload": to_json("payload", op.payload)?, ":created_at": op.created_at,
             },
         )?);
-        self.tx.record().summary(op.account);
+        self.tx.touch(op.account, Table::Ops);
         Ok(id)
     }
 
     /// Replaces an op's payload, as a runner drops ids Gmail no longer has.
     pub fn set_payload<P: Serialize>(&mut self, id: OpId, payload: &P) -> Result<(), StoreError> {
-        self.tx.db().execute(
+        let account: Option<AccountId> = self.tx.db().optional(
             "store an op's payload",
-            "UPDATE ops SET payload = ?2 WHERE id = ?1",
+            "UPDATE ops SET payload = ?2 WHERE id = ?1 RETURNING account_id",
             (id, to_json("payload", payload)?),
+            |r| r.get("account_id"),
         )?;
-        self.tx.stamp();
+        if let Some(account) = account {
+            self.tx.touch(account, Table::Ops);
+        }
         Ok(())
     }
 
@@ -307,7 +309,7 @@ impl<'t, 'c> OpWrites<'t, 'c> {
             |r| r.get("account_id"),
         )?;
         if let Some(account) = account {
-            self.tx.record().summary(account);
+            self.tx.touch(account, Table::Ops);
         }
         Ok(())
     }
@@ -322,7 +324,7 @@ impl<'t, 'c> OpWrites<'t, 'c> {
             |r| r.get("account_id"),
         )?;
         for account in accounts {
-            self.tx.record().summary(account);
+            self.tx.touch(account, Table::Ops);
         }
         Ok(())
     }

@@ -6,9 +6,9 @@ use rusqlite::named_params;
 use ub_domain::contacts::ContactStats;
 use ub_domain::{AccountId, GmailMessageId, Millis};
 
-use crate::StoreError;
 use crate::db::Db;
 use crate::tx::WriteTx;
+use crate::{StoreError, Table};
 
 /// One address seen on one message, with what it adds to the counts.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,8 +160,7 @@ impl<'t, 'c> ContactWrites<'t, 'c> {
                 },
             )?;
         }
-        // Autocomplete is a lookup, not a subscription: nothing to patch.
-        self.tx.stamp();
+        self.tx.touch(account, Table::Contacts);
         Ok(true)
     }
 }

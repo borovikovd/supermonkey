@@ -155,8 +155,9 @@ pub(crate) fn delete_thread_row(
     Ok(())
 }
 
-/// Re-routes every Inbox thread of the account, stamping the ones whose
-/// split moves (SPEC UI state, Ordering).
+/// Re-routes every Inbox thread of the account, stamping and recording the
+/// ones whose split moves (SPEC UI state, Ordering). The caller records what
+/// it changed that made routing change.
 pub(crate) fn reroute_inbox(tx: &mut WriteTx<'_>, account: AccountId) -> Result<(), StoreError> {
     tx.forget_routing(account);
     let placed = tx.read().threads().inbox_splits(account)?;
@@ -176,8 +177,5 @@ pub(crate) fn reroute_inbox(tx: &mut WriteTx<'_>, account: AccountId) -> Result<
             tx.record().thread(account, thread);
         }
     }
-    let changes = tx.record();
-    changes.lists.insert(account);
-    changes.summary(account);
     Ok(())
 }

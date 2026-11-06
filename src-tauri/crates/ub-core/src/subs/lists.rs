@@ -3,10 +3,24 @@
 use chrono::{DateTime, Local};
 use ub_domain::{AccountId, Millis, Query, ThreadId, View};
 use ub_ipc::ListEntry;
-use ub_store::{Reads, StoreError};
+use ub_store::{Reads, StoreError, Table};
 
 /// Rows a list's first load carries, from the top.
 pub(crate) const FIRST_WINDOW: usize = 80;
+
+/// What [`view_ids`] reads of a view's account, besides the Drafts list:
+/// thread rows and their labels, and the split order the Inbox sorts by.
+/// Its changed rows come from the thread ids a commit wrote.
+pub(crate) const VIEW_READS: &[Table] = &[Table::Threads, Table::Splits];
+
+/// What [`view_ids`] reads for the Drafts list: drafts without an outbox
+/// row. Its changed rows come from the draft ids a commit wrote.
+pub(crate) const DRAFTS_READS: &[Table] = &[Table::Drafts, Table::Outbox];
+
+/// What [`search_ids`] reads of its account: thread rows and their messages
+/// (a message write re-derives its thread), the account's addresses for
+/// `from:me`, and the label names `label:` matches.
+pub(crate) const SEARCH_READS: &[Table] = &[Table::Threads, Table::Account, Table::Labels];
 
 /// A view's keys in list order: thread ids with their split, or draft ids
 /// for the Drafts list.

@@ -4,9 +4,10 @@
 //! - [`Writer`] owns the only write connection, on its own thread. Jobs run
 //!   one at a time by [`Priority`], each in its own transaction, through a
 //!   [`WriteTx`]: the only way to write. Every write method stamps the rows
-//!   it changes with the transaction's `rev` and records them in its
-//!   [`Changes`]; after each commit the writer hands a [`Snapshot`] and the
-//!   [`Commit`] to the caller's `on_commit`.
+//!   it changes with the transaction's `rev` and records them, and the
+//!   account's [`Table`]s it wrote, in its [`Changes`]; after each commit the
+//!   writer hands a [`Snapshot`] and the [`Commit`] to the caller's
+//!   `on_commit`, which decides what that makes stale.
 //! - [`ReadPool`] gives read-only connections; [`ReadTx`] reads in one
 //!   snapshot.
 //! - [`Reads`] holds every read, the same on a [`Snapshot`], a [`ReadTx`],
@@ -43,7 +44,7 @@ mod undo;
 mod writer;
 
 pub use accounts::{AccountReads, AccountRecord, AccountWrites};
-pub use changes::{Changes, Commit};
+pub use changes::{Changes, Commit, Table};
 pub use contacts::{ContactReads, ContactRecord, ContactWrites, Sighting};
 pub use drafts::{Draft, DraftAttachment, DraftNeed, DraftReads, DraftRecord, DraftWrites};
 pub use error::StoreError;

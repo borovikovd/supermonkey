@@ -3,9 +3,9 @@
 use rusqlite::{Row, named_params};
 use ub_domain::{AccountId, DraftId, Millis, NoticeId, NoticeKind, ThreadId};
 
-use crate::StoreError;
 use crate::db::Db;
 use crate::tx::WriteTx;
+use crate::{StoreError, Table};
 
 /// A notice to add.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,7 +89,7 @@ impl<'c> NoticeReads<'c> {
     }
 }
 
-/// Writes to notices. Each records the account's summary.
+/// Writes to notices.
 pub struct NoticeWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
@@ -111,7 +111,7 @@ impl<'t, 'c> NoticeWrites<'t, 'c> {
                 ":created_at": notice.created_at,
             },
         )?);
-        self.tx.record().summary(notice.account);
+        self.tx.touch(notice.account, Table::Notices);
         Ok(id)
     }
 
@@ -124,7 +124,7 @@ impl<'t, 'c> NoticeWrites<'t, 'c> {
             |r| r.get("account_id"),
         )?;
         if let Some(account) = account {
-            self.tx.record().summary(account);
+            self.tx.touch(account, Table::Notices);
         }
         Ok(())
     }

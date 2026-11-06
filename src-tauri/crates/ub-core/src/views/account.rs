@@ -5,9 +5,35 @@ use ub_ipc::{
     AccountInfo, AccountSummary, AppState, GlobalSettings, LabelInfo, Notice, PinInfo, SendAs,
     SplitInfo, UndoEntryInfo,
 };
-use ub_store::{AccountRecord, Reads, StoreError};
+use ub_store::{AccountRecord, Reads, StoreError, Table};
 
 use super::outbox_row;
+
+/// What [`app_state`] reads, of every account: the rail's account rows and
+/// their unread Inbox counts (from the threads), each account's mute, and
+/// the global settings ([`AccountId::NONE`]).
+pub(crate) const APP_READS: &[Table] = &[Table::Account, Table::Threads, Table::Settings];
+
+/// What [`account_summary`] reads, of its own account. Keep it in step with
+/// the summary's fields: a table left out leaves the mirror stale.
+pub(crate) const SUMMARY_READS: &[Table] = &[
+    Table::Account,
+    // The unread Inbox count.
+    Table::Threads,
+    // The mute.
+    Table::Settings,
+    Table::Labels,
+    Table::Splits,
+    Table::Pins,
+    Table::Outbox,
+    Table::Undo,
+    Table::Notices,
+    // The queued op count.
+    Table::Ops,
+];
+
+/// What [`badge_count`] reads, of every account.
+pub(crate) const BADGE_READS: &[Table] = &[Table::Account, Table::Threads, Table::Settings];
 
 /// The settings the core reads, and the values they take.
 pub(crate) mod setting {

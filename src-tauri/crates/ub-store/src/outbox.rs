@@ -236,8 +236,8 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
             },
         )?);
         self.changed(new.account, id, [new.thread, None])?;
-        // The draft leaves the Drafts list and its thread's drafts.
-        self.tx.record().draft(new.account, new.draft.clone());
+        // The draft is in the outbox now.
+        self.tx.record().drafts.insert(new.draft.clone());
         Ok(id)
     }
 
@@ -281,10 +281,8 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
             [id],
         )?;
         self.changed(before.outbox.account, id, [before.outbox.thread, None])?;
-        // The draft, if kept, is back in the Drafts list and its thread.
-        self.tx
-            .record()
-            .draft(before.outbox.account, before.outbox.draft);
+        // The draft, if kept, is out of the outbox.
+        self.tx.record().drafts.insert(before.outbox.draft);
         Ok(())
     }
 

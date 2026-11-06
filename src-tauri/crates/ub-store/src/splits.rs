@@ -4,10 +4,10 @@
 use rusqlite::{Row, named_params};
 use ub_domain::{AccountId, Pin, PinKind, Router, Split, SplitId, SplitKind, split_position};
 
-use crate::StoreError;
 use crate::db::Db;
 use crate::routing;
 use crate::tx::WriteTx;
+use crate::{StoreError, Table};
 
 /// One split.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +206,7 @@ impl<'t, 'c> SplitWrites<'t, 'c> {
                 )));
             }
         }
+        self.tx.touch(account, Table::Splits);
         routing::reroute_inbox(self.tx, account)?;
         Ok(ids)
     }
@@ -231,6 +232,7 @@ impl<'t, 'c> SplitWrites<'t, 'c> {
                 ":account": account, ":kind": pin.kind, ":value": pin.value(), ":split": pin.split,
             },
         )?;
+        self.tx.touch(account, Table::Pins);
         routing::reroute_inbox(self.tx, account)?;
         Ok(replaced)
     }
@@ -247,6 +249,7 @@ impl<'t, 'c> SplitWrites<'t, 'c> {
             "DELETE FROM split_overrides WHERE account_id = ?1 AND kind = ?2 AND value = ?3",
             (account, kind, value),
         )?;
+        self.tx.touch(account, Table::Pins);
         routing::reroute_inbox(self.tx, account)
     }
 }

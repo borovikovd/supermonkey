@@ -5,10 +5,10 @@ use std::collections::{BTreeMap, HashMap};
 use rusqlite::{Row, named_params};
 use ub_domain::{AccountId, LabelId, LabelSet};
 
-use crate::StoreError;
 use crate::db::{Db, id_list, json_column};
 use crate::routing;
 use crate::tx::WriteTx;
+use crate::{StoreError, Table};
 
 /// One label.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -243,7 +243,7 @@ impl<'t, 'c> LabelWrites<'t, 'c> {
                 "UPDATE labels SET gmail_id = ?3 WHERE account_id = ?1 AND id = ?2",
                 (account, local, gmail_id),
             )?;
-            self.tx.record().labels(account);
+            self.tx.touch(account, Table::Labels);
             return Ok(local.clone());
         };
         let carrying: Vec<(ub_domain::MessageId, LabelSet)> = self.tx.db().all(
@@ -303,7 +303,7 @@ impl<'t, 'c> LabelWrites<'t, 'c> {
         };
         let before = names(self.tx)?;
         write(self.tx.db())?;
-        self.tx.record().labels(account);
+        self.tx.touch(account, Table::Labels);
         if names(self.tx)? != before {
             routing::reroute_inbox(self.tx, account)?;
         }

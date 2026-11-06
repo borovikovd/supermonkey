@@ -6,9 +6,9 @@ use std::collections::BTreeMap;
 use rusqlite::named_params;
 use ub_domain::AccountId;
 
-use crate::StoreError;
 use crate::db::Db;
 use crate::tx::WriteTx;
+use crate::{StoreError, Table};
 
 /// Reads of settings.
 #[derive(Clone, Copy)]
@@ -61,7 +61,7 @@ impl<'t, 'c> SettingWrites<'t, 'c> {
              ON CONFLICT (account_id, key) DO UPDATE SET value = excluded.value",
             named_params! { ":account": account, ":key": key, ":value": value },
         )?;
-        self.tx.record().setting(account);
+        self.tx.touch(account, Table::Settings);
         Ok(())
     }
 
@@ -72,7 +72,7 @@ impl<'t, 'c> SettingWrites<'t, 'c> {
             "DELETE FROM settings WHERE account_id = ?1 AND key = ?2",
             (account, key),
         )?;
-        self.tx.record().setting(account);
+        self.tx.touch(account, Table::Settings);
         Ok(())
     }
 }

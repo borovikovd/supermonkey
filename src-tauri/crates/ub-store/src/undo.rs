@@ -7,9 +7,9 @@ use ub_domain::{
     AccountId, OutboxId, PinKind, SplitId, ThreadChange, ThreadId, UndoEntryId, UndoKind,
 };
 
-use crate::StoreError;
 use crate::db::{Db, json_column, to_json};
 use crate::tx::WriteTx;
+use crate::{StoreError, Table};
 
 /// How many entries each account keeps.
 pub const UNDO_KEPT: u32 = 50;
@@ -142,7 +142,7 @@ impl<'c> UndoReads<'c> {
     }
 }
 
-/// Writes to the undo history. Each records the account's summary.
+/// Writes to the undo history.
 pub struct UndoWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
@@ -177,7 +177,7 @@ impl<'t, 'c> UndoWrites<'t, 'c> {
                (SELECT id FROM undo_entries WHERE account_id = ?1 ORDER BY id DESC LIMIT ?2)",
             (account, UNDO_KEPT),
         )?;
-        self.tx.record().summary(account);
+        self.tx.touch(account, Table::Undo);
         Ok(())
     }
 
@@ -190,7 +190,7 @@ impl<'t, 'c> UndoWrites<'t, 'c> {
             |r| r.get("account_id"),
         )?;
         if let Some(account) = account {
-            self.tx.record().summary(account);
+            self.tx.touch(account, Table::Undo);
         }
         Ok(())
     }
@@ -204,7 +204,7 @@ impl<'t, 'c> UndoWrites<'t, 'c> {
             |r| r.get("account_id"),
         )?;
         for account in accounts {
-            self.tx.record().summary(account);
+            self.tx.touch(account, Table::Undo);
         }
         Ok(())
     }

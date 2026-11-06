@@ -7,10 +7,10 @@ use ub_domain::{
     SplitKind, SyncStatus, SystemLabel, avatar_hue,
 };
 
-use crate::StoreError;
 use crate::db::{Db, json_column, to_json};
 use crate::routing;
 use crate::tx::WriteTx;
+use crate::{StoreError, Table};
 
 /// One account row, with its inbox unread count.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,15 +231,15 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
                 named_params! { ":account": id, ":name": name, ":kind": kind, ":position": position },
             )?;
         }
-        let changes = self.tx.record();
-        changes.account(id);
-        changes.labels(id);
+        for table in [Table::Account, Table::Labels, Table::Splits] {
+            self.tx.touch(id, table);
+        }
         Ok(id)
     }
 
     /// Removes the account and every row of it: mail, drafts, outbox, ops,
-    /// undo history, notices, splits, contacts, and settings. Subscriptions
-    /// to its rows should close; the commit lists only the account.
+    /// undo history, notices, splits, contacts, and settings. The commit
+    /// records every table of the account, but not the ids of its rows.
     pub fn remove(&mut self, id: AccountId) -> Result<(), StoreError> {
         let db = self.tx.db();
         // The index is contentless, so it can't cascade; drop its rows first.
@@ -259,10 +259,9 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
             [id],
         )?;
         self.tx.forget_routing(id);
-        let changes = self.tx.record();
-        changes.account(id);
-        changes.lists.insert(id);
-        changes.draft_lists.insert(id);
+        for table in Table::ALL {
+            self.tx.touch(id, table);
+        }
         Ok(())
     }
 
@@ -282,7 +281,7 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
             "UPDATE accounts SET display_name = :name, send_as = :send_as WHERE id = :id",
             named_params! { ":id": id, ":name": display_name, ":send_as": to_json("send_as", &json)? },
         )?;
-        self.tx.record().account(id);
+        self.tx.touch(id, Table::Account);
         let after = self.tx.read().accounts().identity(id)?;
         if before != after {
             routing::reroute_inbox(self.tx, id)?;
@@ -302,8 +301,7 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
             "UPDATE accounts SET history_id = :history, last_sync = :at WHERE id = :id",
             named_params! { ":id": id, ":history": history_id, ":at": synced_at },
         )?;
-        // Not shown anywhere: a write, but no subscription changes.
-        self.tx.stamp();
+        self.tx.touch(id, Table::SyncCursor);
         Ok(())
     }
 
@@ -314,7 +312,7 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
             "UPDATE accounts SET connected = 1 WHERE id = ?1",
             [id],
         )?;
-        self.tx.stamp();
+        self.tx.touch(id, Table::SyncCursor);
         Ok(())
     }
 
@@ -330,7 +328,7 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
             named_params! { ":id": id, ":status": status },
         )? > 0;
         if changed {
-            self.tx.record().account(id);
+            self.tx.touch(id, Table::Account);
         }
         Ok(changed)
     }
@@ -346,7 +344,7 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
              WHERE id = :id",
             named_params! { ":id": id, ":needs": needs },
         )?;
-        self.tx.record().account(id);
+        self.tx.touch(id, Table::Account);
         Ok(())
     }
 }

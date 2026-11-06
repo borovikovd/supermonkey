@@ -9,13 +9,13 @@ use ub_domain::{
     ThreadId, View,
 };
 
-use crate::StoreError;
 use crate::db::{Db, id_list, json_column};
 use crate::drafts::{DraftReads, DraftRecord};
 use crate::messages::{self, AttachmentRecord, MessageReads, MessageRecord, NewMessage};
 use crate::outbox::{OutboxReads, OutboxRecord};
 use crate::routing;
 use crate::tx::{WriteTx, require};
+use crate::{StoreError, Table};
 
 /// A thread's row: the values its list row shows, derived from its messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -501,13 +501,15 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
         id: ThreadId,
         history_id: HistoryId,
     ) -> Result<(), StoreError> {
-        self.tx.db().execute(
+        let account: Option<AccountId> = self.tx.db().optional(
             "store a thread's history id",
-            "UPDATE threads SET history_id = ?2 WHERE id = ?1",
+            "UPDATE threads SET history_id = ?2 WHERE id = ?1 RETURNING account_id",
             (id, history_id),
+            |r| r.get("account_id"),
         )?;
-        // Not shown anywhere: a write, but no subscription changes.
-        self.tx.stamp();
+        if let Some(account) = account {
+            self.tx.touch(account, Table::SyncCursor);
+        }
         Ok(())
     }
 
@@ -527,12 +529,5 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
             messages::delete_row(self.tx, message)?;
         }
         routing::delete_thread_row(self.tx, account, id)
-    }
-
-    /// Re-routes every Inbox thread of the account. Split, pin, label, and
-    /// address writes do this themselves; this is for a caller that knows
-    /// routing inputs changed some other way.
-    pub fn reroute_inbox(&mut self, account: AccountId) -> Result<(), StoreError> {
-        routing::reroute_inbox(self.tx, account)
     }
 }

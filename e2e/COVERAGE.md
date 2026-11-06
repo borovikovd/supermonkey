@@ -406,7 +406,7 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 - `crates/ub-store/tests/store/ids.rs`: ids are never reused.
 - `crates/ub-store/src/open.rs`: a database of another schema version, or not a database, is moved aside and a fresh one made.
 - `crates/ub-core/src/tests/writer_channel.rs`: proptest that a list built from its first load and patches equals a fresh load at that `rev`; action numbers after a reload, first loads after a failed commit, `ack` never moving back, a panicking commit still going idle, searches and label reads whose commit failed (UIC-01).
-- `crates/ub-core/src/subs/tests.rs`, `crates/ub-core/src/subs/diff.rs`, and `crates/ub-core/src/subs/affects.rs`: first loads and patches, list diffs as moves, and which subscriptions a commit reaches.
+- `crates/ub-core/src/subs/tests.rs`, `crates/ub-core/src/subs/diff.rs`, and `crates/ub-core/src/subs/affects.rs`: first loads and patches, list diffs as moves, which subscriptions a write to each table reaches, and a write to every table patching each subscription whose fresh load it changed.
 - `crates/ub-core/src/tests/clock.rs`: the activity tracking `settle()` relies on, a closed `Kick` waking a loop, and a stopping task group waiting for the groups inside it.
 - `crates/ub-core/src/tests/actions.rs`: a save after its send is dropped, an unparsable split rule is not saved, an action number already applied is dropped silently, a file over the attachment limit is refused.
 - `crates/ub-core/src/tests/badge.rs`: commits during a badge update make one more count, not one each.

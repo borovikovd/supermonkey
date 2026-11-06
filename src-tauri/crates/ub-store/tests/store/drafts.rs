@@ -4,7 +4,9 @@ use ub_domain::{
     AccountId, Addr, DraftContent, DraftId, DraftKind, LabelId, LabelSet, Millis, OutboxState,
     PinKind, Rev, SplitId, ThreadChange, ThreadId, UndoEntryId, UndoKind, View,
 };
-use ub_store::{Draft, DraftAttachment, DraftNeed, NewOutbox, StoreError, UNDO_KEPT, UndoAction};
+use ub_store::{
+    Draft, DraftAttachment, DraftNeed, NewOutbox, StoreError, Table, UNDO_KEPT, UndoAction,
+};
 
 use crate::common::{Harness, fetched, msg};
 
@@ -56,7 +58,7 @@ fn a_draft_round_trips_and_stamps_its_thread() {
     assert_eq!(stored.rev, commit.rev);
     assert!(!stored.in_outbox);
     assert!(commit.changes.drafts.contains(&draft.id));
-    assert!(commit.changes.draft_lists.contains(&account));
+    assert!(commit.changes.touched(account, Table::Drafts));
     assert!(
         commit.changes.threads.contains(&t),
         "a draft change stamps its thread"
@@ -102,7 +104,11 @@ fn a_draft_in_the_outbox_leaves_drafts_and_its_thread() {
     let commit = h.last_commit();
     assert!(commit.changes.outbox.contains(&row));
     assert!(commit.changes.threads.contains(&t));
-    assert!(commit.changes.draft_lists.contains(&account));
+    assert!(commit.changes.touched(account, Table::Outbox));
+    assert!(
+        commit.changes.drafts.contains(&DraftId::from("d-new")),
+        "the draft's outbox row came"
+    );
     assert_eq!(ids(&h), [DraftId::from("d-old")]);
     let conversation = h.read(move |r| r.threads().conversation(t, false)).unwrap();
     assert_eq!(conversation.drafts.len(), 1);
@@ -295,8 +301,8 @@ fn settings_are_global_or_per_account() {
         tx.settings().set(account, "muted", "on")
     });
     let commit = h.last_commit();
-    assert!(commit.changes.app, "a global setting changes the app state");
-    assert!(commit.changes.summaries.contains(&account));
+    assert!(commit.changes.touched(AccountId::NONE, Table::Settings));
+    assert!(commit.changes.touched(account, Table::Settings));
     assert_eq!(
         h.read(|r| r.settings().get(AccountId::NONE, "remote_images"))
             .as_deref(),

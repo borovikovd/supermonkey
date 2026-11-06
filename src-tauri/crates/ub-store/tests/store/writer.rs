@@ -9,7 +9,7 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::thread::Thread;
 
 use ub_domain::{ActionNo, Rev};
-use ub_store::{Pending, Priority, StoreError, WriteTx};
+use ub_store::{Pending, Priority, StoreError, Table, WriteTx};
 
 use crate::common::{Harness, State, fetched, msg};
 
@@ -97,7 +97,7 @@ fn rev_moves_once_per_writing_commit_and_survives_a_restart() {
     let account = h.account("a@example.com");
     let first = h.last_commit();
     assert_eq!(first.rev, Rev(1));
-    assert!(first.changes.accounts.contains(&account));
+    assert!(first.changes.touched(account, Table::Account));
 
     // A job that writes nothing still commits and runs on_commit, at the same rev.
     let commits = h.commits.lock().len();
@@ -140,9 +140,11 @@ fn a_commit_lists_and_stamps_what_it_wrote() {
         stored.added.iter().copied().collect()
     );
     assert_eq!(stored.added.len(), 2);
-    assert!(commit.changes.lists.contains(&account));
-    assert!(commit.changes.summaries.contains(&account));
-    assert!(commit.changes.app);
+    assert_eq!(
+        commit.changes.tables,
+        [(account, Table::Threads)].into(),
+        "a thread's messages are its thread's"
+    );
     let row = h.read(move |r| r.threads().row(thread)).unwrap();
     assert_eq!(row.rev, commit.rev);
     for id in stored.added {
@@ -267,10 +269,14 @@ fn a_failed_savepoint_undoes_only_its_own_writes_and_changes() {
     });
     assert!(failed);
     let commit = h.last_commit();
-    assert_eq!(
-        commit.changes.accounts.iter().copied().collect::<Vec<_>>(),
-        [kept],
-        "the failed step's changes are gone from the commit"
+    assert!(
+        commit
+            .changes
+            .tables
+            .iter()
+            .all(|&(account, _)| account == kept),
+        "the failed step's changes are gone from the commit: {:?}",
+        commit.changes.tables
     );
     assert_eq!(commit.rev, Rev(1), "a fresh database's first write");
     let emails: Vec<String> = h

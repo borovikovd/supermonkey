@@ -26,7 +26,7 @@ use crate::settings::{SettingReads, SettingWrites};
 use crate::splits::{SplitReads, SplitWrites};
 use crate::threads::{ThreadReads, ThreadWrites};
 use crate::undo::{UndoReads, UndoWrites};
-use crate::{Changes, StoreError};
+use crate::{Changes, StoreError, Table};
 
 /// One write transaction on the writer thread. Every write method stamps the
 /// rows it changes with [`WriteTx::rev`] and records them in the
@@ -190,6 +190,11 @@ impl<'c> WriteTx<'c> {
     pub(crate) fn record(&mut self) -> &mut Changes {
         self.wrote = true;
         &mut self.changes
+    }
+
+    /// Records a write to `account`'s `table`.
+    pub(crate) fn touch(&mut self, account: AccountId, table: Table) {
+        self.record().touch(account, table);
     }
 
     pub(crate) fn routing_cache(&mut self) -> &mut HashMap<AccountId, Routing> {
