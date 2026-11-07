@@ -32,8 +32,10 @@ export function moveHighlight(delta: number) {
   const next = Math.min(ids.length - 1, Math.max(0, at + delta));
   const key = ids[next];
   if (key === undefined) return;
+  // `j` on the last conversation and `k` on the first do nothing.
+  if (key === focus) return;
   if (cur.screen.kind === "conversation") {
-    if (key !== focus) openConversation(Number(key));
+    openConversation(Number(key));
     return;
   }
   // Plain j/k replace a selection with the one conversation they move to.

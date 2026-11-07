@@ -880,3 +880,44 @@ test("TRI-16 Shift+E on mail in Trash or Spam reached by search takes it out of 
   }
   await each(cases, ([, row]) => expect(app.row(row)).toHaveCount(1));
 });
+
+test("TRI-17 j on the last conversation and k on the first keep the selection", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const inbox = async () =>
+    new Set(
+      (await gmail.gmail(A)).messages
+        .filter((m) => m.labels.includes("INBOX"))
+        .map((m) => m.threadId),
+    ).size;
+  const before = await inbox();
+  const top = (await app.rows.first().getAttribute("data-row")) ?? "";
+  await expect(app.highlighted).toHaveAttribute("data-row", top);
+
+  // k on the first row, with the whole Important split selected.
+  await app.press("Meta+Shift+A");
+  const important = await app.selected.count();
+  expect(important).toBeGreaterThan(1);
+  await app.press("k");
+  await expect(app.highlighted).toHaveAttribute("data-row", top);
+  await expect(app.selected).toHaveCount(important);
+  await app.press("e");
+  await app.settle();
+  expect(await inbox()).toBe(before - important);
+
+  // j on the last row, with the rest selected.
+  const left = before - important;
+  await app.press(...Array.from({ length: left }, () => "j"));
+  const last = (await app.rows.last().getAttribute("data-row")) ?? "";
+  await expect(app.highlighted).toHaveAttribute("data-row", last);
+  await app.press("Meta+Shift+A");
+  await expect(app.selected).toHaveCount(left);
+  await app.press("j");
+  await expect(app.highlighted).toHaveAttribute("data-row", last);
+  await expect(app.selected).toHaveCount(left);
+  await app.press("e");
+  await app.settle();
+  expect(await inbox()).toBe(0);
+});
