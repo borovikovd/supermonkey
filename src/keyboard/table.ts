@@ -23,6 +23,7 @@ import {
   useComposeState,
   type ComposeState,
 } from "../compose/session";
+import { notSent } from "../compose/sends";
 import { startCompose, startReply } from "../compose/start";
 import { addAccount, act, subIdFor } from "../ipc/bridge";
 import type { View } from "../ipc/types";
@@ -800,7 +801,7 @@ const DEFS = {
     palette: true,
     hint: "to Send",
     when: composing,
-    run: sendOnScreen,
+    run: () => sendOnScreen(notSent),
   },
   attach: {
     label: "Attach a file",

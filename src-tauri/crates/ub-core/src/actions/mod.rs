@@ -21,7 +21,7 @@ mod splits;
 mod subscriptions;
 
 pub(crate) use dispatch::ActionCtx;
-pub(crate) use error::{ActionError, Unsendable};
+pub(crate) use error::{ActionError, NOT_SAVED, Unsendable};
 pub use handle::Actions;
 pub(crate) use handle::Received;
 pub(crate) use mail::{ThreadsChange, change_threads};

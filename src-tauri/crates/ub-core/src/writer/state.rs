@@ -3,8 +3,9 @@
 use std::sync::Arc;
 
 use ub_domain::{ActionNo, Millis};
-use ub_ipc::ChannelMessage;
+use ub_ipc::{ChannelMessage, Rejection};
 
+use crate::actions::NOT_SAVED;
 use crate::activity::{Activity, Busy, Tracked};
 use crate::clock::Clock;
 use crate::effects::{Effect, EffectSender};
@@ -36,6 +37,12 @@ pub(crate) struct WriterState {
     clock: Arc<dyn Clock>,
     /// The `ack` of the last channel message sent.
     pub(crate) sent_ack: ActionNo,
+    /// The running action batch's numbers, applied or refused: if the batch
+    /// rolls back, each one not refused yet is refused then.
+    batch: Vec<ActionNo>,
+    /// Refusals the page has not heard of: they go with the next channel
+    /// message, which is never later than the first whose `ack` covers them.
+    rejected: Vec<Rejection>,
     /// Tests: the next action batch's commit fails.
     #[cfg(test)]
     pub(crate) fail_next_commit: bool,
@@ -66,6 +73,8 @@ impl WriterState {
             sink: None,
             online: true,
             sent_ack: ActionNo(0),
+            batch: Vec::new(),
+            rejected: Vec::new(),
             #[cfg(test)]
             fail_next_commit: false,
         }
@@ -123,9 +132,44 @@ impl WriterState {
         }
     }
 
-    /// Sends channel messages to `sink` from now on.
+    /// Sends channel messages to `sink` from now on. The new page never sent
+    /// the actions refused for the one before.
     pub(crate) fn set_sink(&mut self, sink: Box<dyn FnMut(ChannelMessage) + Send>) {
         self.sink = Some(sink);
+        self.rejected.clear();
+    }
+
+    /// The running batch applies or refuses action `n`.
+    pub(crate) fn note_action(&mut self, n: ActionNo) {
+        self.batch.push(n);
+    }
+
+    /// The running batch refused an action; the page hears why with the
+    /// next channel message.
+    pub(crate) fn refuse(&mut self, rejection: Rejection) {
+        self.rejected.push(rejection);
+    }
+
+    /// The refusals to send with this commit's message, taken.
+    pub(crate) fn take_rejected(&mut self) -> Vec<Rejection> {
+        self.batch.clear();
+        std::mem::take(&mut self.rejected)
+    }
+
+    /// The running job rolled back. If it was an action batch, none of its
+    /// actions was applied: each one not refused already is refused now, and
+    /// the next message says so, before or with the one whose `ack` moves
+    /// past them.
+    fn refuse_batch(&mut self) {
+        for n in std::mem::take(&mut self.batch) {
+            if !self.rejected.iter().any(|r| r.n == n) {
+                self.rejected.push(Rejection {
+                    n,
+                    message: NOT_SAVED.to_owned(),
+                    split: None,
+                });
+            }
+        }
     }
 
     /// Runs `undo` if the running job rolls back: it changed something
@@ -161,8 +205,10 @@ impl WriterState {
     }
 
     /// Drops what a rolled-back job recorded, but the work of the
-    /// subscription changes it made, and lets it go idle.
+    /// subscription changes it made and the refusal of its actions, and lets
+    /// it go idle.
     pub(crate) fn discard(&mut self) {
+        self.refuse_batch();
         let effects = std::mem::take(&mut self.effects);
         self.send_effects(
             effects

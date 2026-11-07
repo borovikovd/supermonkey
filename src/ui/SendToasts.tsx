@@ -5,8 +5,7 @@
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
-import { followOutbox, isSendNotice, takeBackDraft, undoSend } from "../compose/sends";
-import { reopenDraft } from "../compose/start";
+import { isSendNotice, notSent, undoSend } from "../compose/sends";
 import { act } from "../ipc/bridge";
 import type { Notice, OutboxRow } from "../ipc/types";
 import { useMirror } from "../store/mirror";
@@ -83,11 +82,7 @@ export function SendToasts() {
         toast.dismiss(`send-${id}`);
       }
     }
-    followOutbox(
-      outbox,
-      notices.map((n) => n.notice),
-    );
-  }, [outbox, notices]);
+  }, [outbox]);
 
   // A rejected send, or a held undo that resolved as not sent, puts the draft
   // back in a composer; while the user types in one, its toast offers it.
@@ -95,16 +90,7 @@ export function SendToasts() {
     for (const { account, notice: n } of notices) {
       if (!isSendNotice(n) || !n.draft || shown.current.has(n.id)) continue;
       shown.current.add(n.id);
-      const { draft, thread } = n;
-      if (n.kind === "sendFailed") toast.error(n.message);
-      if (!takeBackDraft(account, draft, thread)) {
-        // It stays until acted on or closed: the draft is otherwise only in Drafts.
-        toast(n.kind === "sendFailed" ? "Your message was not sent" : "Send undone", {
-          duration: Infinity,
-          closeButton: true,
-          action: { label: "Open draft", onClick: () => reopenDraft(account, draft, thread) },
-        });
-      }
+      notSent(account, n.draft, n.thread, n.kind === "sendFailed" ? n.message : null);
       act({ type: "ackNotice", notice: n.id });
     }
   }, [notices]);

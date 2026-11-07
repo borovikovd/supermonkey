@@ -99,9 +99,6 @@ commands! {
     PerfReport { action: String, ms: f64, budget: f64 } -> ();
     /// The snooze picker's choices for what the user typed.
     SnoozeOptions { text: String } -> Vec<SnoozeChoice>;
-    /// Why the splits sheet can't save this custom split rule, or `None`
-    /// when it can: the check `saveSplits` makes.
-    CheckSplitRule { query: String } -> Option<String>;
 }
 
 impl Command {

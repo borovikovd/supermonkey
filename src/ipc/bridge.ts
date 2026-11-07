@@ -4,7 +4,7 @@
 import { Channel, invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { subForKey } from "../store/mirror-core";
+import { subForKey, type MirrorState } from "../store/mirror-core";
 import { useMirror } from "../store/mirror";
 import type {
   Action,
@@ -14,6 +14,7 @@ import type {
   CommandReply,
   LaunchInfo,
   NumberedAction,
+  Rejection,
   SubKey,
 } from "./types";
 
@@ -139,13 +140,60 @@ export function whenCommitted(timeoutMs: number): Promise<void> {
 /** Web mode: the UI's pending work, and the last channel message it applied. */
 export const pendingWork = () => ({ ...pending, buffered: buffer.length });
 
-/** Sends an action. The mirror applies its effect in the same frame. */
-export function act(action: Action): number {
+/** What Rust did with an action, as the channel message that settles it says. */
+export type Outcome = {
+  /** Why Rust refused it, or null: Rust applied it. */
+  refusal: Rejection | null;
+  /** The mirror just before that message: the state Rust applied the action to. */
+  before: MirrorState;
+};
+
+/** Callers waiting for their action's outcome, by action number. */
+const settling = new Map<number, (outcome: Outcome) => void>();
+
+/** Shows a refusal no caller waits for, with the action when this page sent it. */
+type ShowRefusal = (refusal: Rejection, action: Action | null) => void;
+let showRefusal: ShowRefusal = (r) => console.warn(`action ${r.n} refused: ${r.message}`);
+
+/** Sets how refusals no caller waits for are shown (main.tsx). */
+export function onRefusal(show: ShowRefusal): void {
+  showRefusal = show;
+}
+
+/**
+ * Sends an action. The mirror applies its effect in the same frame. With
+ * `settled`, the caller hears Rust's outcome once a channel message settles
+ * the action, and shows a refusal itself; without, a refusal shows as
+ * `onRefusal` says.
+ */
+export function act(action: Action, settled?: (outcome: Outcome) => void): number {
   const n = nextN++;
+  if (settled) settling.set(n, settled);
   useMirror.getState().pend({ n, action });
   buffer.push({ n, action });
   void flush();
   return n;
+}
+
+/**
+ * Applies a channel message to the mirror, then settles the actions it
+ * decides (SPEC UI state, Actions): those it lists are refused, and the rest
+ * its `ack` covers were applied.
+ */
+function receive(msg: ChannelMessage): void {
+  const before = useMirror.getState();
+  before.receive(msg);
+  for (const refusal of msg.rejected) {
+    const settled = settling.get(refusal.n);
+    settling.delete(refusal.n);
+    if (settled) settled({ refusal, before });
+    else showRefusal(refusal, before.pending.find((p) => p.n === refusal.n)?.action ?? null);
+  }
+  for (const [n, settled] of settling) {
+    if (n > msg.ack) continue;
+    settling.delete(n);
+    settled({ refusal: null, before });
+  }
 }
 
 // ------------------------------------------------------------ subscriptions
@@ -246,7 +294,7 @@ export async function connect(): Promise<LaunchInfo> {
     const channel = new Channel<ChannelMessage>();
     // Tauri's Channel is not an EventTarget; `onmessage` is its only API.
     // oxlint-disable-next-line unicorn/prefer-add-event-listener
-    channel.onmessage = (msg) => useMirror.getState().receive(msg);
+    channel.onmessage = receive;
     // `connect` is Tauri's own command: it takes the channel.
     launch = await tauriInvoke<LaunchInfo>("connect", { channel });
   } else {
@@ -256,7 +304,7 @@ export async function connect(): Promise<LaunchInfo> {
       // Channel messages are serialized by Rust from the ts-rs types.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion
       const msg = JSON.parse(e.data) as ChannelMessage;
-      useMirror.getState().receive(msg);
+      receive(msg);
       pending.rev = msg.rev;
       pending.ack = msg.ack;
     });
@@ -299,7 +347,5 @@ export const unblockSender = (account: number, id: string) => invoke("unblock", 
 export const perfReport = (action: string, ms: number, budget: number) =>
   invoke("perf_report", { action, ms, budget });
 export const snoozeOptions = (text: string) => invoke("snooze_options", { text });
-/** Why the core would refuse this custom split rule, or null when it takes it. */
-export const checkSplitRule = (query: string) => invoke("check_split_rule", { query });
 export const addAttachment = (draft: string, filename: string, mimeType: string, data: string) =>
   invoke("add_attachment", { draft, filename, mimeType, data });

@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { act, checkSplitRule, signInAgain } from "../ipc/bridge";
+import { act, signInAgain } from "../ipc/bridge";
 import { keyText, sheet as shortcutSheet } from "../keyboard/table";
 import type { AccountInfo, SplitInfo } from "../ipc/types";
 import { closeSheet, openSplitSettings } from "../navigation";
@@ -170,18 +170,6 @@ function Settings() {
   );
 }
 
-/** Why the core would refuse each custom split's rule, by split id; empty when it takes them all. */
-async function refusedRules(rows: SplitInfo[]): Promise<Record<number, string>> {
-  const custom = rows.filter((r) => r.kind === "custom");
-  const answers = await Promise.all(custom.map((r) => checkSplitRule(r.query)));
-  const found: Record<number, string> = {};
-  custom.forEach((r, i) => {
-    const why = answers[i];
-    if (why) found[r.id] = why;
-  });
-  return found;
-}
-
 const STARTERS: [string, string][] = [
   ["Newsletters", "is:list"],
   ["Promotions", "label:CATEGORY_PROMOTIONS"],
@@ -195,7 +183,7 @@ function Splits() {
   // Unedited, the sheet shows the live splits; the first edit takes a copy.
   const [edited, setEdited] = useState<SplitInfo[] | null>(null);
   const [deleted, setDeleted] = useState<number[]>([]);
-  // Why the core would refuse a rule, by split id, from the last Save.
+  // Why the core refused a rule, by split id, at the last Save.
   const [refused, setRefused] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
   // New splits get negative ids until saved.
@@ -210,22 +198,22 @@ function Splits() {
     }
     setEdited(rows.map((r, j) => (i === j ? { ...r, ...patch } : r)));
   };
-  // The core checks each custom rule before the sheet closes, so a refused
-  // rule keeps the sheet and every edit on screen (SPEC Custom rules).
+  // The sheet closes once the core has saved; a refused rule keeps the
+  // sheet and every edit on screen (SPEC Split Inbox). One save at a time:
+  // a second would add the new splits again.
   const save = () => {
     if (saving) return;
     setSaving(true);
-    void refusedRules(rows)
-      .then(
-        (found) => {
-          setRefused(found);
-          if (Object.keys(found).length > 0) return;
-          act({ type: "saveSplits", account, splits: rows, deleted });
-          closeSheet();
-        },
-        (e: unknown) => toast.error(`Couldn't check the rules: ${String(e)}`),
-      )
-      .finally(() => setSaving(false));
+    act({ type: "saveSplits", account, splits: rows, deleted }, ({ refusal }) => {
+      setSaving(false);
+      if (refusal === null) {
+        if (useChrome.getState().sheet === "splits") closeSheet();
+      } else if (refusal.split === null) {
+        toast.error(refusal.message);
+      } else {
+        setRefused({ [refusal.split]: refusal.message });
+      }
+    });
   };
   const move = (i: number, d: number) => {
     const j = i + d;

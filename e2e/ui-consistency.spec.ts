@@ -272,27 +272,30 @@ test("UIC-05 Cmd+Q quits only once the composer's close has committed", async ({
 
 test("UIC-06 an action the core rejects tells the user why", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
-  // The sheet's own check passes the rule, as a UI out of step with the core would.
-  const check = /\/invoke\/check_split_rule$/;
-  await app.page.route(check, (route) => route.fulfill({ json: null }));
-  await app.press("Meta+k");
-  await app.palette.getByRole("option", { name: /^Split Inbox settings/ }).click();
-  const sheet = app.sheet(/^Split Inbox · /);
-  await sheet.getByRole("button", { name: "Add split", exact: true }).click();
-  // Custom splits come first: the new one is the first row.
-  const row = sheet.locator("div.border-b").first();
-  await expect(row.locator("input").first()).toHaveValue("New split");
-  await row.locator("input").nth(1).fill("from:carol -venue");
-  await sheet.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(sheet).toHaveCount(0);
+  // The mute names an account the core doesn't have, as a UI out of step
+  // with the core would.
+  const submit = /\/invoke\/submit$/;
+  await app.page.route(submit, (route) =>
+    route.continue({
+      postData: (route.request().postData() ?? "").replace(
+        /"setting":"muted","account":\d+/,
+        '"setting":"muted","account":99',
+      ),
+    }),
+  );
+  await app.press("Meta+,");
+  const mute = app.sheet("Settings").getByRole("switch", { name: "Mute notifications" }).first();
+  await mute.click();
   await app.settle();
-  await app.page.unroute(check);
+  await app.page.unroute(submit);
 
   await expect(
-    app.errorToasts.filter({ hasText: "-venue isn't supported in split rules" }),
+    app.errorToasts.filter({ hasText: "That account is no longer in Ubermensch" }),
   ).toHaveCount(1);
-  expect(await app.splitHeader()).toBe("Important 16 · Other 7");
-  // Shown once: the notice is acked, so a reload does not bring it back.
+  // The switch falls back to what the core holds.
+  await expect(mute).toHaveAttribute("aria-checked", "false");
+  // Shown once: the refusal came with the message that settled the action,
+  // so a reload does not bring it back.
   await app.reload();
   await app.settle();
   await expect(app.errorToasts).toHaveCount(0);

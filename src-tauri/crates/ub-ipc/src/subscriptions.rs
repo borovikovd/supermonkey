@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
-use ub_domain::{AccountId, ActionNo, DraftId, Rev, SubId, ThreadId, View};
+use ub_domain::{AccountId, ActionNo, DraftId, Rev, SplitId, SubId, ThreadId, View};
 
 use crate::{AccountSummary, AppState, ConversationData, DraftState, ListEntry, ListMove, ListRow};
 
@@ -95,5 +95,21 @@ pub struct ChannelMessage {
     pub rev: Rev,
     /// Highest UI action number applied in this snapshot.
     pub ack: ActionNo,
+    /// Actions the core refused. Each is listed once, in or before the first
+    /// message whose `ack` covers it; an action `ack` covers that no message
+    /// listed was applied.
+    pub rejected: Vec<Rejection>,
     pub updates: Vec<SubUpdate>,
+}
+
+/// An action the core refused (SPEC UI state, Actions).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Rejection {
+    /// The refused action's number.
+    pub n: ActionNo,
+    /// Why, in a sentence for the user.
+    pub message: String,
+    /// A `saveSplits` refused for a custom split's rule: that split.
+    pub split: Option<SplitId>,
 }

@@ -27,15 +27,15 @@ accounts sign in again), Windows and Linux, and new features.
 
 The rewrite is judged against these, which it may not change without a decision:
 
-| Surface      | What is fixed                                                                                                                                                                                                                                   | Checked by                                                                            |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| IPC types    | The files in `src/bindings`: field names, tags, optionality, and doc comments                                                                                                                                                                   | The gate's bindings step: generated TS must be byte-identical                         |
-| Commands     | `ub_ipc::Command`, one list of every command's name, arguments, and reply; the UI's `invoke` is typed from its bindings; the Tauri `dispatch` command and the web bridge run the same `bridge::dispatch`; error strings where the UI reads them | Compiler (exhaustive match, typed replies), bindings step, E2E through the web bridge |
-| Channel      | One `ChannelMessage { rev, ack, updates }` per commit; the update types `list`, `conversation`, `composer`, `account`, `app`; first loads as their own message (SPEC UI state)                                                                  | E2E, and the writer/channel property test                                             |
-| Actions      | The 17 `Action` types (`reset` … `moreResults`) and their semantics                                                                                                                                                                             | E2E                                                                                   |
-| Test control | The 34 `/__test/*` endpoints `e2e/control.ts` calls, their JSON, and `settle()` meaning "idle"                                                                                                                                                  | E2E                                                                                   |
-| Fake Gmail   | `crates/ub-fake-gmail`, unchanged                                                                                                                                                                                                               | E2E                                                                                   |
-| Packaging    | `tauri.conf.json`, capabilities, `build.rs` inputs (OAuth client file, quota env), binaries `ubermensch` and `e2e-server`, the `fake` feature                                                                                                   | Release dry run                                                                       |
+| Surface      | What is fixed                                                                                                                                                                                                                                                             | Checked by                                                                            |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| IPC types    | The files in `src/bindings`: field names, tags, optionality, and doc comments                                                                                                                                                                                             | The gate's bindings step: generated TS must be byte-identical                         |
+| Commands     | `ub_ipc::Command`, one list of every command's name, arguments, and reply; the UI's `invoke` is typed from its bindings; the Tauri `dispatch` command and the web bridge run the same `bridge::dispatch`; error strings where the UI reads them                           | Compiler (exhaustive match, typed replies), bindings step, E2E through the web bridge |
+| Channel      | One `ChannelMessage { rev, ack, rejected, updates }` per commit, each refused action listed in or before the first message whose `ack` covers it; the update types `list`, `conversation`, `composer`, `account`, `app`; first loads as their own message (SPEC UI state) | E2E, and the writer/channel property test                                             |
+| Actions      | The 17 `Action` types (`reset` … `moreResults`) and their semantics                                                                                                                                                                                                       | E2E                                                                                   |
+| Test control | The 34 `/__test/*` endpoints `e2e/control.ts` calls, their JSON, and `settle()` meaning "idle"                                                                                                                                                                            | E2E                                                                                   |
+| Fake Gmail   | `crates/ub-fake-gmail`, unchanged                                                                                                                                                                                                                                         | E2E                                                                                   |
+| Packaging    | `tauri.conf.json`, capabilities, `build.rs` inputs (OAuth client file, quota env), binaries `ubermensch` and `e2e-server`, the `fake` feature                                                                                                                             | Release dry run                                                                       |
 
 Adding a command touches three places, and the build checks each: a line in the `commands!` list in `ipc/src/commands.rs` (name, arguments, reply, doc); an arm in `bridge::dispatch`, which the exhaustive match requires and whose `Replier` takes only the declared reply type; and a wrapper in `src/ipc/bridge.ts`, whose `invoke` the type check holds to the generated `Command` and `CommandReply`. Neither host lists commands, so the Tauri path the release app uses and the web bridge the E2E suite drives are one code path. App events (`AppEvent`) and settings (`Setting`) are typed the same way.
 
@@ -100,10 +100,11 @@ UI ──submit(actions)──▶ bridge::dispatch ──▶ core::Actions::subm
                                              ▼
                         writer thread: begin tx
                           for each action > last ack:
-                            handler(&mut WriteTx, action) → domain decides, store writes
+                            savepoint: handler(&mut WriteTx, action) → domain decides, store writes
+                            refused? roll back to the savepoint, note Rejection { n, message, split }
                           commit; ack = last number
                           subscriptions.patches(&changes, &snapshot)
-                          emit ChannelMessage { rev, ack, updates }
+                          emit ChannelMessage { rev, ack, rejected, updates }
                           hand Effects to core's effect router
                                              │
                      effect router ──▶ AccountWorker (ops runner / outbox / fetch queue)
@@ -113,6 +114,8 @@ UI ──submit(actions)──▶ bridge::dispatch ──▶ core::Actions::subm
 ```
 
 An action handler is a plain function `fn(&mut WriteTx, &Action) -> Result<(), ActionError>`. It reads and writes through repository methods, decides with `domain` rules, and records effects on the transaction. It never sees SQL or a channel.
+
+A refused action is reported to the page, not stored: the writer state collects each `Rejection` and the commit's first message carries them. If the whole batch rolls back, every action of it is refused, and the next message says so, never later than the one whose `ack` covers them. So the page settles each action by its number: refused when a message lists it, applied once `ack` covers it unlisted. The UI's `act(action, settled)` hands the caller that outcome, with the mirror as it stood when Rust applied the action; a refusal no caller waits for shows as a toast. Notices stay for what Gmail decides later: a rejected op or send, a held undo.
 
 ### 5.2 A subscription
 

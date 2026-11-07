@@ -829,3 +829,35 @@ test("SND-19 a send the core refuses says it was not sent and brings the draft b
   await expect(app.toast("Sending…")).toHaveCount(0);
   expect(await gmail.requests("drafts.send")).toEqual([]);
 });
+
+test("SND-20 an Undo the core refuses says why and opens no composer", async ({ app, gmail }) => {
+  const s = await seeds.standard(gmail, app);
+  await sendReply(app, "Person 3", "kept sending");
+  await app.press("Escape");
+  await app.settle();
+  // The Undo names an entry the core no longer has, as a UI out of step
+  // with the core would.
+  const submit = /\/invoke\/submit$/;
+  await app.page.route(submit, (route) =>
+    route.continue({
+      postData: (route.request().postData() ?? "").replace(
+        /"type":"undo","account":(\d+),"entry":\d+/,
+        '"type":"undo","account":$1,"entry":999999',
+      ),
+    }),
+  );
+  await undoOn(sendToast(app, "Person 3")).click();
+  await app.settle();
+  await app.page.unroute(submit);
+
+  await expect(
+    app.errorToasts.filter({ hasText: "That change can no longer be undone" }),
+  ).toHaveCount(1);
+  await expect(app.editor).toHaveCount(0);
+  // The send goes out as if no Undo was pressed.
+  await app.advance(DELAY);
+  await app.settle();
+  const [sent] = await sentIn(gmail, s.thread("p3").threadId);
+  expect(sent?.labels).not.toContain("TRASH");
+  await expect(app.editor).toHaveCount(0);
+});

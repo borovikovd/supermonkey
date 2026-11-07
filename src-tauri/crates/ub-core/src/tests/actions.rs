@@ -7,8 +7,8 @@ use ub_domain::{
     SettingKey, SubId, ThreadId, View,
 };
 use ub_ipc::{
-    Action, ChannelMessage, DraftFields, DraftSave, ModifyAction, NumberedAction, Setting, SubKey,
-    SubUpdate,
+    Action, ChannelMessage, DraftFields, DraftSave, ModifyAction, NumberedAction, Rejection,
+    Setting, SubKey, SubUpdate,
 };
 use ub_store::{Draft, NewBody, NewNotice, NewOutbox, Priority, StoreError};
 
@@ -131,6 +131,23 @@ async fn a_rejected_action_is_skipped_and_the_batch_goes_on() {
     assert!(!state.settings.remote_images);
     let gone = h.write(|tx| tx.read().settings().all(AccountId(99))).await;
     assert!(gone.is_empty(), "a mute of no account is refused");
+    // The message that acks the batch says which action was refused, and why.
+    let refused: Vec<_> = messages.iter().flat_map(|m| m.rejected.clone()).collect();
+    assert_eq!(
+        refused,
+        [Rejection {
+            n: ActionNo(ns[2]),
+            message: "That account is no longer in Ubermensch".to_owned(),
+            split: None,
+        }]
+    );
+    let acking = messages.iter().find(|m| m.ack >= ActionNo(ns[2]));
+    assert_eq!(acking.map(|m| m.rejected.len()), Some(1));
+    // A refusal is no notice: the page that sent the action hears of it.
+    let notices = h
+        .write(move |tx| tx.read().notices().for_account(account))
+        .await;
+    assert_eq!(notices, []);
 }
 
 #[tokio::test]
@@ -528,11 +545,13 @@ async fn a_split_whose_rule_does_not_parse_is_not_saved() {
         splits: vec![split],
         deleted: Vec::new(),
     };
-    h.act(vec![
-        save(custom("Broken", "from:(ada")),
-        save(custom("Lists", "is:list")),
-    ])
-    .await;
+    let broken = ub_ipc::SplitInfo {
+        id: ub_domain::SplitId(-3),
+        ..custom("Broken", "from:(ada")
+    };
+    let ns = h
+        .act(vec![save(broken), save(custom("Lists", "is:list"))])
+        .await;
     let names = h
         .write(move |tx| {
             let splits = tx.read().splits().all(account)?;
@@ -541,24 +560,20 @@ async fn a_split_whose_rule_does_not_parse_is_not_saved() {
         .await;
     assert!(names.contains(&"Lists".to_owned()), "{names:?}");
     assert!(!names.contains(&"Broken".to_owned()), "{names:?}");
-    let notices = h
-        .write(move |tx| tx.read().notices().for_account(account))
-        .await;
-    let told: Vec<_> = notices
-        .iter()
-        .map(|n| (n.kind, n.message.as_str()))
-        .collect();
+    // The refusal names the split the sheet numbered, to show it on its rule.
+    let refused: Vec<_> = h.take().into_iter().flat_map(|m| m.rejected).collect();
     assert_eq!(
-        told,
-        [(
-            NoticeKind::Rejected,
-            "from:(ada isn't supported in split rules"
-        )]
+        refused,
+        [Rejection {
+            n: ActionNo(ns[0]),
+            message: "from:(ada isn't supported in split rules".to_owned(),
+            split: Some(ub_domain::SplitId(-3)),
+        }]
     );
 }
 
 #[tokio::test]
-async fn an_action_sent_again_under_an_applied_number_leaves_no_second_notice() {
+async fn an_action_sent_again_under_an_applied_number_is_refused_once() {
     let h = Harness::start().await;
     let (account, _) = h.write(seed).await;
     let broken = NumberedAction {
@@ -581,26 +596,13 @@ async fn an_action_sent_again_under_an_applied_number_leaves_no_second_notice() 
     h.app.actions().submit(vec![broken.clone()]);
     h.app.actions().submit(vec![broken]);
     h.app.actions().drained().await.unwrap();
-    let notices = h
-        .write(move |tx| tx.read().notices().for_account(account))
-        .await;
-    let told: Vec<_> = notices.iter().map(|n| n.message.as_str()).collect();
+    let told: Vec<_> = h
+        .take()
+        .into_iter()
+        .flat_map(|m| m.rejected)
+        .map(|r| r.message)
+        .collect();
     assert_eq!(told, ["-venue isn't supported in split rules"]);
-}
-
-#[tokio::test]
-async fn a_rejected_action_for_no_account_leaves_no_notice() {
-    let mut h = Harness::start().await;
-    let (account, _) = h.write(seed).await;
-    h.act(vec![Action::SetSetting(Setting::Muted {
-        account: AccountId(99),
-        on: true,
-    })])
-    .await;
-    let notices = h
-        .write(move |tx| tx.read().notices().for_account(account))
-        .await;
-    assert_eq!(notices, []);
 }
 
 #[tokio::test]

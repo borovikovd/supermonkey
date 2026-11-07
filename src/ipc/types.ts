@@ -33,6 +33,7 @@ export type { ModifyKind } from "../bindings/ModifyKind";
 export type { Notice } from "../bindings/Notice";
 export type { NumberedAction } from "../bindings/NumberedAction";
 export type { OutboxRow } from "../bindings/OutboxRow";
+export type { Rejection } from "../bindings/Rejection";
 export type { PinKind } from "../bindings/PinKind";
 export type { SendAs } from "../bindings/SendAs";
 export type { SnoozeChoice } from "../bindings/SnoozeChoice";

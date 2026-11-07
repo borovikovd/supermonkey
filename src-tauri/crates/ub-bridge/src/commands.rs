@@ -197,14 +197,6 @@ pub fn snooze_options(app: &App, text: &str) -> Vec<SnoozeChoice> {
     app.queries().snooze_options(text)
 }
 
-/// Why the splits sheet can't save this custom split rule, or `None` when
-/// it can: the check `saveSplits` makes, asked before the sheet closes.
-pub fn check_split_rule(query: &str) -> Option<String> {
-    ub_domain::check_split_rule(query)
-        .err()
-        .map(|e| e.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

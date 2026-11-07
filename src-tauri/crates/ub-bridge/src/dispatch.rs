@@ -91,7 +91,6 @@ pub async fn dispatch(app: &App, name: &str, args: Value) -> CmdResult<Answer> {
             reply.send(())
         }
         Command::SnoozeOptions { text, reply } => reply.send(commands::snooze_options(app, &text)),
-        Command::CheckSplitRule { query, reply } => reply.send(commands::check_split_rule(&query)),
     };
     reply
         .map(Answer::Reply)

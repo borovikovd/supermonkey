@@ -80,7 +80,10 @@ pub(super) fn save_splits(
     let mut edits = Vec::with_capacity(splits.len());
     for split in splits {
         if split.kind == SplitKind::Custom {
-            check_split_rule(&split.query)?;
+            check_split_rule(&split.query).map_err(|error| ActionError::Rule {
+                split: split.id,
+                error,
+            })?;
         }
         edits.push(SplitEdit {
             id: split.id,

@@ -619,6 +619,8 @@ test("SPL-11 a rule the core refuses keeps the sheet open with every edit", asyn
   await expect(sheet.getByRole("alert")).toHaveText("-venue isn't supported in split rules");
   await expect(rule).toHaveAttribute("aria-invalid", "true");
   await expect(rule).toHaveAccessibleDescription("-venue isn't supported in split rules");
+  // Shown on the rule, not as a toast.
+  await expect(app.errorToasts).toHaveCount(0);
   expect(await sheetNames(sheet)).toEqual(["Receipts", "Carol", "Important", "Other"]);
   await expect(rule).toHaveValue("from:carol -venue");
   await expect((await sheetRow(sheet, "Important")).getByRole("switch")).toHaveAttribute(

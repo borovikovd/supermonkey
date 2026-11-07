@@ -1,11 +1,14 @@
 //! Why an action was rejected.
 
-use ub_domain::{ModifyError, RuleError};
+use ub_domain::{ModifyError, RuleError, SplitId};
 use ub_store::StoreError;
+
+/// What the user is told when an action's batch could not be stored.
+pub(crate) const NOT_SAVED: &str = "Couldn't save that change. Try again.";
 
 /// Why the core rejected a UI action. A rejected action's writes roll back
 /// and `ack` still moves past it, so the mirror falls back to Rust's state;
-/// a notice tells the user why (SPEC UI state, Actions).
+/// the channel message tells the page why (SPEC UI state, Actions).
 ///
 /// `Display` is for logs and carries no user content; [`ActionError::message`]
 /// is what the user reads.
@@ -21,9 +24,14 @@ pub(crate) enum ActionError {
     /// A mail change that can't be made as asked.
     #[error(transparent)]
     Modify(#[from] ModifyError),
-    /// A split's rule doesn't parse.
+    /// A custom split's rule doesn't parse.
     #[error("a split rule doesn't parse")]
-    Rule(#[from] RuleError),
+    Rule {
+        /// The split, as the splits sheet numbers it.
+        split: SplitId,
+        #[source]
+        error: RuleError,
+    },
     /// A draft that can't be sent as it is: it stays a draft.
     #[error(transparent)]
     Unsendable(#[from] Unsendable),
@@ -45,16 +53,24 @@ impl ActionError {
     /// (an address, a rule's term) where it says what to fix.
     pub(crate) fn message(&self) -> String {
         match self {
-            Self::Store(_) => "Couldn't save that change. Try again.".to_owned(),
+            Self::Store(_) => NOT_SAVED.to_owned(),
             Self::Invalid(sentence) => (*sentence).to_owned(),
             Self::Modify(ModifyError::UnreadWithOtherLabels) => {
                 "Mark unread can't change labels at the same time".to_owned()
             }
-            Self::Rule(e) => e.to_string(),
+            Self::Rule { error, .. } => error.to_string(),
             Self::Unsendable(Unsendable::NoRecipient) => "Not sent: add a recipient".to_owned(),
             Self::Unsendable(Unsendable::BadRecipient(email)) => {
                 format!("Not sent: {email} isn't a valid email address")
             }
+        }
+    }
+
+    /// The custom split whose rule was refused, if that is why.
+    pub(crate) fn split(&self) -> Option<SplitId> {
+        match self {
+            Self::Rule { split, .. } => Some(*split),
+            _ => None,
         }
     }
 }

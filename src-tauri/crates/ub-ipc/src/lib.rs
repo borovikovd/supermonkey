@@ -35,7 +35,7 @@ pub use conversation::{
     AttachmentInfo, ConversationData, DraftSummary, MessageBody, MessageSummary, OutboxRow,
 };
 pub use list::{ListEntry, ListMove, ListRow};
-pub use subscriptions::{ChannelMessage, SubKey, SubUpdate};
+pub use subscriptions::{ChannelMessage, Rejection, SubKey, SubUpdate};
 pub use ub_domain::{
     DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SplitKind, SyncStatus, UndoKind, View,
 };

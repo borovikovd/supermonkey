@@ -165,8 +165,14 @@ function leave(draft: string, forget = true) {
   if (mounted?.draft === draft) mounted = null;
 }
 
-/** Cmd+Enter: refuses with a toast while a recipient is invalid. */
-export function sendOnScreen() {
+/**
+ * Cmd+Enter: refuses with a toast while a recipient is invalid. If Rust
+ * refuses the send, `refused` gets the draft back (compose/sends.ts, which
+ * this module can't import).
+ */
+export function sendOnScreen(
+  refused: (account: number, draft: string, thread: number | null, why: string) => void,
+) {
   const draft = draftOnScreen();
   if (!draft) return;
   // Before the first load or while a file is still attaching, the draft is
@@ -176,7 +182,7 @@ export function sendOnScreen() {
   if (wait) {
     void wait.then((ok) => {
       if (draftOnScreen() !== draft) return;
-      if (ok) sendOnScreen();
+      if (ok) sendOnScreen(refused);
       else toast.error("Not sent: a file could not be attached");
     });
     return;
@@ -198,7 +204,12 @@ export function sendOnScreen() {
     toast.error("Add a recipient");
     return;
   }
-  act({ type: "sendDraft", draft });
+  const sent = loadedDraft(draft);
+  act({ type: "sendDraft", draft }, ({ refusal }) => {
+    if (!refusal) return;
+    if (sent) refused(sent.account, draft, sent.thread, refusal.message);
+    else toast.error(refusal.message);
+  });
   leave(draft);
 }
 

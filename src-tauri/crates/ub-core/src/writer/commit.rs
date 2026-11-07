@@ -26,13 +26,17 @@ pub(crate) fn on_commit(state: &mut WriterState, snapshot: &Snapshot<'_>, commit
     let online = state.online();
     let now = state.now();
     let updates = state.subs.updates(**snapshot, &commit.changes, online, now);
+    let mut rejected = state.take_rejected();
     let ack_moved = ack != state.sent_ack;
     // An action batch moves `ack` even when it changed nothing a
-    // subscription shows, so the mirror drops those pending actions.
-    if !updates.patches.is_empty() || (ack_moved && updates.first_loads.is_empty()) {
+    // subscription shows, so the mirror drops those pending actions; and a
+    // refusal goes out with the first message after it.
+    let tells = ack_moved || !rejected.is_empty();
+    if !updates.patches.is_empty() || (tells && updates.first_loads.is_empty()) {
         state.send(ChannelMessage {
             rev: commit.rev,
             ack,
+            rejected: std::mem::take(&mut rejected),
             updates: updates.patches,
         });
     }
@@ -40,6 +44,7 @@ pub(crate) fn on_commit(state: &mut WriterState, snapshot: &Snapshot<'_>, commit
         state.send(ChannelMessage {
             rev: commit.rev,
             ack,
+            rejected,
             updates: updates.first_loads,
         });
     }
@@ -59,7 +64,8 @@ impl Drop for Releasing<'_> {
     }
 }
 
-/// `on_rollback`: the job's effects and activity go with its transaction.
+/// `on_rollback`: the job's effects and activity go with its transaction,
+/// and an action batch's actions are refused, for the next message to say.
 /// Subscriptions it opened or closed stay so, and the work they asked for
 /// goes out: a first load it would have sent goes out with the next commit.
 pub(crate) fn on_rollback(state: &mut WriterState) {

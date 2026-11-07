@@ -662,10 +662,27 @@ async fn ack_never_moves_back_after_a_failed_batch() {
     h.app.actions().submit(batch(start + 3));
     eventually("the failed batch is rejected", || h.activity.is_idle()).await;
     h.app.actions().drained().await.unwrap();
-    let acks: Vec<i64> = h.take().iter().map(|m| m.ack.0).collect();
+    let messages = h.take();
+    let acks: Vec<i64> = messages.iter().map(|m| m.ack.0).collect();
     assert!(
         acks.windows(2).all(|w| w[0] <= w[1]),
         "ack went back: {acks:?}"
     );
     assert_eq!(acks.last(), Some(&(start + 4)));
+    // The failed batch's actions are refused, and the page hears so no later
+    // than the message whose `ack` first covers them: otherwise it would
+    // take them for applied.
+    let covering = messages
+        .iter()
+        .position(|m| m.ack.0 > start)
+        .expect("a message covers the failed batch");
+    let told: Vec<(i64, &str)> = messages[..=covering]
+        .iter()
+        .flat_map(|m| &m.rejected)
+        .map(|r| (r.n.0, r.message.as_str()))
+        .collect();
+    let not_saved = "Couldn't save that change. Try again.";
+    assert_eq!(told, [(start + 1, not_saved), (start + 2, not_saved)]);
+    let all = messages.iter().map(|m| m.rejected.len()).sum::<usize>();
+    assert_eq!(all, 2, "each refusal is told once");
 }
