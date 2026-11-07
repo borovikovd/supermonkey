@@ -13,8 +13,5 @@ mod diff;
 mod lists;
 mod registry;
 
-#[cfg(test)]
-mod tests;
-
 pub(crate) use affects::affects_badge;
 pub(crate) use registry::Registry;

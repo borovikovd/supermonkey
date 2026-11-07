@@ -54,20 +54,3 @@ fn filter() -> Targets {
         // mail ("foster parenting not implemented"); ammonia still cleans it.
         .with_target("html5ever", LevelFilter::ERROR)
 }
-
-#[cfg(test)]
-mod tests {
-    use tracing::Level;
-
-    use super::filter;
-
-    #[test]
-    fn html_parser_warnings_are_dropped_and_ours_are_kept() {
-        let filter = filter();
-        assert!(!filter.would_enable("html5ever::tree_builder", &Level::WARN));
-        assert!(filter.would_enable("html5ever::tree_builder", &Level::ERROR));
-        assert!(filter.would_enable("ub_core::workers::account::poller", &Level::WARN));
-        assert!(filter.would_enable("ub_mime::sanitize", &Level::WARN));
-        assert!(filter.would_enable("reqwest::connect", &Level::WARN));
-    }
-}

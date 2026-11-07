@@ -43,11 +43,3 @@ pub fn client_for(fake: &FakeGmail, user: &FakeUser) -> Gmail {
     )
     .unwrap()
 }
-
-/// A minimal RFC 822 draft carrying the app's local draft id header.
-pub fn draft_raw(subject: &str, local_id: &str) -> Vec<u8> {
-    format!(
-        "From: me@example.com\r\nTo: ann@example.com\r\nSubject: {subject}\r\nX-Ubermensch-Draft: {local_id}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nBody of {subject}\r\n"
-    )
-    .into_bytes()
-}

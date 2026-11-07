@@ -25,7 +25,6 @@ parking_lot = "0.12"
 [dev-dependencies]
 ub-fake-gmail = { path = "../ub-fake-gmail" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "test-util"] }
-tempfile = "3"
 
 [lints]
 workspace = true

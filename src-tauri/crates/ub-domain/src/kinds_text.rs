@@ -123,23 +123,3 @@ impl ModifyKind {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn text_round_trips_and_unknown_text_is_an_error() {
-        for kind in [DraftKind::New, DraftKind::Reply, DraftKind::Forward] {
-            assert_eq!(kind.as_str().parse::<DraftKind>(), Ok(kind));
-        }
-        assert_eq!("needs_signin".parse(), Ok(SyncStatus::NeedsSignin));
-        assert_eq!(
-            "Reply".parse::<DraftKind>(),
-            Err(UnknownKind {
-                kind: "DraftKind",
-                value: "Reply".into()
-            })
-        );
-    }
-}

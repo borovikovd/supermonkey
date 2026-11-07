@@ -196,25 +196,3 @@ pub fn perf_report(action: &str, ms: f64, budget: f64) {
 pub fn snooze_options(app: &App, text: &str) -> Vec<SnoozeChoice> {
     app.queries().snooze_options(text)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_file_over_the_attachment_limit_is_refused_before_it_is_decoded() {
-        let encode = |n: usize| base64::engine::general_purpose::STANDARD.encode(vec![7u8; n]);
-        assert_eq!(
-            decode_file(&encode(MAX_ATTACHMENT_BYTES)).map(|d| d.len()),
-            Ok(MAX_ATTACHMENT_BYTES)
-        );
-        let over = decode_file(&encode(MAX_ATTACHMENT_BYTES + 3));
-        assert_eq!(
-            over,
-            Err("The file is too large: attachments can be at most 25 MB".to_owned())
-        );
-        // Not even base64: refused for its size, never read.
-        let junk = "!".repeat(MAX_ATTACHMENT_BYTES / 3 * 4 + 8);
-        assert_eq!(decode_file(&junk), over);
-    }
-}

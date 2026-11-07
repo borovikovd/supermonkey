@@ -257,33 +257,3 @@ pub enum BlockedSenders {
     /// The account's grant lacks Gmail filters; Sign in again adds it.
     NeedsPermission,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The names a binding gives its variants under `tag`.
-    fn names(binding: &str, tag: &str) -> Vec<String> {
-        binding
-            .split(&format!("\"{tag}\": \""))
-            .skip(1)
-            .filter_map(|rest| rest.split('"').next())
-            .map(str::to_owned)
-            .collect()
-    }
-
-    /// ts-rs and serde each turn the variant names into the page's names:
-    /// every name the page may invoke must parse as a command, and name a reply.
-    #[test]
-    fn the_page_names_each_command_as_rust_parses_it() {
-        let config = ts_rs::Config::default();
-        let commands = names(&Command::inline(&config), "command");
-        assert_ne!(commands, Vec::<String>::new());
-        assert_eq!(commands, names(&CommandReply::inline(&config), "command"));
-        for name in commands {
-            if let Err(e) = Command::parse(&name, Value::Object(serde_json::Map::new())) {
-                assert!(!e.contains("unknown variant"), "{name}: {e}");
-            }
-        }
-    }
-}

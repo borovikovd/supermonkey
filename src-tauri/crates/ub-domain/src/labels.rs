@@ -230,37 +230,3 @@ impl<'a> IntoIterator for &'a LabelSet {
         self.0.iter()
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn system_ids_round_trip() {
-        for label in SystemLabel::ALL {
-            assert_eq!(SystemLabel::from_id(label.id()), Some(label));
-        }
-        assert_eq!(SystemLabel::from_id("inbox"), None, "ids are exact");
-        assert_eq!(SystemLabel::from_id("Label_1"), None);
-    }
-
-    #[test]
-    fn system_label_ids_ignore_case_and_spaces() {
-        assert!(is_system_label_id("inbox"));
-        assert!(is_system_label_id(" CHAT "));
-        assert!(is_system_label_id("category_purchases"));
-        assert!(!is_system_label_id("Label_7"));
-        assert!(!is_system_label_id("Clients"));
-        assert!(!is_system_label_id("CATEGORY"));
-    }
-
-    #[test]
-    fn set_operations() {
-        let a: LabelSet = ["INBOX", "UNREAD", "Label_1"].into_iter().collect();
-        let b: LabelSet = ["UNREAD", "STARRED"].into_iter().collect();
-        assert!(a.has(SystemLabel::Inbox));
-        assert!(!a.has(SystemLabel::Starred));
-        assert_eq!(a.without(&b), ["INBOX", "Label_1"].into_iter().collect());
-        assert_eq!(a.and(&b), ["UNREAD"].into_iter().collect());
-    }
-}

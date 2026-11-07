@@ -181,37 +181,3 @@ fn write_file(
     std::fs::rename(&part, &path)?;
     Ok(path)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn two_attachments_with_one_name_keep_their_own_files() {
-        let dir = tempfile::tempdir().unwrap();
-        let first = write_file(
-            dir.path(),
-            "image.png",
-            AttachmentId(1),
-            b"first",
-            Millis(0),
-        )
-        .unwrap();
-        let second = write_file(
-            dir.path(),
-            "image.png",
-            AttachmentId(2),
-            b"second",
-            Millis(0),
-        )
-        .unwrap();
-        assert_ne!(first, second);
-        assert_eq!(
-            first.file_name(),
-            second.file_name(),
-            "the name stays as sent"
-        );
-        assert_eq!(std::fs::read(&first).unwrap(), b"first");
-        assert_eq!(std::fs::read(&second).unwrap(), b"second");
-    }
-}

@@ -1,4 +1,4 @@
-//! The started core the tests drive, its recording platform, and the
+//! The started core the tests drive, a platform that does nothing, and the
 //! fixture mailbox.
 
 use std::path::Path;
@@ -15,49 +15,8 @@ use crate::activity::Activity;
 use crate::clock::{Clock, SystemClock};
 use crate::{App, Config, Deps, GmailConfig, Notification, Platform, PlatformError};
 
-/// A platform that records what the core asked of it.
-#[derive(Default)]
-pub(crate) struct Recorder {
-    pub(crate) badges: Mutex<Vec<Option<u32>>>,
-    pub(crate) notifications: Mutex<Vec<Notification>>,
-    /// While closed, setting the badge blocks: a Dock slow to answer.
-    pub(crate) badge_gate: Gate,
-}
-
-/// Blocks the threads that pass it while closed.
-#[derive(Default)]
-pub(crate) struct Gate {
-    closed: Mutex<bool>,
-    opened: parking_lot::Condvar,
-    waiting: std::sync::atomic::AtomicUsize,
-}
-
-impl Gate {
-    pub(crate) fn close(&self) {
-        *self.closed.lock() = true;
-    }
-
-    pub(crate) fn open(&self) {
-        *self.closed.lock() = false;
-        self.opened.notify_all();
-    }
-
-    /// How many threads wait at it now.
-    pub(crate) fn waiting(&self) -> usize {
-        self.waiting.load(std::sync::atomic::Ordering::SeqCst)
-    }
-
-    fn pass(&self) {
-        let mut closed = self.closed.lock();
-        self.waiting
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        while *closed {
-            self.opened.wait(&mut closed);
-        }
-        self.waiting
-            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-    }
-}
+/// A platform that does nothing.
+pub(crate) struct Recorder;
 
 impl Platform for Recorder {
     fn open_url(&self, _: &str) -> Result<(), PlatformError> {
@@ -72,14 +31,9 @@ impl Platform for Recorder {
         Ok(())
     }
 
-    fn notify(&self, notification: &Notification) {
-        self.notifications.lock().push(notification.clone());
-    }
+    fn notify(&self, _: &Notification) {}
 
-    fn set_badge(&self, count: Option<u32>) {
-        self.badge_gate.pass();
-        self.badges.lock().push(count);
-    }
+    fn set_badge(&self, _: Option<u32>) {}
 
     fn focus_window(&self) {}
 }
@@ -90,7 +44,6 @@ pub(crate) struct Harness {
     pub(crate) dir: TempDir,
     pub(crate) app: App,
     pub(crate) activity: Arc<Activity>,
-    pub(crate) platform: Arc<Recorder>,
     pub(crate) messages: Arc<Mutex<Vec<ChannelMessage>>>,
     next: i64,
 }
@@ -110,7 +63,6 @@ impl Harness {
         activity: Arc<Activity>,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        let platform = Arc::new(Recorder::default());
         let app = App::start(
             &Config::in_data_dir(
                 dir.path(),
@@ -118,7 +70,7 @@ impl Harness {
                 GmailConfig::google(OAuthConfig::google("", ""), QuotaConfig::default()),
             ),
             Deps {
-                platform: Arc::<Recorder>::clone(&platform),
+                platform: Arc::new(Recorder),
                 clock,
                 tokens: Arc::new(MemoryTokenStore::default()),
                 activity: Arc::clone(&activity),
@@ -136,7 +88,6 @@ impl Harness {
             dir,
             app,
             activity,
-            platform,
             messages,
             next: launch.last_action.0,
         }

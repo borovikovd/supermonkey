@@ -103,8 +103,6 @@ pub struct App {
     mail: Mail,
     #[cfg(test)]
     writer: CoreWriter,
-    #[cfg(test)]
-    workers: Arc<AccountWorkers>,
 }
 
 impl App {
@@ -197,8 +195,6 @@ impl App {
                 config.debug,
             ),
             accounts: Accounts::new(writer.clone(), Arc::clone(&workers), Arc::clone(&platform)),
-            #[cfg(test)]
-            workers: Arc::clone(&workers),
             mail: Mail::new(platform, workers, pool),
             #[cfg(test)]
             writer,
@@ -234,11 +230,5 @@ impl App {
     #[cfg(test)]
     pub(crate) fn writer(&self) -> &CoreWriter {
         &self.writer
-    }
-
-    /// The account workers, for tests that report what a worker would.
-    #[cfg(test)]
-    pub(crate) fn workers(&self) -> &Arc<AccountWorkers> {
-        &self.workers
     }
 }

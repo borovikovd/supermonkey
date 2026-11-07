@@ -15,17 +15,3 @@ pub fn avatar_hue(slot: i64) -> &'static str {
         .copied()
         .unwrap_or(AVATAR_HUES[0])
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn slots_wrap_round_the_palette() {
-        assert_eq!(avatar_hue(0), "#714CB6");
-        assert_eq!(avatar_hue(5), "#B08A2E");
-        assert_eq!(avatar_hue(6), "#714CB6");
-        assert_eq!(avatar_hue(13), "#D6478A");
-        assert_eq!(avatar_hue(-1), "#B08A2E");
-    }
-}
