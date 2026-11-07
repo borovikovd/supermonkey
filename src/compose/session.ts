@@ -1,14 +1,22 @@
 // The composer on screen (SPEC Compose, Drafts, UI state → Actions): which
-// draft it holds, whether its editor is blurred, and how it leaves the screen.
-// This module is the only writer of that state. The mounted composer
-// registers a handle here, so send, discard, and close carry its pending save
-// in the same invoke.
+// draft it holds, whether its editor is blurred, the files attaching to each
+// draft, and how a composer leaves the screen. This module is the only
+// writer of that state. The mounted composer registers a handle here, so
+// send, discard, and close carry its pending save in the same invoke.
 
 import { toast } from "sonner";
 import { create } from "zustand";
 
-import { act, forgetSub, subIdFor, subscribe } from "../ipc/bridge";
-import type { Addr, DraftSave, DraftState, SubKey } from "../ipc/types";
+import {
+  act,
+  addAttachment,
+  forgetSub,
+  launch,
+  resubscribe,
+  subIdFor,
+  subscribe,
+} from "../ipc/bridge";
+import type { Addr, DraftAttachment, DraftSave, DraftState, SubKey } from "../ipc/types";
 import { useChrome } from "../store/chrome";
 import { useMirror } from "../store/mirror";
 
@@ -24,8 +32,8 @@ export type ComposerHandle = {
   pending: () => UpdateSave | null;
   /** Recipients that are not valid addresses. */
   invalid: () => string[];
-  /** Files still being attached: resolves to whether all of them were; null when none are. */
-  uploads: () => Promise<boolean> | null;
+  /** Files attached to the draft join the composer's fields. */
+  addAttachments: (added: DraftAttachment[]) => void;
   setFrom: (from: Addr) => void;
   /** Opens the file picker. */
   attach: () => void;
@@ -39,14 +47,19 @@ export type ComposerHandle = {
   closeLink: () => boolean;
 };
 
+/** A file still attaching to a draft, shown as a dashed chip. */
+export type Attaching = { key: number; name: string };
+
 export type ComposeState = {
   /** The composer on screen: a reply composer in conversation `thread`, or the `c` screen when null. */
   onScreen: { draft: string; thread: number | null } | null;
   /** The first Esc blurred the editor; compose is still on screen. */
   blurred: boolean;
+  /** Files still attaching, by draft. */
+  attaching: Record<string, Attaching[]>;
 };
 
-const useCompose = create<ComposeState>(() => ({ onScreen: null, blurred: false }));
+const useCompose = create<ComposeState>(() => ({ onScreen: null, blurred: false, attaching: {} }));
 
 /** Reads compose state in a component. */
 export const useComposeState = <T>(select: (s: ComposeState) => T): T => useCompose(select);
@@ -71,9 +84,17 @@ export const onComposeChange = (listener: () => void) => useCompose.subscribe(li
 
 let mounted: ComposerHandle | null = null;
 
+/** Files attached to a draft reopened while they attached, until its composer mounts. */
+const owed = new Map<string, DraftAttachment[]>();
+
 /** The mounted composer registers itself; the returned function unregisters it. */
 export function registerComposer(handle: ComposerHandle): () => void {
   mounted = handle;
+  const due = owed.get(handle.draft);
+  if (due) {
+    owed.delete(handle.draft);
+    handle.addAttachments(due);
+  }
   return () => {
     if (mounted === handle) mounted = null;
   };
@@ -97,12 +118,90 @@ export function loadedDraft(draft: string): DraftState | null {
   return null;
 }
 
+// ------------------------------------------------------------ attaching files
+
+/** Files still attaching, by draft: each pick resolves to whether all its files were attached. */
+const uploads = new Map<string, Set<Promise<boolean>>>();
+let attachSeq = 0;
+
+/** A picked file as base64, for the `add_attachment` command. */
+async function readFile(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCodePoint(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function setAttaching(draft: string, change: (files: Attaching[]) => Attaching[]) {
+  useCompose.setState((s) => {
+    const { [draft]: now = [], ...others } = s.attaching;
+    const next = change(now);
+    return { attaching: next.length > 0 ? { ...others, [draft]: next } : others };
+  });
+}
+
+/**
+ * Attaches files to a draft (SPEC Drafts). A file over the limit is refused
+ * before it is read. The files belong to the draft, not to one composer: a
+ * close or send waits for them, and each joins the composer that has the
+ * draft when it is in, the reopened one too.
+ */
+export function attachFiles(draft: string, files: File[]) {
+  const max = launch.maxAttachmentBytes;
+  const fits = files.filter((file) => {
+    if (file.size <= max) return true;
+    toast.error(
+      `Couldn't attach ${file.name}: attachments can be at most ${Math.floor(max / 2 ** 20)} MB`,
+    );
+    return false;
+  });
+  if (fits.length === 0) return;
+  const picked = fits.map((file) => ({ file, key: ++attachSeq }));
+  setAttaching(draft, (a) => [...a, ...picked.map((p) => ({ key: p.key, name: p.file.name }))]);
+  const pending = uploads.get(draft) ?? new Set<Promise<boolean>>();
+  uploads.set(draft, pending);
+  const store = async (): Promise<boolean> => {
+    const results = await Promise.all(
+      picked.map(async ({ file }): Promise<DraftAttachment | null> => {
+        try {
+          return await addAttachment(draft, file.name, file.type, await readFile(file));
+        } catch (err) {
+          toast.error(`Couldn't attach ${file.name}: ${String(err)}`);
+          return null;
+        }
+      }),
+    );
+    const added = results.filter((a): a is DraftAttachment => a !== null);
+    // Send and close wait for this, so they find the files in the fields.
+    if (added.length > 0) deliver(draft, added);
+    pending.delete(done);
+    if (pending.size === 0 && uploads.get(draft) === pending) uploads.delete(draft);
+    const keys = new Set(picked.map((p) => p.key));
+    setAttaching(draft, (a) => a.filter((x) => !keys.has(x.key)));
+    return added.length === results.length;
+  };
+  const done = store();
+  pending.add(done);
+}
+
+/** Files now in the draft join the composer that has it: on screen, or closed and waiting. */
+function deliver(draft: string, added: DraftAttachment[]) {
+  const to = mountedComposer(draft) ?? waiting.get(draft)?.handle ?? null;
+  if (to) to.addAttachments(added);
+  else if (draftOnScreen() === draft) owed.set(draft, [...(owed.get(draft) ?? []), ...added]);
+  else console.warn(`files attached to draft ${draft} after its composer had closed`);
+}
+
 /**
  * Null when the composer can be saved whole now; else resolves once its
  * first load is in and its files are attached, to whether all of them were.
  */
 function whenReady(draft: string): Promise<boolean> | null {
-  const uploads = mountedComposer(draft)?.uploads() ?? null;
+  const pending = uploads.get(draft);
+  const files =
+    pending && pending.size > 0 ? Promise.all(pending).then((all) => all.every(Boolean)) : null;
   const loaded = () => subIdFor(composerKey(draft)) === undefined || loadedDraft(draft) !== null;
   const load = loaded()
     ? null
@@ -113,22 +212,43 @@ function whenReady(draft: string): Promise<boolean> | null {
           resolve();
         });
       });
-  if (!uploads && !load) return null;
-  return Promise.all([load, uploads]).then(([, ok]) => ok ?? true);
+  if (!files && !load) return null;
+  return Promise.all([load, files]).then(([, ok]) => ok ?? true);
 }
+
+// ------------------------------------------------------------ opening and leaving
 
 /** The draft in the composer on screen, inline or full-screen. */
 export const draftOnScreen = (): string | null => composerOnScreen()?.draft ?? null;
 
+/**
+ * Subscribes a composer to its draft. A draft whose closed composer's close
+ * or send still waits for its files is open again: that is cancelled, and
+ * the closed composer's edits are saved first, so the new composer's first
+ * load, on a new subscription, holds them (SPEC Drafts).
+ */
+function open(draft: string) {
+  const left = waiting.get(draft);
+  if (!left) {
+    subscribe(composerKey(draft));
+    return;
+  }
+  left.cancelled = true;
+  waiting.delete(draft);
+  const save = left.handle?.pending() ?? null;
+  if (save) act({ type: "saveDraft", draft, save });
+  resubscribe(composerKey(draft));
+}
+
 /** Opens a composer that replaces the screen; closing it shows the screen beneath again. */
 export function openScreen(draft: string) {
-  subscribe(composerKey(draft));
+  open(draft);
   useCompose.setState({ onScreen: { draft, thread: null }, blurred: false });
 }
 
 /** Opens the reply composer under the open conversation, with its target message selected. */
 export function openInline(draft: string, thread: number, target: number | null) {
-  subscribe(composerKey(draft));
+  open(draft);
   useCompose.setState({ onScreen: { draft, thread }, blurred: false });
   // Whenever a reply composer opens, its target message is selected.
   if (target !== null) useChrome.getState().selectMessage(target);
@@ -145,20 +265,34 @@ export function composerFocused() {
   if (composeBlurred()) useCompose.setState({ blurred: false });
 }
 
-/**
- * Closes and sends that wait for their composer's first load or files, by
- * draft: each resolves once it is sent, or given up.
- */
-const waiting = new Map<string, Promise<void>>();
+/** A close or send that waits for its composer's first load or files. */
+type Waiting = {
+  /** The composer's handle, for its pending save; null if it never mounted. */
+  handle: ComposerHandle | null;
+  /** Resolves once the close or send is sent, given up, or cancelled. */
+  done: Promise<void>;
+  /** Reopening the draft cancelled it. */
+  cancelled: boolean;
+};
 
-/** Runs `then` once `ready` resolves, with the draft waiting meanwhile. */
-function defer(draft: string, ready: Promise<boolean>, then: (ok: boolean) => void) {
-  const done = (async () => {
+/** Closes and sends that wait, by draft. */
+const waiting = new Map<string, Waiting>();
+
+/** Runs `then` once `ready` resolves, with the draft waiting meanwhile, unless reopening cancels it. */
+function defer(
+  draft: string,
+  handle: ComposerHandle | null,
+  ready: Promise<boolean>,
+  then: (ok: boolean) => void,
+) {
+  const entry: Waiting = { handle, done: Promise.resolve(), cancelled: false };
+  entry.done = (async () => {
     const ok = await ready;
+    if (entry.cancelled) return;
     waiting.delete(draft);
     then(ok);
   })();
-  waiting.set(draft, done);
+  waiting.set(draft, entry);
 }
 
 /**
@@ -179,7 +313,7 @@ export function closeComposerOnScreen() {
   // Off screen at once. The close itself waits for the first load and for
   // files still attaching, or it could discard the draft as untouched.
   leave(draft, false);
-  if (ready) defer(draft, ready, () => close(draft, handle));
+  if (ready) defer(draft, handle, ready, () => close(draft, handle));
   else close(draft, handle);
 }
 
@@ -190,7 +324,7 @@ export function closeComposerOnScreen() {
  */
 export function closeComposers(): Promise<void> {
   closeComposerOnScreen();
-  return Promise.all(waiting.values()).then(() => undefined);
+  return Promise.all([...waiting.values()].map((w) => w.done)).then(() => undefined);
 }
 
 /** Sends a composer's close, with its pending save ahead of it. */
@@ -208,6 +342,8 @@ function leave(draft: string, forget = true) {
   if (mounted?.draft === draft) mounted = null;
 }
 
+// ------------------------------------------------------------ send and discard
+
 /** Gets the draft back after Rust refused its send (compose/sends.ts, which this module can't import). */
 type Refused = (account: number, draft: string, thread: number | null, why: string) => void;
 
@@ -224,7 +360,7 @@ export function sendOnScreen(refused: Refused) {
   // Before the first load or while a file is still attaching, the draft is
   // not complete: it sends once it is, even if the composer is closed
   // meanwhile, and not at all if a file fails. The composer stays on screen.
-  defer(draft, ready, (ok) => {
+  defer(draft, handle, ready, (ok) => {
     if (ok) {
       send(draft, handle, refused);
       return;

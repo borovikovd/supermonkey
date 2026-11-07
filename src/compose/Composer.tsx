@@ -8,9 +8,8 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { ChevronDown, Paperclip, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
 
-import { act, addAttachment, launch, later } from "../ipc/bridge";
+import { act, later } from "../ipc/bridge";
 import type { Addr, DraftAttachment, DraftFields } from "../ipc/types";
 import { command, keyText, shortHintOf, useCommand } from "../keyboard/table";
 import { openPalette } from "../navigation";
@@ -20,9 +19,11 @@ import { frameCsp } from "../ui/frameCsp";
 import { frameTokens } from "../ui/frameTokens";
 import { RecipientField, formatAddr, isValidEmail, type RecipientHandle } from "./RecipientField";
 import {
+  attachFiles,
   composerFocused,
   loadedDraft,
   registerComposer,
+  type Attaching,
   type ComposeField,
   type UpdateSave,
   useComposeState,
@@ -30,6 +31,9 @@ import {
 import { takeTypedAhead } from "./start";
 
 const SAVE_DELAY = 500;
+
+/** No files attaching. */
+const NONE: readonly Attaching[] = [];
 
 // Re-added with keys that do not clash with the compose table.
 const StrikeKeys = Strike.extend({
@@ -73,16 +77,6 @@ function QuoteBlock({ html }: { html: string }) {
   );
 }
 
-/** A picked file as base64, for the `add_attachment` command. */
-async function readFile(file: File): Promise<string> {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) {
-    binary += String.fromCodePoint(...bytes.subarray(i, i + 0x8000));
-  }
-  return btoa(binary);
-}
-
 /**
  * The fields once the first load is in. Anything typed before it wins over
  * the loaded value; a body typed before a resumed draft's body follows it, and
@@ -107,7 +101,7 @@ function AttachmentList({
   onRemove,
 }: {
   attachments: DraftAttachment[];
-  attaching: { key: number; name: string }[];
+  attaching: readonly Attaching[];
   onRemove: (id: string) => void;
 }) {
   return (
@@ -227,10 +221,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   const fileRef = useRef<HTMLInputElement>(null);
   const linkRef = useRef<HTMLInputElement>(null);
   /** Files picked but not yet attached, shown as chips meanwhile. */
-  const [attaching, setAttaching] = useState<{ key: number; name: string }[]>([]);
-  const attachSeq = useRef(0);
-  /** Picks still attaching: each resolves to whether all its files were attached. */
-  const uploads = useRef(new Set<Promise<boolean>>());
+  const attaching = useComposeState((s) => s.attaching[draft] ?? NONE);
 
   // useCallback stays: the effects below register these as handlers and list
   // them as dependencies.
@@ -378,10 +369,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
         [...latest.current.to, ...latest.current.cc, ...latest.current.bcc]
           .filter((a) => !isValidEmail(a.email))
           .map((a) => a.email),
-      uploads: () =>
-        uploads.current.size === 0
-          ? null
-          : Promise.all(uploads.current).then((all) => all.every(Boolean)),
+      addAttachments: (added) => update({ attachments: [...latest.current.attachments, ...added] }),
       setFrom: (from) => update({ from }),
       attach,
       focus,
@@ -414,40 +402,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   }, [inline]);
 
   const onFiles = (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    // A file over the limit is refused before it is read (SPEC Drafts).
-    const max = launch.maxAttachmentBytes;
-    const fits = Array.from(files).filter((file) => {
-      if (file.size <= max) return true;
-      toast.error(
-        `Couldn't attach ${file.name}: attachments can be at most ${Math.floor(max / 2 ** 20)} MB`,
-      );
-      return false;
-    });
-    if (fits.length === 0) return;
-    const picked = fits.map((file) => ({ file, key: ++attachSeq.current }));
-    setAttaching((a) => [...a, ...picked.map((p) => ({ key: p.key, name: p.file.name }))]);
-    const store = async (): Promise<boolean> => {
-      const results = await Promise.all(
-        picked.map(async ({ file: f }): Promise<DraftAttachment | null> => {
-          try {
-            return await addAttachment(draft, f.name, f.type, await readFile(f));
-          } catch (err) {
-            toast.error(`Couldn't attach ${f.name}: ${String(err)}`);
-            return null;
-          }
-        }),
-      );
-      const added = results.filter((a): a is DraftAttachment => a !== null);
-      // Send and close wait for this, so they find the files in the fields.
-      if (added.length > 0) update({ attachments: [...latest.current.attachments, ...added] });
-      uploads.current.delete(done);
-      const keys = new Set(picked.map((p) => p.key));
-      setAttaching((a) => a.filter((x) => !keys.has(x.key)));
-      return added.length === results.length;
-    };
-    const done = store();
-    uploads.current.add(done);
+    if (files && files.length > 0) attachFiles(draft, Array.from(files));
   };
 
   const account = state?.account ?? chromeAccount ?? 0;

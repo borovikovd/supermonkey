@@ -359,4 +359,38 @@ test.describe("attachments", () => {
     );
     expect(subjects(state.drafts.map((d) => d.message))).toEqual(["Kept after closing"]);
   });
+
+  test("ATT-11 a draft reopened while its close waits for a file keeps the new text and the file", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    await app.row("Person 3").click();
+    await expect(app.conversationTitle).toHaveText("Person 3");
+    await app.reply("r");
+    await app.type("Old words.");
+    const release = await app.park("add_attachment");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await app.press("Escape", "Escape");
+    await expect(app.editor).toHaveCount(0);
+
+    // `r` resumes the same draft while its close still waits for the file.
+    await app.press("r");
+    await expect(app.editor).toBeFocused();
+    await expect(app.editor).toHaveText("Old words.");
+    await app.type(" New words.");
+    await release();
+    await app.settle();
+    await expect(app.page.getByRole("button", { name: "Remove notes.txt" })).toBeVisible();
+    await expect(app.editor).toHaveText("Old words. New words.");
+    await app.press("Meta+Enter");
+    await app.settle();
+    await app.advance(10_000);
+    await app.settle();
+
+    const reply = await sentWithSubject(gmail, "Re: Person 3");
+    expect(htmlOf(reply)).toContain("Old words. New words.");
+    expect(Object.keys(filesOf(reply))).toEqual(["notes.txt"]);
+    expect((await gmail.gmail(A)).drafts).toHaveLength(0);
+  });
 });

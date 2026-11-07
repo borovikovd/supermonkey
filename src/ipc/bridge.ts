@@ -279,12 +279,32 @@ export function unsubscribe(key: SubKey): void {
   useMirror.getState().dropSub(have.id);
 }
 
-/** Forgets a composer subscription that Rust closed together with an action. */
+/**
+ * Forgets a composer subscription that Rust closed together with an action:
+ * `unsubscribe` without sending it. Ref-counted like `unsubscribe`.
+ */
 export function forgetSub(key: SubKey): void {
   const k = keyString(key);
   const have = byKey.get(k);
   if (!have) return;
+  if (--have.refs > 0) return;
   byKey.delete(k);
+  useMirror.getState().dropSub(have.id);
+}
+
+/**
+ * Opens `key` again under a new id, then closes the old one, so its first
+ * load comes after every action sent before it. Its holders keep it.
+ */
+export function resubscribe(key: SubKey): void {
+  const k = keyString(key);
+  const have = byKey.get(k);
+  const id = `s${++subSeq}-${pageTag}`;
+  byKey.set(k, { id, refs: have?.refs ?? 1 });
+  useMirror.getState().addSub(id, subForKey(key));
+  act({ type: "subscribe", sub: id, key });
+  if (!have) return;
+  act({ type: "unsubscribe", sub: have.id });
   useMirror.getState().dropSub(have.id);
 }
 
