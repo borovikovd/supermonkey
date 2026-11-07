@@ -183,11 +183,11 @@ Most bugs in an app that syncs live here. Assume every `await` lets the world ch
 - **Expected values from outside the code:** the spec, a fixture, or a literal
   worked out by hand. Never computed by the code under test; never just "a mock was
   called".
-- **It fails when the code is broken.** Break the code it covers (invert a
-  condition, drop a guard) and watch it go red, then restore. A test that stays
-  green is decoration.
-- **Every bug fix comes with a test that fails without the fix.** A known bug not yet
-  fixed is an expected-fail test with a `BUG:` reason.
+- **Test first.** Write the test before the fix or feature, run it, and see it fail
+  for the right reason; then make it pass. That one red run is the proof the test
+  can catch the bug. Don't break working code afterwards to re-check it.
+- **Every bug fix comes with a test that failed before the fix.** A known bug not
+  yet fixed is an expected-fail test with a `BUG:` reason.
 - **Conditions, never sleeps.** The app exposes its pending work (requests,
   timers, queued actions) so a test can wait until it is idle, and tests move app
   time with a fake clock.
