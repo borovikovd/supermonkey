@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 
 import "./theme.css";
 import { App } from "./App";
-import { closeComposerOnScreen } from "./compose/session";
+import { closeComposers } from "./compose/session";
 import {
   connect,
   inTauri,
@@ -32,10 +32,18 @@ onRefusal(showRefusal);
 void connect().then(() => subscribe({ type: "app" }));
 
 onEvent("notification-open", ({ account, thread }) => openNotification(account, thread));
-// Cmd+Q: close an open composer as a second Esc would, then quit once it commits.
+
+/** How long Cmd+Q waits for the page's last actions, in all. */
+const QUIT_WAIT_MS = 5_000;
+
+// Cmd+Q: close an open composer as a second Esc would, then quit once every
+// close is sent and committed, or after QUIT_WAIT_MS (SPEC UI state, Actions).
 onEvent("quit-requested", () => {
-  closeComposerOnScreen();
-  void whenCommitted(5_000).then(quitNow);
+  const start = Date.now();
+  const bound = new Promise<void>((resolve) => setTimeout(resolve, QUIT_WAIT_MS));
+  void Promise.race([closeComposers(), bound])
+    .then(() => whenCommitted(Math.max(0, QUIT_WAIT_MS - (Date.now() - start))))
+    .then(quitNow);
 });
 
 const root = document.querySelector("#root");

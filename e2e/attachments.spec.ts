@@ -285,4 +285,25 @@ test.describe("attachments", () => {
     await app.settle();
     expect(added).toHaveLength(1);
   });
+
+  test("ATT-09 Cmd+Q while a file is attaching quits once the composer's close is sent", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    await app.compose();
+    const release = await app.park("add_attachment");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    const quitting = app.quit();
+    // Cmd+Q takes the composer off screen at once; its close waits for the file.
+    await expect(app.page.getByRole("heading", { name: "New Message" })).toHaveCount(0);
+    await release();
+    await quitting;
+    await app.launch();
+    await app.settle();
+    const drafts = (await gmail.gmail(A)).drafts;
+    expect(drafts).toHaveLength(1);
+    const kept = filesOf(parseMime(drafts[0]?.message.raw ?? ""));
+    expect(Object.keys(kept)).toEqual(["notes.txt"]);
+  });
 });

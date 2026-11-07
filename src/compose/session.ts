@@ -145,24 +145,49 @@ export function composerFocused() {
   if (composeBlurred()) useCompose.setState({ blurred: false });
 }
 
-/** Closes the composer on screen as a second Esc would: kept as a draft, or discarded if untouched. */
+/** Closes that wait for their composer's first load or files, by draft: each resolves once sent. */
+const closing = new Map<string, Promise<void>>();
+
+/**
+ * Closes the composer on screen as a second Esc would: kept as a draft, or
+ * discarded if untouched. A close that waits is in `closing` until sent.
+ */
 export function closeComposerOnScreen() {
   const draft = draftOnScreen();
   if (!draft) return;
   // This composer's own handle: the close may run after it has left the screen.
   const handle = mountedComposer(draft);
-  const wait = whenReady(draft);
-  const close = () => {
-    const save = handle?.pending() ?? null;
-    if (save) act({ type: "saveDraft", draft, save });
-    act({ type: "closeComposer", draft });
-    forgetSub(composerKey(draft));
-  };
+  const ready = whenReady(draft);
   // Off screen at once. The close itself waits for the first load and for
   // files still attaching, or it could discard the draft as untouched.
   leave(draft, false);
-  if (wait) void wait.then(close);
-  else close();
+  if (!ready) {
+    close(draft, handle);
+    return;
+  }
+  const done = (async () => {
+    await ready;
+    closing.delete(draft);
+    close(draft, handle);
+  })();
+  closing.set(draft, done);
+}
+
+/**
+ * Cmd+Q: closes the composer on screen, and resolves once every close still
+ * waiting for a first load or a file is sent (SPEC UI state, Actions).
+ */
+export function closeComposers(): Promise<void> {
+  closeComposerOnScreen();
+  return Promise.all(closing.values()).then(() => undefined);
+}
+
+/** Sends a composer's close, with its pending save ahead of it. */
+function close(draft: string, handle: ComposerHandle | null) {
+  const save = handle?.pending() ?? null;
+  if (save) act({ type: "saveDraft", draft, save });
+  act({ type: "closeComposer", draft });
+  forgetSub(composerKey(draft));
 }
 
 /** Takes the composer off screen and, unless told not to, drops its subscription. */
