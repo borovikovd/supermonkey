@@ -2,7 +2,7 @@ import { createRoot } from "react-dom/client";
 
 import "./theme.css";
 import { App } from "./App";
-import { closeComposers } from "./compose/session";
+import { closeComposers, closeGoneReplies } from "./compose/session";
 import {
   connect,
   inTauri,
@@ -26,6 +26,7 @@ if (import.meta.env.DEV || !inTauri)
 
 installKeys();
 trackFocus();
+closeGoneReplies();
 onRefusal(showRefusal);
 
 // App renders once the app state, subscribed after connecting, arrives.

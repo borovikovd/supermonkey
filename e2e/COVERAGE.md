@@ -85,6 +85,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - CONV-22 · P1 · A message labelled with a legacy charset but served as UTF-8 reads correctly · §Reading
 - CONV-23 · P2 · An address added to the account in Gmail is Me in a conversation already open · §Reading, §Sync
 - CONV-24 · P2 · `r`, `Enter`, and `f` do nothing in a conversation that is gone · §Reading, §Reply composer
+- CONV-25 · P1 · A reply open when its conversation turns gone closes as a second `Esc` would, keeping its text · §Reply composer, §Keyboard
 
 ### triage-actions.spec.ts (TRI)
 

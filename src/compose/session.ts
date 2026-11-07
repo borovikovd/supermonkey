@@ -18,6 +18,7 @@ import {
 } from "../ipc/bridge";
 import type { Addr, DraftAttachment, DraftSave, DraftState, SubKey } from "../ipc/types";
 import { useChrome } from "../store/chrome";
+import { conversationData } from "../store/current";
 import { useMirror } from "../store/mirror";
 
 /** A save of a composer's fields, with the rev of the draft state they are based on. */
@@ -369,6 +370,30 @@ function close(draft: string, handle: ComposerHandle | null) {
   if (save) act({ type: "saveDraft", draft, save });
   act({ type: "closeComposer", draft });
   forgetSub(composerKey(draft));
+}
+
+/** Whether the reply composer on screen belongs to a conversation that is gone, deleted from Gmail. */
+function replyGone(): boolean {
+  const thread = composerOnScreen()?.thread ?? null;
+  if (thread === null) return false;
+  const screen = useChrome.getState().current()?.screen;
+  if (screen?.kind !== "conversation" || screen.thread !== thread) return false;
+  return conversationData(useMirror.getState(), thread, screen.trashMode)?.gone === true;
+}
+
+/**
+ * A gone conversation draws no composer, so a reply composer in one closes
+ * as a second Esc would, the draft kept (SPEC Reply composer). It closes as
+ * the news arrives, before the composer leaves the screen, so its unsaved
+ * text is saved. Call once at startup.
+ */
+export function closeGoneReplies() {
+  useMirror.subscribe(closeIfGone);
+  useCompose.subscribe(closeIfGone);
+}
+
+function closeIfGone() {
+  if (replyGone()) closeComposerOnScreen();
 }
 
 /** Takes the composer off screen and, unless told not to, drops its subscription. */

@@ -806,3 +806,35 @@ test("CONV-24 r, Enter, and f do nothing in a conversation that is gone", async 
   await app.settle();
   expect((await gmail.gmail(A)).drafts).toEqual([]);
 });
+
+// The gone conversation drew no composer, but its reply stayed the one on
+// screen: its keys and hints applied, and Cmd+Enter sent what no one saw.
+test("CONV-25 a reply open when its conversation turns gone closes as a second Esc would", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const p3 = s.thread("p3").threadId;
+  await app.row("Person 3").click();
+  await expect(app.conversationTitle).toHaveText("Person 3");
+  await app.reply("r");
+  await app.type("Words to keep");
+  // Deleted forever in Gmail while the reply is open.
+  await gmail.deleteThread(A, p3, { poll: true });
+  await app.settle();
+  await expect(app.conversation.getByText("This conversation is gone.")).toBeVisible();
+
+  // The gone conversation's own hints and keys: Cmd+Enter sends nothing, one Esc goes back.
+  await expect(app.hintBar).toHaveText(/^E to Mark Done\s*·\s*⌘K for commands$/);
+  await app.press("Meta+Enter");
+  await app.advance(10_000);
+  await app.press("Escape");
+  await expect(app.list).toBeVisible();
+  await expect(app.highlighted).toContainText("Person 4");
+  await app.settle();
+  const sent = (await gmail.gmail(A)).messages.filter((m) => m.labels.includes("SENT"));
+  expect(sent.map((m) => m.threadId)).not.toContain(p3);
+  // The typed text is kept in the draft.
+  await app.press("g", "d");
+  await expect(app.row("Words to keep")).toHaveCount(1);
+});
