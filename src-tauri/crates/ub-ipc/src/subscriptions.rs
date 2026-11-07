@@ -23,7 +23,8 @@ pub enum SubKey {
     /// One thread's conversation.
     Conversation {
         thread: ThreadId,
-        /// Opened from Trash or Spam: every non-draft message is listed.
+        /// Opened from Trash, Spam, or a search that looks there: every
+        /// non-draft message is listed.
         #[serde(rename = "trashMode")]
         trash_mode: bool,
         /// Open, as opposed to prefetched.
@@ -53,6 +54,10 @@ pub enum SubUpdate {
         /// Search only: the query has a term local search can't evaluate,
         /// so only Gmail's hits are listed.
         needs_gmail: bool,
+        /// Search only: the query looks in Trash or Spam (`in:trash`,
+        /// `in:spam`, `in:anywhere`), so a conversation opened from its
+        /// results lists their messages (SPEC Reading).
+        looks_in_trash: bool,
         /// Gmail has another page for this list.
         more: bool,
         /// The key of the lowest row that came from Gmail's pages, if any

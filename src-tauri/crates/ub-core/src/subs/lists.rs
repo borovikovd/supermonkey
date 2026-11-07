@@ -51,17 +51,27 @@ pub(crate) fn view_ids(
         .collect())
 }
 
+/// What a search's query says about its list, besides its keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SearchTraits {
+    /// Local search can't evaluate one of its terms, so only Gmail's hits
+    /// are listed.
+    pub(crate) needs_gmail: bool,
+    /// It looks in Trash or Spam, so a conversation opened from its results
+    /// lists their messages (SPEC Reading).
+    pub(crate) looks_in_trash: bool,
+}
+
 /// A search's keys: local matches plus the Gmail hits it holds, newest
-/// first; and whether the query needs Gmail, because local search can't
-/// evaluate one of its terms. Dates in the query are days in this Mac's time
-/// zone, and ages count back from `now`.
+/// first; and what its query says about the list. Dates in the query are
+/// days in this Mac's time zone, and ages count back from `now`.
 pub(crate) fn search_ids(
     reads: Reads<'_>,
     account: AccountId,
     raw: &str,
     gmail_hits: &[ThreadId],
     now: Millis,
-) -> Result<(Vec<ListEntry>, bool), StoreError> {
+) -> Result<(Vec<ListEntry>, SearchTraits), StoreError> {
     let query = DateTime::from_timestamp_millis(now.0).map_or_else(
         || Query::parse(raw),
         |now| Query::parse_search(raw, &now.with_timezone(&Local)),
@@ -75,5 +85,12 @@ pub(crate) fn search_ids(
             split: None,
         })
         .collect();
-    Ok((ids, query.needs_gmail()))
+    let scope = query.scope();
+    Ok((
+        ids,
+        SearchTraits {
+            needs_gmail: query.needs_gmail(),
+            looks_in_trash: scope.trash || scope.spam,
+        },
+    ))
 }

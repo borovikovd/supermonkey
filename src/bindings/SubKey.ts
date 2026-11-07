@@ -3,7 +3,8 @@ import type { View } from "./View";
 
 export type SubKey = { "type": "app" } | { "type": "account", account: number, } | { "type": "list", account: number, view: View, } | { "type": "search", account: number, query: string, } | { "type": "conversation", thread: number, 
 /**
- * Opened from Trash or Spam: every non-draft message is listed.
+ * Opened from Trash, Spam, or a search that looks there: every
+ * non-draft message is listed.
  */
 trashMode: boolean, 
 /**

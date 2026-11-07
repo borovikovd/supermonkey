@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 
-import { visibleIds } from "../store/current";
+import { listShowsTrash, visibleIds } from "../store/current";
 import { later, subscribe, unsubscribe } from "../ipc/bridge";
 import type { SubKey } from "../ipc/types";
 import { useChrome } from "../store/chrome";
@@ -29,9 +29,8 @@ export function Prefetch() {
     return later(() => {
       const ids = visibleIds();
       const at = ids.indexOf(center);
-      const where = useChrome.getState().current()?.where;
-      const view = where?.kind === "view" ? where.view.kind : null;
-      const trashMode = openTrashMode || view === "trash" || view === "spam";
+      // As the conversation will open (SPEC Reading).
+      const trashMode = openTrashMode || listShowsTrash();
       // An open conversation is subscribed already; a highlighted row is not.
       const around = [ids[at - 1], thread === null ? center : undefined, ids[at + 1]].filter(
         (x): x is string => x !== undefined && !Number.isNaN(Number(x)),

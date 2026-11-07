@@ -43,6 +43,20 @@ export function currentListLoaded(): boolean {
   return sub?.type === "list" && sub.loaded;
 }
 
+/**
+ * Whether a conversation opened from the list on screen lists its messages in
+ * trash and spam: from Trash or Spam, or from a search that looks there
+ * (SPEC Reading).
+ */
+export function listShowsTrash(): boolean {
+  const where = useChrome.getState().current()?.where;
+  if (where?.kind === "view") return where.view.kind === "trash" || where.view.kind === "spam";
+  const key = currentListKey();
+  const id = key ? subIdFor(key) : undefined;
+  const sub = id ? useMirror.getState().subs[id] : undefined;
+  return sub?.type === "list" && sub.looksInTrash;
+}
+
 export function rowOf(key: string) {
   return (currentListView()?.rows ?? useMirror.getState().rows)[key];
 }

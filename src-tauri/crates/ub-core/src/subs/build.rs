@@ -8,7 +8,7 @@ use ub_store::{Changes, Reads, StoreError};
 
 use super::affects::affects;
 use super::diff::diff;
-use super::lists::{FIRST_WINDOW, search_ids, view_ids};
+use super::lists::{FIRST_WINDOW, SearchTraits, search_ids, view_ids};
 use super::registry::Sub;
 use crate::views;
 
@@ -29,8 +29,8 @@ pub(super) fn first_load(
             list_first(reads, sub_id, sub, ids, kind)?
         }
         SubKey::Search { account, query } => {
-            let (ids, needs_gmail) = search_ids(reads, *account, query, &sub.gmail_hits, now)?;
-            list_first(reads, sub_id, sub, ids, ListKind::Search { needs_gmail })?
+            let (ids, traits) = search_ids(reads, *account, query, &sub.gmail_hits, now)?;
+            list_first(reads, sub_id, sub, ids, ListKind::Search(traits))?
         }
         SubKey::App => SubUpdate::App {
             sub: sub_id,
@@ -82,8 +82,8 @@ pub(super) fn patch(
             list_patch(reads, sub_id, sub, ids, kind, changes, forced)?
         }
         SubKey::Search { account, query } => {
-            let (ids, needs_gmail) = search_ids(reads, *account, query, &sub.gmail_hits, now)?;
-            let kind = ListKind::Search { needs_gmail };
+            let (ids, traits) = search_ids(reads, *account, query, &sub.gmail_hits, now)?;
+            let kind = ListKind::Search(traits);
             list_patch(reads, sub_id, sub, ids, kind, changes, forced)?
         }
         SubKey::App => Some(SubUpdate::App {
@@ -121,8 +121,8 @@ enum ListKind {
     View,
     /// Drafts, keyed by draft id.
     Drafts,
-    /// Search results, and whether the query needs Gmail.
-    Search { needs_gmail: bool },
+    /// Search results, and what the query says about them.
+    Search(SearchTraits),
 }
 
 impl ListKind {
@@ -135,7 +135,11 @@ impl ListKind {
     }
 
     fn needs_gmail(self) -> bool {
-        matches!(self, Self::Search { needs_gmail: true })
+        matches!(self, Self::Search(t) if t.needs_gmail)
+    }
+
+    fn looks_in_trash(self) -> bool {
+        matches!(self, Self::Search(t) if t.looks_in_trash)
     }
 }
 
@@ -164,6 +168,7 @@ fn list_first(
         rows,
         searching: sub.searching,
         needs_gmail: kind.needs_gmail(),
+        looks_in_trash: kind.looks_in_trash(),
         more: sub.next_page.is_some(),
         oldest_hit,
     })
@@ -203,6 +208,7 @@ fn list_patch(
         rows,
         searching: sub.searching,
         needs_gmail: kind.needs_gmail(),
+        looks_in_trash: kind.looks_in_trash(),
         more: sub.next_page.is_some(),
         oldest_hit,
     }))

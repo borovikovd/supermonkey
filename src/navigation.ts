@@ -12,6 +12,7 @@ import { useChrome, type PaletteMode, type Sheet } from "./store/chrome";
 import {
   currentListLoaded,
   currentView,
+  listShowsTrash,
   rowOf,
   splitIdOf,
   visibleIds,
@@ -143,7 +144,7 @@ export function openConversation(thread: number, row?: string) {
   const view = currentView();
   const from =
     row ?? (view?.kind === "drafts" ? chrome().current()?.highlight : null) ?? String(thread);
-  chrome().showConversation(thread, view?.kind === "trash" || view?.kind === "spam", from);
+  chrome().showConversation(thread, listShowsTrash(), from);
   markReadWhenLoaded(thread);
 }
 

@@ -309,7 +309,7 @@ The conversation view lists messages oldest first.
 - Clicking a collapsed line expands it. Clicking a fold shows its messages as collapsed lines. Clicking an expanded message's header collapses it.
 - The view opens scrolled to the first unread message, or to the latest message when none are unread.
 
-Draft messages are not listed with the others. Outside Trash and Spam, messages in trash or spam are not listed either, so an undone sent reply disappears from the thread. In Trash and Spam, every non-draft message is listed. A reply or forward draft on the thread shows as a collapsed draft below the last message. Clicking it resumes it in the reply composer. `r`, `Enter`, and `f` resume the newest draft of their kind aimed at the selected message (see Reply composer).
+Draft messages are not listed with the others. Outside Trash and Spam, messages in trash or spam are not listed either, so an undone sent reply disappears from the thread. In Trash and Spam, every non-draft message is listed, and so in a conversation opened, by `Enter`, a click, `j`, or `k`, from the results of a search that looks in trash or spam (see Search). A reply or forward draft on the thread shows as a collapsed draft below the last message. Clicking it resumes it in the reply composer. `r`, `Enter`, and `f` resume the newest draft of their kind aimed at the selected message (see Reply composer).
 
 In Drafts, `Enter` on a new-message draft opens it on the `c` screen. On a reply or forward draft, it opens the thread with that draft in the reply composer, and the highlight stays on the draft's row. Drafts lists drafts, not conversations, so in a conversation opened from it, `j` and `k` open the thread of the next or previous draft in the list, passing over new-message drafts, and the highlight moves to that draft.
 
@@ -601,7 +601,7 @@ The first results come from local full-text search, and they appear immediately,
 | `newer_than:`, `older_than:` | is newer, or older, than that many calendar days, months, or years (`2d`, `3m`, `1y`) before now, so a DST change does not shift them |
 | `from:me`, `to:me`, `cc:me`, `bcc:me` | is from, or to, one of this account's addresses |
 
-Like Gmail search, local search skips drafts and messages in trash and spam, and so conversations with no other message. A query that names `in:trash`, `in:spam`, or `in:anywhere` looks there too, and one that names `in:drafts` looks at drafts, even when the term is negated, as in Gmail.
+Like Gmail search, local search skips drafts and messages in trash and spam, and so conversations with no other message. A query that names `in:trash`, `in:spam`, or `in:anywhere` looks there too, and one that names `in:drafts` looks at drafts, even when the term is negated, as in Gmail. A conversation opened from the results of a query that looks in trash or spam lists every non-draft message, as in Trash and Spam (see Reading).
 
 Gmail applies the full query. Any other operator, such as `filename:` or `larger:`, needs data only Gmail has. Local search lists nothing for a query that holds one, rather than ignore the operator and show mail it may not match. Offline it says the search needs Gmail.
 

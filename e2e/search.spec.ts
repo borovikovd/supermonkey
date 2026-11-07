@@ -681,3 +681,45 @@ test("SRC-15 an open search runs once Gmail can be reached again, though nothing
   await expect(app.row("Invoice 2019")).toHaveCount(1);
   await expect(app.page.getByText("Results from this Mac")).toHaveCount(0);
 });
+
+test("SRC-16 a conversation opened from a search in Trash or Spam lists their messages", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  // Synced now, so local search finds it; Old trash comes from Gmail's hits.
+  await gmail.deliver({
+    account: A,
+    from: "Tess Toss <tess@toss.test>",
+    subject: "Tossed today",
+    text: "A koala was here.",
+    labels: ["TRASH"],
+  });
+  await app.settle();
+  await search(app, "in:trash");
+  await app.advance(300);
+  await expect(app.row("Old trash")).toHaveCount(1);
+  expect(await app.subjects()).toEqual(["Tossed today", "Latest rule", "Old trash"]);
+
+  await app.press("Enter", "Enter");
+  await expect(app.conversationTitle).toHaveText("Tossed today");
+  await expect(app.messageBody(0).locator("body")).toContainText("A koala was here.");
+  // `j` opens the next results the same way: Latest rule with its trashed reply.
+  await app.press("j");
+  await expect(app.conversationTitle).toHaveText("Latest rule");
+  await expect(app.messages).toHaveCount(2);
+  await app.press("j");
+  await expect(app.conversationTitle).toHaveText("Old trash");
+  await expect(app.messageBody(0).locator("body")).toContainText("A wombat was here.");
+  // The reply keys work there.
+  await app.reply("r");
+  await app.press("Escape", "Escape");
+  await expect(app.editor).toHaveCount(0);
+
+  // A search that does not look in Trash hides the trashed reply, as Inbox does (CONV-11).
+  await search(app, "latest rule");
+  await app.row("Latest rule").click();
+  await expect(app.conversationTitle).toHaveText("Latest rule");
+  await app.settle();
+  await expect(app.messages).toHaveCount(1);
+});

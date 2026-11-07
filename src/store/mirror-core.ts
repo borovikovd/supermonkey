@@ -30,6 +30,8 @@ export type ListSub = {
   searching: boolean;
   /** Search: the query has a term only Gmail can evaluate. */
   needsGmail: boolean;
+  /** Search: the query looks in Trash or Spam, so a conversation opened from it lists their messages. */
+  looksInTrash: boolean;
   /** Gmail has another page (Search, Label, Trash, Spam). */
   more: boolean;
   /** The lowest row from Gmail's pages: the next page loads near it. */
@@ -81,6 +83,7 @@ export function subForKey(key: SubKey): Sub {
         ids: [],
         searching: false,
         needsGmail: false,
+        looksInTrash: false,
         more: false,
         oldestHit: null,
       };
@@ -187,6 +190,7 @@ export function applyChannel(
           ids,
           searching: u.searching,
           needsGmail: u.needsGmail,
+          looksInTrash: u.looksInTrash,
           more: u.more,
           oldestHit: u.oldestHit,
         };

@@ -18,6 +18,12 @@ searching: boolean,
  */
 needsGmail: boolean, 
 /**
+ * Search only: the query looks in Trash or Spam (`in:trash`,
+ * `in:spam`, `in:anywhere`), so a conversation opened from its
+ * results lists their messages (SPEC Reading).
+ */
+looksInTrash: boolean, 
+/**
  * Gmail has another page for this list.
  */
 more: boolean, 
