@@ -1179,3 +1179,30 @@ test("REP-19 a reply discarded before its target's body or its own first load ar
   expect(await gmail.requests("drafts.create")).toEqual([]);
   await app.expectNoErrorToasts();
 });
+
+test("REP-20 Cmd+Q before a reply's first load arrives keeps what was typed", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await highlight(app, "Person 3");
+  await app.press("Enter");
+  await expect(app.conversationTitle).toHaveText(s.thread("p3").subject);
+  await app.settle();
+  const release = await app.park("submit");
+  await app.press("r");
+  await expect(app.editor).toBeFocused();
+  await app.type("Typed before it loaded");
+  const quitting = app.quit();
+  // Cmd+Q takes the composer off screen at once; its close waits for the first load.
+  await expect(app.editor).toHaveCount(0);
+  await release();
+  await quitting;
+  await app.launch();
+  await app.settle();
+  const drafts = (await gmail.gmail(A)).drafts.filter(
+    (d) => d.message.threadId === s.thread("p3").threadId,
+  );
+  expect(drafts).toHaveLength(1);
+  expect(drafts[0]?.message.raw).toContain("Typed before it loaded");
+});

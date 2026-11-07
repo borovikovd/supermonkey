@@ -122,3 +122,43 @@ test("the lists of what is covered elsewhere name only real cases, files, and he
     "sections that are not SPEC.md headings",
   ).toEqual([]);
 });
+
+test("every interruption cell names a case or says why it can't happen", () => {
+  const lines = section("Interruptions");
+  const header = lines.find((l) => l.startsWith("Events: "));
+  expect(header, 'the grid lists its "Events: a, b, …."').toBeDefined();
+  const events = (header ?? "").replace(/^Events: |\.$/g, "").split(", ");
+  const known = new Set(cases().map((c) => c.id));
+  const tauri = path.join(DIR, "..", "src-tauri");
+
+  const rows = new Map<string, string[]>();
+  let op = "";
+  for (const line of lines) {
+    const heading = /^### (.+)$/.exec(line);
+    if (heading) {
+      op = heading[1] ?? "";
+      rows.set(op, []);
+      continue;
+    }
+    const cell = /^- ([a-z]+): (.+)$/.exec(line);
+    if (!cell) continue;
+    rows.get(op)?.push(cell[1] ?? "");
+    const value = cell[2] ?? "";
+    if (value.startsWith("n/a: ")) {
+      expect(value.length, `${op} × ${cell[1]} gives a reason`).toBeGreaterThan(10);
+      continue;
+    }
+    const refs = value.split(/,? /).filter((r) => /^[A-Z]+-\d+$|^`.+`$/.test(r));
+    expect(refs.length, `${op} × ${cell[1]} names a case or a unit test: ${value}`).toBeGreaterThan(
+      0,
+    );
+    for (const r of refs) {
+      if (r.startsWith("`"))
+        expect(existsSync(path.join(tauri, r.slice(1, -1))), `${r} exists`).toBe(true);
+      else expect(known.has(r), `${op} × ${cell[1]}: ${r} is a case`).toBe(true);
+    }
+  }
+  expect(rows.size).toBeGreaterThan(0);
+  for (const [name, cells] of rows)
+    expect(cells, `${name} has one cell per event, in order`).toEqual(events);
+});

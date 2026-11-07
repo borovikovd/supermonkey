@@ -1176,3 +1176,142 @@ test("ACC-24 a sign-in cut off by a lost connection or a quit adds nothing, and 
   await expect(app.account(B)).toBeVisible();
   expect((await gmail.tokens()).map((k) => k.account).toSorted()).toEqual([A, B].toSorted());
 });
+
+test("ACC-25 adding an account again while a send, a discard, and an undo are on their way to Gmail does each once", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const errors = (await app.errorToastsShown()).length;
+
+  // A send whose drafts.send is on its way.
+  const send = await gmail.hold("drafts.send");
+  await replyTo(app, "Person 2");
+  await app.type("Sent across a sign-in");
+  await app.settle();
+  await app.press("Meta+Enter");
+  await expect(app.editor).toHaveCount(0);
+  await app.advance(10_000);
+  await parked(gmail, "drafts.send");
+  await app.press("Escape");
+
+  // An archive that landed, for an undo to revert.
+  await highlight(app, "Person 4");
+  await app.press("e");
+  await app.settle();
+  expect(await labelsOf(gmail, A, s.latest("p4").id)).not.toContain("INBOX");
+
+  // A discard whose drafts.delete is on its way, and the undo queued behind it.
+  const discard = await gmail.hold("drafts.delete");
+  await replyTo(app, "Person 3");
+  await app.type("Discarded across a sign-in");
+  await app.advance(1_000);
+  await app.settle();
+  const p3Drafts = async () =>
+    (await gmail.gmail(A)).drafts.filter((d) => d.message.threadId === s.thread("p3").threadId);
+  expect(await p3Drafts()).toHaveLength(1);
+  await app.press("Meta+Shift+,");
+  await expect(app.editor).toHaveCount(0);
+  await parked(gmail, "drafts.delete");
+  await app.press("Escape");
+  await expect(app.list).toBeVisible();
+  await app.press("z");
+  await expect(app.row("Person 4")).toHaveCount(1);
+
+  // A is added again, as already signed in: a new runtime takes over.
+  const lists = (await gmail.requests("threads.list", { account: A })).length;
+  await gmail.nextSignIn({ email: A });
+  await command(app, "Add account");
+  await expect
+    .poll(async () => (await gmail.requests("threads.list", { account: A })).length)
+    .toBeGreaterThan(lists);
+
+  await send.release();
+  await discard.release();
+  await app.advance(60_000, { stepwise: true });
+  await app.settle();
+  const a = await gmail.gmail(A);
+  const sent = a.messages.filter(
+    (m) => m.threadId === s.thread("p2").threadId && m.labels.includes("SENT"),
+  );
+  expect(sent, "the reply went out once").toHaveLength(1);
+  expect(sent[0]?.raw).toContain("Sent across a sign-in");
+  expect(a.drafts, "the discarded draft is gone").toEqual([]);
+  expect(await gmail.requests("drafts.delete")).toHaveLength(1);
+  expect(await labelsOf(gmail, A, s.latest("p4").id)).toContain("INBOX");
+  const p4Modifies = (await gmail.requests("messages.batchModify")).filter((r) =>
+    JSON.stringify(r.body).includes(s.latest("p4").id),
+  );
+  expect(p4Modifies, "the archive and its undo, once each").toHaveLength(2);
+  await expect(app.row("Person 4")).toHaveCount(1);
+  await app.expectNoErrorToasts(errors);
+});
+
+test("ACC-26 a conversation and its reply still loading when the account signs out or is removed", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const errors = (await app.errorToastsShown()).length;
+  const from = seeds.PERSONS[0] ?? "";
+  // Longer than a snippet, so only the downloaded body ends this way.
+  const text = `${"The first lines arrive before the rest. ".repeat(4)}The end of the message.`;
+  const draftsOn = async (threadId: string) =>
+    (await gmail.gmail(A)).drafts.filter((d) => d.message.threadId === threadId);
+
+  // A signs out while the body downloads and a reply to it is open.
+  let body = await gmail.hold({ api: "threads.get", query: { format: "full" } });
+  const slow = await gmail.deliver({ account: A, from, subject: "Slow body", text });
+  await expect
+    .poll(async () => (await gmail.requests("threads.get")).some((r) => r.held))
+    .toBe(true);
+  await app.row("Slow body").click();
+  await expect(app.conversationTitle).toHaveText("Slow body");
+  await app.reply("r");
+  await app.type("Half a reply");
+  await gmail.invalidGrant(A, true);
+  await gmail.expireAccessTokens(A);
+  await gmail.poll();
+  await app.settle();
+  await expect(app.signInMarker(A)).toBeVisible();
+  // The reply stays on screen with its conversation until it is closed.
+  await expect(app.editor).toHaveText("Half a reply");
+  await expect(app.conversationTitle).toHaveText("Slow body");
+  await app.press("Escape", "Escape");
+  await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
+  await gmail.release({ id: body.id });
+
+  // After signing in again, the body loads and the reply quotes all of it.
+  await gmail.invalidGrant(A, false);
+  await gmail.nextSignIn({ email: A });
+  await app.press("Enter");
+  await expect(app.signInMarker(A)).toHaveCount(0);
+  await app.settle();
+  // Back on the conversation it signed out on.
+  await expect(app.conversationTitle).toHaveText("Slow body");
+  await expect(
+    app.conversation.locator("iframe[data-frame]").first().contentFrame().locator("body"),
+  ).toContainText("The end of the message.");
+  const [draft] = await draftsOn(slow.threadId);
+  expect(draft?.message.raw).toContain("Half a reply");
+  expect(draft?.message.raw).toContain("The end of the message.");
+  await app.press("Escape");
+
+  // A is removed while another body downloads and a reply to it is open.
+  body = await gmail.hold({ api: "threads.get", query: { format: "full" } });
+  await gmail.deliver({ account: A, from, subject: "Slow again", text });
+  await expect
+    .poll(async () => (await gmail.requests("threads.get")).some((r) => r.held))
+    .toBe(true);
+  await app.row("Slow again").click();
+  await expect(app.conversationTitle).toHaveText("Slow again");
+  await app.reply("r");
+  await app.type("Gone with the account");
+  await app.removeAccount(A);
+  await expect(app.editor).toHaveCount(0);
+  await expect(app.highlighted).toContainText("Bea Blue");
+  await gmail.release({ id: body.id });
+  await app.settle();
+  await expect(app.highlighted).toContainText("Bea Blue");
+  await app.expectNoErrorToasts(errors);
+});

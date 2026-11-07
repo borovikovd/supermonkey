@@ -1008,3 +1008,162 @@ test("SND-24 a send whose account signs out or is removed while drafts.send is o
   await expect(app.toast("Person 5")).toHaveCount(0);
   await app.expectNoErrorToasts(errors);
 });
+
+test("SND-25 an Undo while the draft's first upsert is in flight reopens the composer and leaves one Gmail draft", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const p3 = s.thread("p3").threadId;
+  const create = await gmail.hold("drafts.create");
+  await openThread(app, "Person 3");
+  await app.reply();
+  await app.type("Undone mid-save");
+  await expect
+    .poll(async () => (await gmail.requests("drafts.create")).some((r) => r.held))
+    .toBe(true);
+  await app.press("Meta+Enter");
+  await expect(app.editor).toHaveCount(0);
+  await undoOn(sendToast(app, "Person 3")).click();
+  await expect(app.editor).toContainText("Undone mid-save");
+
+  await create.release();
+  await app.settle();
+  await app.advance(DELAY);
+  await app.settle();
+  await expect(app.editor).toContainText("Undone mid-save");
+  const drafts = (await gmail.gmail(A)).drafts.filter((d) => d.message.threadId === p3);
+  expect(drafts).toHaveLength(1);
+  expect(drafts[0]?.message.raw).toContain("Undone mid-save");
+  expect(await gmail.requests("drafts.send")).toEqual([]);
+  expect(await sentIn(gmail, p3)).toEqual([]);
+  await app.expectNoErrorToasts();
+});
+
+test("SND-26 a reply key on a thread whose reply is waiting or sending starts a new draft and leaves the send alone", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const draftsOn = async (thread: string) =>
+    (await gmail.gmail(A)).drafts.filter((d) => d.message.threadId === thread);
+  /** `r` on the open thread, a new reply typed and closed. */
+  const replyAgain = async (text: string) => {
+    await app.reply();
+    await expect(app.editor).toHaveText("");
+    await app.type(text);
+    await app.press("Escape", "Escape");
+    await expect(app.editor).toHaveCount(0);
+    await expect(app.conversation.getByText("Sending", { exact: true })).toBeVisible();
+  };
+
+  // While the send waits.
+  const p3 = s.thread("p3").threadId;
+  await sendReply(app, "Person 3", "The waiting reply");
+  await replyAgain("A second thought");
+  await app.advance(DELAY);
+  await app.settle();
+  let sent = await sentIn(gmail, p3);
+  expect(sent).toHaveLength(1);
+  expect(sent[0]?.raw).toContain("The waiting reply");
+  expect(sent[0]?.raw).not.toContain("A second thought");
+  let kept = await draftsOn(p3);
+  expect(kept).toHaveLength(1);
+  expect(kept[0]?.message.raw).toContain("A second thought");
+  await app.press("Escape");
+
+  // While drafts.send is on its way.
+  const p5 = s.thread("p5").threadId;
+  const send = await gmail.hold("drafts.send");
+  await sendReply(app, "Person 5", "The sending reply");
+  await app.advance(DELAY);
+  await expect
+    .poll(async () => (await gmail.requests("drafts.send")).some((r) => r.held))
+    .toBe(true);
+  await replyAgain("Another thought");
+  await send.release();
+  await app.settle();
+  sent = await sentIn(gmail, p5);
+  expect(sent).toHaveLength(1);
+  expect(sent[0]?.raw).toContain("The sending reply");
+  kept = await draftsOn(p5);
+  expect(kept).toHaveLength(1);
+  expect(kept[0]?.message.raw).toContain("Another thought");
+  await app.expectNoErrorToasts();
+});
+
+test("SND-27 a send whose Gmail draft is edited or deleted elsewhere in the undo window sends what was sent here, once", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const gmailDraft = async (thread: string) => {
+    const found = (await gmail.gmail(A)).drafts.find((d) => d.message.threadId === thread);
+    if (!found) throw new Error(`no Gmail draft on ${thread}`);
+    return found;
+  };
+
+  // Edited in Gmail web while the send waits.
+  const p3 = s.thread("p3").threadId;
+  await sendReply(app, "Person 3", "Sent from here");
+  const edited = await gmailDraft(p3);
+  await gmail.updateDraft(
+    A,
+    edited.id,
+    {
+      to: [seeds.PERSONS[2] ?? ""],
+      subject: "Re: Person 3",
+      text: "Edited elsewhere",
+      threadId: p3,
+    },
+    { poll: true },
+  );
+  await app.settle();
+  await app.advance(DELAY);
+  await app.settle();
+  const fromHere = await sentIn(gmail, p3);
+  expect(fromHere).toHaveLength(1);
+  expect(fromHere[0]?.raw).toContain("Sent from here");
+  expect(fromHere[0]?.raw).not.toContain("Edited elsewhere");
+  await app.press("Escape");
+
+  // Deleted in Gmail web while the send waits.
+  const p5 = s.thread("p5").threadId;
+  await sendReply(app, "Person 5", "Sent though deleted");
+  await gmail.deleteDraft(A, (await gmailDraft(p5)).id, { poll: true });
+  await app.settle();
+  await app.advance(DELAY);
+  await app.settle();
+  const recreated = await sentIn(gmail, p5);
+  expect(recreated).toHaveLength(1);
+  expect(recreated[0]?.raw).toContain("Sent though deleted");
+  expect((await gmail.gmail(A)).drafts).toEqual([]);
+  await app.expectNoErrorToasts();
+});
+
+test("SND-28 undoing a waiting send while another composer's first load is on its way keeps what was typed there", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await sendReply(app, "Person 3", "send S");
+  await app.press("Escape");
+  await expect(app.list).toBeVisible();
+  const release = await app.park("submit");
+  await app.press("c");
+  await expect(newMessage(app)).toBeVisible();
+  await app.subject.fill("Typed while loading");
+  await undoOn(sendToast(app, "Person 3")).click();
+  await release();
+  await app.settle();
+
+  await expect(app.conversationTitle).toContainText("Person 3");
+  await expect(app.editor).toContainText("send S");
+  await expect(newMessage(app)).toHaveCount(0);
+  await app.press("Escape", "Escape", "Escape", "g", "d");
+  await app.settle();
+  await expect(app.row("Typed while loading")).toHaveCount(1);
+  await expect(app.row("send S")).toHaveCount(1);
+  expect(await gmail.requests("drafts.send")).toEqual([]);
+  await app.expectNoErrorToasts();
+});

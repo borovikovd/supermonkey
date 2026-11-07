@@ -436,7 +436,7 @@ When `send_after` passes, the row becomes sending. Rust then:
 3. Writes it to the Gmail draft with `drafts.create` or `drafts.update`.
 4. Calls `drafts.send`.
 
-Gmail removes the draft as it sends. When Gmail accepts, the row becomes sent and stores the sent message id. Rust then fetches that message and stores it at once, so the reply never leaves the thread while waiting for the next poll.
+Gmail removes the draft as it sends. A send in the outbox writes what was sent here: an edit or a delete of its Gmail draft made elsewhere meanwhile is overwritten, or the draft is created again. Sending the same draft from another device in those ten seconds therefore sends it twice; a delete and a send elsewhere look the same to the app, and dropping a send the user made here would be the worse mistake. When Gmail accepts, the row becomes sent and stores the sent message id. Rust then fetches that message and stores it at once, so the reply never leaves the thread while waiting for the next poll.
 
 Undo on a send:
 - Waiting: cancel the send and reopen the composer with the draft. This also works after a restart, and after the timer has passed while Gmail is unreachable.

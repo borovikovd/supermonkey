@@ -65,6 +65,10 @@ one is in [Project specifics](#project-specifics) at the end.
   they are stale.
 - Crates form layers, and a test checks the dependency edges. External services sit
   behind one client that owns auth, rate limits, retries, and error mapping.
+- **One path per concern.** Quitting, rendering untrusted content, and binding keys
+  each go through exactly one path; a second path is a second policy that drifts.
+  Platform defaults count as paths: the default macOS menu's Quit bypasses Tauri's
+  exit hooks.
 - Background work is ordered by what the user is looking at. On first sync, what is
   on screen loads before backfills and secondary data.
 - Every way to run the app (dev, demo, test, release) is one command from a known
@@ -106,6 +110,14 @@ one is in [Project specifics](#project-specifics) at the end.
 
 Most bugs in an app that syncs live here. Assume every `await` lets the world change.
 
+- **Decide every interruption.** For each operation that takes time (a send, an
+  upload, a load, a sync, a quit), the spec says what happens when anything else
+  arrives mid-way: the user closes, repeats, undoes, or quits; the data changes or
+  is deleted elsewhere; its owner goes away; the network drops. An undecided case
+  is a bug waiting.
+- **An action is bound to what the user saw.** Its target (account, items) is fixed
+  when the user acts. Anything that runs later (a reply, a timer, a frame callback)
+  checks that its target still holds before it acts.
 - **Stale answers.** Before applying a response, check a version, generation, or
   sequence number, and drop it if a newer one already landed.
 - **Local changes win.** A user's write made while a remote read was in flight
@@ -207,7 +219,9 @@ its id. A new user-visible behavior adds a case and a test. Plan along these axe
 - **Startup and modes:** first launch, restart with data, demo mode, an old
   database.
 - **Failure paths:** offline, a server error at each step, timeouts, late replies.
-- **Interleavings:** the user acts while a sync, send, or load is in flight.
+- **Interruptions:** a grid of each operation that takes time × each event that
+  can arrive mid-way. Every cell names a test, or says why it can't happen; the
+  gate fails on an empty cell.
 - **Realistic limits.** The fake applies production rate limits and latency by
   default, or the suite runs under both. An unlimited fake hides ordering and
   starvation bugs.

@@ -403,3 +403,59 @@ test("UND-08 undoing a trash does not bring back a reply whose send was undone",
   await expect(app.messages).toHaveCount(1);
   await expect(app.conversation).not.toContainText("Count me in.");
 });
+
+test("UND-09 z while the action it undoes is on its way to Gmail, or queued offline, reaches Gmail after it", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  /** The label changes sent for a message, in order. */
+  const changes = async (id: string) =>
+    (await gmail.requests("messages.batchModify"))
+      .map((r) => r.body)
+      .filter(
+        (b): b is { ids: string[]; addLabelIds: string[]; removeLabelIds: string[] } =>
+          typeof b === "object" && b !== null && "ids" in b && Array.isArray(b.ids),
+      )
+      .filter((b) => b.ids.includes(id))
+      .map((b) => ({ add: b.addLabelIds, remove: b.removeLabelIds }));
+
+  // The archive is on its way to Gmail when z undoes it.
+  const p1 = s.message("p1", 1).id;
+  const modify = await gmail.hold("messages.batchModify");
+  await highlight(app, "Person 1");
+  await app.press("e");
+  await expect(app.row("Person 1")).toHaveCount(0);
+  await expect
+    .poll(async () => (await gmail.requests("messages.batchModify")).some((r) => r.held))
+    .toBe(true);
+  await app.press("z");
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await modify.release();
+  await app.settle();
+  expect(await has(gmail, s, "p1", "INBOX")).toBe(true);
+  expect(await changes(p1)).toEqual([
+    { add: [], remove: expect.arrayContaining(["INBOX"]) },
+    { add: expect.arrayContaining(["INBOX"]), remove: [] },
+  ]);
+  await expect(app.row("Person 1")).toHaveCount(1);
+
+  // Both wait in the queue offline, and replay in order.
+  const p2 = s.message("p2", 1).id;
+  await gmail.offline(true);
+  await highlight(app, "Person 2");
+  await app.press("e");
+  await expect(app.row("Person 2")).toHaveCount(0);
+  await app.press("z");
+  await expect(app.row("Person 2")).toHaveCount(1);
+  await app.settle();
+  await gmail.offline(false);
+  await app.settle();
+  expect(await has(gmail, s, "p2", "INBOX")).toBe(true);
+  expect(await changes(p2)).toEqual([
+    { add: [], remove: expect.arrayContaining(["INBOX"]) },
+    { add: expect.arrayContaining(["INBOX"]), remove: [] },
+  ]);
+  await expect(app.row("Person 2")).toHaveCount(1);
+  await app.expectNoErrorToasts();
+});

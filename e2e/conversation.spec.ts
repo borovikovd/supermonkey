@@ -829,3 +829,117 @@ test("CONV-25 a reply open when its conversation turns gone closes as a second E
   await app.press("g", "d");
   await expect(app.row("Words to keep")).toHaveCount(1);
 });
+
+test("CONV-26 a conversation still downloading follows Gmail: a reply joins it, and a deleted thread shows as gone", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const errors = (await app.errorToastsShown()).length;
+  const from = seeds.PERSONS[0] ?? "";
+  const heldBodies = async () =>
+    (await gmail.requests("threads.get")).some((r) => r.held && r.params.format === "full");
+
+  // A reply arrives while the conversation's body downloads.
+  let body = await gmail.hold({ api: "threads.get", query: { format: "full" } });
+  const first = await gmail.deliver({
+    account: A,
+    from,
+    subject: "Slow body",
+    text: "Message one.",
+  });
+  await expect.poll(heldBodies).toBe(true);
+  await app.row("Slow body").click();
+  await expect(app.conversationTitle).toHaveText("Slow body");
+  await expect(app.conversation.locator("[data-message] [aria-busy=true]")).toHaveCount(1);
+  await gmail.deliver({
+    account: A,
+    from,
+    subject: "Re: Slow body",
+    text: "Message two.",
+    threadId: first.threadId,
+    inReplyTo: first.messageId,
+  });
+  await app.settle();
+  await gmail.release({ id: body.id });
+  await app.settle();
+  await expect(app.messages).toHaveCount(2);
+  const frames = app.conversation.locator("iframe[data-frame]");
+  await expect(frames.first().contentFrame().locator("body")).toContainText("Message one.");
+  await expect(frames.last().contentFrame().locator("body")).toContainText("Message two.");
+  await app.press("Escape");
+
+  // The thread is deleted in Gmail while its body downloads.
+  body = await gmail.hold({ api: "threads.get", query: { format: "full" } });
+  const doomed = await gmail.deliver({ account: A, from, subject: "Doomed", text: "Soon gone." });
+  await expect.poll(heldBodies).toBe(true);
+  await app.row("Doomed").click();
+  await expect(app.conversationTitle).toHaveText("Doomed");
+  await gmail.deleteThread(A, doomed.threadId, { poll: true });
+  await app.settle();
+  await expect(app.conversation.getByText("This conversation is gone.")).toBeVisible();
+  await gmail.release({ id: body.id });
+  await app.settle();
+  await expect(app.conversation.getByText("This conversation is gone.")).toBeVisible();
+  await app.expectNoErrorToasts(errors);
+});
+
+test("CONV-27 z while the conversation that opened after e still loads undoes the e, and that conversation opens and is read", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  // Page timers wait for the test, so nothing prefetches Person 5 first.
+  await app.page.clock.pauseAt(await app.now());
+  await app.press("j", "j", "j");
+  await expect(app.highlighted).toContainText("Person 4");
+  await app.press("Enter");
+  await expect(app.conversationTitle).toHaveText(s.thread("p4").subject);
+
+  const release = await app.park("submit");
+  await app.press("e");
+  // Person 5 is opening: its data has not arrived, so it shows no messages yet.
+  await expect(app.conversationTitle).toHaveText(s.thread("p5").subject);
+  await expect(app.messages).toHaveCount(0);
+  await app.press("z");
+  await release();
+  await app.page.clock.resume();
+  await app.page.clock.setFixedTime(await app.now());
+  await app.settle();
+
+  await expect(app.conversationTitle).toHaveText(s.thread("p5").subject);
+  expect(await labelsOf(app, A, s.latest("p4").id)).toContain("INBOX");
+  expect(await labelsOf(app, A, s.message("p5", 1).id)).not.toContain("UNREAD");
+  await app.press("Escape");
+  await expect(app.row("Person 4")).toHaveCount(1);
+  await expect(app.row("Person 5")).not.toHaveAttribute("data-unread");
+  await app.expectNoErrorToasts();
+});
+
+test("CONV-28 a conversation still loading when the app quits stays unread", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  // Page timers wait for the test, so nothing prefetches Person 5 on the way.
+  await app.page.clock.pauseAt(await app.now());
+  await app.press("j", "j", "j", "j");
+  await expect(app.highlighted).toContainText("Person 5");
+  await expect(app.row("Person 5")).toHaveAttribute("data-unread");
+  // The open never reaches Rust: the quit stops waiting for it.
+  const submit = /\/invoke\/submit$/;
+  await app.page.route(submit, () => undefined);
+  await app.press("Enter");
+  await expect(app.list).toHaveCount(0);
+  await app.page.clock.resume();
+  await app.quit();
+  await app.page.unroute(submit);
+  await app.launch();
+
+  await expect(app.row("Person 5")).toHaveAttribute("data-unread");
+  expect(await labelsOf(app, A, s.message("p5", 1).id)).toContain("UNREAD");
+  await app.press("j", "j", "j", "j", "Enter");
+  await expect(app.conversationTitle).toHaveText(s.thread("p5").subject);
+  await app.settle();
+  expect(await labelsOf(app, A, s.message("p5", 1).id)).not.toContain("UNREAD");
+});

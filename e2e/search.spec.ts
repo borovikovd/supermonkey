@@ -723,6 +723,28 @@ test("SRC-16 a conversation opened from a search in Trash or Spam lists their me
   await expect(app.messages).toHaveCount(1);
 });
 
+test("SRC-17 Gmail hits whose threads are deleted or trashed while their metadata loads are not listed", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const meta = await gmail.hold({ api: "threads.get", query: { format: "metadata" } });
+  await search(app, "project");
+  await app.advance(300);
+  await expect
+    .poll(async () => (await gmail.requests("threads.get")).some((r) => r.held))
+    .toBe(true);
+  // Meanwhile one hit is deleted forever and another trashed in Gmail.
+  await gmail.deleteThread(A, s.thread("projOld1").threadId);
+  await gmail.modify(A, s.latest("projOld2").id, ["TRASH"], [], { poll: true });
+  await meta.release();
+  await app.settle();
+  await expect(app.row("Project gamma")).toHaveCount(1);
+  await expect(app.row("Project alpha")).toHaveCount(0);
+  await expect(app.row("Project beta")).toHaveCount(0);
+  await app.expectNoErrorToasts();
+});
+
 // With the search left open under the sign-in screen, its field took the
 // screen's Enter, so Enter did not sign in.
 test("SRC-18 a Gmail search whose account signs out or is removed while it lists stops searching, and the sign-in screen's Enter signs in", async ({

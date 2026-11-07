@@ -6,7 +6,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - **Priority.** P1: a Done-when item, a risk of losing or duplicating data, a security property, or a core state machine. P2: another explicit spec rule, or a second partition of a P1 behavior. P3: a boundary that is costly to set up, or a detail close to cosmetic.
 - **What runs.** Playwright on WebKit drives the built UI against the real Rust core through the web bridge, and the core talks to the in-process fake Gmail. The native shell is not exercised: a recording platform stands in for notifications, the Dock badge, opened URLs and files, and stored tokens.
 - **Harness.** Seed scenarios are in `e2e/seeds.ts`, the page object and app time in `e2e/app.ts`, and the fake's control API (faults, holds, the request log) in `e2e/control.ts`. `e2e/harness.spec.ts` shows each piece in use.
-- **The check.** `e2e/plan.spec.ts` checks that every case line parses, ids are unique and sit in their file's group, every § names a SPEC heading, every case has a test in its file, every test id is a case, and the lists below name only real cases and files.
+- **The check.** `e2e/plan.spec.ts` checks that every case line parses, ids are unique and sit in their file's group, every § names a SPEC heading, every case has a test in its file, every test id is a case, the lists below name only real cases and files, and every cell of the interruption grid names a case or a unit test, or says why the two can't meet.
 
 ## Cases
 
@@ -36,6 +36,8 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ACC-22 · P1 · A sign-in left waiting while the user moves on finishes in the background, with what changed in Gmail meanwhile · §Accounts, §Switching
 - ACC-23 · P2 · Starting another sign-in cancels the waiting one, which shows no error · §Accounts
 - ACC-24 · P2 · A sign-in cut off by a lost connection or a quit adds nothing, and the next one works · §Accounts
+- ACC-25 · P1 · Adding an account again while a send, a discard, and an undo are on their way to Gmail does each once · §Accounts, §Send and undo, §Offline
+- ACC-26 · P1 · A conversation and its reply still loading when the account signs out or is removed · §Accounts, §Addressing
 
 ### inbox-navigation.spec.ts (NAV)
 
@@ -89,6 +91,9 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - CONV-23 · P2 · An address added to the account in Gmail is Me in a conversation already open · §Reading, §Sync
 - CONV-24 · P2 · `r`, `Enter`, and `f` do nothing in a conversation that is gone · §Reading, §Reply composer
 - CONV-25 · P1 · A reply open when its conversation turns gone closes as a second `Esc` would, keeping its text · §Reply composer, §Keyboard
+- CONV-26 · P2 · A conversation still downloading follows Gmail: a reply joins it, and a deleted thread shows as gone · §Reading, §Subscriptions
+- CONV-27 · P2 · `z` while the conversation that opened after `e` still loads undoes the `e`, and that conversation opens and is read · §Undo, §Reading
+- CONV-28 · P2 · A conversation still loading when the app quits stays unread · §Reading, §Actions
 
 ### triage-actions.spec.ts (TRI)
 
@@ -120,6 +125,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - UND-06 · P2 · `z` still works after a restart · §Undo
 - UND-07 · P3 · Only the last 50 entries are kept · §Undo
 - UND-08 · P2 · Undoing a trash does not bring back a reply whose send was undone · §Undo
+- UND-09 · P1 · `z` while the action it undoes is on its way to Gmail, or queued offline, reaches Gmail after it · §Undo, §Offline
 
 ### labels.spec.ts (LAB)
 
@@ -150,6 +156,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SRC-14 · P1 · A search or Gmail-listed view opened offline lists from Gmail when the network returns · §Search, §Views, §Offline
 - SRC-15 · P1 · An open search runs once Gmail can be reached again, though nothing else calls Gmail · §Search, §Offline
 - SRC-16 · P1 · A conversation opened from a search in Trash or Spam lists their messages, by `Enter` and `j` · §Search, §Reading
+- SRC-17 · P2 · Gmail hits whose threads are deleted or trashed while their metadata loads are not listed · §Search, §Gmail errors
 - SRC-18 · P2 · A Gmail search whose account signs out or is removed while it lists stops searching, and the sign-in screen's `Enter` signs in · §Search, §Accounts
 
 ### splits.spec.ts (SPL)
@@ -198,6 +205,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - REP-17 · P1 · A forward started while the message's body downloads carries all of it and its attachments · §Addressing
 - REP-18 · P2 · A forwarded attachment that arrives with the body can be removed, and an untouched forward is still discarded · §Addressing, §Actions
 - REP-19 · P1 · A reply discarded before its target's body or its own first load arrives leaves nothing on Gmail · §Drafts, §Addressing
+- REP-20 · P1 · `Cmd+Q` before a reply's first load arrives keeps what was typed · §Actions, §Drafts
 
 ### compose-new.spec.ts (NEW)
 
@@ -301,6 +309,10 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SND-22 · P1 · A sent reply stays on the thread, marked Sent, until its message lands without waiting for a poll · §Reply composer, §Send and undo
 - SND-23 · P1 · A send settled as sent with no message to show leaves the thread once its toast closes · §Reply composer, §Send and undo
 - SND-24 · P1 · A send whose account signs out or is removed while `drafts.send` is on its way · §Send and undo, §Accounts
+- SND-25 · P1 · An Undo while the draft's first upsert is in flight reopens the composer and leaves one Gmail draft · §Send and undo, §Drafts
+- SND-26 · P2 · A reply key on a thread whose reply is waiting or sending starts a new draft and leaves the send alone · §Reply composer, §Send and undo
+- SND-27 · P1 · A send whose Gmail draft is edited or deleted elsewhere in the undo window sends what was sent here, once · §Send and undo
+- SND-28 · P2 · Undoing a waiting send while another composer's first load is on its way keeps what was typed there · §Send and undo, §Actions
 
 ### offline.spec.ts (OFF)
 
@@ -396,6 +408,120 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - UNW-08 · P1 · Mark spam, and block the domain · §Unsubscribe and block
 - UNW-09 · P1 · Unsubscribe, block, and unblock act only on the account's own thread and block filter · §Unsubscribe and block
 - UNW-10 · P1 · Block and unsubscribe act on their own account when another one is on screen by then · §Unsubscribe and block, §Switching
+
+## Interruptions
+
+Each operation that takes time × each event that can arrive mid-way (AGENTS.md, Concurrency). A cell names the cases that force the interleaving, the operation provably still in progress when the event comes, or says why the two can't meet.
+
+Events: close, repeat, send, discard, undo, quit, elsewhere, account, offline.
+
+### Conversation load
+
+- close: CONV-15, OFF-08
+- repeat: CONV-20, REP-13
+- send: n/a: `Cmd+Enter` acts only in a composer; a composer over a loading conversation is the Composer load row
+- discard: n/a: `Cmd+Shift+,` acts only in a composer; a composer over a loading conversation is the Composer load row
+- undo: CONV-27
+- quit: CONV-28
+- elsewhere: CONV-26
+- account: ACC-26
+- offline: OFF-08
+
+### Composer load
+
+- close: DRF-11, REP-13
+- repeat: REP-13
+- send: REP-16, ATT-03
+- discard: REP-19
+- undo: SND-28
+- quit: REP-20
+- elsewhere: DRF-22
+- account: ACC-26
+- offline: REP-12, ATT-03
+
+### Draft save
+
+- close: DRF-19, DRF-21, ERR-07
+- repeat: DRF-12, DRF-10, DRF-06
+- send: SND-18, DRF-07, SND-13
+- discard: DRF-13, DRF-05
+- undo: SND-25
+- quit: UIC-05, DRF-18
+- elsewhere: DRF-19, DRF-21, DRF-13
+- account: ACC-19
+- offline: DRF-05, DRF-06, DRF-07, DRF-19, ERR-07
+
+### Attach
+
+- close: ATT-06, ATT-10, ATT-19
+- repeat: ATT-11, ATT-14
+- send: ATT-05, ATT-14, ATT-19
+- discard: ATT-15
+- undo: n/a: adding a file makes no undo entry, and another send's Undo closes this composer as a second `Esc` would, which is the close cell
+- quit: ATT-09
+- elsewhere: ATT-21
+- account: ATT-20
+- offline: n/a: attaching copies the file locally and calls no Gmail; a send waiting for it then waits offline like any send (SND-07)
+
+### Send wait
+
+- close: ACC-06, SND-10, SND-06, SND-16, SND-02
+- repeat: SND-26
+- send: n/a: the draft leaves the screen and Drafts when sent and is never resumed, so it can't be sent again
+- discard: n/a: no composer or Drafts row reaches a draft in the outbox
+- undo: SND-02, SND-03, SND-10, SND-11, SND-07, SND-17
+- quit: SND-09
+- elsewhere: SND-27
+- account: ACC-07, ACC-08
+- offline: SND-07, OFF-01, SND-09
+
+### Send
+
+- close: SND-23
+- repeat: SND-26
+- send: n/a: the draft is in the outbox and is never resumed
+- discard: n/a: no composer or Drafts row reaches a draft in the outbox
+- undo: SND-05, SND-15, SND-21, SND-17, `crates/ub-core/src/outbox/machine.rs`
+- quit: SND-09, SND-14
+- elsewhere: SND-23
+- account: SND-24
+- offline: SND-08, SND-07, SND-21
+
+### Action
+
+- close: ACC-06, LAB-01, LAB-03
+- repeat: UIC-01, OFF-06
+- send: OFF-01
+- discard: OFF-02
+- undo: UND-09
+- quit: OFF-03
+- elsewhere: TRI-11, UIC-01, OFF-04
+- account: ACC-07, ACC-08, ACC-13
+- offline: OFF-06, OFF-01, OFF-02, ACC-08
+
+### Search listing
+
+- close: SRC-14
+- repeat: SRC-04, SRC-14, SRC-07
+- send: n/a: a listing only merges hits into its own subscription; a send never reads or changes one
+- discard: n/a: a listing only merges hits into its own subscription; Drafts is not a Gmail-listed view
+- undo: n/a: list membership comes only from Rust's patches, whatever a listing is doing
+- quit: n/a: a listing belongs to an open subscription and is never stored; a relaunch opens no search
+- elsewhere: SRC-17
+- account: SRC-18, SRC-10
+- offline: SRC-15, SRC-14
+
+### Sign-in
+
+- close: ACC-22
+- repeat: ACC-23, ACC-09
+- send: ACC-25
+- discard: ACC-25
+- undo: ACC-25
+- quit: ACC-24
+- elsewhere: ACC-22
+- account: ACC-18, ACC-11
+- offline: ACC-24
 
 ## Not covered end-to-end, and why
 
