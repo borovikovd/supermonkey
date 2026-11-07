@@ -176,11 +176,10 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
             />
           ),
         )}
-        {data.outbox
-          .filter((o) => o.state !== "sent")
-          .map((o) => (
-            <PendingSend key={`ob${o.id}`} row={o} />
-          ))}
+        {/* Rust keeps a sent row here until the thread holds its message. */}
+        {data.outbox.map((o) => (
+          <PendingSend key={`ob${o.id}`} row={o} />
+        ))}
         {data.drafts
           .filter((d) => d.id !== inlineDraft)
           .map((d) => (
@@ -208,15 +207,14 @@ function Fold({ ids }: { ids: number[] }) {
   );
 }
 
-/** A send still in the outbox, shown at the end of its thread. */
+/** A send in the outbox, shown at the end of its thread until its message is there. */
 function PendingSend({ row }: { row: OutboxRow }) {
+  const state = row.state === "sent" ? "Sent" : row.delayed ? "Email delayed" : "Sending";
   return (
     <div className="my-2 flex items-center gap-3 rounded-md bg-surface px-4 py-2 text-row">
       <span className="font-medium">Me</span>
       <span className="truncate text-text-2">{row.snippet}</span>
-      <span className="ml-auto text-hint text-accent">
-        {row.delayed ? "Email delayed" : "Sending"}
-      </span>
+      <span className="ml-auto text-hint text-accent">{state}</span>
     </div>
   );
 }

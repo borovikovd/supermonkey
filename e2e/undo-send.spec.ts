@@ -891,3 +891,31 @@ test("SND-21 a held undo resolves at once when the access token could not be ref
   await app.settle();
   expect(await sentIn(gmail, s.thread("p3").threadId)).toEqual([]);
 });
+
+// The conversation hid a sent row itself, so a reply Gmail had accepted left
+// the thread until its message landed.
+test("SND-22 a sent reply stays on the thread, marked Sent, until its message lands", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const p3 = s.thread("p3").threadId;
+  await sendReply(app, "Person 3", "on its way");
+  await expect(app.conversation.getByText("Sending", { exact: true })).toBeVisible();
+  // Gmail accepts the send; fetching its message is held.
+  const fetch = await gmail.hold({ api: "threads.get", path: `*/threads/${p3}` });
+  await app.advance(DELAY);
+  await app.settle();
+  expect(await sentIn(gmail, p3)).toHaveLength(1);
+  const sentRow = app.conversation.getByText("Sent", { exact: true });
+  await expect(sentRow).toBeVisible();
+  await expect(app.conversation.getByText("on its way")).toBeVisible();
+  await expect(app.messages).toHaveCount(1);
+
+  // The message lands and takes the row's place.
+  await fetch.release();
+  await app.settle();
+  await expect(app.messages).toHaveCount(2);
+  await expect(sentRow).toHaveCount(0);
+  await expect(app.conversation.getByText("Sending", { exact: true })).toHaveCount(0);
+});

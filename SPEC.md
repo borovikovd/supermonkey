@@ -369,7 +369,7 @@ A forward stays on the thread, like a reply, with thread id, `In-Reply-To`, and 
 
 A thread can hold several drafts, for example from Gmail web or after an undo. Each shows as a collapsed draft. A draft in the outbox shows only as the Sending message and is never resumed.
 
-Closing the reply composer leaves the conversation open. Sending closes the composer and keeps the conversation open. The pending message shows at the bottom of the thread, marked Sending, until Gmail accepts it. The conversation shows an outbox row until the thread holds the message with that row's sent message id. From then on it shows only the message.
+Closing the reply composer leaves the conversation open. Sending closes the composer and keeps the conversation open. The pending message shows at the bottom of the thread, marked Sending until Gmail accepts it and Sent after. The conversation shows an outbox row until the thread holds the message with that row's sent message id, whatever state the row is in, so a reply never leaves the thread between Gmail accepting it and its message landing. From then on it shows only the message.
 
 `c` opens a new message that replaces the screen. Closing or sending it returns to the screen it came from. The `c` screen is headed `New Message` and opens with focus in To. The reply composer has no Subject row until `Cmd+Shift+S` shows it.
 
