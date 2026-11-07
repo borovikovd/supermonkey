@@ -491,4 +491,32 @@ test.describe("attachments", () => {
     expect(Object.keys(out).toSorted()).toEqual(["notes.txt", "report.pdf"]);
     expect((await gmail.gmail(A)).drafts).toHaveLength(0);
   });
+
+  test("ATT-15 discarding while a send waits for a file cancels the send", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    const heading = app.page.getByRole("heading", { name: "New Message" });
+    await newMessage(app, "Thrown away", "Never sent.");
+    const release = await app.park("add_attachment");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await app.press("Meta+Enter");
+    await expect(heading).toBeVisible();
+    await app.press("Meta+Shift+Comma");
+    await expect(app.toast("Draft discarded")).toBeVisible();
+    await expect(heading).toHaveCount(0);
+
+    // The file lands after the discard: nothing is sent, and nothing goes
+    // wrong. Read at once: a toast leaves by itself after 4 s.
+    await release();
+    await app.settle();
+    expect(await app.errorToasts.allTextContents()).toEqual([]);
+    await app.advance(10_000);
+    await app.settle();
+    expect(await app.errorToasts.allTextContents()).toEqual([]);
+    const state = await gmail.gmail(A);
+    expect(subjects(state.messages)).not.toContain("Thrown away");
+    expect(state.drafts).toHaveLength(0);
+  });
 });

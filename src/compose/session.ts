@@ -252,13 +252,11 @@ export const draftOnScreen = (): string | null => composerOnScreen()?.draft ?? n
  * load, on a new subscription, holds them (SPEC Drafts).
  */
 function open(draft: string) {
-  const left = waiting.get(draft);
+  const left = cancelWaiting(draft);
   if (!left) {
     subscribe(composerKey(draft));
     return;
   }
-  left.cancelled = true;
-  waiting.delete(draft);
   const save = left.handle?.pending() ?? null;
   if (save) act({ type: "saveDraft", draft, save });
   resubscribe(composerKey(draft));
@@ -302,7 +300,16 @@ type Waiting = {
 /** Closes and sends that wait, by draft. */
 const waiting = new Map<string, Waiting>();
 
-/** Runs `then` once `ready` resolves, with the draft waiting meanwhile, unless reopening cancels it. */
+/** Cancels the close or send of `draft` that waits, if one does, and returns it. */
+function cancelWaiting(draft: string): Waiting | undefined {
+  const left = waiting.get(draft);
+  if (!left) return undefined;
+  left.cancelled = true;
+  waiting.delete(draft);
+  return left;
+}
+
+/** Runs `then` once `ready` resolves, with the draft waiting meanwhile, unless reopening or discarding cancels it. */
 function defer(
   draft: string,
   handle: ComposerHandle | null,
@@ -428,11 +435,12 @@ function send(draft: string, sentFrom: ComposerHandle | null, refused: Refused) 
   leave(draft);
 }
 
-/** Cmd+Shift+,: discard locally and on Gmail. */
+/** Cmd+Shift+,: discard locally and on Gmail, and with it a send that waits for a file. */
 export function discardOnScreen() {
   const draft = draftOnScreen();
   if (!draft) return;
   discarded.add(draft);
+  cancelWaiting(draft);
   act({ type: "discardDraft", draft });
   leave(draft);
   toast("Draft discarded");
