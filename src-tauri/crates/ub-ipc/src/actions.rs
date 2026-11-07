@@ -55,12 +55,8 @@ pub enum Action {
     CloseToast { outbox: OutboxId },
     /// The UI showed a notice.
     AckNotice { notice: NoticeId },
-    /// Set an account's setting, or a global one with no account.
-    SetSetting {
-        account: Option<AccountId>,
-        key: String,
-        value: String,
-    },
+    /// Change a setting (SPEC Settings).
+    SetSetting(Setting),
     /// Pin a sender, domain, or label to a split.
     Pin {
         account: AccountId,
@@ -80,6 +76,17 @@ pub enum Action {
     RemoveAccount { account: AccountId },
     /// Fetch older search pages / view pages from Gmail.
     MoreResults { sub: SubId },
+}
+
+/// A setting the user changes, with its new value (SPEC Settings).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "setting", rename_all = "camelCase")]
+#[ts(export)]
+pub enum Setting {
+    /// Load remote images in messages, in every account.
+    RemoteImages { on: bool },
+    /// Mute an account: no notifications, and its unread mail leaves the Dock badge.
+    Muted { account: AccountId, on: bool },
 }
 
 /// A resolved mail change, never a toggle.

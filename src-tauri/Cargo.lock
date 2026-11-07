@@ -5194,6 +5194,7 @@ name = "ub-ipc"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "ts-rs",
  "ub-domain",
 ]
@@ -5251,6 +5252,7 @@ dependencies = [
  "ub-domain",
  "ub-fake-gmail",
  "ub-gmail",
+ "ub-ipc",
  "ub-store",
  "url",
 ]

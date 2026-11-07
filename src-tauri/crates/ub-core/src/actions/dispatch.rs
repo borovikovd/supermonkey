@@ -32,11 +32,7 @@ pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), A
             Ok(())
         }
         Action::MoreResults { sub } => subscriptions::more_results(ctx, &sub),
-        Action::SetSetting {
-            account,
-            key,
-            value,
-        } => settings::set_setting(ctx, account, &key, &value),
+        Action::SetSetting(setting) => settings::set_setting(ctx, setting),
         Action::AckNotice { notice } => notices::ack_notice(ctx, notice),
         Action::CloseToast { outbox } => outbox::close_toast(ctx, outbox),
         Action::Modify(modify) => mail::modify(ctx, modify),
@@ -81,7 +77,7 @@ pub(super) fn kind(action: &Action) -> &'static str {
         Action::DiscardDraft { .. } => "discardDraft",
         Action::CloseToast { .. } => "closeToast",
         Action::AckNotice { .. } => "ackNotice",
-        Action::SetSetting { .. } => "setSetting",
+        Action::SetSetting(_) => "setSetting",
         Action::Pin { .. } => "pin",
         Action::SaveSplits { .. } => "saveSplits",
         Action::RemoveAccount { .. } => "removeAccount",

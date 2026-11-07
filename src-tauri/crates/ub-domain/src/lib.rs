@@ -49,7 +49,8 @@ pub use ids::{
     HistoryId, LabelId, MessageId, NoticeId, OutboxId, Rev, SplitId, SubId, ThreadId, UndoEntryId,
 };
 pub use kinds::{
-    DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SplitKind, SyncStatus, UndoKind, View,
+    DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SettingKey, SplitKind, SyncStatus,
+    UndoKind, View,
 };
 pub use kinds_text::UnknownKind;
 pub use labels::{LabelSet, SystemLabel};

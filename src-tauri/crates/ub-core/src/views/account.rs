@@ -1,6 +1,6 @@
 //! The app state and account summaries (SPEC UI state, Subscriptions).
 
-use ub_domain::{AVATAR_HUES, AccountId, SyncStatus};
+use ub_domain::{AVATAR_HUES, AccountId, SettingKey, SyncStatus};
 use ub_ipc::{
     AccountInfo, AccountSummary, AppState, GlobalSettings, LabelInfo, Notice, PinInfo, SendAs,
     SplitInfo, UndoEntryInfo,
@@ -35,21 +35,9 @@ pub(crate) const SUMMARY_READS: &[Table] = &[
 /// What [`badge_count`] reads, of every account.
 pub(crate) const BADGE_READS: &[Table] = &[Table::Account, Table::Threads, Table::Settings];
 
-/// The settings the core reads, and the values they take.
-pub(crate) mod setting {
-    /// Per account: notifications off and out of the Dock badge.
-    pub(crate) const MUTED: &str = "muted";
-    /// Global: load remote images in messages.
-    pub(crate) const REMOTE_IMAGES: &str = "remote_images";
-    /// A setting turned on.
-    pub(crate) const ON: &str = "on";
-    /// A setting turned off.
-    pub(crate) const OFF: &str = "off";
-}
-
 /// Whether the account's notifications are muted.
 fn is_muted(reads: Reads<'_>, account: AccountId) -> Result<bool, StoreError> {
-    Ok(reads.settings().get(account, setting::MUTED)?.as_deref() == Some(setting::ON))
+    reads.settings().is_on(account, SettingKey::Muted)
 }
 
 /// An account as the rail shows it.
@@ -92,9 +80,7 @@ pub(crate) fn app_state(reads: Reads<'_>, online: bool) -> Result<AppState, Stor
         .collect::<Result<_, StoreError>>()?;
     let remote_images = reads
         .settings()
-        .get(AccountId::NONE, setting::REMOTE_IMAGES)?
-        .as_deref()
-        != Some(setting::OFF);
+        .is_on(AccountId::NONE, SettingKey::RemoteImages)?;
     Ok(AppState {
         accounts,
         settings: GlobalSettings { remote_images },

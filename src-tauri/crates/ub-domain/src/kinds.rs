@@ -115,3 +115,23 @@ pub enum ModifyKind {
     Label,
     RemoveLabel,
 }
+
+/// A setting the user turns on or off (SPEC Settings). Each is stored by
+/// this key, globally or per account.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SettingKey {
+    /// Global: load remote images in messages.
+    RemoteImages,
+    /// Per account: no notifications, and its unread mail is out of the Dock badge.
+    Muted,
+}
+
+impl SettingKey {
+    /// Whether the setting is on before the user changes it.
+    pub const fn default_on(self) -> bool {
+        match self {
+            Self::RemoteImages => true,
+            Self::Muted => false,
+        }
+    }
+}

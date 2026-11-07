@@ -102,9 +102,7 @@ function AccountBlock({ a }: { a: AccountInfo }) {
         <Toggle
           label="Mute notifications"
           on={a.muted}
-          onChange={(on) =>
-            act({ type: "setSetting", account: a.id, key: "muted", value: on ? "on" : "off" })
-          }
+          onChange={(on) => act({ type: "setSetting", setting: "muted", account: a.id, on })}
         />
       </div>
       <div className="flex flex-wrap gap-2 pt-2">
@@ -162,14 +160,7 @@ function Settings() {
         <Toggle
           label="Load remote images"
           on={app.settings.remoteImages}
-          onChange={(on) =>
-            act({
-              type: "setSetting",
-              account: null,
-              key: "remote_images",
-              value: on ? "on" : "off",
-            })
-          }
+          onChange={(on) => act({ type: "setSetting", setting: "remoteImages", on })}
         />
       </div>
       {app.accounts.map((a) => (

@@ -7,21 +7,15 @@ import { listen } from "@tauri-apps/api/event";
 import { subForKey } from "../store/mirror-core";
 import { useMirror } from "../store/mirror";
 import type {
-  AccountId,
   Action,
+  AppEvent,
   ChannelMessage,
-  ContactSuggestion,
-  DraftAttachment,
+  Command,
+  CommandReply,
   LaunchInfo,
-  ListRow,
-  MessageBody,
   NumberedAction,
-  BlockedSenders,
-  BlockResult,
-  SnoozeChoice,
   SubKey,
-  Unsubscribed,
-} from "./bridge-types";
+} from "./types";
 
 /** Inside the Tauri webview; otherwise the debug web bridge on 127.0.0.1:1430. */
 export const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -34,23 +28,36 @@ const BRIDGE = import.meta.env.DEV ? "http://127.0.0.1:1430" : "";
  * `settle()`. Sign-ins are counted apart because they can wait on a person.
  */
 const pending = { invokes: 0, signIns: 0, timers: 0, rev: 0, ack: 0 };
-const SIGN_INS = new Set(["add_account", "sign_in_again"]);
+const SIGN_INS = new Set<CommandName>(["add_account", "sign_in_again"]);
 
-async function invoke<T>(cmd: string, args: Record<string, unknown> = {}): Promise<T> {
-  if (inTauri) return tauriInvoke<T>(cmd, args);
-  const kind = SIGN_INS.has(cmd) ? "signIns" : "invokes";
+/** A command's name, as Rust defines it (`ub_ipc::Command`). */
+type CommandName = Command["command"];
+/** A command's arguments, named as Rust names them. */
+type ArgsOf<K extends CommandName> = Extract<Command, { command: K }>["args"];
+/** What a command replies. */
+type ReplyOf<K extends CommandName> = Extract<CommandReply, { command: K }>["reply"];
+
+/**
+ * Runs a command in Rust. Its name, arguments, and reply are typed from
+ * `ub_ipc::Command`. In Tauri, every command but `connect` goes through the
+ * one `dispatch` command, which runs the web bridge's code.
+ */
+async function invoke<K extends CommandName>(command: K, args: ArgsOf<K>): Promise<ReplyOf<K>> {
+  if (inTauri) return tauriInvoke<ReplyOf<K>>("dispatch", { command, args });
+  const kind = SIGN_INS.has(command) ? "signIns" : "invokes";
   pending[kind]++;
   try {
-    const r = await fetch(`${BRIDGE}/invoke/${cmd}`, {
+    const r = await fetch(`${BRIDGE}/invoke/${command}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(args),
     });
-    // The debug bridge answers with JSON Rust serialized from the same ts-rs types.
+    const body: unknown = await r.json();
+    // A refused command answers with its error string.
+    if (!r.ok) throw new Error(typeof body === "string" ? body : JSON.stringify(body));
+    // The debug bridge answers with JSON Rust serialized as this command's reply.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-    const body = (await r.json()) as T;
-    if (!r.ok) throw new Error(String(body));
-    return body;
+    return body as ReplyOf<K>;
   } finally {
     pending[kind]--;
   }
@@ -195,13 +202,11 @@ export function subIdFor(key: SubKey): string | undefined {
 
 // ------------------------------------------------------------ app events
 
-/** App events Rust sends the page, and their payloads (see lib.rs and the E2E server). */
-export type AppEvents = {
-  /** A notification was clicked: that account's Inbox, the thread highlighted. */
-  "notification-open": { account: number; thread: number | null };
-  /** Cmd+Q: close an open composer, then call `quit_now`. */
-  "quit-requested": null;
-};
+/** An app event's name, as Rust defines it (`ub_ipc::AppEvent`). */
+type EventName = AppEvent["event"];
+/** An app event's payload; null for one that has none. */
+type PayloadOf<K extends EventName> =
+  Extract<AppEvent, { event: K }> extends { payload: infer P } ? P : null;
 
 type EventHandler = (payload: unknown) => void;
 const handlers = new Map<string, EventHandler[]>();
@@ -215,17 +220,17 @@ function listenWeb(source: EventSource, name: string) {
 }
 
 /** An app event from Rust: Tauri's `emit`, or a named event on the web bridge. */
-export function onEvent<K extends keyof AppEvents>(
+export function onEvent<K extends EventName>(
   name: K,
-  handler: (payload: AppEvents[K]) => void,
+  handler: (payload: PayloadOf<K>) => void,
 ): void {
   if (inTauri) {
-    void listen<AppEvents[K]>(name, (e) => handler(e.payload));
+    void listen<PayloadOf<K>>(name, (e) => handler(e.payload));
     return;
   }
   // The payload is JSON Rust serialized for this event name.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion
-  const untyped = (payload: unknown) => handler(payload as AppEvents[K]);
+  const untyped = (payload: unknown) => handler(payload as PayloadOf<K>);
   const have = handlers.get(name);
   if (have) have.push(untyped);
   else {
@@ -242,7 +247,8 @@ export async function connect(): Promise<LaunchInfo> {
     // Tauri's Channel is not an EventTarget; `onmessage` is its only API.
     // oxlint-disable-next-line unicorn/prefer-add-event-listener
     channel.onmessage = (msg) => useMirror.getState().receive(msg);
-    launch = await invoke<LaunchInfo>("connect", { channel });
+    // `connect` is Tauri's own command: it takes the channel.
+    launch = await tauriInvoke<LaunchInfo>("connect", { channel });
   } else {
     const source = new EventSource(`${BRIDGE}/events`);
     events = source;
@@ -261,7 +267,7 @@ export async function connect(): Promise<LaunchInfo> {
     // The stream reconnected: messages sent meanwhile are lost, and the core
     // may have restarted. Start over, as a reload resyncs everything.
     source.addEventListener("open", () => location.reload());
-    launch = await invoke<LaunchInfo>("connect");
+    launch = await invoke("connect", {});
   }
   nextN = launch.lastAction + 1;
   // Close every subscription of a previous page (e.g. after a webview crash).
@@ -272,32 +278,28 @@ export async function connect(): Promise<LaunchInfo> {
 // ------------------------------------------------------------ commands
 
 export const fetchRows = (drafts: boolean, keys: string[]) =>
-  invoke<ListRow[]>("fetch_rows", { drafts, keys });
-export const getBodies = (ids: number[]) => invoke<MessageBody[]>("get_bodies", { ids });
-export const autocomplete = (account: AccountId, query: string) =>
-  invoke<ContactSuggestion[]>("autocomplete", { account, query });
-export const addAccount = () => invoke<number>("add_account");
-export const signInAgain = (account: AccountId) => invoke<void>("sign_in_again", { account });
-export const openAttachment = (attachment: number) =>
-  invoke<void>("open_attachment", { attachment });
-export const quitNow = () => invoke<void>("quit_now");
+  invoke("fetch_rows", { drafts, keys });
+export const getBodies = (ids: number[]) => invoke("get_bodies", { ids });
+export const autocomplete = (account: number, query: string) =>
+  invoke("autocomplete", { account, query });
+export const addAccount = () => invoke("add_account", {});
+export const signInAgain = (account: number) => invoke("sign_in_again", { account });
+export const openAttachment = (attachment: number) => invoke("open_attachment", { attachment });
+export const quitNow = () => invoke("quit_now", {});
 /** Web mode: a link from a message, opened by the core as the opener plugin would. */
-export const openUrlInCore = (url: string) => invoke<void>("open_url", { url });
-export const unsubscribeFrom = (account: AccountId, thread: number) =>
-  invoke<Unsubscribed>("unsubscribe", { account, thread });
-export const senderThreads = (account: AccountId, thread: number) =>
-  invoke<number[]>("sender_threads", { account, thread });
-export const blockSender = (account: AccountId, thread: number, domain: boolean) =>
-  invoke<BlockResult>("block", { account, thread, domain });
-export const blockedSenders = (account: AccountId) =>
-  invoke<BlockedSenders>("blocked_senders", { account });
-export const unblockSender = (account: AccountId, id: string) =>
-  invoke<void>("unblock", { account, id });
+export const openUrlInCore = (url: string) => invoke("open_url", { url });
+export const unsubscribeFrom = (account: number, thread: number) =>
+  invoke("unsubscribe", { account, thread });
+export const senderThreads = (account: number, thread: number) =>
+  invoke("sender_threads", { account, thread });
+export const blockSender = (account: number, thread: number, domain: boolean) =>
+  invoke("block", { account, thread, domain });
+export const blockedSenders = (account: number) => invoke("blocked_senders", { account });
+export const unblockSender = (account: number, id: string) => invoke("unblock", { account, id });
 export const perfReport = (action: string, ms: number, budget: number) =>
-  invoke<void>("perf_report", { action, ms, budget });
-export const snoozeOptions = (text: string) => invoke<SnoozeChoice[]>("snooze_options", { text });
+  invoke("perf_report", { action, ms, budget });
+export const snoozeOptions = (text: string) => invoke("snooze_options", { text });
 /** Why the core would refuse this custom split rule, or null when it takes it. */
-export const checkSplitRule = (query: string) =>
-  invoke<string | null>("check_split_rule", { query });
+export const checkSplitRule = (query: string) => invoke("check_split_rule", { query });
 export const addAttachment = (draft: string, filename: string, mimeType: string, data: string) =>
-  invoke<DraftAttachment>("add_attachment", { draft, filename, mimeType, data });
+  invoke("add_attachment", { draft, filename, mimeType, data });

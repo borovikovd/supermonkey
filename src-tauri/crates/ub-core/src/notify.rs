@@ -4,12 +4,13 @@
 
 use std::collections::BTreeSet;
 
-use ub_domain::{AccountId, GmailMessageId, Identity, MessageId, SystemLabel, ThreadId};
+use ub_domain::{
+    AccountId, GmailMessageId, Identity, MessageId, SettingKey, SystemLabel, ThreadId,
+};
 use ub_store::{MessageRecord, Reads, StoreError};
 
 use crate::Notification;
 use crate::effects::Effect;
-use crate::views::setting;
 use crate::writer::WriterState;
 
 /// More new messages than this for one account in one poll become one
@@ -32,7 +33,7 @@ pub(crate) fn new_mail(
     if stored.is_empty() {
         return Ok(());
     }
-    if reads.settings().get(account, setting::MUTED)?.as_deref() == Some(setting::ON) {
+    if reads.settings().is_on(account, SettingKey::Muted)? {
         return Ok(());
     }
     let Some(record) = reads.accounts().get(account)? else {

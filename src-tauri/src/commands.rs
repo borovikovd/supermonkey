@@ -1,20 +1,14 @@
-//! The Tauri commands: typed wrappers over [`ub_bridge::commands`], so the
-//! app and the debug web bridge run the same code. Commands that read or
-//! wait are `async`; a plain command runs on the main thread.
+//! The Tauri commands: `connect`, which hands the core the page's channel,
+//! and `dispatch`, which runs every other command through
+//! [`ub_bridge::dispatch`], the code the debug web bridge runs too. A
+//! command is defined once, in `ub_ipc::Command`; nothing here names one.
 
-#![expect(
-    clippy::needless_pass_by_value,
-    reason = "Tauri hands commands owned arguments and state"
-)]
-
+use serde_json::Value;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
+use ub_bridge::Answer;
 use ub_bridge::commands::{self as cmd, CmdResult};
-use ub_domain::{AccountId, AttachmentId, DraftId, MessageId, ThreadId};
-use ub_ipc::{
-    BlockResult, BlockedSenders, ChannelMessage, ContactSuggestion, DraftAttachment, LaunchInfo,
-    ListRow, MessageBody, NumberedAction, SnoozeChoice, Unsubscribed,
-};
+use ub_ipc::{ChannelMessage, LaunchInfo};
 
 use crate::Shell;
 
@@ -36,139 +30,21 @@ pub(crate) async fn connect(
     Ok(info)
 }
 
+/// Runs the command `command` with `args`, as the web bridge's
+/// `/invoke/{command}` does. `quit_now` quits once the core has committed
+/// the page's last actions.
 #[tauri::command]
-pub(crate) fn submit(shell: State<'_, Shell>, actions: Vec<NumberedAction>) {
-    cmd::submit(&shell.core, actions);
-}
-
-#[tauri::command]
-pub(crate) async fn fetch_rows(
+pub(crate) async fn dispatch(
+    app: AppHandle,
     shell: State<'_, Shell>,
-    drafts: bool,
-    keys: Vec<String>,
-) -> CmdResult<Vec<ListRow>> {
-    cmd::fetch_rows(&shell.core, drafts, keys).await
-}
-
-#[tauri::command]
-pub(crate) async fn get_bodies(
-    shell: State<'_, Shell>,
-    ids: Vec<MessageId>,
-) -> CmdResult<Vec<MessageBody>> {
-    cmd::get_bodies(&shell.core, ids).await
-}
-
-#[tauri::command]
-pub(crate) async fn autocomplete(
-    shell: State<'_, Shell>,
-    account: AccountId,
-    query: String,
-) -> CmdResult<Vec<ContactSuggestion>> {
-    cmd::autocomplete(&shell.core, account, query).await
-}
-
-#[tauri::command]
-pub(crate) async fn add_account(shell: State<'_, Shell>) -> CmdResult<AccountId> {
-    cmd::add_account(&shell.core).await
-}
-
-#[tauri::command]
-pub(crate) async fn sign_in_again(shell: State<'_, Shell>, account: AccountId) -> CmdResult<()> {
-    cmd::sign_in_again(&shell.core, account).await
-}
-
-#[tauri::command]
-pub(crate) async fn open_attachment(
-    shell: State<'_, Shell>,
-    attachment: AttachmentId,
-) -> CmdResult<()> {
-    cmd::open_attachment(&shell.core, attachment).await
-}
-
-#[tauri::command]
-pub(crate) fn open_url(shell: State<'_, Shell>, url: String) -> CmdResult<()> {
-    cmd::open_url(&shell.core, &url)
-}
-
-#[tauri::command]
-pub(crate) async fn unsubscribe(
-    shell: State<'_, Shell>,
-    account: AccountId,
-    thread: ThreadId,
-) -> CmdResult<Unsubscribed> {
-    cmd::unsubscribe(&shell.core, account, thread).await
-}
-
-#[tauri::command]
-pub(crate) async fn block(
-    shell: State<'_, Shell>,
-    account: AccountId,
-    thread: ThreadId,
-    domain: bool,
-) -> CmdResult<BlockResult> {
-    cmd::block(&shell.core, account, thread, domain).await
-}
-
-#[tauri::command]
-pub(crate) async fn blocked_senders(
-    shell: State<'_, Shell>,
-    account: AccountId,
-) -> CmdResult<BlockedSenders> {
-    cmd::blocked_senders(&shell.core, account).await
-}
-
-#[tauri::command]
-pub(crate) async fn unblock(
-    shell: State<'_, Shell>,
-    account: AccountId,
-    id: String,
-) -> CmdResult<()> {
-    cmd::unblock(&shell.core, account, &id).await
-}
-
-#[tauri::command]
-pub(crate) async fn sender_threads(
-    shell: State<'_, Shell>,
-    account: AccountId,
-    thread: ThreadId,
-) -> CmdResult<Vec<ThreadId>> {
-    cmd::sender_threads(&shell.core, account, thread).await
-}
-
-#[tauri::command]
-pub(crate) async fn add_attachment(
-    shell: State<'_, Shell>,
-    draft: DraftId,
-    filename: String,
-    mime_type: String,
-    data: String,
-) -> CmdResult<DraftAttachment> {
-    cmd::add_attachment(&shell.core, draft, filename, mime_type, &data).await
-}
-
-/// Quits after the UI has closed an open composer (SPEC Send and undo: Cmd+Q).
-#[tauri::command]
-pub(crate) fn quit_now(app: AppHandle) {
-    crate::quit(&app);
-}
-
-/// Quits at once, as `quit_now` does.
-#[tauri::command]
-pub(crate) fn quit(app: AppHandle) {
-    crate::quit(&app);
-}
-
-#[tauri::command]
-pub(crate) fn perf_report(action: String, ms: f64, budget: f64) {
-    cmd::perf_report(&action, ms, budget);
-}
-
-#[tauri::command]
-pub(crate) fn snooze_options(shell: State<'_, Shell>, text: String) -> Vec<SnoozeChoice> {
-    cmd::snooze_options(&shell.core, &text)
-}
-
-#[tauri::command]
-pub(crate) fn check_split_rule(query: String) -> Option<String> {
-    cmd::check_split_rule(&query)
+    command: String,
+    args: Value,
+) -> CmdResult<Value> {
+    match ub_bridge::dispatch(&shell.core, &command, args).await? {
+        Answer::Reply(reply) => Ok(reply.into_json()),
+        Answer::Quit => {
+            crate::quit(&app);
+            Ok(Value::Null)
+        }
+    }
 }

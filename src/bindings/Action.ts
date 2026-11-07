@@ -2,10 +2,11 @@
 import type { DraftSave } from "./DraftSave";
 import type { ModifyAction } from "./ModifyAction";
 import type { PinKind } from "./PinKind";
+import type { Setting } from "./Setting";
 import type { SplitInfo } from "./SplitInfo";
 import type { SubKey } from "./SubKey";
 
-export type Action = { "type": "reset" } | { "type": "subscribe", sub: string, key: SubKey, } | { "type": "unsubscribe", sub: string, } | { "type": "modify" } & ModifyAction | { "type": "undo", account: number, entry: number, } | { "type": "createLabel", account: number, id: string, name: string, apply: ModifyAction | null, } | { "type": "saveDraft", draft: string, save: DraftSave, } | { "type": "closeComposer", draft: string, } | { "type": "sendDraft", draft: string, } | { "type": "discardDraft", draft: string, } | { "type": "closeToast", outbox: number, } | { "type": "ackNotice", notice: number, } | { "type": "setSetting", account: number | null, key: string, value: string, } | { "type": "pin", account: number, kind: PinKind, value: string, split: number, } | { "type": "saveSplits", account: number, splits: Array<SplitInfo>, 
+export type Action = { "type": "reset" } | { "type": "subscribe", sub: string, key: SubKey, } | { "type": "unsubscribe", sub: string, } | { "type": "modify" } & ModifyAction | { "type": "undo", account: number, entry: number, } | { "type": "createLabel", account: number, id: string, name: string, apply: ModifyAction | null, } | { "type": "saveDraft", draft: string, save: DraftSave, } | { "type": "closeComposer", draft: string, } | { "type": "sendDraft", draft: string, } | { "type": "discardDraft", draft: string, } | { "type": "closeToast", outbox: number, } | { "type": "ackNotice", notice: number, } | { "type": "setSetting" } & Setting | { "type": "pin", account: number, kind: PinKind, value: string, split: number, } | { "type": "saveSplits", account: number, splits: Array<SplitInfo>, 
 /**
  * Ids of custom splits to delete.
  */

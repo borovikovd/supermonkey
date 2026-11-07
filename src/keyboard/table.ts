@@ -600,7 +600,8 @@ const DEFS = {
     palette: true,
     when: anyScreen,
     run: (c) => {
-      act({ type: "setSetting", account: c.account, key: "muted", value: c.muted ? "off" : "on" });
+      if (c.account !== null)
+        act({ type: "setSetting", setting: "muted", account: c.account, on: !c.muted });
     },
   },
   settings: {

@@ -5,7 +5,8 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::{
-    DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SplitKind, SyncStatus, UndoKind,
+    DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SettingKey, SplitKind, SyncStatus,
+    UndoKind,
 };
 
 /// Stored text that names no value of the enum it was read as.
@@ -101,6 +102,7 @@ text_enum! {
         Label => "label",
         RemoveLabel => "remove_label",
     }
+    SettingKey { RemoteImages => "remote_images", Muted => "muted" }
 }
 
 impl ModifyKind {

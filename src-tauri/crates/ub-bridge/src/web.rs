@@ -41,9 +41,9 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use ub_core::App;
 use ub_core::activity::{Activity, busy_scope};
 use ub_domain::{ActionNo, Rev};
-use ub_ipc::ChannelMessage;
+use ub_ipc::{AppEvent, ChannelMessage};
 
-use crate::{Reply, dispatch};
+use crate::{Answer, dispatch};
 
 /// Where the debug app serves the bridge, for `vp dev` in a browser.
 pub(crate) const LOCAL_ADDR: &str = "127.0.0.1:1430";
@@ -74,7 +74,7 @@ struct Shared {
 /// What goes down an event stream.
 enum Push {
     Message(ChannelMessage),
-    AppEvent { name: &'static str, payload: Value },
+    AppEvent { name: String, payload: Value },
 }
 
 impl WebBridge {
@@ -107,11 +107,18 @@ impl WebBridge {
 
     /// Sends an app event to every open page, as `AppHandle::emit` does in
     /// the app. Returns how many pages got it.
-    pub fn emit(&self, name: &'static str, payload: &Value) -> usize {
+    pub fn emit(&self, event: &AppEvent) -> usize {
+        let (name, payload) = match event.parts() {
+            Ok(parts) => parts,
+            Err(e) => {
+                tracing::error!(error = %e, "couldn't encode an app event");
+                return 0;
+            }
+        };
         let mut streams = self.0.streams.lock();
         streams.retain(|page| {
             page.send(Push::AppEvent {
-                name,
+                name: name.clone(),
                 payload: payload.clone(),
             })
             .is_ok()
@@ -279,7 +286,7 @@ fn is_sign_in(command: &str) -> bool {
     matches!(command, "add_account" | "sign_in_again")
 }
 
-/// Runs a command by name, as the Tauri commands do. It counts as core
+/// Runs a command by name, as the app's Tauri `dispatch` command does. It counts as core
 /// activity until it returns, except while a sign-in waits on the person.
 async fn invoke(
     State(bridge): State<WebBridge>,
@@ -292,8 +299,8 @@ async fn invoke(
     let _signing_in = is_sign_in(&cmd).then(|| SignIn::new(&bridge.0.sign_ins));
     let result = busy_scope(&bridge.0.activity, "bridge", dispatch(&app, &cmd, args)).await;
     match result {
-        Ok(Reply::Value(value)) => Json(value).into_response(),
-        Ok(Reply::Quit) => {
+        Ok(Answer::Reply(reply)) => Json(reply.into_json()).into_response(),
+        Ok(Answer::Quit) => {
             bridge.0.quit.notify_waiters();
             Json(Value::Null).into_response()
         }

@@ -8,8 +8,8 @@ use parking_lot::Mutex;
 use tempfile::TempDir;
 use ub_domain::{
     AccountId, Addr, DraftId, DraftKind, GmailMessageId, GmailThreadId, HistoryId, LabelId,
-    LabelSet, Millis, NoticeKind, Pin, PinKind, SplitId, SplitKind, SubId, SyncStatus, ThreadId,
-    UndoEntryId, View,
+    LabelSet, Millis, NoticeKind, Pin, PinKind, SettingKey, SplitId, SplitKind, SubId, SyncStatus,
+    ThreadId, UndoEntryId, View,
 };
 use ub_ipc::{ListEntry, ListMove, SubKey, SubUpdate};
 use ub_store::{
@@ -571,11 +571,14 @@ fn one_write_per_table(account: AccountId, threads: &[ThreadId], draft: &DraftId
         ),
         (
             "a mute",
-            Box::new(move |tx| tx.settings().set(account, "muted", "on")),
+            Box::new(move |tx| tx.settings().set(account, SettingKey::Muted, true)),
         ),
         (
             "a global setting",
-            Box::new(|tx| tx.settings().set(AccountId::NONE, "remote_images", "off")),
+            Box::new(|tx| {
+                tx.settings()
+                    .set(AccountId::NONE, SettingKey::RemoteImages, false)
+            }),
         ),
         (
             "a contact",

@@ -1,6 +1,7 @@
 //! The commands, typed: one function per command over the core's handles,
-//! with its result or the error string the UI reads. The Tauri commands call
-//! these directly; [`crate::dispatch`] calls them by name.
+//! with its result or the error string the UI reads. [`crate::dispatch`]
+//! calls them by name; the app's `connect` calls [`connect`] with its
+//! channel.
 
 use base64::Engine as _;
 use ub_core::{App, MAX_ATTACHMENT_BYTES, NewAttachment, attachment_too_large};

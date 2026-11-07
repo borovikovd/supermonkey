@@ -7,7 +7,8 @@ use std::time::Duration;
 use axum::Json;
 use axum::extract::{Query, State};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::json;
+use ub_ipc::AppEvent;
 
 use crate::server::{Core, Ctl, Fail, SETTLE_LIMIT, Server, done};
 
@@ -57,7 +58,7 @@ pub(crate) async fn stop(State(s): State<Arc<Server>>, Json(req): Json<StopReq>)
         let quit = s.bridge.quit_called();
         tokio::pin!(quit);
         quit.as_mut().enable();
-        if s.bridge.emit("quit-requested", &Value::Null) > 0
+        if s.bridge.emit(&AppEvent::QuitRequested) > 0
             && tokio::time::timeout(SETTLE_LIMIT, quit).await.is_err()
         {
             tracing::warn!("the page did not call quit_now");
@@ -156,10 +157,10 @@ pub(crate) async fn focus(State(s): State<Arc<Server>>, Json(req): Json<FocusReq
     let Some(n) = clicked else {
         return Ok(Json(json!({ "openThread": null })));
     };
-    s.bridge.emit(
-        "notification-open",
-        &json!({ "account": n.account, "thread": n.thread }),
-    );
+    s.bridge.emit(&AppEvent::NotificationOpen {
+        account: n.account,
+        thread: n.thread,
+    });
     let thread = match n.thread {
         Some(t) => s.gmail_thread(t).await,
         None => None,

@@ -2,8 +2,8 @@
 
 use ub_domain::{
     AccountId, Addr, DraftContent, DraftId, DraftKind, GmailDraftId, GmailMessageId, GmailThreadId,
-    LabelId, LabelSet, Millis, OutboxState, PinKind, Rev, SplitId, ThreadChange, ThreadId,
-    UndoEntryId, UndoKind, View,
+    LabelId, LabelSet, Millis, OutboxState, PinKind, Rev, SettingKey, SplitId, ThreadChange,
+    ThreadId, UndoEntryId, UndoKind, View,
 };
 use ub_store::{
     Draft, DraftAttachment, DraftLifecycle, DraftStage, DraftWait, NewOutbox, StoreError, Table,
@@ -342,17 +342,21 @@ fn settings_are_global_or_per_account() {
     let h = Harness::start();
     let account = h.account("me@example.com");
     h.write(move |tx| {
-        tx.settings().set(AccountId::NONE, "remote_images", "off")?;
-        tx.settings().set(account, "muted", "on")
+        tx.settings()
+            .set(AccountId::NONE, SettingKey::RemoteImages, false)?;
+        tx.settings().set(account, SettingKey::Muted, true)
     });
     let commit = h.last_commit();
     assert!(commit.changes.touched(AccountId::NONE, Table::Settings));
     assert!(commit.changes.touched(account, Table::Settings));
-    assert_eq!(
-        h.read(|r| r.settings().get(AccountId::NONE, "remote_images"))
-            .as_deref(),
-        Some("off")
-    );
+    assert!(!h.read(|r| {
+        r.settings()
+            .is_on(AccountId::NONE, SettingKey::RemoteImages)
+    }));
+    assert!(h.read(move |r| r.settings().is_on(account, SettingKey::Muted)));
+    // Never set: the default, global and per account apart.
+    assert!(h.read(move |r| r.settings().is_on(account, SettingKey::RemoteImages)));
+    assert!(!h.read(|r| r.settings().is_on(AccountId::NONE, SettingKey::Muted)));
     assert_eq!(h.read(move |r| r.settings().all(account)).len(), 1);
     h.write(move |tx| tx.accounts().remove(account));
     assert!(

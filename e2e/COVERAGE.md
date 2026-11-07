@@ -425,6 +425,7 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 - `crates/ub-core/src/workers/unwanted.rs`: Blocked senders lists only filters that trash one sender.
 - `crates/ub-core/src/workers/attachments.rs`: two attachments of one message with one name keep their own files.
 - `crates/ub-core/src/tests/perf.rs` (ignored; needs `UBERMENSCH_PERF_DB`): local search and autocomplete against §Performance.
+- `crates/ub-ipc/src/commands.rs`: every command name in the TypeScript bindings parses as that command in Rust and names its reply; the E2E suite reaches only the commands the UI calls.
 - `crates/ub-bridge/src/commands.rs`: a file over 25 MB is refused before its base64 is decoded.
 - `crates/ub-bridge/src/web.rs`: the debug web bridge answers only loopback hosts and its own origins (SEC-05).
 - `src/logging.rs`: the stderr logger drops the HTML parser's warnings.

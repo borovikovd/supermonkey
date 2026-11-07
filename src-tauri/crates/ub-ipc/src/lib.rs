@@ -24,11 +24,11 @@ pub use account::{
     AccountInfo, AccountSummary, AppState, GlobalSettings, LabelInfo, Notice, PinInfo, SendAs,
     SplitInfo, UndoEntryInfo,
 };
-pub use actions::{Action, ModifyAction, NumberedAction, SnoozeChange};
+pub use actions::{Action, ModifyAction, NumberedAction, Setting, SnoozeChange};
 pub use addr::Addr;
 pub use commands::{
-    BlockResult, BlockedSender, BlockedSenders, ContactSuggestion, LaunchInfo, SnoozeChoice,
-    Unsubscribed,
+    AppEvent, BlockResult, BlockedSender, BlockedSenders, Command, CommandReply, ContactSuggestion,
+    LaunchInfo, Replier, Reply, SnoozeChoice, Unsubscribed,
 };
 pub use compose::{DraftAttachment, DraftFields, DraftSave, DraftState};
 pub use conversation::{

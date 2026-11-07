@@ -820,7 +820,7 @@ The thread list is virtualized. The conversation view does not virtualize a thre
 | Gmail | reqwest and the oauth2 crate |
 | Plugins | notification, opener, window-state, single-instance |
 
-Tauri commands are a small handwritten TypeScript surface. Every type that crosses it is generated from the Rust types with ts-rs into `src/bindings/`: actions, channel messages, rows, notices, and command arguments and results. No IPC type is written by hand in TypeScript. `cargo test` regenerates the bindings, and the check fails if they differ from the committed files. The UI does not open SQLite itself.
+The command surface is defined once, in Rust: each command's name, its arguments, and its reply. The app registers two Tauri commands, `connect`, which takes the channel, and `dispatch`, which runs every other command by name through the same code as the debug web bridge. Every type that crosses it is generated from the Rust types with ts-rs into `src/bindings/`: actions, settings, channel messages, rows, notices, app events, and each command's name, arguments, and reply, so the UI's typed `invoke` can't call a command Rust lacks or misname an argument. No IPC type is written by hand in TypeScript. `cargo test` regenerates the bindings, and the check fails if they differ from the committed files. The UI does not open SQLite itself.
 
 Tooling is Vite+ 1.4. `vite.config.ts` configures Oxfmt, Oxlint with `typeAware` and `typeCheck`, and Vitest. `vp check` is the frontend gate. `typescript@7.0.2` is installed for the editor. The `vite` package resolves to `@voidzero-dev/vite-plus-core@1.4.0`, and `vitest` is pinned to the copy Vite+ ships. pnpm is the package manager under `vp`. Rust uses rustfmt and clippy.
 

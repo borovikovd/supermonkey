@@ -4,7 +4,7 @@
 //! after a send Gmail rejected.
 
 use ub_domain::{AccountId, DraftId, Millis, NoticeKind};
-use ub_ipc::{Action, DraftSave};
+use ub_ipc::{Action, DraftSave, Setting};
 use ub_store::{NewNotice, StoreError, WriteTx};
 
 use super::ActionError;
@@ -30,10 +30,11 @@ pub(super) fn owner(action: &Action) -> Owner {
         | Action::Unsubscribe { .. }
         | Action::MoreResults { .. }
         | Action::AckNotice { .. }
-        | Action::CloseToast { .. } => Owner::Nobody,
-        Action::SetSetting { account, .. } => account.map_or(Owner::Nobody, Owner::Account),
+        | Action::CloseToast { .. }
+        | Action::SetSetting(Setting::RemoteImages { .. }) => Owner::Nobody,
         Action::Modify(modify) => Owner::Account(modify.account),
-        Action::Undo { account, .. }
+        Action::SetSetting(Setting::Muted { account, .. })
+        | Action::Undo { account, .. }
         | Action::CreateLabel { account, .. }
         | Action::Pin { account, .. }
         | Action::SaveSplits { account, .. }

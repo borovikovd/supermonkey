@@ -1,34 +1,27 @@
 //! Settings (SPEC Settings): an action, not an undo entry, applied at once.
 
-use ub_domain::AccountId;
+use ub_domain::{AccountId, SettingKey};
+use ub_ipc::Setting;
 
 use super::{ActionCtx, ActionError};
-use crate::views::setting;
 
-/// Sets a setting: remote images globally, or an account's mute. The webview
-/// is not trusted, so only those keys and `on` or `off` are taken. The Dock
+/// Sets a setting: remote images globally, or an account's mute. The Dock
 /// badge follows a mute through the commit's changed settings.
 pub(super) fn set_setting(
     ctx: &mut ActionCtx<'_, '_>,
-    account: Option<AccountId>,
-    key: &str,
-    value: &str,
+    setting: Setting,
 ) -> Result<(), ActionError> {
-    if value != setting::ON && value != setting::OFF {
-        return Err(ActionError::Invalid("Couldn't change that setting"));
-    }
-    let account = match (account, key) {
-        (None, setting::REMOTE_IMAGES) => AccountId::NONE,
-        (Some(account), setting::MUTED) => {
+    let (account, key, on) = match setting {
+        Setting::RemoteImages { on } => (AccountId::NONE, SettingKey::RemoteImages, on),
+        Setting::Muted { account, on } => {
             if ctx.tx.read().accounts().get(account)?.is_none() {
                 return Err(ActionError::Invalid(
                     "That account is no longer in Ubermensch",
                 ));
             }
-            account
+            (account, SettingKey::Muted, on)
         }
-        _ => return Err(ActionError::Invalid("Couldn't change that setting")),
     };
-    ctx.tx.settings().set(account, key, value)?;
+    ctx.tx.settings().set(account, key, on)?;
     Ok(())
 }

@@ -21,12 +21,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use serde_json::json;
 use tauri::{AppHandle, Emitter as _, Manager as _, RunEvent, WindowEvent};
 use ub_core::activity::{Activity, Tasks};
 use ub_core::clock::SystemClock;
 use ub_core::{App, Config, Deps, GmailConfig};
 use ub_gmail::{OAuthConfig, QuotaConfig, TokenFile, TokenStore, Units};
+use ub_ipc::AppEvent;
 
 pub use crate::logging::init_logging;
 use crate::platform::TauriPlatform;
@@ -101,25 +101,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::connect,
-            commands::submit,
-            commands::fetch_rows,
-            commands::get_bodies,
-            commands::autocomplete,
-            commands::add_account,
-            commands::sign_in_again,
-            commands::open_attachment,
-            commands::open_url,
-            commands::unsubscribe,
-            commands::block,
-            commands::blocked_senders,
-            commands::unblock,
-            commands::sender_threads,
-            commands::add_attachment,
-            commands::quit_now,
-            commands::quit,
-            commands::perf_report,
-            commands::snooze_options,
-            commands::check_split_rule,
+            commands::dispatch
         ])
         .build(tauri::generate_context!());
     let app = match built {
@@ -144,7 +126,7 @@ pub fn run() {
                 .unwrap_or(false);
             if !visible {
                 quit(app);
-            } else if let Err(e) = app.emit("quit-requested", ()) {
+            } else if let Err(e) = emit(app, &AppEvent::QuitRequested) {
                 tracing::warn!(error = %e, "couldn't ask the page to quit; quitting");
                 quit(app);
             }
@@ -318,10 +300,20 @@ fn on_focus(app: &AppHandle, focused: bool) {
     let Some(clicked) = shell.core.lifecycle().focus(focused) else {
         return;
     };
-    let payload = json!({ "account": clicked.account, "thread": clicked.thread });
-    if let Err(e) = app.emit("notification-open", payload) {
+    let event = AppEvent::NotificationOpen {
+        account: clicked.account,
+        thread: clicked.thread,
+    };
+    if let Err(e) = emit(app, &event) {
         tracing::warn!(error = %e, "couldn't open a clicked notification");
     }
+}
+
+/// Sends the page an app event.
+fn emit(app: &AppHandle, event: &AppEvent) -> anyhow::Result<()> {
+    let (name, payload) = event.parts()?;
+    app.emit(&name, payload)?;
+    Ok(())
 }
 
 /// Exits once the core has committed the UI actions queued so far, so the

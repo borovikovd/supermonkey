@@ -4,10 +4,11 @@ use std::time::Duration;
 
 use ub_domain::{
     AccountId, ActionNo, Addr, DraftId, DraftKind, MessageId, Millis, NoticeKind, OutboxState,
-    SubId, ThreadId, View,
+    SettingKey, SubId, ThreadId, View,
 };
 use ub_ipc::{
-    Action, ChannelMessage, DraftFields, DraftSave, ModifyAction, NumberedAction, SubKey, SubUpdate,
+    Action, ChannelMessage, DraftFields, DraftSave, ModifyAction, NumberedAction, Setting, SubKey,
+    SubUpdate,
 };
 use ub_store::{Draft, NewBody, NewNotice, NewOutbox, Priority, StoreError};
 
@@ -113,16 +114,11 @@ async fn a_rejected_action_is_skipped_and_the_batch_goes_on() {
     let ns = h
         .act(vec![
             a_modify(account),
-            Action::SetSetting {
-                account: None,
-                key: "remote_images".to_owned(),
-                value: "off".to_owned(),
-            },
-            Action::SetSetting {
-                account: None,
-                key: "bogus".to_owned(),
-                value: "on".to_owned(),
-            },
+            Action::SetSetting(Setting::RemoteImages { on: false }),
+            Action::SetSetting(Setting::Muted {
+                account: AccountId(99),
+                on: true,
+            }),
         ])
         .await;
     let messages = h.take();
@@ -133,10 +129,8 @@ async fn a_rejected_action_is_skipped_and_the_batch_goes_on() {
     );
     let state = app_state(&messages).expect("the setting reached the app");
     assert!(!state.settings.remote_images);
-    let bogus = h
-        .write(|tx| tx.read().settings().get(AccountId::NONE, "bogus"))
-        .await;
-    assert_eq!(bogus, None, "an unknown setting is refused");
+    let gone = h.write(|tx| tx.read().settings().all(AccountId(99))).await;
+    assert!(gone.is_empty(), "a mute of no account is refused");
 }
 
 #[tokio::test]
@@ -165,26 +159,13 @@ async fn an_action_at_or_below_the_last_applied_is_dropped() {
 }
 
 #[tokio::test]
-async fn setting_values_and_accounts_are_checked() {
+async fn a_mute_is_checked_against_the_accounts() {
     let mut h = Harness::start().await;
     let (account, _) = h.write(seed).await;
-    h.act(vec![
-        Action::SetSetting {
-            account: Some(account),
-            key: "muted".to_owned(),
-            value: "yes".to_owned(),
-        },
-        Action::SetSetting {
-            account: Some(AccountId(99)),
-            key: "muted".to_owned(),
-            value: "on".to_owned(),
-        },
-        Action::SetSetting {
-            account: None,
-            key: "muted".to_owned(),
-            value: "on".to_owned(),
-        },
-    ])
+    h.act(vec![Action::SetSetting(Setting::Muted {
+        account: AccountId(99),
+        on: true,
+    })])
     .await;
     let stored = h
         .write(move |tx| {
@@ -209,11 +190,7 @@ async fn muting_an_account_takes_its_unread_mail_off_the_badge() {
     eventually("the badge counts the inbox", || badge(&h) == Some(unread)).await;
     h.act(vec![
         subscribe("app", SubKey::App),
-        Action::SetSetting {
-            account: Some(account),
-            key: "muted".to_owned(),
-            value: "on".to_owned(),
-        },
+        Action::SetSetting(Setting::Muted { account, on: true }),
     ])
     .await;
     eventually("the badge clears", || {
@@ -376,11 +353,7 @@ async fn quit_commits_queued_ui_actions_then_stops_everything() {
     let (account, _) = h.write(seed).await;
     h.app.actions().submit(vec![NumberedAction {
         n: ActionNo(h.app.actions().last_received().0 + 1),
-        action: Action::SetSetting {
-            account: Some(account),
-            key: "muted".to_owned(),
-            value: "on".to_owned(),
-        },
+        action: Action::SetSetting(Setting::Muted { account, on: true }),
     }]);
     tokio::time::timeout(Duration::from_secs(10), h.app.lifecycle().quit())
         .await
@@ -396,9 +369,9 @@ async fn quit_commits_queued_ui_actions_then_stops_everything() {
     let dir = std::mem::replace(&mut h.dir, tempfile::tempdir().unwrap());
     let again = Harness::start_in(dir).await;
     let muted = again
-        .write(move |tx| tx.read().settings().get(account, "muted"))
+        .write(move |tx| tx.read().settings().is_on(account, SettingKey::Muted))
         .await;
-    assert_eq!(muted.as_deref(), Some("on"));
+    assert!(muted);
 }
 
 #[tokio::test]
@@ -619,11 +592,10 @@ async fn an_action_sent_again_under_an_applied_number_leaves_no_second_notice() 
 async fn a_rejected_action_for_no_account_leaves_no_notice() {
     let mut h = Harness::start().await;
     let (account, _) = h.write(seed).await;
-    h.act(vec![Action::SetSetting {
-        account: None,
-        key: "bogus".to_owned(),
-        value: "on".to_owned(),
-    }])
+    h.act(vec![Action::SetSetting(Setting::Muted {
+        account: AccountId(99),
+        on: true,
+    })])
     .await;
     let notices = h
         .write(move |tx| tx.read().notices().for_account(account))

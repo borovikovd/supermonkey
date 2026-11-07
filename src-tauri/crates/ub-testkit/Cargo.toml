@@ -11,6 +11,7 @@ publish = false
 ub-core = { path = "../ub-core" }
 ub-bridge = { path = "../ub-bridge", features = ["web"] }
 ub-domain = { path = "../ub-domain" }
+ub-ipc = { path = "../ub-ipc" }
 ub-gmail = { path = "../ub-gmail" }
 ub-store = { path = "../ub-store" }
 ub-fake-gmail = { path = "../ub-fake-gmail" }
