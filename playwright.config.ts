@@ -7,6 +7,10 @@ export default defineConfig({
   testDir: "./e2e",
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: true,
+  // Each worker drives its own WebKit window. Several full runs at once (as
+  // parallel agents did) exhausted macOS WindowServer's image buffers and
+  // crashed the login session, so one run stays small.
+  workers: 4,
   forbidOnly: !!process.env.CI,
   retries: 0,
   timeout: 30_000,
@@ -17,7 +21,9 @@ export default defineConfig({
     viewport: { width: 1280, height: 800 },
     // The core runs in the same zone (e2e/fixtures.ts).
     timezoneId: "America/New_York",
-    trace: "retain-on-failure",
+    // DOM snapshots only: trace screenshots capture the window continuously,
+    // which is what WindowServer was serving when it ran out of buffers.
+    trace: { mode: "retain-on-failure", screenshots: false },
   },
   projects: [{ name: "webkit", use: { browserName: "webkit" } }],
 });
