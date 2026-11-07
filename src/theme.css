@@ -166,7 +166,8 @@
  * hidden for the first 300 ms, so a quick load never flashes it.
  */
 .loading-bar {
-  position: relative;
+  /* Over the text below it, taking no room, so nothing moves when it goes. */
+  position: absolute;
   height: 2px;
   overflow: hidden;
   border-radius: 1px;

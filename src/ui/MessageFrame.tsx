@@ -64,14 +64,15 @@ function srcdoc(body: MessageBody, remoteImages: boolean, quoteOpen: boolean): s
 
 /**
  * A message whose body is still on its way: its snippet, readable at once as
- * in Gmail and Superhuman, under a thin bar that shows only if the wait is
+ * in Gmail and Superhuman and set as the body's text is, where the body will
+ * start, under a thin bar that takes no room and shows only if the wait is
  * long enough to notice.
  */
 export function LoadingBody({ snippet }: { snippet: string }) {
   return (
-    <div aria-busy="true" aria-label="Loading message" data-loading>
-      <div aria-hidden="true" className="loading-bar mb-3" />
-      <p className="text-body text-text-2">{snippet && `${snippet}…`}</p>
+    <div aria-busy="true" aria-label="Loading message" data-loading className="relative">
+      <div aria-hidden="true" className="loading-bar inset-x-0 -top-2" />
+      <p className="text-body text-text">{snippet && `${snippet}…`}</p>
     </div>
   );
 }
@@ -95,6 +96,9 @@ export function MessageFrame({
   onSelect: (id: number) => void;
 }) {
   const [body, setBody] = useState(() => bodies.get(id));
+  // The snippet stays until the frame has laid out its body and taken its
+  // height, so the message grows once instead of shrinking to an empty frame.
+  const [sized, setSized] = useState(false);
   const frame = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -112,10 +116,12 @@ export function MessageFrame({
     let ro: ResizeObserver | null = null;
     const setup = () => {
       const doc = el.contentDocument;
-      if (!doc) return;
+      // Before the srcdoc loads, the frame holds an empty about:blank.
+      if (doc?.URL !== "about:srcdoc") return;
       ro?.disconnect();
       const fit = () => {
         el.style.height = `${doc.documentElement.scrollHeight}px`;
+        setSized(true);
       };
       fit();
       ro = new ResizeObserver(fit);
@@ -145,21 +151,27 @@ export function MessageFrame({
     };
   }, [body, onSelect, id]);
 
-  if (!body) return <LoadingBody snippet={snippet} />;
   return (
-    <iframe
-      ref={frame}
-      data-frame={id}
-      title={`message ${id}`}
-      // allow-scripts is only there so WebKit fires the parent's listeners (bug 218086);
-      // the document's CSP is script-src 'none', so nothing in a message can run.
-      // oxlint-disable-next-line react/iframe-missing-sandbox
-      sandbox="allow-same-origin allow-scripts"
-      srcDoc={srcdoc(body, remoteImages, quoteOpen)}
-      className="block w-full border-0"
-      // The card is always white, so a message never gets its dark-mode styles:
-      // WebKit answers prefers-color-scheme inside the frame from this property.
-      style={{ height: 40, colorScheme: "light" }}
-    />
+    <div className="relative">
+      {!sized && <LoadingBody snippet={snippet} />}
+      {body && (
+        <iframe
+          ref={frame}
+          data-frame={id}
+          title={`message ${id}`}
+          // allow-scripts is only there so WebKit fires the parent's listeners (bug 218086);
+          // the document's CSP is script-src 'none', so nothing in a message can run.
+          // oxlint-disable-next-line react/iframe-missing-sandbox
+          sandbox="allow-same-origin allow-scripts"
+          srcDoc={srcdoc(body, remoteImages, quoteOpen)}
+          // Until sized, it lays out unseen behind the snippet, from no height, so
+          // its measured height is its content's.
+          className={`block w-full border-0 ${sized ? "" : "invisible absolute inset-x-0 top-0"}`}
+          // The card is always white, so a message never gets its dark-mode styles:
+          // WebKit answers prefers-color-scheme inside the frame from this property.
+          style={{ height: 0, colorScheme: "light" }}
+        />
+      )}
+    </div>
   );
 }

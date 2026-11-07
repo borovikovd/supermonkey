@@ -86,7 +86,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - CONV-18 · P2 · The subject row's Done and Snooze buttons act like `e` and `h` · §Layout, §Keyboard
 - CONV-19 · P1 · A message's dark-mode styles stay off when macOS is in dark mode · §Reading, §Look
 - CONV-20 · P2 · A conversation opened, closed, and opened again in one batch still reads its body · §Sync, §Actions
-- CONV-21 · P1 · A message still downloading shows its snippet and a loading bar, then its body · §Reading, §Subscriptions
+- CONV-21 · P1 · A message still downloading shows its snippet and a loading bar, then its body, growing in one step · §Reading, §Subscriptions
 - CONV-22 · P1 · A message labelled with a legacy charset but served as UTF-8 reads correctly · §Reading
 - CONV-23 · P2 · An address added to the account in Gmail is Me in a conversation already open · §Reading, §Sync
 - CONV-24 · P2 · `r`, `Enter`, and `f` do nothing in a conversation that is gone · §Reading, §Reply composer

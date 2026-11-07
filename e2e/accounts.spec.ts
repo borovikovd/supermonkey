@@ -1255,7 +1255,7 @@ test("ACC-26 a conversation and its reply still loading when the account signs o
   const errors = (await app.errorToastsShown()).length;
   const from = seeds.PERSONS[0] ?? "";
   // Longer than a snippet, so only the downloaded body ends this way.
-  const text = `${"The first lines arrive before the rest. ".repeat(4)}The end of the message.`;
+  const text = `${"The first lines arrive before the rest. ".repeat(6)}The end of the message.`;
   const draftsOn = async (threadId: string) =>
     (await gmail.gmail(A)).drafts.filter((d) => d.message.threadId === threadId);
 

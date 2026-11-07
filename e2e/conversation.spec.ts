@@ -703,9 +703,10 @@ test.describe("conversation", () => {
 });
 
 // The message used to show only a faint "Downloading message…" line, which read as an empty email.
-test("CONV-21 a message still downloading shows its snippet and a loading bar, then its body", async ({
+test("CONV-21 a message still downloading shows its snippet and a loading bar, then its body, growing in one step", async ({
   app,
   gmail,
+  page,
 }) => {
   await seeds.standard(gmail, app);
   const body = await gmail.hold({ api: "threads.get", query: { format: "full" } });
@@ -713,7 +714,8 @@ test("CONV-21 a message still downloading shows its snippet and a loading bar, t
     account: A,
     from: seeds.PERSONS[0] ?? "",
     subject: "Slow body",
-    text: "The first lines arrive before the rest.",
+    // Long enough that its snippet wraps over several lines.
+    text: `The first lines arrive before the rest. ${"Then the rest follows, line after line. ".repeat(40)}`,
   });
   await expect
     .poll(async () => (await gmail.requests("threads.get")).some((r) => r.held))
@@ -725,11 +727,63 @@ test("CONV-21 a message still downloading shows its snippet and a loading bar, t
   await expect(loading).toContainText("The first lines arrive before the rest.");
   await expect(app.conversation.locator("iframe[data-frame]")).toHaveCount(0);
 
+  // The snippet is set as the body's text will be, where it will start: the
+  // bar above it takes no room.
+  const snippet = loading.locator("p");
+  const snippetStyle = await snippet.evaluate((p) => {
+    const s = getComputedStyle(p);
+    const top = p.getBoundingClientRect().top;
+    const from = p.closest("[data-message]")?.getBoundingClientRect().top ?? 0;
+    return { size: s.fontSize, line: s.lineHeight, color: s.color, top: top - from };
+  });
+
+  // The message's height after every change to it from here on, measured
+  // as each change lands, so no state between two paints goes unseen.
+  const message = app.conversation.locator("[data-message]").last();
+  await message.evaluate((el) => {
+    const heights = [el.getBoundingClientRect().height];
+    Reflect.set(window, "__heights", heights);
+    new MutationObserver(() => heights.push(el.getBoundingClientRect().height)).observe(el, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+    });
+  });
+
   await body.release();
-  await expect(
-    app.conversation.locator("iframe[data-frame]").contentFrame().locator("body"),
-  ).toContainText("The first lines arrive before the rest.");
+  const frame = app.conversation.locator("iframe[data-frame]");
+  await expect(frame.contentFrame().locator("body")).toContainText(
+    "The first lines arrive before the rest.",
+  );
   await expect(loading).toHaveCount(0);
+
+  // The message never shrinks on the way to its full height.
+  const heights = await page.evaluate((): number[] => {
+    const log: unknown = Reflect.get(window, "__heights");
+    return Array.isArray(log) ? log.filter((h) => typeof h === "number") : [];
+  });
+  expect(heights.length).toBeGreaterThan(0);
+  for (let i = 1; i < heights.length; i++) {
+    expect(heights[i], `height ${i} of ${heights.join(", ")}`).toBeGreaterThanOrEqual(
+      heights[i - 1] ?? 0,
+    );
+  }
+
+  const bodyStyle = await frame
+    .contentFrame()
+    .locator("body")
+    .evaluate((b) => {
+      const s = getComputedStyle(b);
+      return { size: s.fontSize, line: s.lineHeight, color: s.color };
+    });
+  expect({ size: snippetStyle.size, line: snippetStyle.line, color: snippetStyle.color }).toEqual(
+    bodyStyle,
+  );
+  const frameTop = await frame.evaluate((f) => {
+    const from = f.closest("[data-message]")?.getBoundingClientRect().top ?? 0;
+    return f.getBoundingClientRect().top - from;
+  });
+  expect(frameTop).toBe(snippetStyle.top);
 });
 
 // UTF-8 bytes decoded as the declared KOI8-R showed as box-drawing characters ("п■п╬п╠").

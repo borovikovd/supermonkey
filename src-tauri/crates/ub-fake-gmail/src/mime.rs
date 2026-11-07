@@ -316,13 +316,14 @@ fn strip_tags(html: &str) -> String {
     out
 }
 
-/// The snippet Gmail would show: collapsed whitespace, at most 100 characters.
+/// The snippet Gmail would show: collapsed whitespace, at most 200 characters,
+/// about what Gmail returns, so a snippet wraps over lines as real ones do.
 pub(crate) fn snippet(text: &str) -> String {
     text.split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .chars()
-        .take(100)
+        .take(200)
         .collect()
 }
 
