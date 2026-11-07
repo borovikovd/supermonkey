@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.0](https://github.com/borovikovd/ubermensch/compare/v0.5.2...v0.6.0) (2026-11-07)
+
+
+### Features
+
+* **palette:** list only the commands that work where it opens ([de1d6d7](https://github.com/borovikovd/ubermensch/commit/de1d6d730f385ac872feb5f903546da7acf63be6))
+
+
+### Bug Fixes
+
+* **compose:** close a reply when search closes or a new query replaces it ([3b276b0](https://github.com/borovikovd/ubermensch/commit/3b276b016f7ff5ea2f0591b8c44e67f2a66dfca3))
+* **compose:** mark every address that can't be sent to, and refuse Send before the composer closes ([8cd55b9](https://github.com/borovikovd/ubermensch/commit/8cd55b974684c350953eb8a2c9f6c1128ddf11d7))
+* **compose:** quote the whole message in a reply or forward started while it downloads ([0ce91a2](https://github.com/borovikovd/ubermensch/commit/0ce91a271766861a373e78145edf9f13c9dce4d1))
+* **drafts:** keep a draft edit that is still waiting to reach Gmail ([c66fe68](https://github.com/borovikovd/ubermensch/commit/c66fe680a0bae622196eaae7b5c160ce1a855af9))
+* **keyboard:** Esc closes a sheet from its fields, or over a composer ([25ccc37](https://github.com/borovikovd/ubermensch/commit/25ccc379737d86fe4c263ab50a53fb7970013dc8))
+* **privacy:** with remote images off, block web fonts and the reply quote's images too ([bb17cb2](https://github.com/borovikovd/ubermensch/commit/bb17cb2d9d235467253f34ec5af09e6849f99dbb))
+* **reading:** show Russian and other non-Latin mail that Gmail labels with an old charset ([5698ec3](https://github.com/borovikovd/ubermensch/commit/5698ec3785975721298823fd286a77bf655c6eeb))
+* say why when the app can't do what you asked, and bring back a draft it couldn't send ([605f851](https://github.com/borovikovd/ubermensch/commit/605f8515fade0563020a4b4bce032c44f89dd0c4))
+* **search:** load more Gmail results where they belong, not at the list's end ([4cc60f3](https://github.com/borovikovd/ubermensch/commit/4cc60f31d37a5024f643d8a68f11e6b6b0432c45))
+* **search:** run a search's or view's Gmail listing once the network returns ([24f6003](https://github.com/borovikovd/ubermensch/commit/24f6003253918733262077afb305f920b4f2a2b5))
+* **splits:** keep the splits sheet open when a rule can't be used ([1bb58e4](https://github.com/borovikovd/ubermensch/commit/1bb58e45c8383bf92c01ddcfdcec60dab950dc6b))
+* **triage:** never act on a conversation that is no longer on screen ([241a15e](https://github.com/borovikovd/ubermensch/commit/241a15e71228b1da5b795aa87619c987e8aa5021))
+
 ## [0.5.2](https://github.com/borovikovd/ubermensch/compare/v0.5.1...v0.5.2) (2026-11-05)
 
 
