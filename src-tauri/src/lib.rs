@@ -4,10 +4,13 @@
 //!
 //! - Closing the window hides it; the app keeps syncing in the Dock, and a
 //!   Dock click shows it again.
-//! - Cmd+Q asks the page to close an open composer first, then the page
-//!   calls `quit_now`; quitting waits for the user's last actions to commit
-//!   (SPEC Send and undo), then exits. A page that has not asked within
-//!   10 s is quit without.
+//! - Cmd+Q, the app menu's own Quit, asks a connected page to close an open
+//!   composer first, then the page calls `quit_now`; quitting waits for the
+//!   user's last actions to commit (SPEC UI state, Actions), then exits. A
+//!   page that has not asked within 10 s is quit without.
+//! - When macOS terminates the app (Quit in the Dock, a logout, a
+//!   shutdown), the page can't answer: the exit still waits, within the
+//!   core's own deadline, for the UI actions the core has queued.
 //! - Debug builds with the `web` feature serve the web bridge on
 //!   127.0.0.1:1430 when `UBERMENSCH_WEB_BRIDGE=1`, for the UI in a browser.
 //! - Debug builds with the `fake` feature run demo mode when
@@ -16,6 +19,7 @@
 
 mod commands;
 mod logging;
+mod menu;
 mod platform;
 
 use std::path::Path;
@@ -24,6 +28,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, Emitter as _, Manager as _, RunEvent, WindowEvent};
 use tauri_plugin_window_state::StateFlags;
+use tokio::sync::OnceCell;
 use ub_core::activity::{Activity, Tasks};
 use ub_core::clock::SystemClock;
 use ub_core::{App, Config, Deps, GmailConfig};
@@ -31,6 +36,7 @@ use ub_gmail::{OAuthConfig, QuotaConfig, TokenFile, TokenStore, Units};
 use ub_ipc::AppEvent;
 
 pub use crate::logging::init_logging;
+pub use crate::menu::{QUIT_MENU_ITEM, app_menu};
 use crate::platform::TauriPlatform;
 
 /// The main window's label (`tauri.conf.json`).
@@ -68,11 +74,27 @@ pub(crate) struct Shell {
     tasks: Tasks,
     /// Set by the first quit, so a second Cmd+Q doesn't quit twice.
     quitting: AtomicBool,
+    /// Set once the shell's tasks and the core have stopped ([`Shell::stop`]).
+    stopped: OnceCell<()>,
     /// Set once the page has connected and the window has been shown.
     pub(crate) connected: AtomicBool,
     /// Demo mode's fake Gmail, kept running for as long as the app.
     #[cfg(feature = "fake")]
     _demo: Option<ub_testkit::Demo>,
+}
+
+impl Shell {
+    /// Stops the shell's tasks and quits the core, which commits the UI
+    /// actions it has queued within its own deadline. Runs once: a later
+    /// caller waits for the first to finish.
+    async fn stop(&self) {
+        self.stopped
+            .get_or_init(|| async {
+                self.tasks.stop().await;
+                self.core.lifecycle().quit().await;
+            })
+            .await;
+    }
 }
 
 /// Where the core keeps its data, which Gmail it talks to, and where its
@@ -100,6 +122,12 @@ pub fn run() {
         )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .menu(app_menu)
+        .on_menu_event(|app, event| {
+            if event.id() == QUIT_MENU_ITEM {
+                request_quit(app);
+            }
+        })
         .setup(|app| {
             let shell = start_core(app.handle())?;
             app.manage(shell);
@@ -132,25 +160,15 @@ pub fn run() {
     app.run(|app, event| match event {
         // Clicking the Dock icon shows the window again.
         RunEvent::Reopen { .. } => show_main(app),
-        // Cmd+Q: let the page close an open composer first; it then calls
-        // `quit_now`. A hidden window has no composer on screen.
+        // Tauri asks this when the last window is gone, which hiding on
+        // close never lets happen; quit as Cmd+Q does all the same.
         RunEvent::ExitRequested {
             code: None, api, ..
         } => {
             api.prevent_exit();
-            let visible = app
-                .get_webview_window(MAIN_WINDOW)
-                .and_then(|w| w.is_visible().ok())
-                .unwrap_or(false);
-            if !visible {
-                quit(app);
-            } else if let Err(e) = emit(app, &AppEvent::QuitRequested) {
-                tracing::warn!(error = %e, "couldn't ask the page to quit; quitting");
-                quit(app);
-            } else {
-                quit_after_deadline(app);
-            }
+            request_quit(app);
         }
+        RunEvent::Exit => finish_quit(app),
         _ => {}
     });
 }
@@ -182,6 +200,7 @@ fn start_core(app: &AppHandle) -> anyhow::Result<Shell> {
         core,
         tasks,
         quitting: AtomicBool::new(false),
+        stopped: OnceCell::new(),
         connected: AtomicBool::new(false),
         #[cfg(feature = "fake")]
         _demo: setup.demo,
@@ -359,6 +378,29 @@ fn emit(app: &AppHandle, event: &AppEvent) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The app menu's Quit (`Cmd+Q`): a page that has connected closes an open
+/// composer and waits for its last actions to commit, then calls
+/// `quit_now`, or [`PAGE_QUIT_DEADLINE`] later the app quits anyway. The
+/// window may be hidden or minimized: its page can still hold a composer. A
+/// page that never connected can't answer, so the app quits at once.
+fn request_quit(app: &AppHandle) {
+    let Some(shell) = app.try_state::<Shell>() else {
+        quit(app);
+        return;
+    };
+    if shell.quitting.load(Ordering::Acquire) {
+        return;
+    }
+    if !shell.connected.load(Ordering::Acquire) {
+        quit(app);
+    } else if let Err(e) = emit(app, &AppEvent::QuitRequested) {
+        tracing::warn!(error = %e, "couldn't ask the page to quit; quitting");
+        quit(app);
+    } else {
+        quit_after_deadline(app);
+    }
+}
+
 /// Quits after [`PAGE_QUIT_DEADLINE`] if the page has not asked to by then:
 /// a hung page never keeps the app open. A quit the page asked for first
 /// makes this one do nothing.
@@ -390,9 +432,20 @@ pub(crate) fn quit(app: &AppHandle) {
             if shell.quitting.swap(true, Ordering::AcqRel) {
                 return;
             }
-            shell.tasks.stop().await;
-            shell.core.lifecycle().quit().await;
+            shell.stop().await;
         }
         app.exit(0);
     });
+}
+
+/// The process is about to end: after [`quit`], or because macOS terminated
+/// the app (Quit in the Dock, a logout, a shutdown, a script), which goes
+/// straight to `RunEvent::Exit` with no chance for the page to answer. Waits
+/// on the main thread until the core has committed the UI actions it has
+/// queued, within its own deadline; after [`quit`] that is already done.
+fn finish_quit(app: &AppHandle) {
+    if let Some(shell) = app.try_state::<Shell>() {
+        shell.quitting.store(true, Ordering::Release);
+        tauri::async_runtime::block_on(shell.stop());
+    }
 }

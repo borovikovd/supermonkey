@@ -25,6 +25,12 @@ name = "perf-fixture"
 path = "src/bin/perf_fixture.rs"
 required-features = ["fake"]
 
+# macOS makes menus only on the main thread, where a test runs only
+# without the harness.
+[[test]]
+name = "menu"
+harness = false
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 serde_json = "1"
@@ -43,9 +49,13 @@ tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = "2"
 anyhow = "1"
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+tokio = { version = "1", features = ["sync"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+
+[dev-dependencies]
+# `tauri::test`: a mock app to build the menu bar on (tests/menu.rs).
+tauri = { version = "2.12", features = ["macos-private-api", "test"] }
 
 [features]
 # Debug only: the web bridge on 127.0.0.1:1430 (UBERMENSCH_WEB_BRIDGE=1), for
@@ -53,7 +63,7 @@ tracing-subscriber = "0.3"
 web = ["ub-bridge/web"]
 # Debug only: the E2E server (`e2e-server`), demo mode (UBERMENSCH_FAKE=1),
 # against an in-process fake Gmail, and the perf fixture (`perf-fixture`).
-fake = ["web", "dep:ub-testkit", "dep:tokio"]
+fake = ["web", "dep:ub-testkit", "tokio/rt-multi-thread", "tokio/macros"]
 
 [lints]
 workspace = true

@@ -387,7 +387,12 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 
 ## Not covered end-to-end, and why
 
-- Window behavior (a second launch focuses the window, closing hides it, a Dock click shows it, size and position restored but not visibility, the window shown only once the page connects or after 5 s, the overlay title bar) and the shell's 10 s quit deadline for a page that never answers: the native shell is not exercised. Checked by hand on a real Mac against Done when.
+- Window behavior (a second launch focuses the window, closing hides it, a Dock click shows it, size and position restored but not visibility, the window shown only once the page connects or after 5 s, the overlay title bar) and quitting from the menu bar or macOS: the native shell is not exercised. The suite's quit is the E2E server asking the page itself (UIC-05, ATT-09); `tests/menu.rs` checks that the menu bar's Quit is the app's own. Checked by hand on a real Mac with the release build, on a test account:
+  - type in a composer and `Cmd+Q` within 0.5 s: the text is there on relaunch, and in the Gmail draft;
+  - the same with the window hidden (`Cmd+W`) and with it minimized;
+  - archive, `Cmd+Q` at once: archived on relaunch, and in Gmail once online;
+  - archive, then Quit in the Dock at once: archived on relaunch;
+  - in a debug build, with the page paused at a breakpoint in the Web Inspector: the app quits 10 s after `Cmd+Q`.
 - Real Google OAuth (the system browser, the unverified-app warning, a production consent screen): the fake OAuth stands in, and ACC-01 checks the token file and the auth URL's scope, PKCE, and loopback. Checked by hand against two real accounts (§Testing).
 - Performance budgets, the keydown-to-paint meter, 60 fps scrolling, cold launch: CI WebKit is not the M1 target. Checked on the perf fixture (§Performance, `crates/ub-core/src/tests/perf.rs`).
 - Look, Motion, and Reduce Motion: visual, not behavior; SET-03 and SET-04 check the hint size and the shortcut sheet. Design review.
@@ -459,3 +464,4 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 - `crates/ub-bridge/src/web.rs`: the debug web bridge answers only loopback hosts and its own origins (SEC-05).
 - `src/logging.rs`: the stderr logger drops the HTML parser's warnings.
 - `tests/layers.rs`: the crate layering in ARCHITECTURE.md.
+- `tests/menu.rs`: the menu bar is Tauri's standard one with the app's own Quit in place of the predefined one, which would end the app without asking the page (UIC-05).
