@@ -240,6 +240,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ATT-14 · P1 · A file attached while a send waits for another goes with the send · §Drafts
 - ATT-15 · P1 · Discarding while a send waits for a file cancels the send · §Drafts
 - ATT-16 · P2 · The same file can be attached twice · §Drafts
+- ATT-17 · P2 · An attachment that can't be opened says why · §Reading, §Offline
 
 ### drafts.spec.ts (DRF)
 

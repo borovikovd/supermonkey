@@ -1,5 +1,6 @@
 import { Check, Clock, File, Paperclip } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
+import { toast } from "sonner";
 
 import { Composer } from "../compose/Composer";
 import { composerOnScreen, useComposeState } from "../compose/session";
@@ -378,7 +379,11 @@ function Attachments({ files }: { files: AttachmentInfo[] }) {
       {files.map((a) => (
         <button
           key={a.id}
-          onClick={() => void openAttachment(a.id)}
+          onClick={() => {
+            openAttachment(a.id).catch((err: unknown) => {
+              toast.error(`Couldn't open ${a.filename}: ${String(err)}`);
+            });
+          }}
           className="flex items-center gap-2 rounded-md border border-border px-2 py-1 text-row hover:bg-fill-half"
         >
           <Paperclip size={12} strokeWidth={1.5} className="text-text-3" />

@@ -539,4 +539,26 @@ test.describe("attachments", () => {
     const mime = await sentWithSubject(gmail, "Same file twice");
     expect(attachments(mime).map((p) => p.filename)).toEqual(["notes.txt", "notes.txt"]);
   });
+
+  test("ATT-17 an attachment that can't be opened says why", async ({ app, gmail }) => {
+    await seeds.standard(gmail, app);
+    await app.row("Contract").click();
+    const chip = app.conversation.getByRole("button", { name: /contract\.pdf/ });
+    await expect(chip).toBeVisible();
+    await app.settle();
+
+    // Offline, a file not yet downloaded can't be had.
+    await gmail.offline(true);
+    await chip.click();
+    await app.settle();
+    await expect(app.errorToasts.filter({ hasText: "Couldn't open contract.pdf" })).toBeVisible();
+    expect((await gmail.platform()).openedFiles).toEqual([]);
+
+    // Back online, the same click opens it.
+    await gmail.offline(false);
+    await app.settle();
+    await chip.click();
+    await app.settle();
+    expect((await gmail.platform()).openedFiles).toHaveLength(1);
+  });
 });
