@@ -156,7 +156,9 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
     // 1 to 3: parts, MIME, and the Gmail draft. Failing here, Gmail never
     // got a send.
     let written = match write(ctx, &draft).await {
-        Ok(written) => written,
+        Ok(Some(written)) => written,
+        // The draft went with its account while its target's body was read.
+        Ok(None) => return Ok(()),
         Err(failure) => {
             let retry = match failure {
                 WriteFailure::Gmail(e) => match e.outcome() {

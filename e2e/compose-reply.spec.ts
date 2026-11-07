@@ -1131,3 +1131,51 @@ test("REP-18 a forwarded attachment that arrives with the body can be removed, a
   await send(app);
   expect(attachments(parseMime((await sentWith(gmail, A, "Just the text")).raw))).toHaveLength(0);
 });
+
+test("REP-19 a reply discarded before its target's body or its own first load arrives leaves nothing on Gmail", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+
+  // The target's body is still downloading: the reply's upsert waits for it.
+  const body = await deliverWhileBodyHeld(gmail, {
+    subject: "Long body",
+    text: `${LONG}The decision is TAILONE.`,
+  });
+  await openDownloading(app, "Long body");
+  await app.reply("r");
+  await app.type("Thrown away early");
+  await app.advance(1_000);
+  await app.press("Meta+Shift+Comma");
+  await expect(app.editor).toHaveCount(0);
+  await expect(app.toast("Draft discarded")).toBeVisible();
+  await body.release();
+  await app.settle();
+  await app.advance(10_000);
+  await app.settle();
+  await expect(stubs(app)).toHaveCount(0);
+  expect((await gmail.gmail(A)).drafts).toEqual([]);
+  expect(await gmail.requests("drafts.create")).toEqual([]);
+  await app.press("Escape");
+
+  // The reply's own first load has not arrived.
+  await highlight(app, "Person 3");
+  await app.press("Enter");
+  await expect(app.conversationTitle).toHaveText(s.thread("p3").subject);
+  await app.settle();
+  const release = await app.park("submit");
+  await app.press("r");
+  await expect(app.editor).toBeFocused();
+  await app.type("Never loaded");
+  await app.press("Meta+Shift+Comma");
+  await expect(app.editor).toHaveCount(0);
+  await release();
+  await app.settle();
+  await app.advance(10_000);
+  await app.settle();
+  await expect(stubs(app)).toHaveCount(0);
+  expect((await gmail.gmail(A)).drafts).toEqual([]);
+  expect(await gmail.requests("drafts.create")).toEqual([]);
+  await app.expectNoErrorToasts();
+});

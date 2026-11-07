@@ -37,13 +37,18 @@ pub(crate) async fn load(pool: &Arc<ReadPool>, id: DraftId) -> Result<Option<Dra
 /// the write was cancelled) may have a Gmail draft already: it is looked
 /// for by its header first, and updated if found. Every write carries all
 /// of the draft's attachments: `drafts.update` replaces the whole message.
+/// `None` when the draft went (discarded, or its account removed) while its
+/// target's body was read: nothing is written.
 pub(crate) async fn write(
     ctx: &AccountCtx,
     draft: &Draft,
-) -> Result<ub_gmail::Draft, WriteFailure> {
+) -> Result<Option<ub_gmail::Draft>, WriteFailure> {
     let filled;
     let draft = if lifecycle::awaits_target_body(draft) {
-        filled = with_target_body(ctx, draft).await?;
+        let Some(settled) = with_target_body(ctx, draft).await? else {
+            return Ok(None);
+        };
+        filled = settled;
         &filled
     } else {
         draft
@@ -61,19 +66,22 @@ pub(crate) async fn write(
             .update_draft(Priority::P1, &id, &raw, thread.as_ref())
             .await
         {
-            Ok(written) => return Ok(written),
+            Ok(written) => return Ok(Some(written)),
             Err(e) if *e.outcome() == Outcome::NotFound => {}
             Err(e) => return Err(e.into()),
         }
     }
-    create(ctx, &draft.id, &raw, thread.as_ref()).await
+    create(ctx, &draft.id, &raw, thread.as_ref())
+        .await
+        .map(Some)
 }
 
 /// A draft that quotes its target's snippet is never written so (SPEC
 /// Addressing): the target's body is read now, ahead of other reads, and fills
 /// the draft as it lands. Offline, the write waits like any other. If Gmail
-/// no longer has the target, the snippet's quote goes.
-async fn with_target_body(ctx: &AccountCtx, draft: &Draft) -> Result<Draft, WriteFailure> {
+/// no longer has the target, the snippet's quote goes. `None` when the draft
+/// is gone once the body is in.
+async fn with_target_body(ctx: &AccountCtx, draft: &Draft) -> Result<Option<Draft>, WriteFailure> {
     if let Some(target) = draft.target {
         let thread = ctx
             .read(move |r| {
@@ -96,7 +104,7 @@ async fn with_target_body(ctx: &AccountCtx, draft: &Draft) -> Result<Draft, Writ
         .call(WritePriority::Sync, move |tx, _| settle(tx, &id))
         .await
         .map_err(Error::from)?;
-    Ok(settled.unwrap_or_else(|| draft.clone()))
+    Ok(settled)
 }
 
 /// The Gmail thread the draft goes on: its thread's, else the one its last

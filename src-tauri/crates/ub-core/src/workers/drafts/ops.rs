@@ -60,8 +60,12 @@ pub(crate) async fn upsert(ctx: &AccountCtx, id: &DraftId) -> Result<Upserted, W
     let Some(draft) = load(&ctx.deps.pool, id.clone()).await? else {
         return Ok(Upserted::Nothing);
     };
+    // Gone while its target's body was read: discarded meanwhile.
+    let Some(written) = write(ctx, &draft).await? else {
+        return Ok(Upserted::Nothing);
+    };
     Ok(Upserted::Written {
-        draft: Box::new(write(ctx, &draft).await?),
+        draft: Box::new(written),
         writing,
     })
 }
