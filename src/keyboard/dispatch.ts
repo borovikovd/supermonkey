@@ -81,9 +81,10 @@ const LAYERS: Layer[] = [
     },
     modal: true,
   },
+  // The sign-in screen hides a search left open under it, and its Enter signs in.
   {
     name: "search",
-    active: (c) => c.searchField,
+    active: (c) => c.searchField && !c.signedOut,
     take: (e, c, t) => runKey("search", e, c, t),
     modal: true,
   },

@@ -150,6 +150,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SRC-14 · P1 · A search or Gmail-listed view opened offline lists from Gmail when the network returns · §Search, §Views, §Offline
 - SRC-15 · P1 · An open search runs once Gmail can be reached again, though nothing else calls Gmail · §Search, §Offline
 - SRC-16 · P1 · A conversation opened from a search in Trash or Spam lists their messages, by `Enter` and `j` · §Search, §Reading
+- SRC-18 · P2 · A Gmail search whose account signs out or is removed while it lists stops searching, and the sign-in screen's `Enter` signs in · §Search, §Accounts
 
 ### splits.spec.ts (SPL)
 

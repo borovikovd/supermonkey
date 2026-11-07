@@ -722,3 +722,56 @@ test("SRC-16 a conversation opened from a search in Trash or Spam lists their me
   await app.settle();
   await expect(app.messages).toHaveCount(1);
 });
+
+// With the search left open under the sign-in screen, its field took the
+// screen's Enter, so Enter did not sign in.
+test("SRC-18 a Gmail search whose account signs out or is removed while it lists stops searching, and the sign-in screen's Enter signs in", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const searching = app.page.getByText("Searching Gmail…");
+
+  // A signs out while the listing is on its way.
+  let listing = await gmail.hold({ api: "threads.list", query: { q: "zebra crossing" } });
+  await search(app, "zebra crossing");
+  await app.advance(300);
+  await expect
+    .poll(async () => (await gmail.requests("threads.list")).some((r) => r.held))
+    .toBe(true);
+  await expect(searching).toBeVisible();
+  await gmail.invalidGrant(A, true);
+  await gmail.expireAccessTokens(A);
+  await gmail.poll();
+  await app.settle();
+  await expect(app.signInMarker(A)).toBeVisible();
+  await gmail.release({ id: listing.id });
+  await app.settle();
+  await expect(searching).toHaveCount(0);
+  // The sign-in screen's Enter signs in, though the search is still open under it.
+  await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
+  await gmail.invalidGrant(A, false);
+  await gmail.nextSignIn({ email: A });
+  await app.press("Enter");
+  await expect(app.signInMarker(A)).toHaveCount(0);
+  await app.settle();
+  // Back to the search left open under the sign-in screen.
+  await expect(field(app)).toHaveValue("zebra crossing");
+  await expect(searching).toHaveCount(0);
+  await app.press("Escape");
+  await expect(field(app)).toHaveCount(0);
+
+  // A is removed while the listing is on its way.
+  listing = await gmail.hold({ api: "threads.list", query: { q: "zebra crossing" } });
+  await search(app, "zebra crossing");
+  await app.advance(300);
+  await expect
+    .poll(async () => (await gmail.requests("threads.list")).some((r) => r.held))
+    .toBe(true);
+  await app.removeAccount(A);
+  await gmail.release({ id: listing.id });
+  await app.settle();
+  await expect(searching).toHaveCount(0);
+  await expect(app.highlighted).toContainText("Bea Blue");
+  await app.expectNoErrorToasts();
+});
