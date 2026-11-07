@@ -251,3 +251,23 @@ test.describe("security", () => {
     await expect(app.row("Person 1")).toHaveCount(0);
   });
 });
+
+test("SEC-06 the UI runs under the release app's content security policy", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await expect(app.rows.first()).toBeVisible();
+  // A script added inline does not run, as in the release app; the app's
+  // own scripts and its channel to the core work.
+  const ran = await app.page.evaluate(() => {
+    const script = document.createElement("script");
+    script.textContent = "document.body.dataset.inlineRan = 'yes'";
+    document.body.append(script);
+    return document.body.dataset.inlineRan ?? "no";
+  });
+  expect(ran).toBe("no");
+  await app.press("j");
+  await app.press("Enter");
+  await expect(app.conversationTitle).toBeVisible();
+});

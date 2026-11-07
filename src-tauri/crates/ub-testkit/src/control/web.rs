@@ -10,9 +10,36 @@ use axum::extract::{Query, State};
 use axum::http::{Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::server::{Ctl, Fail, Hit, Server};
+
+/// The app's Tauri config, for the CSP the release app runs the UI under.
+const TAURI_CONF: &str = include_str!("../../../../tauri.conf.json");
+
+/// The release app's CSP (`app.security.csp`), so the suite runs the UI
+/// under it (SPEC Testing). The page talks to this server instead of
+/// Tauri's IPC, so `connect-src` also allows the server's own origin.
+fn release_csp() -> Result<String, String> {
+    let conf: Value = serde_json::from_str(TAURI_CONF).map_err(|e| e.to_string())?;
+    let csp = conf
+        .pointer("/app/security/csp")
+        .and_then(Value::as_str)
+        .ok_or("tauri.conf.json has no app.security.csp")?;
+    let directives: Vec<String> = csp
+        .split(';')
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(|d| {
+            if d.split_whitespace().next() == Some("connect-src") {
+                format!("{d} 'self'")
+            } else {
+                d.to_owned()
+            }
+        })
+        .collect();
+    Ok(directives.join("; "))
+}
 
 /// A 1×1 PNG.
 const PIXEL: &[u8] = &[
@@ -111,9 +138,23 @@ pub(crate) async fn static_file(State(s): State<Arc<Server>>, uri: Uri) -> Respo
     if !path.is_file() {
         path = s.dist.join("index.html");
     }
-    match tokio::fs::read(&path).await {
-        Ok(bytes) => ([(header::CONTENT_TYPE, mime_for(&path))], bytes).into_response(),
-        Err(_) => (StatusCode::NOT_FOUND, "build the UI first: vp build").into_response(),
+    let Ok(bytes) = tokio::fs::read(&path).await else {
+        return (StatusCode::NOT_FOUND, "build the UI first: vp build").into_response();
+    };
+    let content_type = mime_for(&path);
+    if path.extension().and_then(|e| e.to_str()) != Some("html") {
+        return ([(header::CONTENT_TYPE, content_type)], bytes).into_response();
+    }
+    match release_csp() {
+        Ok(csp) => (
+            [
+                (header::CONTENT_TYPE, content_type.to_owned()),
+                (header::CONTENT_SECURITY_POLICY, csp),
+            ],
+            bytes,
+        )
+            .into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e).into_response(),
     }
 }
 

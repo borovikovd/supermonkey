@@ -352,6 +352,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SEC-03 · P1 · Links never navigate the app window · §Reading
 - SEC-04 · P2 · The webview holds no Gmail credentials · §Security
 - SEC-05 · P2 · Another page cannot take the app's channel from the core · §Security, §Testing
+- SEC-06 · P1 · The UI runs under the release app's content security policy · §Security, §Testing
 
 ### ui-consistency.spec.ts (UIC)
 
