@@ -311,7 +311,7 @@ The conversation view lists messages oldest first.
 
 Draft messages are not listed with the others. Outside Trash and Spam, messages in trash or spam are not listed either, so an undone sent reply disappears from the thread. In Trash and Spam, every non-draft message is listed. A reply or forward draft on the thread shows as a collapsed draft below the last message. Clicking it resumes it in the reply composer. `r`, `Enter`, and `f` resume the newest draft of their kind aimed at the selected message (see Reply composer).
 
-In Drafts, `Enter` on a new-message draft opens it on the `c` screen. On a reply or forward draft, it opens the thread with that draft in the reply composer.
+In Drafts, `Enter` on a new-message draft opens it on the `c` screen. On a reply or forward draft, it opens the thread with that draft in the reply composer, and the highlight stays on the draft's row. Drafts lists drafts, not conversations, so in a conversation opened from it, `j` and `k` open the thread of the next or previous draft in the list, passing over new-message drafts, and the highlight moves to that draft.
 
 One message is selected, drawn as a raised card with an `accent-edge` bar on its left (see Layout). It starts as the latest message, even when the view opens scrolled to an earlier unread one, so `r` from the list and `r` after opening reach the same person. Collapsed drafts and the Sending row are never selected. `n` and `p` select the next and previous message and scroll it into view. Selecting a message inside a fold, by any path, opens the fold. Clicking a message selects it. `o` expands or collapses the selected message. `r`, `Enter`, and `f` act on the selected message.
 

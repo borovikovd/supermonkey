@@ -67,7 +67,8 @@ type ChromeActions = {
   showList: (where: Where) => void;
   /** The list of the current view, leaving an open conversation. */
   leaveConversation: () => void;
-  showConversation: (thread: number, trashMode: boolean) => void;
+  /** Opens a conversation from the list row `row`, which takes the highlight. */
+  showConversation: (thread: number, trashMode: boolean, row: string) => void;
   setHighlight: (key: string | null) => void;
   setSelection: (keys: string[]) => void;
   forceSplit: (split: number | null) => void;
@@ -172,9 +173,9 @@ export const useChrome = create<ChromeState & ChromeActions>((set, get) => {
       ),
     leaveConversation: () =>
       patchCurrent({ screen: { kind: "list" } }, { link: null, selectedMessage: null }),
-    showConversation: (thread, trashMode) =>
+    showConversation: (thread, trashMode, row) =>
       patchCurrent(
-        { screen: { kind: "conversation", thread, trashMode }, highlight: String(thread) },
+        { screen: { kind: "conversation", thread, trashMode }, highlight: row },
         { ...conversationReset, selection: [] },
       ),
     setHighlight: (highlight) => patchCurrent({ highlight }),

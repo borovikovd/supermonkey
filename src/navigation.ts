@@ -133,11 +133,17 @@ function markReadWhenLoaded(thread: number) {
   });
 }
 
-/** Opens a conversation from the list (SPEC Reading). */
-export function openConversation(thread: number) {
+/**
+ * Opens a conversation from the list (SPEC Reading). Its row, `row`, takes
+ * the highlight: the thread's own row, except in Drafts, whose rows are
+ * drafts, where it is the draft's row and stays the highlighted one by default.
+ */
+export function openConversation(thread: number, row?: string) {
   closeComposerOnScreen();
   const view = currentView();
-  chrome().showConversation(thread, view?.kind === "trash" || view?.kind === "spam");
+  const from =
+    row ?? (view?.kind === "drafts" ? chrome().current()?.highlight : null) ?? String(thread);
+  chrome().showConversation(thread, view?.kind === "trash" || view?.kind === "spam", from);
   markReadWhenLoaded(thread);
 }
 
@@ -155,11 +161,16 @@ export function closeConversation() {
  */
 const lastSeen = new Map<number, { focus: string; ids: string[] }>();
 
-/** The open conversation, else the highlighted row. */
+/**
+ * The highlighted row; in an open conversation, the row it was opened from
+ * (a draft's, in Drafts), which holds the highlight.
+ */
 export function focusOf(): string | null {
   const cur = chrome().current();
   if (!cur) return null;
-  return cur.screen.kind === "conversation" ? String(cur.screen.thread) : cur.highlight;
+  return cur.screen.kind === "conversation"
+    ? (cur.highlight ?? String(cur.screen.thread))
+    : cur.highlight;
 }
 
 /**

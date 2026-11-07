@@ -4,7 +4,7 @@
 import type { ConversationData } from "../ipc/types";
 import { focusOf, formerNeighbor, highlight, openConversation, visibleSplits } from "../navigation";
 import { useChrome } from "../store/chrome";
-import { currentListView, visibleIds } from "../store/current";
+import { currentListView, currentView, rowOf, visibleIds } from "../store/current";
 import { blocks } from "../ui/folds";
 
 const chrome = () => useChrome.getState();
@@ -23,6 +23,10 @@ export function moveHighlight(delta: number) {
     if (from != null) at = ids.indexOf(from) - delta;
   }
   if (at < 0) at = delta > 0 ? -1 : ids.length;
+  if (cur.screen.kind === "conversation" && currentView()?.kind === "drafts") {
+    openDraftThread(ids, at, delta);
+    return;
+  }
   const next = Math.min(ids.length - 1, Math.max(0, at + delta));
   const key = ids[next];
   if (key === undefined) return;
@@ -33,6 +37,24 @@ export function moveHighlight(delta: number) {
   // Plain j/k replace a selection with the one conversation they move to.
   highlight(key);
   if (c.selection.length > 0) c.setSelection([]);
+}
+
+/**
+ * `j` / `k` in a conversation opened from Drafts, whose rows are drafts: the
+ * thread of the next draft past `at` that has one (SPEC Reading). A row not
+ * loaded yet ends the search rather than be passed over unseen.
+ */
+function openDraftThread(ids: string[], at: number, delta: number) {
+  for (let i = at + delta; i >= 0 && i < ids.length; i += delta) {
+    const key = ids[i];
+    if (key === undefined) return;
+    const row = rowOf(key);
+    if (!row) return;
+    if (row.thread !== null) {
+      openConversation(row.thread, key);
+      return;
+    }
+  }
 }
 
 /** Adds `x` if missing, else removes it. */

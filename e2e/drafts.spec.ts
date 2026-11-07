@@ -786,3 +786,38 @@ test("DRF-19 an edit still waiting to reach Gmail is not replaced by an older Gm
   await app.reply("r");
   await expect(app.editor).toHaveText("one two three four");
 });
+
+test("DRF-20 j and k in a conversation opened from Drafts open the other drafts' threads", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.drafts(gmail, app);
+  await goDrafts(app);
+  await highlight(app, "Person 4");
+  await app.press("Enter");
+  await expect(app.editor).toContainText("My text");
+  await app.press("Escape", "Escape");
+  await expect(app.editor).toHaveCount(0);
+  await app.settle();
+
+  // Drafts, latest edit first: … Q4 plan, Person 4, Contract (a forward), Idea
+  // (a new message). `j` opens the next draft's thread.
+  await app.press("j");
+  await expect(app.conversationTitle).toContainText("Contract");
+  await app.settle();
+  // A new message has no thread: `j` passes it over, and no draft follows it.
+  await app.press("j");
+  await app.settle();
+  await expect(app.conversationTitle).toContainText("Contract");
+  await app.press("k");
+  await expect(app.conversationTitle).toContainText("Person 4");
+  await app.press("k");
+  await expect(app.conversationTitle).toContainText("Q4 plan");
+  await app.settle();
+
+  // Back in Drafts, the highlight is on the draft whose thread was open.
+  await app.press("Escape");
+  await expect(app.highlighted).toContainText("About message three.");
+  await app.press("Enter");
+  await expect(app.editor).toContainText("About message three.");
+});
