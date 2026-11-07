@@ -1,6 +1,6 @@
 //! Conversations, their outbox rows, and message bodies.
 
-use ub_domain::{AccountId, Identity, Rev, SystemLabel, ThreadId};
+use ub_domain::{AccountId, Rev, SystemLabel, ThreadId};
 use ub_ipc::{
     Addr, AttachmentInfo, ConversationData, DraftSummary, MessageBody, MessageSummary, OutboxRow,
 };
@@ -31,14 +31,13 @@ pub(crate) fn outbox_row(record: OutboxRecord) -> OutboxRow {
     }
 }
 
-fn message_summary(entry: ConversationMessage, identity: Option<&Identity>) -> MessageSummary {
+fn message_summary(entry: ConversationMessage) -> MessageSummary {
     let ConversationMessage {
         message: m,
         attachments,
     } = entry;
     MessageSummary {
         id: m.id,
-        from_me: identity.is_some_and(|i| i.is_mine(&m.from.email)),
         unread: m.labels.has(SystemLabel::Unread),
         starred: m.labels.has(SystemLabel::Starred),
         in_trash: m.labels.has(SystemLabel::Trash),
@@ -88,7 +87,6 @@ pub(crate) fn conversation(
             rev: Rev(0),
         });
     };
-    let identity = reads.accounts().identity(rows.thread.account)?;
     let drafts = rows
         .drafts
         .into_iter()
@@ -111,11 +109,7 @@ pub(crate) fn conversation(
         subject: rows.thread.subject,
         labels: rows.thread.labels.into_iter().collect(),
         snooze_until: rows.thread.snooze_until,
-        messages: rows
-            .messages
-            .into_iter()
-            .map(|m| message_summary(m, identity.as_ref()))
-            .collect(),
+        messages: rows.messages.into_iter().map(message_summary).collect(),
         drafts,
         outbox: rows.outbox.into_iter().map(outbox_row).collect(),
         gone: false,

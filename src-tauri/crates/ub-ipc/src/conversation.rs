@@ -47,8 +47,6 @@ pub struct MessageSummary {
     pub date: Millis,
     pub unread: bool,
     pub starred: bool,
-    /// Sent from one of this account's addresses.
-    pub from_me: bool,
     pub in_trash: bool,
     pub in_spam: bool,
     pub has_body: bool,

@@ -79,6 +79,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - CONV-20 · P2 · A conversation opened, closed, and opened again in one batch still reads its body · §Sync, §Actions
 - CONV-21 · P1 · A message still downloading shows its snippet and a loading bar, then its body · §Reading, §Subscriptions
 - CONV-22 · P1 · A message labelled with a legacy charset but served as UTF-8 reads correctly · §Reading
+- CONV-23 · P2 · An address added to the account in Gmail is Me in a conversation already open · §Reading, §Sync
 
 ### triage-actions.spec.ts (TRI)
 

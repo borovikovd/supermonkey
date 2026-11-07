@@ -429,7 +429,7 @@ async fn snooze_choices_are_worked_out_at_app_time_in_the_local_zone() {
 }
 
 #[tokio::test]
-async fn a_conversation_lists_its_messages_and_marks_the_accounts_own() {
+async fn a_conversation_lists_its_messages() {
     let mut h = Harness::start().await;
     let (_, threads) = h.write(seed).await;
     // Thread 1: a message from someone, then the account's reply.
@@ -454,18 +454,12 @@ async fn a_conversation_lists_its_messages_and_marks_the_accounts_own() {
         })
         .unwrap();
     assert!(!data.gone);
-    let from: Vec<(String, bool)> = data
+    let from: Vec<&str> = data
         .messages
         .iter()
-        .map(|m| (m.from.email.clone(), m.from_me))
+        .map(|m| m.from.email.as_str())
         .collect();
-    assert_eq!(
-        from,
-        [
-            ("person1@example.org".to_owned(), false),
-            (ACCOUNT_EMAIL.to_owned(), true)
-        ]
-    );
+    assert_eq!(from, ["person1@example.org", ACCOUNT_EMAIL]);
 }
 
 #[tokio::test]

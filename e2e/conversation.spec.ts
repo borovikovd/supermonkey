@@ -761,3 +761,21 @@ test("CONV-22 a message labelled with a legacy charset but served as UTF-8 reads
   await expect(body).toContainText("Добрый день, Дина");
   await expect(body).not.toContainText("п■п╬п╠");
 });
+
+test("CONV-23 an address added to the account in Gmail is Me in a conversation already open", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const header = () => app.selectedMessage.locator('button[aria-expanded="true"]');
+  await app.row("Offsite venue").click();
+  await expect(header()).toContainText("Carol Chen to dave, erin & Me");
+
+  // Gmail now lists dave@ as one of the account's addresses; a focus reads
+  // them again. The open conversation follows without any change to it.
+  await gmail.sendAs(A, "dave@corp.test", "Dave");
+  await app.focus(false);
+  await app.focus(true);
+  await app.settle();
+  await expect(header()).toContainText("Carol Chen to erin & Me");
+});
