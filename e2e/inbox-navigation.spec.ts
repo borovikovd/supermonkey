@@ -554,3 +554,44 @@ test("NAV-13 g #, g !, and a held g jump as typed on a keyboard, and touch no ma
   expect(labels).not.toContain("TRASH");
   expect(labels).not.toContain("SPAM");
 });
+
+// Every change to the list or the account's counts ran the keep-in-view
+// effect again, so the list jumped back to the highlight while being skimmed.
+test("NAV-14 a list scrolled away from the highlight stays put while mail changes", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.bulk(gmail, app);
+  await expect(app.highlighted).toContainText("Bulk 01");
+  const top = await app.rowKey("Bulk 01");
+  // Scrolled off, the highlighted row is not drawn; the listbox still names it.
+  const highlightStays = () =>
+    expect(app.list).toHaveAttribute("aria-activedescendant", `row-${top}`);
+  const scroller = app.list.locator("xpath=..");
+  const scrollTop = () => scroller.evaluate((el) => el.scrollTop);
+  // The pointer rests on the highlighted row, so it takes no other; the wheel goes to the end.
+  await app.highlighted.hover();
+  await app.page.mouse.wheel(0, 10_000);
+  await expect
+    .poll(() => scroller.evaluate((el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 1))
+    .toBe(true);
+  await app.settle();
+  const end = await scrollTop();
+  expect(end).toBeGreaterThan(0);
+
+  // Read in another client: the row and the unread count change.
+  await gmail.modify(A, s.latest("important1").id, [], ["UNREAD"], { poll: true });
+  await app.settle();
+  await highlightStays();
+  expect(await scrollTop()).toBe(end);
+  // New mail arrives.
+  await gmail.deliver({ account: A, from: "New <new@x.test>", subject: "Fresh mail" });
+  await app.settle();
+  await highlightStays();
+  expect(await scrollTop()).toBe(end);
+
+  // The highlight moving still brings it into view.
+  await app.press("j");
+  await expect(app.highlighted).toContainText("Bulk 02");
+  await expect.poll(() => highlightInView(app)).toBe(true);
+});

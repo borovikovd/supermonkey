@@ -190,15 +190,27 @@ export function ListView() {
     }
   }, [items.length]);
 
-  // Keep the highlight in view, unless the pointer put it there: that row is
-  // already under the mouse, and scrolling would move the list under it.
+  // Bring the highlight into view when it moves or the list comes on screen,
+  // unless the pointer put it there: that row is already under the mouse, and
+  // scrolling would move the list under it. A change to the list under a
+  // highlight that stays put never scrolls: the user may have scrolled away.
   const hovered = useRef<string | null>(null);
+  /** The list and highlighted row last brought into view. */
+  const shown = useRef<string | null>(null);
+  const listSub = list.sub;
   useEffect(() => {
+    const target = highlight === null ? null : `${listSub ?? ""}:${highlight}`;
+    if (target === shown.current) return;
     const fromPointer = hovered.current === highlight;
     hovered.current = null;
-    if (highlight === null || fromPointer) return;
+    if (highlight === null || fromPointer) {
+      shown.current = target;
+      return;
+    }
     const i = items.findIndex((it) => it.type === "row" && it.key === highlight);
+    // Not listed yet: once it is.
     if (i < 0) return;
+    shown.current = target;
     // A click on a split name asks for its header at the top.
     const toTop = listScroll.headerToTop;
     listScroll.headerToTop = false;
@@ -209,7 +221,7 @@ export function ListView() {
     if (header && (toTop || header.start < (v.scrollOffset ?? 0)))
       v.scrollToIndex(i - 1, { align: "start" });
     else v.scrollToIndex(i, { align: "auto" });
-  }, [highlight, items, v]);
+  }, [highlight, items, v, listSub]);
 
   // Rows outside the pushed window are fetched ahead of scrolling.
   const virtual = v.getVirtualItems();

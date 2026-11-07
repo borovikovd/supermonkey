@@ -48,6 +48,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - NAV-11 · P1 · A poll that empties the list clears the highlight, so `#` acts on the mail that arrives next · §Keyboard
 - NAV-12 · P1 · A row removed while another account is on screen moves that account's highlight · §Switching, §Keyboard
 - NAV-13 · P1 · `g #`, `g !`, and a held `g` jump as typed on a keyboard, Shift and repeats included, and touch no mail · §Views, §Keyboard
+- NAV-14 · P2 · A list scrolled away from the highlight stays put while mail changes; moving the highlight still scrolls to it · §Layout, §Keyboard
 
 ### views.spec.ts (VIEW)
 
