@@ -193,7 +193,7 @@ pub(crate) fn written(draft: &mut Draft, ids: GmailIds) {
 
 /// Gmail's draft went (sent or deleted elsewhere) while a composer has it
 /// open: it keeps its text, and its next write creates a Gmail draft on the
-/// same thread.
+/// same thread, or in a thread of its own if that thread went with it.
 pub(crate) fn gmail_gone(draft: &mut Draft) {
     draft.lifecycle.gmail_draft_id = None;
     draft.lifecycle.gmail_message_id = None;

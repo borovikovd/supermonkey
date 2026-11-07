@@ -124,7 +124,9 @@ async fn gmail_thread(
 /// `drafts.create`, which is unsafe to repeat: the draft is marked as sent
 /// to create first, so a create whose answer is lost to a quit is
 /// recovered on the next write, and after one with no clear answer, it
-/// looks for the draft it may have made before trying again.
+/// looks for the draft it may have made before trying again. A thread
+/// Gmail no longer has went with the Gmail draft that was alone in it
+/// (deleted elsewhere): the draft starts a thread of its own.
 async fn create(
     ctx: &AccountCtx,
     local: &DraftId,
@@ -132,9 +134,11 @@ async fn create(
     thread: Option<&GmailThreadId>,
 ) -> Result<ub_gmail::Draft, WriteFailure> {
     mark_create_sent(ctx, local.clone()).await?;
+    let mut thread = thread;
     for _ in 0..CREATE_TRIES {
         match ctx.gmail.create_draft(Priority::P1, raw, thread).await {
             Ok(created) => return Ok(created),
+            Err(e) if *e.outcome() == Outcome::NotFound && thread.is_some() => thread = None,
             Err(e)
                 if matches!(
                     e.outcome(),

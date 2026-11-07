@@ -662,6 +662,40 @@ test.describe("attachments", () => {
     );
   });
 
+  // Its next create named the thread Gmail deleted with the draft, got a 404,
+  // and the draft never reached Gmail again.
+  test("ATT-21 a file attaching when the draft is deleted in Gmail joins the draft written again", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    await newMessage(app, "Deleted elsewhere", "The file follows.");
+    await app.settle();
+    const [first] = (await gmail.gmail(A)).drafts;
+    if (!first) throw new Error("the draft never reached Gmail");
+    const created = async () =>
+      (await gmail.requests("drafts.create")).filter((r) => r.answer === 200).length;
+    const creates = await created();
+
+    const attach = await app.park("add_attachment");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    // The page's attach is parked, so it can't settle: the toast says when the deletion is in.
+    await gmail.deleteDraft(A, first.id, { poll: true });
+    await expect(app.toast("Draft was sent or deleted elsewhere")).toBeVisible();
+    await expect(app.page.getByRole("heading", { name: "New Message" })).toBeVisible();
+    await attach();
+    await app.settle();
+    await expect(app.page.getByRole("button", { name: "Remove notes.txt" })).toBeVisible();
+    await app.advance(1_000);
+    await app.settle();
+
+    expect(await created()).toBe(creates + 1);
+    const drafts = (await gmail.gmail(A)).drafts;
+    expect(subjects(drafts.map((d) => d.message))).toEqual(["Deleted elsewhere"]);
+    expect(Object.keys(filesOf(parseMime(drafts[0]?.message.raw ?? "")))).toEqual(["notes.txt"]);
+    await app.expectNoErrorToasts();
+  });
+
   // The composer left the screen before its close or send ran, and took the
   // typed address with it: the fields that held it were gone by then.
   test("ATT-19 an address typed but not yet a chip goes with a close or send that waits for a file", async ({
