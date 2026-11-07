@@ -696,7 +696,7 @@ Every Gmail call ends in one of these outcomes. Of these, only a rejection rolls
 | 409 on `labels.create` | The label exists. Use it, as Labels says. If `labels.list` then shows no label of that name, the 409 is a rejection |
 | Any other 4xx | A rejection |
 
-The quiet sync status is a muted dot on the account's rail avatar, whose title gains ` · Can't reach Gmail`. Gmail's next answer clears it.
+The quiet sync status is a muted dot on the account's rail avatar, whose title gains ` · Can't reach Gmail`. Gmail's next answer clears it, also when that answer comes after a relaunch.
 
 When Gmail rejects a queued action, its toast reads `Gmail rejected a change (<status>): <Gmail's message>`. The 404 and 409 above count as rejections so that the change rolls back instead of retrying forever, and their toasts say what is gone or taken.
 

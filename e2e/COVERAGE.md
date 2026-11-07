@@ -300,6 +300,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ERR-07 · P1 · `drafts.create` with no clear answer never makes a duplicate draft · §Gmail errors
 - ERR-08 · P2 · A 404 while fetching a body is dropped silently · §Gmail errors
 - ERR-09 · P3 · A rejected undo or label create · §Gmail errors
+- ERR-10 · P2 · The quiet sync status clears once Gmail answers after a relaunch · §Gmail errors
 
 ### sync.spec.ts (SYN)
 

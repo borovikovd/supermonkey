@@ -29,8 +29,9 @@ pub(crate) struct Health {
 }
 
 struct State {
-    /// The status last asked of the writer.
-    status: SyncStatus,
+    /// The status last asked of the writer; none yet, so the first is
+    /// written whatever the stored one is (it may be from before a launch).
+    status: Option<SyncStatus>,
     /// The retrying episode under way, if any; a success ends it.
     retrying: Option<u64>,
     episodes: u64,
@@ -51,7 +52,7 @@ impl Health {
             clock,
             tasks,
             state: Arc::new(Mutex::new(State {
-                status: SyncStatus::Idle,
+                status: None,
                 retrying: None,
                 episodes: 0,
             })),
@@ -130,17 +131,19 @@ fn show(
 ) {
     {
         let mut s = state.lock();
-        if s.status == status {
+        if s.status == Some(status) {
             return;
         }
-        s.status = status;
+        s.status = Some(status);
     }
     let (state, cancel) = (Arc::clone(state), cancel.clone());
     writer.queue(Priority::Sync, "store a sync status", move |tx, _| {
         if cancel.is_cancelled() {
             return Ok(());
         }
-        let status = state.lock().status;
+        let Some(status) = state.lock().status else {
+            return Ok(());
+        };
         tx.accounts().set_sync_status(account, status).map(drop)
     });
 }

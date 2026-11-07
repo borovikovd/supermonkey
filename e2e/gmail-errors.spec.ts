@@ -651,3 +651,23 @@ test("ERR-09 a rejected undo or label create", async ({ app, gmail }) => {
   await expect.soft.poll(errors).toHaveLength(before + 1);
   await expect(app.row("Person 1")).toHaveCount(0);
 });
+
+test("ERR-10 the quiet sync status clears once Gmail answers after a relaunch", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await gmail.fault("messages.batchModify", { kind: "status", status: 503 });
+  await app.press("e");
+  await app.settle();
+  await app.advance(31_000);
+  await expect(app.syncMarker(A)).toBeVisible();
+
+  // Gmail recovers while the app is closed.
+  await app.restart(async () => {
+    await gmail.clearFaults();
+  });
+  await app.settle();
+  await expect(app.syncMarker(A)).toHaveCount(0);
+  await expect(app.account(A)).not.toHaveAttribute("title", /Can't reach Gmail/);
+});
