@@ -395,7 +395,7 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 - `crates/ub-domain/src/drafts.rs`: when a draft is untouched, and Gmail draft kinds.
 - `crates/ub-domain/src/labels.rs`, `crates/ub-domain/src/kinds_text.rs`, and `crates/ub-domain/src/hue.rs`: system label ids, label set operations, kind text round trips, label hue slots.
 - `crates/ub-mime/tests/sanitize.rs`: the hostile fixture, what is kept and dropped, `rel=noopener`, `cid:` to `data:`, text extraction (SEC-01).
-- `crates/ub-mime/tests/payload.rs`: a charset with no decoder read as undeclared text.
+- `crates/ub-mime/tests/payload.rs`: a charset with no decoder read as undeclared text; the attachments inside an attached message, and not its body or inline images.
 - `crates/ub-mime/tests/no_panic.rs`: 3,000 seeded random inputs through every parser and the sanitizer.
 - `crates/ub-mime/tests/addresses.rs`: `is_valid_email` against the address table the composer's copy of the rule is held to (RCP-11).
 - `crates/ub-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser and when one-click applies.

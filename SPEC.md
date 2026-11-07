@@ -335,7 +335,7 @@ Links never navigate the app window.
 
 Remote images load by default. A setting turns them off. With remote images off, the iframe's CSP is `default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`, so nothing outside the message loads: no remote images, CSS ones included, web fonts, or stylesheets. The composer's quoted text renders in a sandboxed frame under the same policy. Tracking pixels are a consequence of the default.
 
-An expanded message lists its attachments, not its inline images, as chips with the file name and size. Clicking one downloads it the first time, into the app's data folder, and opens it with the default app, quarantined first (see Security). Attachments are not fetched during the initial sync.
+An expanded message lists its attachments, not its inline images, as chips with the file name and size. Clicking one downloads it the first time, into the app's data folder, and opens it with the default app, quarantined first (see Security). Attachments are not fetched during the initial sync. A message attached to it (`message/rfc822`, as a forward as attachment sends it) adds its own attachments to the chips, but not its body or inline images. The attached message itself has a chip only when Gmail gives it an attachment id. Gmail usually serves it as parts instead, and its `.eml` could then be had only from the whole outer message's raw source.
 
 ## Compose
 

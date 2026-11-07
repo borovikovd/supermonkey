@@ -125,11 +125,14 @@ impl ParsedMessage {
 /// Bodies are the base64url `body.data` of `text/html` and `text/plain` parts
 /// without a filename, decoded in their charset; several of one type (Apple
 /// Mail splits a body around attachments) are joined in order. A body Gmail
-/// moved behind an attachment id is skipped.
+/// moved behind an attachment id is skipped. A message attached to this one
+/// (`message/rfc822`, as a forward as attachment sends it) adds the attachments
+/// inside it, not its body or inline images; the attached message itself is
+/// listed only when Gmail gives it an attachment id.
 pub fn parse_message(payload: &serde_json::Value) -> Result<ParsedMessage, PayloadError> {
     let root = WirePart::deserialize(payload)?;
     let mut walk = Walk::default();
-    walk.visit(&root);
+    walk.visit(&root, false);
     Ok(ParsedMessage {
         headers: MessageHeaders::from_part(&root),
         body: RawBody {
@@ -218,15 +221,27 @@ struct Walk {
 }
 
 impl Walk {
-    fn visit(&mut self, part: &WirePart<'_>) {
+    /// Visits `part`; `attached` when it is inside an attached message.
+    fn visit(&mut self, part: &WirePart<'_>, attached: bool) {
         let mime_type = part.mime_type.trim().to_ascii_lowercase();
         if mime_type.starts_with("multipart/") {
             for child in &part.parts {
-                self.visit(child);
+                self.visit(child, attached);
             }
             return;
         }
+        // Gmail serves an attached message's parts under it.
+        let is_message = mime_type == "message/rfc822";
+        self.leaf(part, mime_type, attached);
+        if is_message {
+            for child in &part.parts {
+                self.visit(child, true);
+            }
+        }
+    }
 
+    /// A part that is not a container: a body, an attachment, or an inline part.
+    fn leaf(&mut self, part: &WirePart<'_>, mime_type: String, attached: bool) {
         let content_type = part.header("Content-Type").unwrap_or_default();
         let disposition = part.header("Content-Disposition").unwrap_or_default();
         let disposition_kind = header_kind(disposition);
@@ -242,6 +257,9 @@ impl Walk {
             && filename.is_empty()
             && disposition_kind != "attachment";
         if is_body {
+            if attached {
+                return;
+            }
             if let Some(bytes) = data {
                 let charset = header_param(content_type, "charset");
                 let decoded = decode_text_part(bytes, charset.as_deref());
@@ -275,6 +293,10 @@ impl Walk {
             "" => content_id.is_some(),
             _ => false,
         };
+        // An attached message's inline parts belong to its body, not shown.
+        if attached && is_inline {
+            return;
+        }
         let filename = if filename.is_empty() {
             default_filename(&mime_type).to_owned()
         } else {
