@@ -911,3 +911,40 @@ test("ACC-18 an account removed while its Sign in again waits in the browser com
   await expect(app.row("Back again")).toHaveCount(1);
   await expect(app.row("Q4 plan")).toHaveCount(1);
 });
+
+test("ACC-19 a reply open when its account signs out stays on screen until it is closed", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await app.row("Person 3").click();
+  await expect(app.conversationTitle).toHaveText("Person 3");
+  await app.reply("r");
+  await app.type("Half a reply");
+  // Google revokes the grant; the autosave's upsert finds out.
+  await gmail.invalidGrant(A, true);
+  await gmail.expireAccessTokens(A);
+  await app.advance(1_000);
+  await app.settle();
+  await expect(app.signInMarker(A)).toBeVisible();
+
+  // The reply stays, with its conversation, and only the composer's keys and hints apply.
+  await expect(app.editor).toHaveText("Half a reply");
+  await expect(app.conversationTitle).toHaveText("Person 3");
+  await expect(app.hintBar).toHaveText(/to Send\s*·\s*Esc to close\s*·\s*⌘K for commands/);
+  await app.type(", and the rest");
+  await expect(app.editor).toHaveText("Half a reply, and the rest");
+
+  // Closing it shows the sign-in screen, whose Enter signs in again.
+  await app.press("Escape", "Escape");
+  await expect(app.editor).toHaveCount(0);
+  await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
+  await expect(app.hintBar).toHaveText(/Enter to sign in\s*·\s*⌘K for commands/);
+  await gmail.nextSignIn({ email: A });
+  await gmail.invalidGrant(A, false);
+  await app.press("Enter");
+  await app.settle();
+  await expect(app.signInMarker(A)).toHaveCount(0);
+  const drafts = (await gmail.gmail(A)).drafts;
+  expect(drafts.map((d) => d.message.raw).join()).toContain("Half a reply, and the rest");
+});

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Toaster } from "sonner";
 
-import { useComposeState } from "./compose/session";
+import { composerKind, useComposeState } from "./compose/session";
 import { followAccounts } from "./navigation";
 import { useChrome } from "./store/chrome";
 import { listKey } from "./store/current";
@@ -34,6 +34,7 @@ export function App() {
   const screen = useChrome((s) =>
     s.account === null ? null : (s.perAccount[s.account]?.screen ?? null),
   );
+  const composer = useComposeState(composerKind);
   /** The `c` composer replaces the screen while it is open. */
   const composing = useComposeState((s) => (s.onScreen?.thread === null ? s.onScreen.draft : null));
   const signedOut = useNeedsSignin(account);
@@ -58,8 +59,9 @@ export function App() {
         <Rail accounts={app.accounts} />
         {/* The white panel on the off-white canvas, as in Superhuman. */}
         <div className="relative mr-2 mb-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border-2 bg-bg shadow-panel">
-          {signedOut && composing === null ? (
-            // A composer already open stays, so nothing typed is lost.
+          {signedOut && composer === null ? (
+            // A composer already open stays, a reply with its conversation,
+            // so nothing typed is lost; closing it shows this screen.
             <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               <SignInAgain
                 account={account ?? 0}

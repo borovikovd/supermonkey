@@ -17,6 +17,7 @@ import {
   blurComposer,
   closeComposerOnScreen,
   composeState,
+  composerKind,
   discardOnScreen,
   mountedComposer,
   sendOnScreen,
@@ -130,12 +131,11 @@ function contextOf(chrome: ChromeState, mirror: MirrorState, compose: ComposeSta
     selected.length > 0 ||
     (highlight && view?.kind !== "drafts" && !Number.isNaN(Number(cur?.highlight)));
   const splits = new Set(entries.map((e) => e.split).filter((s) => s !== null)).size;
-  const onScreen = compose.onScreen;
   const ctx: Ctx = {
     account,
     signedOut: app?.accounts.find((a) => a.id === account)?.needsSignin ?? false,
     screen: screen.kind,
-    composer: onScreen === null ? null : onScreen.thread === null ? "screen" : "inline",
+    composer: composerKind(compose),
     composeBlurred: compose.blurred,
     view,
     sheet: chrome.sheet !== null,

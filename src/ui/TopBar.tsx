@@ -1,6 +1,6 @@
 import { ArrowLeft, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
-import { useComposeState } from "../compose/session";
+import { composerKind, useComposeState } from "../compose/session";
 import { dom } from "../keyboard/refs";
 import { useCommand, type CommandId } from "../keyboard/table";
 import { editSearch, highlight as moveHighlightTo, visibleSplits } from "../navigation";
@@ -95,7 +95,7 @@ function ViewTitle() {
 export function TopBar() {
   const { cur } = useCurrent();
   const searchOpen = useChrome((s) => s.search !== null);
-  const composing = useComposeState((s) => s.onScreen?.thread === null);
+  const composing = useComposeState(composerKind) === "screen";
 
   const screen = composing ? "compose" : (cur?.screen.kind ?? "list");
   if (screen !== "list" && !searchOpen) {

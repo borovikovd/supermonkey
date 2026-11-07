@@ -30,6 +30,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ACC-16 · P1 · A removal waiting on its revoke holds up no other account · §Accounts
 - ACC-17 · P1 · A first sign-in shows the whole Inbox before reading the account's drafts · §Sync
 - ACC-18 · P1 · An account removed while its Sign in again waits in the browser comes back and syncs · §Accounts
+- ACC-19 · P1 · A reply open when its account signs out stays on screen until it is closed · §Accounts, §Keyboard
 
 ### inbox-navigation.spec.ts (NAV)
 

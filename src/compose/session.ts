@@ -51,6 +51,13 @@ const useCompose = create<ComposeState>(() => ({ onScreen: null, blurred: false 
 /** Reads compose state in a component. */
 export const useComposeState = <T>(select: (s: ComposeState) => T): T => useCompose(select);
 
+/** Which composer is on screen: the reply composer in the open conversation, the `c` screen, or none. */
+export type ComposerKind = "inline" | "screen" | null;
+
+/** The composer on screen, by kind: what the screen, its hints, and its keys follow. */
+export const composerKind = (s: ComposeState): ComposerKind =>
+  s.onScreen === null ? null : s.onScreen.thread === null ? "screen" : "inline";
+
 /** Compose state now, outside React. */
 export const composeState = () => useCompose.getState();
 
