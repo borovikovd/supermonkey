@@ -422,7 +422,7 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 - `crates/ub-store/tests/store/search.rs`: the FTS index and what search skips.
 - `crates/ub-store/tests/store/drafts.rs`: drafts and the outbox, undo history, local labels, settings, contacts.
 - `crates/ub-store/tests/store/ids.rs`: ids are never reused.
-- `crates/ub-store/src/open.rs`: a database of another schema version, or not a database, is moved aside and a fresh one made.
+- `crates/ub-store/src/open.rs`: a database of another schema version, or not a database, is moved aside and a fresh one made; a locked one, or one that can't be opened, is left in place and the open fails.
 - `crates/ub-core/src/tests/writer_channel.rs`: proptest that a list built from its first load and patches equals a fresh load at that `rev`; action numbers after a reload, first loads after a failed commit, `ack` never moving back and a failed batch's actions refused no later than the message that acks them, a panicking commit still going idle, searches and label reads whose commit failed (UIC-01).
 - `crates/ub-core/src/subs/tests.rs`, `crates/ub-core/src/subs/diff.rs`, and `crates/ub-core/src/subs/affects.rs`: first loads and patches, list diffs as moves, which subscriptions a write to each table reaches, and a write to every table patching each subscription whose fresh load it changed.
 - `crates/ub-core/src/tests/clock.rs`: the activity tracking `settle()` relies on, a closed `Kick` waking a loop, and a stopping task group waiting for the groups inside it.

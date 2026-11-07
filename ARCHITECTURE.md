@@ -127,7 +127,7 @@ A worker fetches from Gmail, parses and sanitizes the result off the writer thre
 
 ## 6. Store
 
-- **Schema:** one `schema.sql`, created fresh. A `user_version` pragma guards it. An unknown older file is moved aside and a new one created; there is no migration code.
+- **Schema:** one `schema.sql`, created fresh. A `user_version` pragma guards it. A file of another version, or one that is not a database, is moved aside and a new one created; there is no migration code. Any other error opening it fails the launch and leaves the file alone (SPEC Data).
 - **`Writer`:** the actor handle. `call(priority, job) -> impl Future<Output = Result<T, StoreError>>`. Jobs are closures `FnOnce(&mut WriteTx) -> Result<T>`, run in order of priority, then arrival.
 - **`WriteTx`:** wraps the transaction. It is the only way to write, and has no raw `execute`. Repositories hang off it: `tx.threads()`, `tx.messages()`, `tx.drafts()`, `tx.outbox()`, `tx.ops()`, `tx.labels()`, `tx.accounts()`, `tx.splits()`, `tx.contacts()`, `tx.settings()`.
   - Every write method stamps `rev` and records in the transaction's `Changes` the rows and the account's tables it wrote, never which read models that makes stale. Change tracking is a property of the write, not something callers remember to do.

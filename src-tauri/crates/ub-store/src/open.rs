@@ -23,7 +23,8 @@ const STATEMENT_CACHE: usize = 256;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Opens the write connection, creating the database when there is none and
-/// moving aside one with another schema version.
+/// moving aside one with another schema version, or a file that is not a
+/// database. Any other error reading the file fails, and leaves it in place.
 pub(crate) fn open_writer(path: &Path) -> Result<Connection, StoreError> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).map_err(|source| StoreError::Io {
@@ -43,14 +44,17 @@ pub(crate) fn open_writer(path: &Path) -> Result<Connection, StoreError> {
                     "database has another schema version; starting a fresh one",
                 );
             }
-            Err(e) => {
+            Err(e) if is_not_a_database(&e) => {
                 let aside = move_aside(path)?;
                 tracing::warn!(
                     target: "ub_store",
                     error = %e, moved_to = %aside.display(),
-                    "database file is unreadable; starting a fresh one",
+                    "database file is not a database or is corrupt; starting a fresh one",
                 );
             }
+            // Locked, unreadable, or out of space: the mail is still there,
+            // so startup fails rather than throw it away.
+            Err(e) => return Err(StoreError::sql("read the database's schema version")(e)),
         }
     }
     create(path)
@@ -79,7 +83,17 @@ pub(crate) fn open_reader(path: &Path) -> Result<Connection, StoreError> {
 
 fn stored_version(path: &Path) -> rusqlite::Result<i32> {
     let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    conn.busy_timeout(BUSY_TIMEOUT)?;
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
+}
+
+/// Whether SQLite found the file is no database it can use, the one error
+/// that moves it aside.
+fn is_not_a_database(e: &rusqlite::Error) -> bool {
+    matches!(
+        e.sqlite_error_code(),
+        Some(rusqlite::ErrorCode::NotADatabase | rusqlite::ErrorCode::DatabaseCorrupt)
+    )
 }
 
 fn open_existing(path: &Path) -> Result<Connection, StoreError> {
@@ -235,5 +249,41 @@ mod tests {
         drop(open_writer(&path).unwrap());
         assert_eq!(version(&path), SCHEMA_VERSION);
         assert!(sibling(&path, ".old-1").exists());
+    }
+
+    #[test]
+    fn a_locked_database_is_left_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mail.db");
+        {
+            let conn = open_writer(&path).unwrap();
+            conn.execute("UPDATE meta SET rev = 41", []).unwrap();
+        }
+        // Another connection holds the file's lock throughout.
+        let holder = Connection::open(&path).unwrap();
+        holder
+            .execute_batch("PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE;")
+            .unwrap();
+        assert!(open_writer(&path).is_err(), "startup fails loudly");
+        assert!(!sibling(&path, ".old-1").exists(), "not moved aside");
+        drop(holder);
+
+        let conn = open_writer(&path).unwrap();
+        let rev: i64 = conn
+            .query_row("SELECT rev FROM meta", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rev, 41, "the same database, not a fresh one");
+    }
+
+    #[test]
+    fn a_database_that_cannot_be_opened_is_left_in_place() {
+        let dir = tempfile::tempdir().unwrap();
+        // Something SQLite can't open, though it is no corrupt database.
+        let path = dir.path().join("mail.db");
+        std::fs::create_dir(&path).unwrap();
+
+        assert!(open_writer(&path).is_err(), "startup fails loudly");
+        assert!(path.is_dir(), "left where it was");
+        assert!(!sibling(&path, ".old-1").exists());
     }
 }

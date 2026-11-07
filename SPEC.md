@@ -708,6 +708,8 @@ Access tokens refresh shortly before they expire, so a 401 is rare.
 
 One SQLite file in the app data directory. `rusqlite` with bundled SQLite and FTS5. Rows are keyed by account so two Gmail accounts can share a thread id space without colliding.
 
+There are no migrations. At launch, a file of another schema version, or one SQLite finds is not a database or is corrupt, is moved aside as `<name>.old-<n>` and a fresh database is made; the mail comes back from Gmail. Any other error reading the file, such as a lock held for more than 5 s or a file the app may not open, stops the launch with that error and leaves the file in place, so mail that is only on this Mac, such as queued actions and the outbox, is never thrown away.
+
 | Table | Holds |
 |---|---|
 | `accounts` | Email, display name, `sendAs` addresses, rail position, avatar hue, `history_id`, last sync time, needs sign-in |
