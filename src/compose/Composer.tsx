@@ -16,6 +16,7 @@ import { openPalette } from "../navigation";
 import { useChrome } from "../store/chrome";
 import { useAppState, useDraft } from "../store/hooks";
 import { frameCsp } from "../ui/frameCsp";
+import { catchLinks } from "../ui/frameLinks";
 import { frameTokens } from "../ui/frameTokens";
 import { RecipientField, formatAddr, isValidEmail, type RecipientHandle } from "./RecipientField";
 import {
@@ -77,13 +78,18 @@ function QuoteBlock({ html }: { html: string }) {
       {open && (
         <iframe
           title="quoted"
-          sandbox="allow-same-origin"
+          // Sandboxed as a message frame is (SPEC Reading): allow-scripts only so
+          // WebKit fires the parent's listeners; the CSP lets nothing run.
+          // oxlint-disable-next-line react/iframe-missing-sandbox
+          sandbox="allow-same-origin allow-scripts"
           className="mt-2 w-full border-0"
           srcDoc={`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${frameCsp(remoteImages)}"><style>${frameTokens()}body{margin:0;font:13px/20px var(--font-sans);color:var(--color-text-2)}</style></head><body>${html}</body></html>`}
           onLoad={(e) => {
             const el = e.currentTarget;
             const doc = el.contentDocument;
-            if (doc) el.style.height = `${doc.documentElement.scrollHeight}px`;
+            if (!doc) return;
+            el.style.height = `${doc.documentElement.scrollHeight}px`;
+            catchLinks(doc);
           }}
         />
       )}

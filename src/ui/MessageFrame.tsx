@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
-import { getBodies, openUrlInCore } from "../ipc/bridge";
+import { getBodies } from "../ipc/bridge";
 import type { MessageBody } from "../ipc/types";
 import { dispatchKey } from "../keyboard/dispatch";
 import { frameCsp } from "./frameCsp";
+import { catchLinks } from "./frameLinks";
 import { frameTokens } from "./frameTokens";
 
 /** Bodies never change, so a loaded body is kept for the session. */
@@ -132,19 +133,9 @@ export function MessageFrame({
         if (t.closest("[data-ub-toggle]")) {
           doc.querySelector(".ub-quote")?.classList.toggle("ub-open");
           requestAnimationFrame(fit);
-          return;
-        }
-        const a = t.closest("a");
-        if (a) {
-          // Links never navigate the app window.
-          e.preventDefault();
-          const href = a.getAttribute("href");
-          if (href && /^(https?:|mailto:)/i.test(href)) {
-            openUrlInCore(href).catch((err: unknown) => console.warn("open link", err));
-          }
         }
       });
-      doc.addEventListener("submit", (e) => e.preventDefault(), true);
+      catchLinks(doc);
     };
     el.addEventListener("load", setup);
     if (el.contentDocument?.readyState === "complete") setup();

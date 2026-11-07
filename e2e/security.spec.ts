@@ -205,6 +205,47 @@ test.describe("security", () => {
     await expect(body.getByRole("link", { name: "Link B" })).toBeVisible();
   });
 
+  test("SEC-07 links in a reply's quoted text open in the browser, never in the composer", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    await gmail.deliver({
+      account: seeds.A,
+      from: "Mallory Mal <mallory@evil.test>",
+      subject: "Quoted links",
+      html:
+        '<p><a href="http://evil.test/quoted">Tracked link</a></p>' +
+        '<p><a href="mailto:x@example.org">Mail X</a></p>' +
+        '<p><a href="ftp://evil.test/file">Other scheme</a></p>',
+    });
+    const framesLoaded: string[] = [];
+    app.page.on("framenavigated", (f) => {
+      if (f !== app.page.mainFrame() && !f.url().startsWith("about:")) framesLoaded.push(f.url());
+    });
+    await app.row("Quoted links").click();
+    await expect(app.conversationTitle).toHaveText("Quoted links");
+    await app.reply("r");
+    await app.page.getByTitle("Show quoted text").click();
+    const quote = app.page.locator('iframe[title="quoted"]').contentFrame();
+    const opened = async () => (await gmail.platform()).openedUrls;
+
+    await quote.getByRole("link", { name: "Tracked link" }).click();
+    await expect.poll(opened).toEqual(["http://evil.test/quoted"]);
+    await quote.getByRole("link", { name: "Mail X" }).click();
+    await expect.poll(opened).toEqual(["http://evil.test/quoted", "mailto:x@example.org"]);
+    await quote.getByRole("link", { name: "Other scheme" }).click();
+    await app.settle();
+
+    // Nothing else opened, and the quote is still the quote, in the composer.
+    expect(await opened()).toEqual(["http://evil.test/quoted", "mailto:x@example.org"]);
+    await expect(quote.getByRole("link", { name: "Tracked link" })).toBeVisible();
+    await expect(app.editor).toBeVisible();
+    expect(framesLoaded).toEqual([]);
+    expect(app.popups).toEqual([]);
+    expect((await gmail.hits()).filter((h) => h.path.startsWith("/sink/evil.test"))).toEqual([]);
+  });
+
   test("SEC-04 the webview holds no Gmail credentials", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
     const tokens = (await gmail.tokens()).map((k) => k.token);

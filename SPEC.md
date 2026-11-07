@@ -331,7 +331,7 @@ Each expanded message renders in a `srcdoc` iframe with `sandbox="allow-same-ori
 - cycles the iframe's links for `Tab`
 - catches link clicks and opens `http`, `https`, and `mailto` links, which Rust checks again, in the default browser or mail app through the opener plugin. Other links do nothing
 
-Links never navigate the app window.
+Links never navigate the app window. The composer's quoted text (see Addressing) renders in a frame sandboxed the same way, and the parent catches its link clicks by the same rule, so a quote never loads a page inside the composer.
 
 Remote images load by default. A setting turns them off. With remote images off, the iframe's CSP is `default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`, so nothing outside the message loads: no remote images, CSS ones included, web fonts, or stylesheets. The composer's quoted text renders in a sandboxed frame under the same policy. Tracking pixels are a consequence of the default.
 
