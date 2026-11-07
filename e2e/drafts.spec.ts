@@ -796,6 +796,7 @@ test("DRF-20 j and k in a conversation opened from Drafts open the other drafts'
   await highlight(app, "Person 4");
   await app.press("Enter");
   await expect(app.editor).toContainText("My text");
+  await app.settle();
   await expect(app.editor).toBeFocused();
   await app.press("Escape", "Escape");
   await expect(app.editor).toHaveCount(0);
