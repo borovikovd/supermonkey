@@ -865,3 +865,33 @@ test("DRF-21 a draft deleted on Gmail while an edit waits to reach Gmail is writ
   expect(now[0]?.id).not.toBe(first?.id);
   expect(bodyOf(now[0])).toContain("one two");
 });
+
+test("DRF-22 a draft deleted elsewhere just before its composer loads leaves the screen and says so", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.drafts(gmail, app);
+  const heading = app.page.getByRole("heading", { name: "New Message" });
+  await goDrafts(app);
+  await highlight(app, "Idea");
+  // The composer's subscription reaches the core only after a poll has seen
+  // the draft deleted in another client, so no composer had it open.
+  const release = await app.park("submit", (body) => body.includes('"composer"'));
+  await app.press("Enter");
+  await expect(heading).toBeVisible();
+  await gmail.deleteDraft(A, s.draft("dNew").id, { poll: true });
+  await gmail.idle();
+  await release();
+  await app.settle();
+
+  await expect(app.toast("Draft was sent or deleted elsewhere")).toBeVisible();
+  await expect(heading).toHaveCount(0);
+  await expect(app.editor).toHaveCount(0);
+  // Back on Drafts, where it is gone too, with the list's keys.
+  await expect(app.row("Idea")).toHaveCount(0);
+  await expect(app.hintBar).toHaveText(
+    /Enter to open draft\s*·\s*C to compose\s*·\s*⌘K for commands/,
+  );
+  await app.expectNoErrorToasts();
+  expect((await gmail.gmail(A)).drafts.map((d) => d.id)).not.toContain(s.draft("dNew").id);
+});

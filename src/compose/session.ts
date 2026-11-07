@@ -408,6 +408,19 @@ function closeIfGone() {
   if (replyGone()) closeComposerOnScreen();
 }
 
+/**
+ * A composer whose first load finds its draft gone, deleted elsewhere before
+ * the composer reached Rust, has nothing to show: it leaves the screen, with
+ * a close or send that waited for that load, and a toast says why (SPEC
+ * Drafts).
+ */
+export function leaveGoneDraft(draft: string) {
+  if (draftOnScreen() !== draft) return;
+  cancelWaiting(draft);
+  leave(draft);
+  toast("Draft was sent or deleted elsewhere");
+}
+
 /** Takes the composer off screen and, unless told not to, drops its subscription. */
 function leave(draft: string, forget = true) {
   if (forget) forgetSub(composerKey(draft));

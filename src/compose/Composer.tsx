@@ -24,6 +24,7 @@ import {
   composeBlurred,
   composerFocused,
   focusNextFrame,
+  leaveGoneDraft,
   loadedDraft,
   registerComposer,
   type Attaching,
@@ -305,6 +306,11 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     if (state.bcc.length > 0) setShowBcc(true);
     if (state.kind === "new") setShowSubject(true);
   }
+  // A first load that finds the draft gone leaves nothing to edit.
+  const goneAtLoad = state?.gone === true && !loaded;
+  useEffect(() => {
+    if (goneAtLoad) leaveGoneDraft(draft);
+  }, [goneAtLoad, draft]);
   useEffect(() => {
     latest.current = fields;
     for (const a of fields.attachments) seen.current.ids.add(a.id);
