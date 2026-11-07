@@ -471,11 +471,12 @@ export class Control {
 
   /**
    * The network goes away (every Gmail request fails to connect) or comes
-   * back. Coming back retries what is backing off at once, as a network
-   * change would.
+   * back. Coming back also retries at once what is backing off and polls,
+   * so a test need not wait for the app to find out by itself; with
+   * `probe: true` it does not, and the app's own poll (SPEC Offline) must.
    */
-  offline(on: boolean): Promise<null> {
-    return this.call("POST", "/__test/offline", { on });
+  offline(on: boolean, opts: { probe?: boolean } = {}): Promise<null> {
+    return this.call("POST", "/__test/offline", { on, ...opts });
   }
 
   /** The request log, in arrival order, optionally only one method's requests. */

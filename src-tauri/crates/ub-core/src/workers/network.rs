@@ -18,6 +18,9 @@ pub(crate) struct Network {
     online: Arc<AtomicBool>,
     writer: CoreWriter,
     back: Signal,
+    /// Fires when the network goes away, so the pollers start checking for
+    /// it soon instead of at their next interval.
+    lost: Signal,
 }
 
 impl Network {
@@ -25,7 +28,8 @@ impl Network {
         Self {
             online: Arc::new(AtomicBool::new(true)),
             writer,
-            back: Signal::new(activity),
+            back: Signal::new(Arc::clone(&activity)),
+            lost: Signal::new(activity),
         }
     }
 
@@ -51,6 +55,8 @@ impl Network {
             });
         if online {
             self.back.fire();
+        } else {
+            self.lost.fire();
         }
     }
 
@@ -63,6 +69,13 @@ impl Network {
     /// Waits until the network may be back, or `timeout` of app time.
     pub(crate) async fn wait(&self, clock: &dyn Clock, timeout: Duration) {
         self.back.wait(clock, timeout).await;
+    }
+
+    /// Waits until the network goes away, or `timeout` of app time.
+    pub(crate) async fn until_lost(&self, clock: &dyn Clock, timeout: Duration) {
+        self.lost
+            .wait_unless(clock, timeout, || !self.is_online())
+            .await;
     }
 
     /// Waits until a Gmail call reaches Gmail again, which another task's

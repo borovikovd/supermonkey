@@ -617,6 +617,8 @@ The cached mailbox stays readable with no network: list, thread, search of cache
 
 These actions queue and replay in order per account when the network returns: archive, trash, spam, star, read-state, return to inbox, label changes, label create, snooze, unsnooze, draft upsert, and discard. A label created offline gets a local id, and replay maps it to the Gmail id. Sends wait in the outbox instead.
 
+The app finds out that Gmail can be reached again from its own calls: once any call fails to reach Gmail, every account polls every 10 s instead of every 45 s, and the first answer wakes everything that waits for the network, so a queued action, a send, or an open search runs within about 10 s of the network returning, even when nothing else calls Gmail. The poll is the check: it costs 2 quota units and needs no other signal from macOS.
+
 The queue is SQLite, not memory. A restart does not drop it. A queued action applies to the messages it recorded, so it wins over a conflicting remote change to those messages without hiding newer mail. After replay, a history sync reconciles. Loss of network leaves the queued action in place. A rejection from Gmail, as defined in Gmail errors, rolls that action back, toasts the error, and replay continues with the next action.
 
 ## Notifications
@@ -658,7 +660,7 @@ Each list is fetched newest first. Metadata uses `threads.get` with `format=meta
 
 With the quota below, a 2,000-thread inbox has all its rows in about 20 minutes and all its bodies about an hour after that. The newest rows show within seconds, and an opened thread fetches its bodies at once.
 
-Polling `users.history.list` from the stored cursor starts as soon as the connect `historyId` is stored, and runs alongside the fetches above at its priority, for every account. It runs every 45 seconds while the app runs, on focus, and on wake from sleep. This app polls Gmail for changes. A gap of more than three poll intervals between two ticks of the poll timer counts as a wake from sleep.
+Polling `users.history.list` from the stored cursor starts as soon as the connect `historyId` is stored, and runs alongside the fetches above at its priority, for every account. It runs every 45 seconds while Gmail answers, every 10 s while it can't be reached (see Offline), on focus, and on wake from sleep. This app polls Gmail for changes. A gap of more than three poll intervals between two ticks of the poll timer counts as a wake from sleep.
 
 A poll applies each message's latest `labelIds` from the history records directly, and fetches thread metadata only for messages the app does not know yet. Pending actions are applied on top, so a queued action wins, and so does one that reached Gmail while the poll or a thread read was on its way, since the answer may predate it. A message that history reports deleted, for example deleted forever in Gmail web, is deleted here too. A Gmail answer never undoes a newer one already stored: a thread read whose `historyId` is older than the stored one keeps only the bodies it brought, and of two `labels.list` or `sendAs` reads, the one started later wins. A poll that sees a draft change reconciles the drafts only (see Drafts). The connect sync and a full resync also queue each Gmail draft's thread for metadata and bodies.
 

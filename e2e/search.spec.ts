@@ -657,3 +657,27 @@ test("SRC-14 a search or Gmail-listed view opened offline lists from Gmail when 
     1,
   );
 });
+
+test("SRC-15 an open search runs once Gmail can be reached again, though nothing else calls Gmail", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  // The network goes away between polls, and the search is the first to find out.
+  await gmail.offline(true);
+  await search(app, "invoice 2019");
+  await app.advance(300);
+  await app.settle();
+  await expect(app.page.getByText("Results from this Mac")).toBeVisible();
+  await expect(app.rows).toHaveCount(0);
+
+  // The network returns, and nothing tells the app: no action or send is
+  // waiting, and the next poll is 45 s away.
+  await gmail.offline(false, { probe: true });
+  await app.settle();
+  await expect(app.page.getByText("Results from this Mac")).toBeVisible();
+  await app.advance(10_000);
+  await app.settle();
+  await expect(app.row("Invoice 2019")).toHaveCount(1);
+  await expect(app.page.getByText("Results from this Mac")).toHaveCount(0);
+});

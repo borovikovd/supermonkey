@@ -77,12 +77,7 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
         {
             ctx.health.failed(&e);
         }
-        let wait = if ctx.deps.network.is_online() {
-            POLL_EVERY
-        } else {
-            OFFLINE_RETRY
-        };
-        ctx.poll.wait(ctx.clock(), wait).await;
+        wait_to_poll(&ctx).await;
         let now = ctx.clock().now();
         let gap = u64::try_from(now.0.saturating_sub(last.0)).unwrap_or(0);
         if Duration::from_millis(gap) > WOKE_AFTER {
@@ -94,6 +89,24 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
         }
         last = now;
     }
+}
+
+/// Waits for the next poll: `POLL_EVERY` while Gmail answers, or a kick.
+/// Offline, polls are how the app finds out Gmail can be reached again
+/// (SPEC Offline), so they come every `OFFLINE_RETRY`, and a network that
+/// any call found gone meanwhile cuts the long wait short.
+async fn wait_to_poll(ctx: &AccountCtx) {
+    let network = &ctx.deps.network;
+    if network.is_online() {
+        tokio::select! {
+            () = ctx.poll.wait(ctx.clock(), POLL_EVERY) => return,
+            () = network.until_lost(ctx.clock(), POLL_EVERY) => {}
+        }
+        if network.is_online() {
+            return;
+        }
+    }
+    ctx.poll.wait(ctx.clock(), OFFLINE_RETRY).await;
 }
 
 async fn is_connected(pool: &Arc<ReadPool>, account: AccountId) -> Result<bool, Error> {

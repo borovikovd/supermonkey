@@ -139,6 +139,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SRC-12 · P2 · A query local search can't evaluate waits for Gmail; offline it says the search needs Gmail · §Search, §Offline
 - SRC-13 · P2 · The next Gmail page loads near the oldest Gmail hit, not the list's end · §Search, §Views, §Subscriptions
 - SRC-14 · P1 · A search or Gmail-listed view opened offline lists from Gmail when the network returns · §Search, §Views, §Offline
+- SRC-15 · P1 · An open search runs once Gmail can be reached again, though nothing else calls Gmail · §Search, §Offline
 
 ### splits.spec.ts (SPL)
 

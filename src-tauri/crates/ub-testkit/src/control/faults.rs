@@ -184,15 +184,19 @@ pub(crate) async fn clear_faults(State(s): State<Arc<Server>>) -> Ctl {
 }
 
 #[derive(Deserialize)]
-pub(crate) struct OnReq {
+pub(crate) struct OfflineReq {
     on: bool,
+    /// Coming back, leave it to the app's own poll to find out.
+    #[serde(default)]
+    probe: bool,
 }
 
 /// The network goes away (every Gmail request fails to connect) or comes
-/// back.
-pub(crate) async fn offline(State(s): State<Arc<Server>>, Json(req): Json<OnReq>) -> Ctl {
+/// back. Coming back retries the app's backed-off work and polls at once,
+/// unless `probe`.
+pub(crate) async fn offline(State(s): State<Arc<Server>>, Json(req): Json<OfflineReq>) -> Ctl {
     s.fake.set_offline(req.on).await;
-    if !req.on {
+    if !req.on && !req.probe {
         s.retry().await;
     }
     Ok(done())
