@@ -98,6 +98,8 @@ export type Ctx = {
   selection: boolean;
   /** The open conversation has loaded. */
   loaded: boolean;
+  /** The open conversation has loaded, and its thread is gone. */
+  gone: boolean;
   undo: boolean;
   /** The account has user labels. */
   labels: boolean;
@@ -131,6 +133,10 @@ function contextOf(chrome: ChromeState, mirror: MirrorState, compose: ComposeSta
     selected.length > 0 ||
     (highlight && view?.kind !== "drafts" && !Number.isNaN(Number(cur?.highlight)));
   const splits = new Set(entries.map((e) => e.split).filter((s) => s !== null)).size;
+  const open =
+    screen.kind === "conversation"
+      ? conversationData(mirror, screen.thread, screen.trashMode)
+      : null;
   const ctx: Ctx = {
     account,
     signedOut: app?.accounts.find((a) => a.id === account)?.needsSignin ?? false,
@@ -147,9 +153,8 @@ function contextOf(chrome: ChromeState, mirror: MirrorState, compose: ComposeSta
     splits: view?.kind === "inbox" ? splits : 0,
     link: chrome.link !== null,
     selection: chrome.selection.length > 0,
-    loaded:
-      screen.kind === "conversation" &&
-      conversationData(mirror, screen.thread, screen.trashMode) !== null,
+    loaded: open !== null,
+    gone: open?.gone ?? false,
     undo: account !== null && undoTarget(mirror, account) !== null,
     labels: summary?.labels.some((l) => !l.system) ?? false,
     accounts: app?.accounts.length ?? 0,
@@ -178,6 +183,8 @@ export function useCtx(): Ctx {
 const mailScreen = (c: Ctx) => c.account !== null && !c.signedOut && c.composer === null;
 const onList = (c: Ctx) => mailScreen(c) && c.screen === "list";
 const inConversation = (c: Ctx) => mailScreen(c) && c.screen === "conversation";
+/** A reply can be aimed here: an open conversation that is not gone (it may still be loading). */
+const replies = (c: Ctx) => inConversation(c) && !c.gone;
 /** A mail action has something to act on (SPEC Keyboard). */
 const acts = (c: Ctx) => mailScreen(c) && c.targets;
 /** Views and settings of the account on screen, also from the rail while composing. */
@@ -392,7 +399,7 @@ const DEFS = {
     group: "Write",
     palette: true,
     hint: "to Reply",
-    when: (c) => inConversation(c) || (onList(c) && c.highlight && !isView(c, "drafts")),
+    when: (c) => replies(c) || (onList(c) && c.highlight && !isView(c, "drafts")),
     run: () => startReply("reply"),
     meter: (c) => (c.screen === "conversation" ? "replyInline" : "replyFromList"),
   },
@@ -402,7 +409,7 @@ const DEFS = {
     group: "Write",
     palette: true,
     hint: "to Reply all",
-    when: (c) => inConversation(c) && !c.link,
+    when: (c) => replies(c) && !c.link,
     run: () => startReply("replyAll"),
     meter: "replyInline",
   },
@@ -411,7 +418,7 @@ const DEFS = {
     keys: "f",
     group: "Write",
     palette: true,
-    when: (c) => inConversation(c) || (onList(c) && c.highlight && !isView(c, "drafts")),
+    when: (c) => replies(c) || (onList(c) && c.highlight && !isView(c, "drafts")),
     run: () => startReply("forward"),
     meter: (c) => (c.screen === "conversation" ? "replyInline" : "replyFromList"),
   },

@@ -91,14 +91,19 @@ let stopWaiting: (() => void) | null = null;
 /**
  * Waits for the conversation's data (first load) before aiming a composer.
  * Only the latest reply key waits, or each would start its own draft, and it
- * waits only while that conversation stays on screen.
+ * waits only while that conversation stays on screen. A conversation that
+ * turns out to be gone has nothing to reply to: the reply and its keys drop.
  */
 function whenLoaded(thread: number, trashMode: boolean, run: (data: ConversationData) => void) {
   stopWaiting?.();
   const ready = () => conversationData(useMirror.getState(), thread, trashMode);
+  const aim = (data: ConversationData) => {
+    if (!data.gone) run(data);
+    else typedAhead = null;
+  };
   const now = ready();
   if (now) {
-    run(now);
+    aim(now);
     return;
   }
   const onScreen = () => {
@@ -124,7 +129,7 @@ function whenLoaded(thread: number, trashMode: boolean, run: (data: Conversation
       const d = ready();
       if (!d) return;
       stop();
-      run(d);
+      aim(d);
     });
   });
   stopWaiting = stop;

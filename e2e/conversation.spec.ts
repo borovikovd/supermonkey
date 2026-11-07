@@ -779,3 +779,30 @@ test("CONV-23 an address added to the account in Gmail is Me in a conversation a
   await app.settle();
   await expect(header()).toContainText("Carol Chen to erin & Me");
 });
+
+test("CONV-24 r, Enter, and f do nothing in a conversation that is gone", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await app.row("Person 3").click();
+  await expect(app.conversationTitle).toHaveText("Person 3");
+  await app.settle();
+  // Deleted forever in Gmail while open.
+  await gmail.deleteThread(A, s.thread("p3").threadId, { poll: true });
+  await app.settle();
+  await expect(app.conversation.getByText("This conversation is gone.")).toBeVisible();
+
+  // No composer opens to take the keys, and the hints offer no reply.
+  await app.press("r", "Enter", "f");
+  await app.settle();
+  await expect(app.hintBar).toHaveText(/^E to Mark Done\s*·\s*⌘K for commands$/);
+  // One Esc goes back to the list, where the keys work.
+  await app.press("Escape");
+  await expect(app.list).toBeVisible();
+  await expect(app.highlighted).toContainText("Person 4");
+  await app.press("j");
+  await expect(app.highlighted).toContainText("Person 5");
+  await app.settle();
+  expect((await gmail.gmail(A)).drafts).toEqual([]);
+});
