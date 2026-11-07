@@ -47,6 +47,10 @@ impl<'c> SearchReads<'c> {
         } else {
             Vec::new()
         };
+        // The newest local matches, then every Gmail hit, however old: the
+        // next Gmail page loads near the oldest hit (SPEC Search).
+        matched.sort_unstable_by(|a, b| b.cmp(a));
+        matched.truncate(SEARCH_LIMIT);
         let past_live = !query.scope().live_only();
         let mut seen: HashSet<ThreadId> = matched.iter().map(|&(_, t)| t).collect();
         for &hit in gmail_hits {
@@ -66,7 +70,6 @@ impl<'c> SearchReads<'c> {
             }
         }
         matched.sort_unstable_by(|a, b| b.cmp(a));
-        matched.truncate(SEARCH_LIMIT.max(gmail_hits.len()));
         Ok(matched.into_iter().map(|(_, t)| t).collect())
     }
 

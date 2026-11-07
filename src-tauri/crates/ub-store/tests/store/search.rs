@@ -162,6 +162,45 @@ fn search_skips_trash_spam_and_drafts_but_lists_gmail_hits() {
 }
 
 #[test]
+fn gmail_hits_older_than_the_local_limit_are_still_listed() {
+    let h = Harness::start();
+    let account = h.account("me@example.com");
+    // More local matches than a search lists, all newer than the Gmail hit.
+    let local = ub_store::SEARCH_LIMIT + 1;
+    h.write(move |tx| {
+        for i in 0..local {
+            let gmail = format!("t{i}");
+            let mut m = msg(
+                &format!("{gmail}-m"),
+                10_000 + i64::try_from(i).unwrap(),
+                "alice@example.com",
+                &["INBOX"],
+            );
+            "budget report".clone_into(&mut m.subject);
+            tx.threads().store(&fetched(account, &gmail, vec![m]))?;
+        }
+        Ok(())
+    });
+    let old = mail(
+        &h,
+        account,
+        "old",
+        "bob@example.com",
+        &["INBOX"],
+        "older than every local match",
+    );
+    for query in ["budget", "budget label:inbox"] {
+        let listed = search(&h, account, query, vec![old]);
+        assert_eq!(
+            listed.len(),
+            ub_store::SEARCH_LIMIT + 1,
+            "{query}: the local limit, then the Gmail hit"
+        );
+        assert_eq!(listed.last(), Some(&old), "{query}");
+    }
+}
+
+#[test]
 fn a_trashed_message_does_not_match_for_its_live_thread() {
     let h = Harness::start();
     let account = h.account("me@example.com");

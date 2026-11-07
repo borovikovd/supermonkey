@@ -419,7 +419,7 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 - `crates/ub-store/tests/store/writer.rs`, `crates/ub-store/src/writer.rs`, and `crates/ub-store/src/reply.rs`: writer priority and order, rollbacks and savepoints, panics, `rev`, stopping, awaiting results.
 - `crates/ub-store/tests/store/threads.rs` and `crates/ub-store/tests/store/views.rs`: a thread's row from its messages, refetches and deletes, and every view's rule and order.
 - `crates/ub-store/tests/store/routing.rs`: split routing, pins, and custom splits.
-- `crates/ub-store/tests/store/search.rs`: the FTS index and what search skips.
+- `crates/ub-store/tests/store/search.rs`: the FTS index, what search skips, and Gmail hits listed past the local limit.
 - `crates/ub-store/tests/store/drafts.rs`: drafts and the outbox, undo history, local labels, settings, contacts.
 - `crates/ub-store/tests/store/ids.rs`: ids are never reused.
 - `crates/ub-store/src/open.rs`: a database of another schema version, or not a database, is moved aside and a fresh one made; a locked one, or one that can't be opened, is left in place and the open fails.
