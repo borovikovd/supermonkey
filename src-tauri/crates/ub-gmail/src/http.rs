@@ -119,7 +119,7 @@ impl ReadResponse {
         Ok(Self {
             status,
             retry_after,
-            body: body.to_vec(),
+            body: Vec::from(body),
         })
     }
 

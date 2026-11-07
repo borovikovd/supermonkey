@@ -10,21 +10,22 @@ const NO_RECIPIENTS: &str = "(no recipients)";
 const DRAFT_LABEL: &str = "DRAFT";
 
 /// A thread's list row. Its key is its id.
-pub(crate) fn thread_row(row: &ThreadRow) -> ListRow {
+pub(crate) fn thread_row(row: ThreadRow) -> ListRow {
+    let starred = row.starred();
     ListRow {
         key: row.id.to_string(),
         thread: Some(row.id),
         draft: None,
-        sender: row.sender.clone(),
-        sender_email: row.sender_email.clone(),
-        subject: row.subject.clone(),
-        snippet: row.snippet.clone(),
+        sender: row.sender,
+        sender_email: row.sender_email,
+        subject: row.subject,
+        snippet: row.snippet,
         time: row.sort_time,
         unread: row.unread,
-        starred: row.starred(),
+        starred,
         has_attachments: row.has_attachments,
         message_count: row.message_count,
-        labels: row.labels.iter().cloned().collect(),
+        labels: row.labels.into_iter().collect(),
         snooze_until: row.snooze_until,
         split: row.split,
         rev: row.rev,
@@ -33,8 +34,8 @@ pub(crate) fn thread_row(row: &ThreadRow) -> ListRow {
 
 /// A draft's row in the Drafts list. Its key is the draft id, and it shows
 /// the recipients where a thread shows the sender.
-pub(crate) fn draft_row(record: &DraftRecord) -> ListRow {
-    let draft = &record.draft;
+pub(crate) fn draft_row(record: DraftRecord) -> ListRow {
+    let draft = record.draft;
     let sender = if draft.to.is_empty() {
         NO_RECIPIENTS.to_owned()
     } else {
@@ -53,15 +54,16 @@ pub(crate) fn draft_row(record: &DraftRecord) -> ListRow {
     ListRow {
         key: draft.id.to_string(),
         thread: draft.thread,
-        draft: Some(draft.id.clone()),
+        draft: Some(draft.id),
         sender,
         sender_email: draft
             .to
-            .first()
-            .map(|a| a.email.clone())
+            .into_iter()
+            .next()
+            .map(|a| a.email)
             .unwrap_or_default(),
-        subject: draft.subject.clone(),
-        snippet: draft.snippet.clone(),
+        subject: draft.subject,
+        snippet: draft.snippet,
         time: draft.updated_at,
         unread: false,
         starred: false,
@@ -86,7 +88,7 @@ pub(crate) fn rows_for_keys(
         Ok(reads
             .drafts()
             .get_many(&ids)?
-            .iter()
+            .into_iter()
             .map(draft_row)
             .collect())
     } else {
@@ -94,6 +96,11 @@ pub(crate) fn rows_for_keys(
             .iter()
             .filter_map(|k| k.as_ref().parse().ok())
             .collect();
-        Ok(reads.threads().rows(&ids)?.iter().map(thread_row).collect())
+        Ok(reads
+            .threads()
+            .rows(&ids)?
+            .into_iter()
+            .map(thread_row)
+            .collect())
     }
 }

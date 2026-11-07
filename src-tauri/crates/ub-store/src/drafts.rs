@@ -6,8 +6,8 @@ use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, 
 use rusqlite::{Row, named_params};
 use serde::{Deserialize, Serialize};
 use ub_domain::{
-    AccountId, Addr, AttachmentId, DraftContent, DraftId, DraftKind, GmailDraftId, GmailMessageId,
-    GmailThreadId, MessageId, Millis, Rev, ThreadId,
+    AccountId, Addr, AttachmentId, DraftContent, DraftContentRef, DraftId, DraftKind, GmailDraftId,
+    GmailMessageId, GmailThreadId, MessageId, Millis, Rev, ThreadId,
 };
 
 use crate::StoreError;
@@ -233,15 +233,15 @@ impl Draft {
     }
 
     /// The fields the untouched rule compares, as they are now.
-    pub fn content(&self) -> DraftContent {
-        DraftContent {
-            from: self.from.clone(),
-            to: self.to.clone(),
-            cc: self.cc.clone(),
-            bcc: self.bcc.clone(),
-            subject: self.subject.clone(),
-            body_html: self.body_html.clone(),
-            attachments: self.attachments.iter().map(|a| a.id.clone()).collect(),
+    pub fn content(&self) -> DraftContentRef<'_, impl Iterator<Item = &str>> {
+        DraftContentRef {
+            from: self.from.as_ref(),
+            to: &self.to,
+            cc: &self.cc,
+            bcc: &self.bcc,
+            subject: &self.subject,
+            body_html: &self.body_html,
+            attachments: self.attachments.iter().map(|a| a.id.as_str()),
         }
     }
 }

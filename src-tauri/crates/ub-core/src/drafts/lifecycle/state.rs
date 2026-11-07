@@ -2,7 +2,7 @@
 //! caller writes it back with `tx.drafts().put`. A transition that may
 //! change nothing says whether it did, so the caller writes only then.
 
-use ub_domain::{DraftContent, GmailDraftId, GmailMessageId, GmailThreadId};
+use ub_domain::{GmailDraftId, GmailMessageId, GmailThreadId};
 use ub_store::{Draft, DraftAttachment, DraftStage, DraftWait};
 
 use crate::drafts::text::is_blank;
@@ -49,10 +49,7 @@ pub(crate) enum GmailWrite<'d> {
 /// rules: closing that composer untouched discards it. Its defaults are that
 /// content with a blank body.
 pub(crate) fn start_fresh(draft: &mut Draft) {
-    let defaults = DraftContent {
-        body_html: String::new(),
-        ..draft.content()
-    };
+    let defaults = draft.content().with_body(String::new());
     draft.lifecycle.stage = DraftStage::Fresh { defaults };
 }
 
@@ -67,7 +64,7 @@ pub(crate) fn is_fresh(draft: &Draft) -> bool {
 pub(crate) fn is_untouched(draft: &Draft) -> bool {
     match &draft.lifecycle.stage {
         DraftStage::Fresh { defaults } | DraftStage::Opened { defaults } => {
-            defaults.is_untouched_by(&draft.content(), is_blank(&draft.body_html))
+            defaults.is_untouched_by(draft.content(), is_blank(&draft.body_html))
         }
         DraftStage::Kept => false,
     }

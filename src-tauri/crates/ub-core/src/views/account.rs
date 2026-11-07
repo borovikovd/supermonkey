@@ -53,23 +53,25 @@ fn is_muted(reads: Reads<'_>, account: AccountId) -> Result<bool, StoreError> {
 }
 
 /// An account as the rail shows it.
-fn account_info(record: &AccountRecord, muted: bool) -> AccountInfo {
+fn account_info(record: AccountRecord, muted: bool) -> AccountInfo {
+    let hue = record.hue().to_owned();
+    let sync_status = record.status();
     AccountInfo {
         id: record.id,
-        email: record.email.clone(),
-        name: record.display_name.clone(),
-        hue: record.hue().to_owned(),
+        email: record.email,
+        name: record.display_name,
+        hue,
         position: record.position,
         inbox_unread: record.inbox_unread,
         needs_signin: record.needs_signin,
         muted,
-        sync_status: record.status(),
+        sync_status,
         send_as: record
             .send_as
-            .iter()
+            .into_iter()
             .map(|s| SendAs {
-                email: s.email.clone(),
-                name: s.name.clone(),
+                email: s.email,
+                name: s.name,
                 is_default: s.is_default,
                 is_primary: s.is_primary,
             })
@@ -82,8 +84,11 @@ pub(crate) fn app_state(reads: Reads<'_>, online: bool) -> Result<AppState, Stor
     let accounts = reads
         .accounts()
         .all()?
-        .iter()
-        .map(|record| Ok(account_info(record, is_muted(reads, record.id)?)))
+        .into_iter()
+        .map(|record| {
+            let muted = is_muted(reads, record.id)?;
+            Ok(account_info(record, muted))
+        })
         .collect::<Result<_, StoreError>>()?;
     let remote_images = reads
         .settings()
@@ -164,14 +169,14 @@ pub(crate) fn account_summary(
         })
         .collect();
     Ok(Some(AccountSummary {
-        account: account_info(&record, is_muted(reads, account)?),
+        account: account_info(record, is_muted(reads, account)?),
         labels,
         splits,
         pins,
         outbox: reads
             .outbox()
             .for_account(account)?
-            .iter()
+            .into_iter()
             .map(outbox_row)
             .collect(),
         undo,

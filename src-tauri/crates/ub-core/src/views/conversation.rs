@@ -6,27 +6,27 @@ use ub_ipc::{
 };
 use ub_store::{BodyRecord, ConversationMessage, OutboxRecord, Reads, StoreError};
 
-fn addrs(list: &[ub_domain::Addr]) -> Vec<Addr> {
-    list.iter().cloned().map(Addr::from).collect()
+fn addrs(list: Vec<ub_domain::Addr>) -> Vec<Addr> {
+    list.into_iter().map(Addr::from).collect()
 }
 
 /// A send as its toast and the pending message show it.
-pub(crate) fn outbox_row(record: &OutboxRecord) -> OutboxRow {
-    let o = &record.outbox;
+pub(crate) fn outbox_row(record: OutboxRecord) -> OutboxRow {
+    let o = record.outbox;
     OutboxRow {
         id: o.id,
         account: o.account,
-        draft: o.draft.clone(),
+        draft: o.draft,
         thread: o.thread,
         send_after: o.send_after,
         state: o.state,
-        sent_message_gmail_id: o.sent_message_id.clone(),
+        sent_message_gmail_id: o.sent_message_id,
         undo_requested: o.undo_requested,
         toast_closed: o.toast_closed,
         delayed: o.delayed,
-        to: addrs(&record.to),
-        snippet: record.snippet.clone(),
-        subject: record.subject.clone(),
+        to: addrs(record.to),
+        snippet: record.snippet,
+        subject: record.subject,
         undo_entry: record.undo_entry,
     }
 }
@@ -44,9 +44,9 @@ fn message_summary(entry: ConversationMessage, identity: Option<&Identity>) -> M
         in_trash: m.labels.has(SystemLabel::Trash),
         in_spam: m.labels.has(SystemLabel::Spam),
         from: Addr::from(m.from),
-        to: addrs(&m.to),
-        cc: addrs(&m.cc),
-        bcc: addrs(&m.bcc),
+        to: addrs(m.to),
+        cc: addrs(m.cc),
+        bcc: addrs(m.bcc),
         subject: m.subject,
         snippet: m.snippet,
         date: m.date,
@@ -99,7 +99,7 @@ pub(crate) fn conversation(
                 kind: d.kind,
                 target: d.target,
                 started_on_latest: d.started_on_latest,
-                to: addrs(&d.to),
+                to: addrs(d.to),
                 snippet: d.snippet,
                 updated_at: d.updated_at,
             }
@@ -109,7 +109,7 @@ pub(crate) fn conversation(
         thread,
         account: rows.thread.account,
         subject: rows.thread.subject,
-        labels: rows.thread.labels.iter().cloned().collect(),
+        labels: rows.thread.labels.into_iter().collect(),
         snooze_until: rows.thread.snooze_until,
         messages: rows
             .messages
@@ -117,7 +117,7 @@ pub(crate) fn conversation(
             .map(|m| message_summary(m, identity.as_ref()))
             .collect(),
         drafts,
-        outbox: rows.outbox.iter().map(outbox_row).collect(),
+        outbox: rows.outbox.into_iter().map(outbox_row).collect(),
         gone: false,
         rev: rows.thread.rev,
     })

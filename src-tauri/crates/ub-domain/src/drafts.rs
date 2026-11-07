@@ -5,9 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Addr, DraftKind, MessageId, Millis, Thread};
 
-/// The fields of a draft that the untouched rule compares. Stored as a
-/// draft's defaults when its composer starts, and built from its current
-/// state when it closes.
+/// The fields of a draft that the untouched rule compares, stored as a
+/// draft's defaults when its composer starts.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DraftContent {
     /// The From mailbox.
@@ -31,14 +30,58 @@ impl DraftContent {
     /// same From, recipients, subject, and attachments, and a body that is
     /// the same or blank. `body_is_blank` is whether `now`'s body has no
     /// text and no image, which only HTML parsing can tell.
-    pub fn is_untouched_by(&self, now: &Self, body_is_blank: bool) -> bool {
-        self.from == now.from
+    pub fn is_untouched_by<'a>(
+        &self,
+        now: DraftContentRef<'a, impl IntoIterator<Item = &'a str>>,
+        body_is_blank: bool,
+    ) -> bool {
+        self.from.as_ref() == now.from
             && self.to == now.to
             && self.cc == now.cc
             && self.bcc == now.bcc
             && self.subject == now.subject
             && (body_is_blank || self.body_html == now.body_html)
-            && self.attachments == now.attachments
+            && self
+                .attachments
+                .iter()
+                .map(String::as_str)
+                .eq(now.attachments)
+    }
+}
+
+/// A draft's [`DraftContent`] as it is now, borrowed from the draft so the
+/// untouched rule compares without copying the body. `A` gives the
+/// attachments' ids within the draft, in order.
+#[derive(Debug, Clone)]
+pub struct DraftContentRef<'a, A> {
+    /// The From mailbox.
+    pub from: Option<&'a Addr>,
+    /// The `To` mailboxes.
+    pub to: &'a [Addr],
+    /// The `Cc` mailboxes.
+    pub cc: &'a [Addr],
+    /// The `Bcc` mailboxes.
+    pub bcc: &'a [Addr],
+    /// The subject.
+    pub subject: &'a str,
+    /// The editor's HTML.
+    pub body_html: &'a str,
+    /// The attachments' ids within the draft, in order.
+    pub attachments: A,
+}
+
+impl<'a, A: IntoIterator<Item = &'a str>> DraftContentRef<'a, A> {
+    /// This content, owned, with `body_html` for its body.
+    pub fn with_body(self, body_html: String) -> DraftContent {
+        DraftContent {
+            from: self.from.cloned(),
+            to: self.to.to_vec(),
+            cc: self.cc.to_vec(),
+            bcc: self.bcc.to_vec(),
+            subject: self.subject.to_owned(),
+            body_html,
+            attachments: self.attachments.into_iter().map(str::to_owned).collect(),
+        }
     }
 }
 
@@ -99,6 +142,19 @@ pub fn gmail_draft_aim(
 mod tests {
     use super::*;
 
+    /// `content`, borrowed as a draft lends it.
+    fn now(content: &DraftContent) -> DraftContentRef<'_, impl Iterator<Item = &str>> {
+        DraftContentRef {
+            from: content.from.as_ref(),
+            to: &content.to,
+            cc: &content.cc,
+            bcc: &content.bcc,
+            subject: &content.subject,
+            body_html: &content.body_html,
+            attachments: content.attachments.iter().map(String::as_str),
+        }
+    }
+
     #[test]
     fn untouched_compares_every_field_but_a_blank_body() {
         let start = DraftContent {
@@ -108,17 +164,17 @@ mod tests {
             attachments: vec!["src-1".into()],
             ..DraftContent::default()
         };
-        assert!(start.is_untouched_by(&start, false));
+        assert!(start.is_untouched_by(now(&start), false));
         let typed = DraftContent {
             body_html: "<p>hello</p>".into(),
             ..start.clone()
         };
-        assert!(!start.is_untouched_by(&typed, false));
+        assert!(!start.is_untouched_by(now(&typed), false));
         let cleared = DraftContent {
             body_html: "<p></p>".into(),
             ..start.clone()
         };
-        assert!(start.is_untouched_by(&cleared, true));
+        assert!(start.is_untouched_by(now(&cleared), true));
         let edits = [
             DraftContent {
                 from: None,
@@ -146,7 +202,7 @@ mod tests {
             },
         ];
         for edit in edits {
-            assert!(!start.is_untouched_by(&edit, true), "{edit:?}");
+            assert!(!start.is_untouched_by(now(&edit), true), "{edit:?}");
         }
     }
 

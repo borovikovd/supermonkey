@@ -22,11 +22,11 @@ pub(super) fn first_load(
     now: Millis,
 ) -> Result<SubUpdate, StoreError> {
     let sub_id = id.clone();
-    let key = sub.key.clone();
-    Ok(match &key {
+    Ok(match &sub.key {
         SubKey::List { account, view } => {
             let ids = view_ids(reads, *account, view)?;
-            list_first(reads, sub_id, sub, ids, ListKind::of(view))?
+            let kind = ListKind::of(view);
+            list_first(reads, sub_id, sub, ids, kind)?
         }
         SubKey::Search { account, query } => {
             let (ids, needs_gmail) = search_ids(reads, *account, query, &sub.gmail_hits, now)?;
@@ -75,11 +75,11 @@ pub(super) fn patch(
         return Ok(None);
     }
     let sub_id = id.clone();
-    let key = sub.key.clone();
-    Ok(match &key {
+    Ok(match &sub.key {
         SubKey::List { account, view } => {
             let ids = view_ids(reads, *account, view)?;
-            list_patch(reads, sub_id, sub, ids, ListKind::of(view), changes, forced)?
+            let kind = ListKind::of(view);
+            list_patch(reads, sub_id, sub, ids, kind, changes, forced)?
         }
         SubKey::Search { account, query } => {
             let (ids, needs_gmail) = search_ids(reads, *account, query, &sub.gmail_hits, now)?;

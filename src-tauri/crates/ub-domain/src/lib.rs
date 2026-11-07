@@ -41,7 +41,7 @@ mod tests;
 
 pub use addr::Addr;
 pub use addressing::{Addressing, ReplyTarget, addressing};
-pub use drafts::{DraftAim, DraftContent, gmail_draft_aim, gmail_draft_kind};
+pub use drafts::{DraftAim, DraftContent, DraftContentRef, gmail_draft_aim, gmail_draft_kind};
 pub use hue::{AVATAR_HUES, avatar_hue};
 pub use identity::{Identity, SendAsAddress};
 pub use ids::{
