@@ -4,11 +4,17 @@ import { create } from "zustand";
 import { addAccount, signInAgain } from "../ipc/bridge";
 import { useChrome } from "../store/chrome";
 
+/** Why a sign-in failed, or null when a newer sign-in replaced it: that says nothing. */
+function failure(e: unknown): string | null {
+  const message = String(e);
+  return message.includes("Sign-in cancelled") ? null : message;
+}
+
 /** Shows why a sign-in failed. One replaced by a newer attempt says nothing. */
 export function reportSignIn(signIn: Promise<unknown>) {
   signIn.catch((e: unknown) => {
-    const message = String(e);
-    if (!message.includes("Sign-in cancelled")) toast.error(message);
+    const message = failure(e);
+    if (message !== null) toast.error(message);
   });
 }
 
@@ -23,7 +29,8 @@ const attempts = new Map<string, number>();
 /**
  * Starts a sign-in whose status shows on its screen. Starting again while one
  * waits starts over: the core cancels the sign-in left in the browser, and
- * only the latest attempt reports back.
+ * only the latest attempt reports back. One cancelled by a sign-in started
+ * elsewhere (another account's, or Add account) stops waiting and says nothing.
  */
 function startSignIn(key: string, run: () => Promise<unknown>) {
   const mine = (attempts.get(key) ?? 0) + 1;
@@ -33,7 +40,7 @@ function startSignIn(key: string, run: () => Promise<unknown>) {
   run()
     .catch((e: unknown) => {
       if (latest())
-        useStatus.setState((s) => ({ [key]: { ...(s[key] ?? IDLE), error: String(e) } }));
+        useStatus.setState((s) => ({ [key]: { ...(s[key] ?? IDLE), error: failure(e) } }));
     })
     .finally(() => {
       if (latest()) useStatus.setState((s) => ({ [key]: { ...(s[key] ?? IDLE), busy: false } }));

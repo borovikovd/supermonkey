@@ -33,6 +33,9 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ACC-19 · P1 · A reply open when its account signs out stays on screen until it is closed · §Accounts, §Keyboard
 - ACC-20 · P1 · Removing the account on screen while its reply is open leaves no composer behind · §Accounts, §Switching
 - ACC-21 · P2 · Removing the account on screen shows the next account on the rail, or the one before the last · §Accounts, §Settings
+- ACC-22 · P1 · A sign-in left waiting while the user moves on finishes in the background, with what changed in Gmail meanwhile · §Accounts, §Switching
+- ACC-23 · P2 · Starting another sign-in cancels the waiting one, which shows no error · §Accounts
+- ACC-24 · P2 · A sign-in cut off by a lost connection or a quit adds nothing, and the next one works · §Accounts
 
 ### inbox-navigation.spec.ts (NAV)
 

@@ -3,7 +3,7 @@
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
-import type { Control } from "./control.ts";
+import type { ApiMethod, Control } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A, B, C } from "./seeds.ts";
@@ -1011,4 +1011,168 @@ test("ACC-21 removing the account on screen shows the next account on the rail, 
   await removeOnScreen(B);
   await expect(app.row("Cy 1")).toHaveCount(1);
   await expect(app.row("Person 1")).toHaveCount(0);
+});
+
+/** Google revokes each account's grant and the next poll signs it out. */
+async function signOut(app: App, gmail: Control, ...emails: string[]): Promise<void> {
+  await Promise.all(
+    emails.map(async (email) => {
+      await gmail.invalidGrant(email, true);
+      await gmail.expireAccessTokens(email);
+    }),
+  );
+  await gmail.poll();
+  await app.settle();
+  await Promise.all(emails.map((email) => expect(app.signInMarker(email)).toBeVisible()));
+  await Promise.all(emails.map((email) => gmail.invalidGrant(email, false)));
+}
+
+/** Waits until `n` requests to `api` are parked by a hold. */
+async function parked(gmail: Control, api: ApiMethod, n = 1) {
+  await expect.poll(async () => (await gmail.requests(api)).filter((r) => r.held).length).toBe(n);
+}
+
+const WAITING = /Waiting for Google in your browser/;
+
+test("ACC-22 a sign-in left waiting while the user moves on finishes in the background, with what changed in Gmail meanwhile", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await signOut(app, gmail, A);
+  const errors = (await app.errorToastsShown()).length;
+
+  const consent = await gmail.hold("oauth.authorize");
+  await gmail.nextSignIn({ email: A });
+  await app.page.getByRole("button", { name: "Sign in with Google" }).click();
+  await expect(app.page.getByText(WAITING)).toBeVisible();
+  await parked(gmail, "oauth.authorize");
+
+  // The user moves on to B and opens and closes Settings.
+  await app.press("Control+2");
+  await expect(app.highlighted).toContainText("Bea Blue");
+  await app.press("Meta+,");
+  await expect(app.sheet("Settings")).toBeVisible();
+  await app.press("Escape");
+  await expect(app.sheet("Settings")).toHaveCount(0);
+  // Gmail changes meanwhile: new mail, and a thread trashed elsewhere.
+  await gmail.deliver({
+    account: A,
+    from: seeds.PERSONS[0] ?? "",
+    subject: "While signing in",
+    text: "Hi.",
+    poll: false,
+  });
+  await gmail.modify(A, s.latest("p1").id, ["TRASH"], ["INBOX"]);
+
+  // The person finishes in the browser: A signs in, and B stays on screen.
+  await consent.release();
+  await expect(app.signInMarker(A)).toHaveCount(0);
+  await app.settle();
+  await expect(app.highlighted).toContainText("Bea Blue");
+  await app.expectNoErrorToasts(errors);
+  await app.press("Control+1");
+  await expect(app.row("While signing in")).toHaveCount(1);
+  await expect(app.row("Person 1")).toHaveCount(0);
+  await expect(app.row("Person 2")).toHaveCount(1);
+  await expect(app.page.getByText(WAITING)).toHaveCount(0);
+});
+
+// The cancelled sign-in's "Sign-in cancelled" showed as an error under its button.
+test("ACC-23 starting another sign-in cancels the waiting one, which shows no error", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await signOut(app, gmail, A, B);
+  const errors = (await app.errorToastsShown()).length;
+  const signIn = app.page.getByRole("button", { name: "Sign in with Google" });
+  const waiting = app.page.getByText(WAITING);
+  const cancelled = app.page.getByText(/cancel/i);
+
+  // A's Sign in again waits in the browser; then B's starts.
+  let consent = await gmail.hold("oauth.authorize");
+  await gmail.nextSignIn({ email: A });
+  await signIn.click();
+  await expect(waiting).toBeVisible();
+  await app.press("Control+2");
+  await expect(app.page.getByText(`You're signed out of ${B}.`)).toBeVisible();
+  await expect(waiting).toHaveCount(0);
+  await gmail.nextSignIn({ email: B });
+  await signIn.click();
+  await expect(waiting).toBeVisible();
+  await parked(gmail, "oauth.authorize", 2);
+
+  // A's was cancelled: its screen neither waits nor shows an error.
+  await app.press("Control+1");
+  await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
+  await expect(waiting).toHaveCount(0);
+  await expect(cancelled).toHaveCount(0);
+  // Both browser pages finish: only B's sign-in was still waiting for its answer.
+  await consent.release(undefined, { min: 2 });
+  await expect(app.signInMarker(B)).toHaveCount(0);
+  await app.settle();
+  await expect(app.signInMarker(A)).toBeVisible();
+  await expect(cancelled).toHaveCount(0);
+
+  // The palette's Add account cancels a waiting Sign in again the same way.
+  consent = await gmail.hold("oauth.authorize");
+  await gmail.nextSignIn({ email: A });
+  await signIn.click();
+  await expect(waiting).toBeVisible();
+  await parked(gmail, "oauth.authorize");
+  await gmail.nextSignIn({ email: B });
+  await command(app, "Add account");
+  await expect(waiting).toHaveCount(0);
+  await expect(cancelled).toHaveCount(0);
+  await consent.release(undefined, { min: 2 });
+  await app.settle();
+  await expect(app.signInMarker(A)).toBeVisible();
+  await expect(cancelled).toHaveCount(0);
+  await app.expectNoErrorToasts(errors);
+
+  // A fresh Sign in again for A works.
+  await gmail.nextSignIn({ email: A });
+  await signIn.click();
+  await expect(app.signInMarker(A)).toHaveCount(0);
+  await expect(app.row("Q4 plan")).toBeVisible();
+});
+
+test("ACC-24 a sign-in cut off by a lost connection or a quit adds nothing, and the next one works", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.none(gmail, app);
+
+  // The token exchange finds no connection: the sign-in fails and says so.
+  await gmail.hold("oauth.token");
+  await gmail.nextSignIn({ email: A });
+  await app.firstRunButton.click();
+  await parked(gmail, "oauth.token");
+  await gmail.offline(true);
+  await expect(app.page.getByText(WAITING)).toHaveCount(0);
+  await expect(app.page.getByText(/Sign-in failed/)).toBeVisible();
+  await app.settle();
+  await expect(app.page.getByRole("navigation")).toHaveCount(0);
+  expect(await gmail.tokens()).toEqual([]);
+  await gmail.clearFaults();
+  await gmail.offline(false);
+  await gmail.nextSignIn({ email: A });
+  await app.firstRunButton.click();
+  await expect(app.account(A)).toBeVisible();
+
+  // A quit while the next sign-in waits in the browser.
+  await gmail.nextSignIn({ abandon: true });
+  await command(app, "Add account");
+  await app.settle();
+  await app.quit();
+  await app.launch();
+  await expect(app.account(A)).toBeVisible();
+  await expect(app.account(B)).toHaveCount(0);
+  await expect(app.page.getByText(WAITING)).toHaveCount(0);
+  expect((await gmail.tokens()).map((k) => k.account)).toEqual([A]);
+  await gmail.nextSignIn({ email: B });
+  await command(app, "Add account");
+  await expect(app.account(B)).toBeVisible();
+  expect((await gmail.tokens()).map((k) => k.account).toSorted()).toEqual([A, B].toSorted());
 });
