@@ -616,4 +616,49 @@ test.describe("attachments", () => {
     const forwarded = filesOf(await sentWithSubject(gmail, "Fwd: Photo from my phone"));
     expect(forwarded["photo.png"]?.bytes.equals(files.photoPng.buffer)).toBe(true);
   });
+
+  // The composer left the screen before its close or send ran, and took the
+  // typed address with it: the fields that held it were gone by then.
+  test("ATT-19 an address typed but not yet a chip goes with a close or send that waits for a file", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    const heading = app.page.getByRole("heading", { name: "New Message" });
+    const typeCc = async (address: string) => {
+      await app.press("Meta+Shift+c");
+      await expect(app.field("Cc")).toBeFocused();
+      await app.type(address);
+    };
+
+    // Closed while the file attaches: the draft keeps the address.
+    await newMessage(app, "Closed mid-upload", "Cc is typed.");
+    const closing = await app.park("add_attachment");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await typeCc("cora@cc.test");
+    await app.press("Escape", "Escape");
+    await expect(heading).toHaveCount(0);
+    await closing();
+    await app.settle();
+    const drafts = (await gmail.gmail(A)).drafts;
+    expect(subjects(drafts.map((d) => d.message))).toEqual(["Closed mid-upload"]);
+    expect(parseMime(drafts[0]?.message.raw ?? "").headers.cc).toContain("cora@cc.test");
+
+    // Sent while the file attaches, then closed: the send carries the address.
+    await newMessage(app, "Sent mid-upload", "Cc is typed.");
+    const sending = await app.park("add_attachment");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await typeCc("dora@cc.test");
+    await app.press("Meta+Enter");
+    await expect(heading).toBeVisible();
+    await app.press("Escape", "Escape");
+    await expect(heading).toHaveCount(0);
+    await sending();
+    await app.settle();
+    await app.advance(10_000);
+    await app.settle();
+    const sentMime = await sentWithSubject(gmail, "Sent mid-upload");
+    expect(sentMime.headers.cc).toContain("dora@cc.test");
+    expect(Object.keys(filesOf(sentMime))).toEqual(["notes.txt"]);
+  });
 });

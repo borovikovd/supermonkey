@@ -243,6 +243,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ATT-16 · P2 · The same file can be attached twice · §Drafts
 - ATT-17 · P2 · An attachment that can't be opened says why · §Reading, §Offline
 - ATT-18 · P1 · An image the body doesn't show, such as a photo sent inline with no Content-ID, is an attachment, and a forward carries it · §Reading, §Addressing
+- ATT-19 · P1 · An address typed but not yet a chip goes with a close or send that waits for a file · §Drafts, §Recipients and autocomplete
 
 ### drafts.spec.ts (DRF)
 

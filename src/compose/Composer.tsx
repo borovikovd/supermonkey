@@ -367,6 +367,9 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     return registerComposer({
       draft,
       pending: () => takePending.current(true),
+      commitTyped: () => {
+        for (const field of [toRef, ccRef, bccRef]) field.current?.commit();
+      },
       invalid: () =>
         [...latest.current.to, ...latest.current.cc, ...latest.current.bcc]
           .filter((a) => !isValidEmail(a.email))

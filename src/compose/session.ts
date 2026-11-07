@@ -30,6 +30,8 @@ export type ComposerHandle = {
   draft: string;
   /** Takes the save of pending fields not yet saved, or null when saved. */
   pending: () => UpdateSave | null;
+  /** Turns text typed in To, Cc, and Bcc into chips; only the fields on screen hold it. */
+  commitTyped: () => void;
   /** Recipients that are not valid addresses. */
   invalid: () => string[];
   /** Files attached to the draft join the composer's fields. */
@@ -335,6 +337,9 @@ export function closeComposerOnScreen() {
   if (!draft) return;
   // This composer's own handle: the close may run after it has left the screen.
   const handle = mountedComposer(draft);
+  // Typed text becomes a chip now, while its field is on screen: a close or
+  // send that waits for a file runs after the fields are gone.
+  handle?.commitTyped();
   // A send waiting for its files goes on once they are in (SPEC Drafts).
   if (waiting.has(draft)) {
     leave(draft, false);
