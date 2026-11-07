@@ -35,6 +35,10 @@ pub enum Error {
     /// browser. The UI matches this text.
     #[error("Sign-in cancelled")]
     SignInCancelled,
+    /// The draft was sent, discarded, or its account removed while a file
+    /// for it was on its way. The UI matches this text.
+    #[error("The draft is gone")]
+    DraftGone,
     /// A Gmail call failed.
     #[error("{0}")]
     Gmail(#[from] ub_gmail::GmailError),

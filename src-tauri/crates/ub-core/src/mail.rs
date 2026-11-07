@@ -73,7 +73,8 @@ impl Mail {
 
     /// Keeps a file the user attached to a draft with the draft's files,
     /// until the draft is sent or discarded (SPEC Compose: attachments).
-    /// The composer then saves it as one of the draft's attachments.
+    /// The composer then saves it as one of the draft's attachments. A draft
+    /// already gone keeps nothing: [`Error::DraftGone`].
     pub async fn add_attachment(
         &self,
         draft: DraftId,
@@ -93,6 +94,12 @@ impl Mail {
         let name = safe_name(&filename);
         let (id, path) =
             tokio::task::spawn_blocking(move || keep_file(&dir, &name, &data)).await??;
+        // The draft went while the file was on its way, and its folder with
+        // it (SPEC Drafts): this file goes too.
+        if self.workers.draft_files_gone(&draft) {
+            self.workers.delete_draft_files(&draft);
+            return Err(Error::DraftGone);
+        }
         Ok(DraftAttachment {
             id,
             filename,

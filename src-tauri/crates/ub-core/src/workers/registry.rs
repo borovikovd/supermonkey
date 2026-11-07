@@ -3,7 +3,7 @@
 //! forgetting them happens here, so no two workers of one account ever run
 //! at once.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -42,6 +42,10 @@ pub(crate) struct AccountWorkers {
     /// How many removed accounts are still being cleaned up. A sign-in waits
     /// until none is: a revoke landing after it would end the new grant too.
     removals: watch::Sender<usize>,
+    /// Drafts whose files were deleted this run: sent, discarded, or their
+    /// account removed. Draft ids are never reused, so a file that lands for
+    /// one later goes too.
+    gone_drafts: Mutex<HashSet<DraftId>>,
 }
 
 /// The running workers, by account.
@@ -93,6 +97,7 @@ impl AccountWorkers {
             next_id: AtomicU64::new(0),
             launched: AtomicBool::new(false),
             removals: watch::Sender::new(0),
+            gone_drafts: Mutex::default(),
         })
     }
 
@@ -127,8 +132,11 @@ impl AccountWorkers {
         draft_dir(&self.deps.data_dir, draft)
     }
 
-    /// Deletes a draft's added files: its row is gone.
+    /// Deletes a draft's added files: its row is gone. It is marked gone
+    /// first, so a file written before the mark is in the folder this
+    /// deletes, and one written after it sees the mark.
     pub(crate) fn delete_draft_files(&self, draft: &DraftId) {
+        self.gone_drafts.lock().insert(draft.clone());
         let dir = self.draft_dir(draft);
         self.tasks.spawn("delete draft files", async move {
             let deleted =
@@ -143,6 +151,11 @@ impl AccountWorkers {
                 Err(e) => tracing::warn!(error = %e, "deleting a draft's files failed"),
             }
         });
+    }
+
+    /// Whether the draft's files were deleted with it this run.
+    pub(crate) fn draft_files_gone(&self, draft: &DraftId) -> bool {
+        self.gone_drafts.lock().contains(draft)
     }
 
     /// The account's running worker.

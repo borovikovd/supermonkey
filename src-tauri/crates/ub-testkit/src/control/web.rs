@@ -1,5 +1,6 @@
 //! The web around the app: the built UI, the remote image host, the sink
-//! for hostile destinations, and a look inside the database files.
+//! for hostile destinations, and a look inside the database files and the
+//! draft folders.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -124,6 +125,24 @@ pub(crate) async fn db_contains(State(s): State<Arc<Server>>, Query(q): Query<Co
         }
     }
     Ok(Json(json!({ "found": found })))
+}
+
+/// The drafts whose added files are in the data folder (`drafts/<draft>`),
+/// sorted: SPEC Drafts says the folder goes with the draft, with nothing on
+/// screen to show it.
+pub(crate) async fn draft_folders(State(s): State<Arc<Server>>) -> Ctl {
+    let mut names = Vec::new();
+    match tokio::fs::read_dir(s.data_dir.join("drafts")).await {
+        Ok(mut dir) => {
+            while let Some(entry) = dir.next_entry().await? {
+                names.push(entry.file_name().to_string_lossy().into_owned());
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(e.into()),
+    }
+    names.sort();
+    Ok(Json(json!(names)))
 }
 
 /// Serves the built UI; unknown paths get `index.html`.

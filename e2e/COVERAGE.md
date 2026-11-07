@@ -247,6 +247,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ATT-17 · P2 · An attachment that can't be opened says why · §Reading, §Offline
 - ATT-18 · P1 · A file sent inline, as Apple Mail sends it, or an image the body doesn't show is an attachment, and a forward carries it · §Reading, §Addressing
 - ATT-19 · P1 · An address typed but not yet a chip goes with a close or send that waits for a file · §Drafts, §Recipients and autocomplete
+- ATT-20 · P1 · Removing the account while its composer's send or close waits for a file leaves nothing behind · §Accounts, §Drafts
 
 ### drafts.spec.ts (DRF)
 

@@ -11,7 +11,7 @@ import { attachment, files } from "./files.ts";
 import { expect, test } from "./fixtures.ts";
 import { attachments, findPart, htmlOf, parseMime, shape, type MimePart } from "./mime.ts";
 import * as seeds from "./seeds.ts";
-import { A } from "./seeds.ts";
+import { A, B, C } from "./seeds.ts";
 
 /** The decoded subjects of these messages. */
 const subjects = (msgs: GmailMessage[]) => msgs.map((m) => parseMime(m.raw).headers.subject);
@@ -492,6 +492,8 @@ test.describe("attachments", () => {
     const state = await gmail.gmail(A);
     expect(subjects(state.messages)).not.toContain("Thrown away");
     expect(state.drafts).toHaveLength(0);
+    // The file went with the draft.
+    expect(await gmail.draftFolders()).toEqual([]);
   });
 
   test("ATT-16 the same file can be attached twice", async ({ app, gmail }) => {
@@ -613,6 +615,51 @@ test.describe("attachments", () => {
     await app.settle();
     const forwarded = filesOf(await sentWithSubject(gmail, "Fwd: Photo from my phone"));
     expect(forwarded["photo.png"]?.bytes.equals(files.photoPng.buffer)).toBe(true);
+  });
+
+  // The send went ahead for the removed draft once the file was in: Rust
+  // refused it, and the draft's "not sent" switched back to the removed account.
+  test("ATT-20 removing the account while its composer's send or close waits for a file leaves nothing behind", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app, { connect: ["A", "B", "C"] });
+    const heading = app.page.getByRole("heading", { name: "New Message" });
+
+    // A send waits for the file when the account on screen is removed.
+    await newMessage(app, "Gone with A", "The file is late.");
+    let attach = await app.park("add_attachment");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await app.press("Meta+Enter");
+    await expect(heading).toBeVisible();
+    await app.removeAccount(A);
+    await expect(heading).toHaveCount(0);
+    await attach();
+    await app.settle();
+    await expect(app.account(A)).toHaveCount(0);
+    await expect(app.highlighted).toContainText("Bea Blue");
+    await expect(heading).toHaveCount(0);
+    await app.expectNoErrorToasts();
+
+    // A close waits for the file when its account is removed from another one's screen.
+    await newMessage(app, "Gone with B", "The file is late.");
+    attach = await app.park("add_attachment");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await app.press("Escape", "Escape");
+    await expect(heading).toHaveCount(0);
+    await app.press("Control+2");
+    await expect(app.highlighted).toContainText("Cy 1");
+    await app.removeAccount(B);
+    await attach();
+    await app.settle();
+    await expect(app.highlighted).toContainText("Cy 1");
+    await app.expectNoErrorToasts();
+    expect(await gmail.draftFolders()).toEqual([]);
+    await app.advance(10_000);
+    await app.settle();
+    expect(subjects((await gmail.gmail(C)).messages)).toEqual(
+      expect.not.arrayContaining(["Gone with A", "Gone with B"]),
+    );
   });
 
   // The composer left the screen before its close or send ran, and took the

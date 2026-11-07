@@ -126,8 +126,15 @@ export function loadedDraft(draft: string): DraftState | null {
 /** Files still attaching, by draft: each pick resolves to whether all its files were attached. */
 const uploads = new Map<string, Set<Promise<boolean>>>();
 let attachSeq = 0;
-/** Drafts discarded this session: a file that lands for one goes nowhere. Draft ids are never reused. */
-const discarded = new Set<string>();
+/**
+ * Drafts discarded this session, or gone with their account: a file that
+ * lands for one goes nowhere, and a close or send that waited for it is not
+ * made. Draft ids are never reused.
+ */
+const gone = new Set<string>();
+
+/** Rust's answer to a file for a draft that was sent, discarded, or removed with its account. */
+const DRAFT_GONE = "The draft is gone";
 
 /** A picked file as base64, for the `add_attachment` command. */
 async function readFile(file: File): Promise<string> {
@@ -173,7 +180,9 @@ export function attachFiles(draft: string, files: File[]) {
         try {
           return await addAttachment(draft, file.name, file.type, await readFile(file));
         } catch (err) {
-          toast.error(`Couldn't attach ${file.name}: ${String(err)}`);
+          // The draft went while the file was on its way: there is nothing to tell.
+          if (String(err).includes(DRAFT_GONE)) gone.add(draft);
+          else toast.error(`Couldn't attach ${file.name}: ${String(err)}`);
           return null;
         }
       }),
@@ -198,7 +207,7 @@ export function attachFiles(draft: string, files: File[]) {
  */
 function deliver(draft: string, added: DraftAttachment[]) {
   // The user threw the draft away, files and all.
-  if (discarded.has(draft)) return;
+  if (gone.has(draft)) return;
   const to = mountedComposer(draft) ?? waiting.get(draft)?.handle ?? null;
   if (to) to.addAttachments(added);
   else if (draftOnScreen() === draft) owed.set(draft, [...(owed.get(draft) ?? []), ...added]);
@@ -324,7 +333,10 @@ function cancelWaiting(draft: string): Waiting | undefined {
   return left;
 }
 
-/** Runs `then` once `ready` resolves, with the draft waiting meanwhile, unless reopening or discarding cancels it. */
+/**
+ * Runs `then` once `ready` resolves, with the draft waiting meanwhile, unless
+ * reopening or discarding cancels it, or the draft is gone by then.
+ */
 function defer(
   draft: string,
   handle: ComposerHandle | null,
@@ -336,6 +348,8 @@ function defer(
     const ok = await ready;
     if (entry.cancelled) return;
     waiting.delete(draft);
+    // The draft went with its account meanwhile: nothing is sent or refused (SPEC Accounts).
+    if (gone.has(draft)) return;
     then(ok);
   })();
   waiting.set(draft, entry);
@@ -494,7 +508,7 @@ function send(draft: string, sentFrom: ComposerHandle | null, refused: Refused) 
 export function discardOnScreen() {
   const draft = draftOnScreen();
   if (!draft) return;
-  discarded.add(draft);
+  gone.add(draft);
   cancelWaiting(draft);
   act({ type: "discardDraft", draft });
   leave(draft);

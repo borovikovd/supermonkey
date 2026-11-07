@@ -558,4 +558,12 @@ export class Control {
     const r = await this.call<{ found: boolean }>("GET", `/__test/db-contains?${q}`);
     return r.found;
   }
+
+  /**
+   * The drafts whose added files are in the data folder (`drafts/<draft>`).
+   * Only for SPEC Drafts' promise that the folder goes with the draft.
+   */
+  draftFolders(): Promise<string[]> {
+    return this.call("GET", "/__test/draft-folders");
+  }
 }
