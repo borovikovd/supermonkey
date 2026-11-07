@@ -184,7 +184,7 @@ A thread's views come from its messages' labels. It is in Trash or Spam when any
 
 Most archived, labeled, trashed, and spam mail is older than the first sync. Opening Done, All Mail, a Label, Trash, or Spam view therefore also runs `threads.list` and merges the results the way Search does: Done with `q=-in:inbox -in:draft`, All Mail with `q=-in:draft`, the others with that label's id. Trash and Spam set `includeSpamTrash=true`. Opened offline, the view lists its cached mail, and the listing waits for Gmail as a search's does.
 
-`g` then a letter jumps to a view: `e` done, `a` All Mail, `h` snoozed, `s` starred, `t` sent, `d` drafts, `l` label picker, `#` trash, `!` spam. From any view, `g` then `i` and `g` then `o` open Inbox on the Important and Other splits. The header stays `Inbox`. If that split is hidden because it is empty, the jump shows its header. If Important is turned off, `g` then `i` opens Inbox and does not show that split.
+`g` then a letter jumps to a view: `e` done, `a` All Mail, `h` snoozed, `s` starred, `t` sent, `d` drafts, `l` label picker, `#` trash, `!` spam. The letter is the next key typed: a modifier going down alone, such as the Shift that types `#` or `!`, and a held `g` repeating do not count. From any view, `g` then `i` and `g` then `o` open Inbox on the Important and Other splits. The header stays `Inbox`. If that split is hidden because it is empty, the jump shows its header. If Important is turned off, `g` then `i` opens Inbox and does not show that split.
 
 ## Accounts
 

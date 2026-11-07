@@ -518,3 +518,39 @@ test("NAV-12 a row removed while another account is on screen moves that account
   expect(await labelsOf(gmail, s.latest("p4").id)).toContain("TRASH");
   expect(await labelsOf(gmail, s.latest("p3").id)).not.toContain("TRASH");
 });
+
+// A keyboard sends Shift down before `#` and `!`, and a held key repeats: either
+// ended the wait for `g`'s second key, so `#` trashed and `e` archived instead.
+test("NAV-13 g #, g !, and a held g jump as typed on a keyboard, and touch no mail", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await expect(app.highlighted).toContainText("Person 1");
+  await app.press("x");
+  await expect(app.selected).toHaveCount(1);
+
+  // `press` sends Shift's own keydown before `#` and `!`.
+  await app.press("g", "#");
+  await expectHeader(app, "Trash");
+  await app.press("g", "i");
+  await expectHeader(app, INBOX_HEADER);
+  await app.press("g", "!");
+  await expectHeader(app, "Spam");
+  await app.press("g", "i");
+  await expectHeader(app, INBOX_HEADER);
+
+  // Held long enough to repeat, then e.
+  const keyboard = app.page.keyboard;
+  await keyboard.down("g");
+  await keyboard.down("g");
+  await keyboard.up("g");
+  await app.press("e");
+  await expectHeader(app, "Done");
+
+  await app.settle();
+  const labels = await labelsOf(gmail, s.latest("p1").id);
+  expect(labels).toContain("INBOX");
+  expect(labels).not.toContain("TRASH");
+  expect(labels).not.toContain("SPAM");
+});

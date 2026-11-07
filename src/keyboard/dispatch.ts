@@ -92,8 +92,13 @@ const LAYERS: Layer[] = [
   { name: "mail", active: () => true, take: (e, c, t) => runKey("mail", e, c, t), modal: true },
 ];
 
+/** Keys that only modify the next one: no layer takes them alone. */
+const MODIFIERS = new Set(["Shift", "Meta", "Control", "Alt", "AltGraph", "CapsLock", "Fn"]);
+
 /** Routes a keydown through the layers. */
 export function dispatchKey(e: KeyboardEvent) {
+  // Shift goes down before the `#` it types; it must not end the wait for `g`'s second key.
+  if (MODIFIERS.has(e.key)) return;
   const start = performance.now();
   const c = context();
   if (c.account === null) return;

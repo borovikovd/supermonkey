@@ -42,6 +42,9 @@ const NAVIGATING: PagePending = { invokes: 1, signIns: 0, timers: 0, buffered: 0
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Symbols a US keyboard types with Shift held. */
+const SHIFTED = /^[~!@#$%^&*()_+{}|:"<>?]$/;
+
 /** The Mac's poll interval: after a sleep, the poll timer notices the gap. */
 const POLL_MS = 45_000;
 
@@ -347,10 +350,21 @@ export class App {
     };
   }
 
-  /** Presses keys in order, e.g. `press("g", "i")` or `press("Meta+k")`. */
+  /**
+   * Presses keys in order, e.g. `press("g", "i")` or `press("Meta+k")`. A
+   * symbol typed with Shift on a US keyboard (`#`, `!`, `?`) goes down with
+   * Shift, as a keyboard sends it: Shift's own keydown first.
+   */
   async press(...keys: string[]): Promise<void> {
+    const keyboard = this.page.keyboard;
+    const one = async (k: string) => {
+      if (!SHIFTED.test(k)) return keyboard.press(k);
+      await keyboard.down("Shift");
+      await keyboard.press(k);
+      await keyboard.up("Shift");
+    };
     // In order: each key must land before the next.
-    await keys.reduce((prev, k) => prev.then(() => this.page.keyboard.press(k)), Promise.resolve());
+    await keys.reduce((prev, k) => prev.then(() => one(k)), Promise.resolve());
   }
 
   async type(text: string): Promise<void> {

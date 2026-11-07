@@ -1051,6 +1051,11 @@ function runCommand(cmd: Command, c: Ctx, e: KeyboardEvent, start: number) {
 export function runKey(scope: Scope, e: KeyboardEvent, c: Ctx, start: number): boolean {
   const inScope = COMMANDS.filter((cmd) => cmd.scope === scope);
   if (prefix !== null && scope === "mail") {
+    // A held key repeating, `g` itself most likely, is not the second key.
+    if (e.repeat) {
+      e.preventDefault();
+      return true;
+    }
     const first = prefix;
     prefix = null;
     clearTimeout(prefixTimer);
