@@ -237,6 +237,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ATT-13 · P1 · A file Gmail serves inside the message opens and forwards · §Reading, §Addressing
 - ATT-14 · P1 · A file attached while a send waits for another goes with the send · §Drafts
 - ATT-15 · P1 · Discarding while a send waits for a file cancels the send · §Drafts
+- ATT-16 · P2 · The same file can be attached twice · §Drafts
 
 ### drafts.spec.ts (DRF)
 

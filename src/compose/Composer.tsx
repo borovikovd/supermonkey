@@ -408,8 +408,12 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     } else toRef.current?.focus();
   }, [editor, inline]);
 
-  const onFiles = (files: FileList | null) => {
-    if (files && files.length > 0) attachFiles(draft, Array.from(files));
+  const onFiles = (picker: HTMLInputElement) => {
+    const files = Array.from(picker.files ?? []);
+    // Forget the pick: the browser fires no change for a pick equal to the
+    // input's value, so the same file could not be attached again.
+    picker.value = "";
+    if (files.length > 0) attachFiles(draft, files);
   };
 
   const account = state?.account ?? chromeAccount ?? 0;
@@ -538,7 +542,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       )}
       {/* Empty room in the card goes below the quote, as in Superhuman. */}
       <div className="flex-1" />
-      <input ref={fileRef} type="file" multiple hidden onChange={(e) => onFiles(e.target.files)} />
+      <input ref={fileRef} type="file" multiple hidden onChange={(e) => onFiles(e.target)} />
       <Footer blurred={blurred} />
     </div>
   );

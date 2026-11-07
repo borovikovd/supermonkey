@@ -519,4 +519,24 @@ test.describe("attachments", () => {
     expect(subjects(state.messages)).not.toContain("Thrown away");
     expect(state.drafts).toHaveLength(0);
   });
+
+  test("ATT-16 the same file can be attached twice", async ({ app, gmail }) => {
+    await seeds.standard(gmail, app);
+    await newMessage(app, "Same file twice", "Two copies.");
+    const removeNotes = app.page.getByRole("button", { name: "Remove notes.txt" });
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await expect(removeNotes).toHaveCount(1);
+    // A browser fires no change for a pick equal to the input's value, so the
+    // picker forgets each pick. Playwright fires one anyway, so check the value.
+    await expect(app.page.locator('input[type="file"]')).toHaveValue("");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await expect(removeNotes).toHaveCount(2);
+    await app.settle();
+    await app.press("Meta+Enter");
+    await app.settle();
+    await app.advance(10_000);
+    await app.settle();
+    const mime = await sentWithSubject(gmail, "Same file twice");
+    expect(attachments(mime).map((p) => p.filename)).toEqual(["notes.txt", "notes.txt"]);
+  });
 });
