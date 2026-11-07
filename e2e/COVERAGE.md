@@ -277,6 +277,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SND-18 · P1 · A send while the draft's first upsert is in flight goes out once and leaves no draft · §Drafts, §Gmail errors
 - SND-19 · P1 · A send the core refuses says it was not sent and brings the draft back · §Send and undo, §Actions
 - SND-20 · P2 · An Undo the core refuses says why and opens no composer · §Send and undo, §Actions
+- SND-21 · P1 · A held undo resolves at once when the send's access token could not be refreshed · §Send and undo, §Gmail errors
 
 ### offline.spec.ts (OFF)
 

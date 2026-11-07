@@ -686,7 +686,7 @@ Every Gmail call ends in one of these outcomes. Of these, only a rejection rolls
 
 | Outcome | What Rust does |
 |---|---|
-| No connection, or the request failed before it was sent | The account is offline. The action stays queued and replays when the network returns |
+| No connection, or the request failed before it was sent, including an access token that could not be refreshed for a reason other than `invalid_grant` or a rejection | The account is offline. The action stays queued and replays when the network returns |
 | Sent, but no response (timeout or dropped connection) | Retry, except where the spec says otherwise: `drafts.send` follows Send and undo, and `drafts.create` follows the rule below |
 | `drafts.send` or `drafts.create` gets a 5xx | Gmail may have done the write. For `drafts.send`, a 5xx is no clear answer and a 404 means sent, as in Send and undo. For `drafts.create`, a 5xx follows the rule below |
 | 401 | Refresh the access token once and retry. If the refresh gets `invalid_grant`, the account shows Sign in again. A 401 that survives the refresh does not sign the account out: a queued action backs off and retries, and a sync read is dropped |

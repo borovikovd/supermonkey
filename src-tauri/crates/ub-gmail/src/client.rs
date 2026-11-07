@@ -606,11 +606,15 @@ impl Gmail {
     async fn send_call(&self, call: &Call<'_>) -> Result<ReadResponse, GmailError> {
         let _permit = self.scheduler.acquire(call.priority, call.cost).await;
         let url = format!("{}/{}", self.api, call.path);
-        let token = self.tokens.access_token().await?;
+        let token = self.tokens.access_token().await.map_err(not_sent)?;
         let mut response = self.attempt(call, &url, &token).await?;
         if response.status() == StatusCode::UNAUTHORIZED {
             tracing::debug!("401; refreshing the access token");
-            let token = self.tokens.refresh_after_401(&token).await?;
+            let token = self
+                .tokens
+                .refresh_after_401(&token)
+                .await
+                .map_err(not_sent)?;
             response = self.attempt(call, &url, &token).await?;
         }
         let read = ReadResponse::read(response).await?;
@@ -637,6 +641,20 @@ impl Gmail {
             request = request.json(body);
         }
         http::send(request).await
+    }
+}
+
+/// A token refresh that failed before the call went out (again): Gmail did
+/// nothing, so the call is safe to replay (SPEC Gmail errors), whatever the
+/// token endpoint answered. A refused grant and a rejected request keep
+/// their outcome: the account must sign in again, or the client is wrong.
+fn not_sent(err: GmailError) -> GmailError {
+    match err.outcome() {
+        Outcome::Offline | Outcome::InvalidGrant | Outcome::Rejected { .. } => err,
+        outcome => {
+            let detail = format!("token refresh: {outcome}");
+            GmailError::with_detail(Outcome::Offline, detail)
+        }
     }
 }
 

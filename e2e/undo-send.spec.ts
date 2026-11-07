@@ -861,3 +861,33 @@ test("SND-20 an Undo the core refuses says why and opens no composer", async ({ 
   expect(sent?.labels).not.toContain("TRASH");
   await expect(app.editor).toHaveCount(0);
 });
+
+test("SND-21 a held undo resolves at once when the access token could not be refreshed", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await sendReply(app, "Person 3", "never sent, token refused");
+  await app.press("Escape");
+  // `drafts.send` gets a 401, and the token refresh it needs is in flight.
+  await gmail.fault("drafts.send", { kind: "status", status: 401 }, { times: 1 });
+  const refresh = await gmail.hold("oauth.token");
+  await app.advance(DELAY);
+  await expect
+    .poll(async () => (await gmail.requests("oauth.token")).some((r) => r.held))
+    .toBe(true);
+  const toast = sendToast(app, "Person 3");
+  await undoOn(toast).click();
+  await expect(toast).toContainText("Undoing…");
+  // The refresh gets no answer: `drafts.send` never went out again, so Gmail
+  // never got the send, and the undo resolves as not sent at once.
+  await refresh.release({ kind: "noResponse" });
+  await app.settle();
+  await expect(app.conversationTitle).toContainText("Person 3");
+  await expect(app.editor).toContainText("never sent, token refused");
+  await expect(toast).toHaveCount(0);
+  expect(await gmail.requests("drafts.get")).toEqual([]);
+  await app.advance(60_000, { stepwise: true });
+  await app.settle();
+  expect(await sentIn(gmail, s.thread("p3").threadId)).toEqual([]);
+});
