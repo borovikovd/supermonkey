@@ -293,10 +293,17 @@ export function switchAccountAt(index: number) {
   if (a) switchAccount(a.id);
 }
 
-/** Keeps an account on screen: the first one, when none is yet or the one on screen was removed. */
+/**
+ * Keeps an account on screen: the first one, when none is yet or the one on
+ * screen was removed. A removed account's composer leaves the screen with it,
+ * closed as a second Esc would; its draft is already gone, so the close does
+ * nothing more. Settings stays open (SPEC Accounts).
+ */
 export function followAccounts(ids: number[]) {
   const { account } = chrome();
-  if (account === null || !ids.includes(account)) chrome().setAccount(ids[0] ?? null);
+  if (account !== null && ids.includes(account)) return;
+  closeComposerOnScreen();
+  chrome().setAccount(ids[0] ?? null);
 }
 
 /** A notification click: that account, Inbox, the thread highlighted. */

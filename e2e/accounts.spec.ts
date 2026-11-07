@@ -948,3 +948,29 @@ test("ACC-19 a reply open when its account signs out stays on screen until it is
   const drafts = (await gmail.gmail(A)).drafts;
   expect(drafts.map((d) => d.message.raw).join()).toContain("Half a reply, and the rest");
 });
+
+test("ACC-20 removing the account on screen while its reply is open leaves no composer behind", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await replyTo(app, "Person 2");
+  await app.type("Half a reply");
+  await app.press("Meta+,");
+  const settings = app.sheet("Settings");
+  await settingsBlock(app, A).getByRole("button", { name: "Remove account" }).click();
+  await settings.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(app.account(A)).toHaveCount(0);
+  // Settings stays open, as for any removal (ACC-07).
+  await expect(settings).toBeVisible();
+  await app.press("Escape");
+  await expect(settings).toHaveCount(0);
+  await app.settle();
+
+  // B's Inbox, with the list's hints and keys.
+  await expect(app.editor).toHaveCount(0);
+  await expect(app.hintBar).toHaveText(/E to Mark Done\s*·\s*H to snooze\s*·\s*⌘K for commands/);
+  await expect(app.highlighted).toContainText("Bea Blue");
+  await app.press("j");
+  await expect(app.highlighted).toContainText("Bo Brown");
+});
