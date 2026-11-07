@@ -823,3 +823,45 @@ test("DRF-20 j and k in a conversation opened from Drafts open the other drafts'
   await app.press("Enter");
   await expect(app.editor).toContainText("About message three.");
 });
+
+test("DRF-21 a draft deleted on Gmail while an edit waits to reach Gmail is written again with the edit", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const p3 = s.thread("p3");
+  await openThread(app, "Person 3");
+  await app.reply();
+  await app.type("one");
+  await app.settle();
+  const [first] = await draftsIn(gmail, p3.threadId);
+  expect(bodyOf(first)).toContain("one");
+  await app.press("Escape", "Escape");
+  await app.settle();
+
+  // A star waits on Gmail, so the edit's upsert queues behind it.
+  const star = await gmail.hold("messages.batchModify");
+  await app.press("s");
+  await expect
+    .poll(async () => (await gmail.requests("messages.batchModify")).some((r) => r.held))
+    .toBe(true);
+  await app.reply("r");
+  await expect(app.editor).toHaveText("one");
+  await app.type(" two");
+  await app.press("Escape", "Escape");
+  await app.settle();
+  await expect(stub(app, "one two")).toHaveCount(1);
+
+  // Meanwhile the draft is deleted in another client, and a poll sees it.
+  await gmail.deleteDraft(A, first?.id ?? "", { poll: true });
+  await app.settle();
+  await expect(stub(app, "one two")).toHaveCount(1);
+
+  await star.release();
+  await app.settle();
+  await expect(stub(app, "one two")).toHaveCount(1);
+  const now = await draftsIn(gmail, p3.threadId);
+  expect(now).toHaveLength(1);
+  expect(now[0]?.id).not.toBe(first?.id);
+  expect(bodyOf(now[0])).toContain("one two");
+});

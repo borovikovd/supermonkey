@@ -253,6 +253,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - DRF-18 · P1 · A crash after `drafts.create` reached Gmail, before its ids were stored, leaves one draft · §Gmail errors, §Drafts
 - DRF-19 · P1 · An edit still waiting to reach Gmail is not replaced by an older Gmail version · §Drafts
 - DRF-20 · P1 · `j` and `k` in a conversation opened from Drafts open the other drafts' threads and keep the Drafts highlight · §Reading, §Keyboard
+- DRF-21 · P1 · A draft deleted on Gmail while an edit waits to reach Gmail is written again with the edit · §Drafts
 
 ### undo-send.spec.ts (SND)
 

@@ -116,9 +116,11 @@ fn delete_gmail_draft(
 }
 
 /// Drafts whose Gmail draft `drafts.list` no longer has (sent from a phone,
-/// say) are deleted, unless a composer has one open: then it keeps its
-/// text, loses its Gmail ids so its next upsert creates one, and a notice
-/// says so. A draft that changed since the list was read is not gone.
+/// say) are deleted, unless a composer has one open or its upsert is
+/// queued: then it keeps its text and loses its Gmail ids, so its next
+/// upsert creates one with the edit Gmail has not seen; an open one's
+/// composer gets a notice. A draft that changed since the list was read is
+/// not gone.
 pub(crate) fn drop_gone(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -136,17 +138,20 @@ pub(crate) fn drop_gone(
             continue;
         }
         let mut draft = record.draft;
-        if state.subs.has_composer(id) {
+        let open = state.subs.has_composer(id);
+        if open || tx.read().ops().upserts_draft(id)? {
             lifecycle::gmail_gone(&mut draft);
             tx.drafts().put(&draft)?;
-            tx.notices().add(&NewNotice {
-                account: draft.account,
-                kind: NoticeKind::DraftGone,
-                message: GONE_ELSEWHERE.to_owned(),
-                draft: Some(draft.id),
-                thread: None,
-                created_at: now,
-            })?;
+            if open {
+                tx.notices().add(&NewNotice {
+                    account: draft.account,
+                    kind: NoticeKind::DraftGone,
+                    message: GONE_ELSEWHERE.to_owned(),
+                    draft: Some(draft.id),
+                    thread: None,
+                    created_at: now,
+                })?;
+            }
         } else {
             tx.drafts().delete(id)?;
             state.effect(Effect::DraftFilesGone(id.clone()));
