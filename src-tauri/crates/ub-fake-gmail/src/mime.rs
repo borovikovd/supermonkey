@@ -39,6 +39,10 @@ pub(crate) fn parse(raw: &[u8], new_id: &mut dyn FnMut() -> String) -> Parsed {
     }
 }
 
+/// Marks a part whose bytes the payload carries, as Gmail serves some small
+/// parts. The fake's own header: left out of the payload's headers.
+const SERVED_INLINE: &str = "X-Fake-Gmail-Served-Inline";
+
 struct Ctx<'a> {
     new_id: &'a mut dyn FnMut() -> String,
     attachments: Vec<(String, Vec<u8>)>,
@@ -58,6 +62,7 @@ fn parse_part(bytes: &[u8], part_id: &str, ctx: &mut Ctx<'_>) -> (Value, Vec<(St
         .unwrap_or_default();
     let json_headers: Vec<Value> = headers
         .iter()
+        .filter(|(name, _)| !name.eq_ignore_ascii_case(SERVED_INLINE))
         .map(|(name, value)| json!({ "name": name, "value": value }))
         .collect();
 
@@ -94,6 +99,9 @@ fn parse_part(bytes: &[u8], part_id: &str, ctx: &mut Ctx<'_>) -> (Value, Vec<(St
             } else if mime_type == "text/html" && ctx.html.is_none() {
                 ctx.html = Some(String::from_utf8_lossy(&data).into_owned());
             }
+            node["body"] = json!({ "size": data.len(), "data": URL_SAFE.encode(&data) });
+        } else if header(&headers, SERVED_INLINE).is_some() {
+            // A file whose bytes the payload carries, with no attachment id.
             node["body"] = json!({ "size": data.len(), "data": URL_SAFE.encode(&data) });
         } else {
             let id = (ctx.new_id)();
@@ -388,6 +396,9 @@ fn attachment(a: &NewAttachment) -> String {
     )];
     if let Some(cid) = &a.content_id {
         headers.push(("Content-ID".to_owned(), format!("<{cid}>")));
+    }
+    if a.served_inline {
+        headers.push((SERVED_INLINE.to_owned(), "yes".to_owned()));
     }
     leaf(
         &format!("{}; name=\"{}\"", a.mime_type, a.filename),

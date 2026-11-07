@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use ub_domain::{AttachmentId, Millis};
-use ub_gmail::{GmailAttachmentId, GmailError, Priority};
+use ub_domain::{AttachmentId, GmailMessageId, Millis};
+use ub_gmail::{Format, GmailAttachmentId, GmailError, Priority};
 use ub_store::{AttachmentSource, Priority as WritePriority, ReadPool, StoreError};
 
 use super::account::AccountCtx;
@@ -19,7 +19,8 @@ use crate::{Error, Platform};
 /// Why an attachment's file could not be had.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DownloadError {
-    /// It is not stored, has no Gmail id, or is another account's.
+    /// It is not stored, Gmail no longer serves its bytes, or it is another
+    /// account's.
     #[error("The attachment is gone")]
     Gone,
     /// The account stopped syncing: offline at launch, or signed out.
@@ -87,16 +88,17 @@ pub(crate) async fn ensure(
             return Ok(path);
         }
     }
-    let gmail_id = record
-        .gmail_attachment_id
-        .map(GmailAttachmentId::from)
-        .ok_or(DownloadError::Gone)?;
-    let bytes = ctx
-        .gmail
-        .get_attachment(Priority::P2, &message_gmail_id, &gmail_id)
-        .await;
-    ctx.note(&bytes);
-    let bytes = bytes?;
+    let bytes = match record.gmail_attachment_id.map(GmailAttachmentId::from) {
+        Some(gmail_id) => {
+            let bytes = ctx
+                .gmail
+                .get_attachment(Priority::P2, &message_gmail_id, &gmail_id)
+                .await;
+            ctx.note(&bytes);
+            bytes?
+        }
+        None => in_message(ctx, &message_gmail_id, &record.part_id).await?,
+    };
     // Removed meanwhile: its folder is gone and must stay gone.
     if ctx.tasks.token().is_cancelled() {
         return Err(DownloadError::Stopped);
@@ -117,6 +119,33 @@ pub(crate) async fn ensure(
         .await
         .map_err(|e: StoreError| Error::Store(e))?;
     Ok(path)
+}
+
+/// The bytes of a part Gmail serves inside its message, with no attachment
+/// id, as it does for some small files: the message is read again.
+async fn in_message(
+    ctx: &AccountCtx,
+    message: &GmailMessageId,
+    part_id: &str,
+) -> Result<Vec<u8>, DownloadError> {
+    let read = ctx
+        .gmail
+        .get_message(Priority::P2, message, Format::Full)
+        .await;
+    ctx.note(&read);
+    let Some(payload) = read?.payload else {
+        return Err(DownloadError::Gone);
+    };
+    let parsed = ub_mime::parse_message(&payload).map_err(|e| {
+        tracing::warn!(error = %e, "a message read for its attachment doesn't parse");
+        DownloadError::Gone
+    })?;
+    parsed
+        .parts
+        .into_iter()
+        .find(|part| part.part_id == part_id)
+        .and_then(|part| part.data)
+        .ok_or(DownloadError::Gone)
 }
 
 /// Writes an attachment of the message whose folder is `message_dir` into

@@ -30,6 +30,9 @@ pub(crate) struct AttachmentReq {
     /// `Content-Disposition: inline` with no content id.
     #[serde(default)]
     inline: bool,
+    /// Served in the payload with no attachment id.
+    #[serde(default)]
+    served_inline: bool,
 }
 
 fn attachments(list: Vec<AttachmentReq>) -> Result<Vec<NewAttachment>, Fail> {
@@ -48,6 +51,7 @@ fn attachments(list: Vec<AttachmentReq>) -> Result<Vec<NewAttachment>, Fail> {
                 data,
                 content_id: a.content_id,
                 inline: a.inline,
+                served_inline: a.served_inline,
             })
         })
         .collect()

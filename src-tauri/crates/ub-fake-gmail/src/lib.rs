@@ -545,6 +545,9 @@ pub struct NewAttachment {
     /// `Content-Disposition: inline` with no content id, beside the body, as
     /// Apple Mail sends every file.
     pub inline: bool,
+    /// Served in the message's payload (`body.data`) with no attachment id,
+    /// as Gmail serves some small parts.
+    pub served_inline: bool,
 }
 
 /// Ids of a message the fake stored.

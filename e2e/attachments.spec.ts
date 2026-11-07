@@ -142,6 +142,44 @@ test.describe("attachments", () => {
     expect(readFileSync(openedFiles[0] ?? "").equals(files.reportPdf.buffer)).toBe(true);
   });
 
+  test("ATT-13 a file Gmail serves inside the message opens and forwards", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    await gmail.deliver({
+      account: A,
+      from: "Nina Notes <nina@notes.test>",
+      subject: "Meeting notes",
+      text: "Notes attached.",
+      attachments: [{ ...attachment(files.notesTxt), servedInline: true }],
+    });
+    await app.settle();
+    await app.row("Meeting notes").click();
+    // The received message's chip: the forward below carries one too.
+    const chip = app.conversation.getByRole("button", { name: /notes\.txt/ }).first();
+    await expect(chip).toContainText("notes.txt");
+
+    // Forwarded before it was ever opened.
+    await app.reply("f");
+    await app.press("Meta+Shift+o");
+    await app.type("kim@kite.test,");
+    await expect(app.chips("To")).toHaveCount(1);
+    await app.settle();
+    await app.press("Meta+Enter");
+    await app.advance(10_000);
+    await app.settle();
+    const forwarded = filesOf(await sentWithSubject(gmail, "Fwd: Meeting notes"));
+    expect(forwarded["notes.txt"]?.bytes.equals(files.notesTxt.buffer)).toBe(true);
+
+    await chip.click();
+    await app.settle();
+    const { openedFiles } = await gmail.platform();
+    expect(openedFiles).toHaveLength(1);
+    expect(readFileSync(openedFiles[0] ?? "").equals(files.notesTxt.buffer)).toBe(true);
+    await expect(app.errorToasts).toHaveCount(0);
+  });
+
   test("ATT-03 a forward made offline still sends its attachments", async ({ app, gmail }) => {
     const s = await seeds.standard(gmail, app);
     const synced = new Set((await gmail.requests("attachments.get")).map((r) => r.path));

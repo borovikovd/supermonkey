@@ -195,6 +195,7 @@ fn seed_people(user: &FakeUser, me: &str) {
                     data: PNG.to_vec(),
                     content_id: Some("chart@demo".into()),
                     inline: false,
+                    served_inline: false,
                 },
                 NewAttachment {
                     filename: "numbers.csv".into(),
@@ -202,6 +203,7 @@ fn seed_people(user: &FakeUser, me: &str) {
                     data: b"quarter,revenue\nQ3,42\n".to_vec(),
                     content_id: None,
                     inline: false,
+                    served_inline: false,
                 },
             ],
             ..Default::default()

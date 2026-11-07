@@ -13,6 +13,8 @@ export type Attachment = {
   contentId?: string;
   /** `Content-Disposition: inline` with no content id, as Apple Mail sends every file. */
   inline?: boolean;
+  /** Gmail serves its bytes in the message's payload, with no attachment id, as it does for some small parts. */
+  servedInline?: boolean;
 };
 
 export type Delivery = {
