@@ -11,6 +11,8 @@ export type Attachment = {
   base64?: boolean;
   /** Makes it an inline part, referenced from HTML as `cid:<contentId>`. */
   contentId?: string;
+  /** `Content-Disposition: inline` with no content id, as Apple Mail sends every file. */
+  inline?: boolean;
 };
 
 export type Delivery = {

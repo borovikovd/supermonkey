@@ -194,12 +194,14 @@ fn seed_people(user: &FakeUser, me: &str) {
                     mime_type: "image/png".into(),
                     data: PNG.to_vec(),
                     content_id: Some("chart@demo".into()),
+                    inline: false,
                 },
                 NewAttachment {
                     filename: "numbers.csv".into(),
                     mime_type: "text/csv".into(),
                     data: b"quarter,revenue\nQ3,42\n".to_vec(),
                     content_id: None,
+                    inline: false,
                 },
             ],
             ..Default::default()

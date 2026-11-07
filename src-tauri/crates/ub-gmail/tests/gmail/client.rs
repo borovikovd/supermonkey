@@ -59,6 +59,7 @@ async fn reads_threads_messages_history_and_attachments() {
             mime_type: "application/octet-stream".into(),
             data: vec![0, 1, 2, 250],
             content_id: None,
+            inline: false,
         }],
         ..NewMessage::inbox("Ann <ann@example.com>", "Hello", "Hi there")
     });

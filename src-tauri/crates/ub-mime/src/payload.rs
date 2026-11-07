@@ -74,7 +74,10 @@ pub struct Part {
     pub attachment_id: Option<String>,
     /// The Content-ID, without angle brackets.
     pub content_id: Option<String>,
-    /// `Content-Disposition: inline`, or no disposition but a Content-ID.
+    /// An inline image: an `image/*` part with `Content-Disposition:
+    /// inline`, or with no disposition but a Content-ID. It belongs to the
+    /// body. Any other part is an attachment, whatever its disposition: Apple
+    /// Mail sends every file `inline`.
     pub is_inline: bool,
     /// The bytes, when Gmail sent them in the payload.
     pub data: Option<Vec<u8>>,
@@ -125,10 +128,11 @@ impl ParsedMessage {
 /// Bodies are the base64url `body.data` of `text/html` and `text/plain` parts
 /// without a filename, decoded in their charset; several of one type (Apple
 /// Mail splits a body around attachments) are joined in order. A body Gmail
-/// moved behind an attachment id is skipped. A message attached to this one
-/// (`message/rfc822`, as a forward as attachment sends it) adds the attachments
-/// inside it, not its body or inline images; the attached message itself is
-/// listed only when Gmail gives it an attachment id.
+/// moved behind an attachment id is skipped. Only images are inline parts
+/// ([`Part::is_inline`]). A message attached to this one (`message/rfc822`,
+/// as a forward as attachment sends it) adds the attachments inside it, not
+/// its body or inline images; the attached message itself is listed only
+/// when Gmail gives it an attachment id.
 pub fn parse_message(payload: &serde_json::Value) -> Result<ParsedMessage, PayloadError> {
     let root = WirePart::deserialize(payload)?;
     let mut walk = Walk::default();
@@ -288,12 +292,13 @@ impl Walk {
             .map(bare_id)
             .filter(|id| !id.is_empty())
             .map(str::to_owned);
-        let is_inline = match disposition_kind.as_str() {
-            "inline" => true,
-            "" => content_id.is_some(),
-            _ => false,
-        };
-        // An attached message's inline parts belong to its body, not shown.
+        let is_inline = mime_type.starts_with("image/")
+            && match disposition_kind.as_str() {
+                "inline" => true,
+                "" => content_id.is_some(),
+                _ => false,
+            };
+        // An attached message's inline images belong to its body, not shown.
         if attached && is_inline {
             return;
         }

@@ -164,3 +164,82 @@ fn an_attached_message_with_an_attachment_id_is_listed_before_its_attachments() 
     assert_eq!(names, ["Quarterly.eml", "q3.pdf", "q3.csv"]);
     assert_eq!(parsed.parts[0].mime_type, "message/rfc822");
 }
+
+/// A message as Apple Mail sends it: every attachment `inline`, a PDF and a
+/// photo; and a message forwarded as an attachment holding one of each.
+fn apple_mail() -> Value {
+    let pdf = |id: &str, name: &str| {
+        json!({
+            "partId": id,
+            "mimeType": "application/pdf",
+            "filename": name,
+            "headers": [
+                header("Content-Type", &format!("application/pdf; name=\"{name}\"")),
+                header("Content-Disposition", &format!("inline; filename=\"{name}\"")),
+            ],
+            "body": { "size": 4096, "attachmentId": format!("ATT-{id}") },
+        })
+    };
+    let photo = |id: &str| {
+        json!({
+            "partId": id,
+            "mimeType": "image/jpeg",
+            "filename": "photo.jpg",
+            "headers": [
+                header("Content-Disposition", "inline; filename=\"photo.jpg\""),
+                header("Content-ID", &format!("<photo-{id}>")),
+            ],
+            "body": { "size": 2048, "attachmentId": format!("ATT-{id}") },
+        })
+    };
+    json!({
+        "partId": "",
+        "mimeType": "multipart/mixed",
+        "parts": [
+            {
+                "partId": "0",
+                "mimeType": "text/html",
+                "body": data("<p>Scans attached.<img src=\"cid:photo-2\"></p>"),
+            },
+            pdf("1", "scan.pdf"),
+            photo("2"),
+            {
+                "partId": "3",
+                "mimeType": "message/rfc822",
+                "filename": "Fwd.eml",
+                "headers": [header("Content-Disposition", "attachment; filename=\"Fwd.eml\"")],
+                "body": { "size": 0 },
+                "parts": [{
+                    "partId": "3.0",
+                    "mimeType": "multipart/mixed",
+                    "parts": [
+                        { "partId": "3.0.0", "mimeType": "text/plain", "body": data("Inside.") },
+                        pdf("3.0.1", "inner.pdf"),
+                        photo("3.0.2"),
+                    ],
+                }],
+            },
+        ],
+    })
+}
+
+#[test]
+fn only_inline_images_are_inline() {
+    let parsed = parse_message(&apple_mail()).unwrap();
+    let listed: Vec<(&str, bool)> = parsed
+        .parts
+        .iter()
+        .map(|p| (p.filename.as_str(), p.is_inline))
+        .collect();
+    // A PDF sent inline is an attachment, here and inside the attached
+    // message; the photo is an inline image of this message's body, and the
+    // attached message's photo belongs to its body.
+    assert_eq!(
+        listed,
+        [
+            ("scan.pdf", false),
+            ("photo.jpg", true),
+            ("inner.pdf", false)
+        ]
+    );
+}

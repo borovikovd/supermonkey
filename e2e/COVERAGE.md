@@ -231,6 +231,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ATT-09 · P1 · `Cmd+Q` while a file is attaching quits once the composer's close is sent · §Actions, §Drafts
 - ATT-10 · P1 · A send waiting for a file still goes when the composer is closed meanwhile; a file that fails keeps the draft · §Drafts
 - ATT-11 · P1 · A draft reopened while its close waits for a file keeps the new text and the file · §Drafts, §Actions
+- ATT-12 · P1 · A file sent inline, as Apple Mail sends every file, is an attachment · §Reading
 
 ### drafts.spec.ts (DRF)
 
@@ -410,7 +411,7 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 - `crates/ub-domain/src/drafts.rs`: when a draft is untouched, and Gmail draft kinds.
 - `crates/ub-domain/src/labels.rs`, `crates/ub-domain/src/kinds_text.rs`, and `crates/ub-domain/src/hue.rs`: system label ids, label set operations, kind text round trips, label hue slots.
 - `crates/ub-mime/tests/sanitize.rs`: the hostile fixture, what is kept and dropped, `rel=noopener`, `cid:` to `data:`, text extraction (SEC-01).
-- `crates/ub-mime/tests/payload.rs`: a charset with no decoder read as undeclared text; the attachments inside an attached message, and not its body or inline images.
+- `crates/ub-mime/tests/payload.rs`: a charset with no decoder read as undeclared text; the attachments inside an attached message, and not its body or inline images; only images are inline, here and inside an attached message (ATT-12).
 - `crates/ub-mime/tests/no_panic.rs`: 3,000 seeded random inputs through every parser and the sanitizer.
 - `crates/ub-mime/tests/addresses.rs`: `is_valid_email` against the address table the composer's copy of the rule is held to (RCP-11).
 - `crates/ub-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser and when one-click applies.

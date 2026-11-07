@@ -77,7 +77,7 @@ pub struct NewAttachment {
     pub gmail_attachment_id: Option<String>,
     /// The `Content-ID` of an inline part.
     pub content_id: Option<String>,
-    /// Shown inline rather than as a file.
+    /// An inline image, shown in the body rather than as a file.
     pub is_inline: bool,
 }
 

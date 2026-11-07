@@ -542,6 +542,9 @@ pub struct NewAttachment {
     pub mime_type: String,
     pub data: Vec<u8>,
     pub content_id: Option<String>,
+    /// `Content-Disposition: inline` with no content id, beside the body, as
+    /// Apple Mail sends every file.
+    pub inline: bool,
 }
 
 /// Ids of a message the fake stored.

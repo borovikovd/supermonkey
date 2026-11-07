@@ -335,7 +335,7 @@ Links never navigate the app window.
 
 Remote images load by default. A setting turns them off. With remote images off, the iframe's CSP is `default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`, so nothing outside the message loads: no remote images, CSS ones included, web fonts, or stylesheets. The composer's quoted text renders in a sandboxed frame under the same policy. Tracking pixels are a consequence of the default.
 
-An expanded message lists its attachments, not its inline images, as chips with the file name and size. Clicking one downloads it the first time, into the app's data folder, and opens it with the default app, quarantined first (see Security). Attachments are not fetched during the initial sync. A message attached to it (`message/rfc822`, as a forward as attachment sends it) adds its own attachments to the chips, but not its body or inline images. The attached message itself has a chip only when Gmail gives it an attachment id. Gmail usually serves it as parts instead, and its `.eml` could then be had only from the whole outer message's raw source.
+An expanded message lists its attachments, not its inline images, as chips with the file name and size. An inline image is an `image/*` part with `Content-Disposition: inline`, or with no disposition but a `Content-ID`; it belongs to the body. Every other part with a file is an attachment, whatever its disposition: Apple Mail sends every file `inline`, a PDF included. The same holds inside a message attached to this one, except that its inline images belong to its own body and are not listed. Clicking one downloads it the first time, into the app's data folder, and opens it with the default app, quarantined first (see Security). Attachments are not fetched during the initial sync. A message attached to it (`message/rfc822`, as a forward as attachment sends it) adds its own attachments to the chips, but not its body or inline images. The attached message itself has a chip only when Gmail gives it an attachment id. Gmail usually serves it as parts instead, and its `.eml` could then be had only from the whole outer message's raw source.
 
 ## Compose
 
@@ -595,7 +595,7 @@ The first results come from local full-text search, and they appear immediately,
 | `in:anywhere` | is anywhere, Trash and Spam included |
 | `in:snoozed`, `is:snoozed` | is in a conversation snoozed in this app |
 | `is:unread`, `is:read`, `is:starred`, `is:important` | is unread, read, starred, or marked important |
-| `has:attachment` | has an attachment that is not inline |
+| `has:attachment` | has an attachment, not counting inline images |
 | `category:primary`, `social`, `promotions`, `updates`, `forums` | has that category |
 | `after:`, `before:` (also `newer:`, `older:`) | is dated on or after, or before, local midnight at the start of the day, written `2026/01/31`, `2026-01-31`, or `01/31/2026`. A bare number is seconds since 1970 |
 | `newer_than:`, `older_than:` | is newer, or older, than that many calendar days, months, or years (`2d`, `3m`, `1y`) before now, so a DST change does not shift them |
@@ -710,7 +710,7 @@ Access tokens refresh shortly before they expire, so a 401 is rare.
 
 One SQLite file in the app data directory. `rusqlite` with bundled SQLite and FTS5. Rows are keyed by account so two Gmail accounts can share a thread id space without colliding.
 
-There are no migrations. At launch, a file of another schema version, or one SQLite finds is not a database or is corrupt, is moved aside as `<name>.old-<n>` and a fresh database is made; the mail comes back from Gmail. Any other error reading the file, such as a lock held for more than 5 s or a file the app may not open, stops the launch with that error and leaves the file in place, so mail that is only on this Mac, such as queued actions and the outbox, is never thrown away.
+There are no migrations. A change in how mail read from Gmail is stored, such as which parts are attachments, takes a new schema version too, so stored mail is read again. At launch, a file of another schema version, or one SQLite finds is not a database or is corrupt, is moved aside as `<name>.old-<n>` and a fresh database is made, with no accounts: each is added again, and its mail comes back from Gmail. Any other error reading the file, such as a lock held for more than 5 s or a file the app may not open, stops the launch with that error and leaves the file in place, so mail that is only on this Mac, such as queued actions and the outbox, is never thrown away.
 
 | Table | Holds |
 |---|---|

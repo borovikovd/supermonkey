@@ -7,7 +7,7 @@ import type { Route } from "@playwright/test";
 
 import type { App } from "./app.ts";
 import type { Control, GmailMessage } from "./control.ts";
-import { files } from "./files.ts";
+import { attachment, files } from "./files.ts";
 import { expect, test } from "./fixtures.ts";
 import { attachments, findPart, htmlOf, parseMime, shape, type MimePart } from "./mime.ts";
 import * as seeds from "./seeds.ts";
@@ -117,6 +117,29 @@ test.describe("attachments", () => {
     const again = (await gmail.platform()).openedFiles;
     expect(again).toHaveLength(2);
     expect(readFileSync(again[1] ?? "").equals(files.contractPdf.buffer)).toBe(true);
+  });
+
+  test("ATT-12 a file sent inline, as Apple Mail sends every file, is an attachment", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    await gmail.deliver({
+      account: A,
+      from: "Ann Apple <ann@apple.test>",
+      subject: "Scans from my phone",
+      html: "<p>The scan is attached.</p>",
+      attachments: [{ ...attachment(files.reportPdf), inline: true }],
+    });
+    await app.settle();
+    await app.row("Scans from my phone").click();
+    const chip = app.conversation.getByRole("button", { name: /report\.pdf/ });
+    await expect(chip).toContainText("report.pdf");
+    await chip.click();
+    await app.settle();
+    const { openedFiles } = await gmail.platform();
+    expect(openedFiles).toHaveLength(1);
+    expect(readFileSync(openedFiles[0] ?? "").equals(files.reportPdf.buffer)).toBe(true);
   });
 
   test("ATT-03 a forward made offline still sends its attachments", async ({ app, gmail }) => {

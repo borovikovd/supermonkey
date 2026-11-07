@@ -8,9 +8,11 @@ use rusqlite::{Connection, OpenFlags};
 use crate::StoreError;
 
 /// The `user_version` of a database made by this `schema.sql`. Change it with
-/// any change to the schema: a file with another version is moved aside and a
-/// fresh one created, since there are no migrations (ARCHITECTURE.md, section 6).
-pub const SCHEMA_VERSION: i32 = 4;
+/// any change to the schema, or to what stored rows mean, so they are read
+/// from Gmail again: a file with another version is moved aside and a fresh
+/// one created, since there are no migrations (ARCHITECTURE.md, section 6).
+/// 5: only images are inline parts, so files sent `inline` are listed.
+pub const SCHEMA_VERSION: i32 = 5;
 
 const SCHEMA: &str = include_str!("schema.sql");
 

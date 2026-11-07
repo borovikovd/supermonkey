@@ -27,6 +27,9 @@ pub(crate) struct AttachmentReq {
     base64: bool,
     #[serde(default)]
     content_id: Option<String>,
+    /// `Content-Disposition: inline` with no content id.
+    #[serde(default)]
+    inline: bool,
 }
 
 fn attachments(list: Vec<AttachmentReq>) -> Result<Vec<NewAttachment>, Fail> {
@@ -44,6 +47,7 @@ fn attachments(list: Vec<AttachmentReq>) -> Result<Vec<NewAttachment>, Fail> {
                     .unwrap_or_else(|| "application/octet-stream".into()),
                 data,
                 content_id: a.content_id,
+                inline: a.inline,
             })
         })
         .collect()

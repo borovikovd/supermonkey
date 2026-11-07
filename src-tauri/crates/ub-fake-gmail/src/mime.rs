@@ -377,7 +377,7 @@ pub(crate) fn build(msg: &NewMessage, date_ms: u64, message_id: &str) -> Vec<u8>
 }
 
 fn attachment(a: &NewAttachment) -> String {
-    let disposition = if a.content_id.is_some() {
+    let disposition = if a.content_id.is_some() || a.inline {
         "inline"
     } else {
         "attachment"
