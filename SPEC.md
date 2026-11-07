@@ -38,7 +38,7 @@ These stay out of the product until the daily-driver loop below is solid.
 
 One window. A second launch focuses the existing window. Closing the window hides it. The app keeps running in the Dock and keeps syncing every account. Clicking the Dock icon shows the window again. `Cmd+Q` quits.
 
-macOS title bar is overlay style: hidden title, traffic lights inset, content under the bar. The window restores its last size and position.
+macOS title bar is overlay style: hidden title, traffic lights inset, content under the bar. The window restores its last size and position, but not whether it was shown: at launch it stays hidden until the page has connected to the core, so it never shows blank. If the page has not connected 5 s after launch, the window shows anyway, so the app is never running with no window to quit from, and the error is logged.
 
 The window is an off-white canvas with the content in a white rounded panel. A slim icon rail sits on the canvas, left of the panel. It is not a folder list. It holds icons for Inbox, Done, Snoozed, Starred, Sent, and Drafts at the top, and one avatar per account at the bottom. The conversation list fills the rest of the window. A hint bar along the bottom shows the core shortcuts.
 

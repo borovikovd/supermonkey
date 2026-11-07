@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, Emitter as _, Manager as _, RunEvent, WindowEvent};
+use tauri_plugin_window_state::StateFlags;
 use ub_core::activity::{Activity, Tasks};
 use ub_core::clock::SystemClock;
 use ub_core::{App, Config, Deps, GmailConfig};
@@ -48,6 +49,10 @@ const ENDPOINT_OVERRIDES: [&str; 4] = [
     "UBERMENSCH_OAUTH_REVOKE_URL",
 ];
 
+/// How long after launch the window shows even if the page has not
+/// connected (SPEC Window).
+const SHOW_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// How long the page has to answer a quit before the app quits without it
 /// (SPEC Actions): longer than the page's own 5 s wait for the core.
 const PAGE_QUIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
@@ -63,6 +68,8 @@ pub(crate) struct Shell {
     tasks: Tasks,
     /// Set by the first quit, so a second Cmd+Q doesn't quit twice.
     quitting: AtomicBool,
+    /// Set once the page has connected and the window has been shown.
+    pub(crate) connected: AtomicBool,
     /// Demo mode's fake Gmail, kept running for as long as the app.
     #[cfg(feature = "fake")]
     _demo: Option<ub_testkit::Demo>,
@@ -85,12 +92,18 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main(app);
         }))
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Size and position only: the shell decides when the window shows.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::all() - StateFlags::VISIBLE)
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let shell = start_core(app.handle())?;
             app.manage(shell);
+            show_if_never_connected(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| match event {
@@ -169,6 +182,7 @@ fn start_core(app: &AppHandle) -> anyhow::Result<Shell> {
         core,
         tasks,
         quitting: AtomicBool::new(false),
+        connected: AtomicBool::new(false),
         #[cfg(feature = "fake")]
         _demo: setup.demo,
     })
@@ -279,6 +293,28 @@ fn start_web_bridge(_core: &Arc<App>, _tasks: &Tasks) {
         tracing::warn!(
             "UBERMENSCH_WEB_BRIDGE=1 needs a debug build with the `web` feature (--features web)"
         );
+    }
+}
+
+/// Shows the window [`SHOW_DEADLINE`] after launch if the page has not
+/// connected by then, which shows it: a page that failed to load still gets
+/// a window, so the app is never running with nothing to quit from.
+fn show_if_never_connected(app: &AppHandle) {
+    let app = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("show deadline".into())
+        .spawn(move || {
+            std::thread::sleep(SHOW_DEADLINE);
+            let connected = app
+                .try_state::<Shell>()
+                .is_some_and(|shell| shell.connected.load(Ordering::Acquire));
+            if !connected {
+                tracing::error!("the page did not connect to the core; showing the window anyway");
+                show_main(&app);
+            }
+        });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "couldn't start the window's show deadline");
     }
 }
 

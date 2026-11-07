@@ -26,6 +26,9 @@ pub(crate) async fn connect(
         }
     });
     let info = cmd::connect(&shell.core, sink).await?;
+    shell
+        .connected
+        .store(true, std::sync::atomic::Ordering::Release);
     crate::show_main(&app);
     Ok(info)
 }
