@@ -123,6 +123,8 @@ export function loadedDraft(draft: string): DraftState | null {
 /** Files still attaching, by draft: each pick resolves to whether all its files were attached. */
 const uploads = new Map<string, Set<Promise<boolean>>>();
 let attachSeq = 0;
+/** Drafts discarded this session: a file that lands for one goes nowhere. Draft ids are never reused. */
+const discarded = new Set<string>();
 
 /** A picked file as base64, for the `add_attachment` command. */
 async function readFile(file: File): Promise<string> {
@@ -186,12 +188,36 @@ export function attachFiles(draft: string, files: File[]) {
   pending.add(done);
 }
 
-/** Files now in the draft join the composer that has it: on screen, or closed and waiting. */
+/**
+ * Files now in the draft join the composer that has it: on screen, or closed
+ * and waiting. Send and close wait for every file, so none should be left
+ * without one; if one is, the user hears that it is not in the draft.
+ */
 function deliver(draft: string, added: DraftAttachment[]) {
+  // The user threw the draft away, files and all.
+  if (discarded.has(draft)) return;
   const to = mountedComposer(draft) ?? waiting.get(draft)?.handle ?? null;
   if (to) to.addAttachments(added);
   else if (draftOnScreen() === draft) owed.set(draft, [...(owed.get(draft) ?? []), ...added]);
-  else console.warn(`files attached to draft ${draft} after its composer had closed`);
+  else
+    toast.error(
+      `Couldn't attach ${added.map((a) => a.filename).join(", ")}: the draft closed before it was in`,
+    );
+}
+
+/**
+ * Null when no file is attaching to the draft; else resolves once none is,
+ * files picked meanwhile included, to whether all of them were attached.
+ */
+function filesIn(draft: string): Promise<boolean> | null {
+  const pending = uploads.get(draft);
+  if (!pending || pending.size === 0) return null;
+  const all = Promise.all(pending);
+  return (async () => {
+    const attached = (await all).every(Boolean);
+    const later = filesIn(draft);
+    return (later ? await later : true) && attached;
+  })();
 }
 
 /**
@@ -199,9 +225,7 @@ function deliver(draft: string, added: DraftAttachment[]) {
  * first load is in and its files are attached, to whether all of them were.
  */
 function whenReady(draft: string): Promise<boolean> | null {
-  const pending = uploads.get(draft);
-  const files =
-    pending && pending.size > 0 ? Promise.all(pending).then((all) => all.every(Boolean)) : null;
+  const files = filesIn(draft);
   const loaded = () => subIdFor(composerKey(draft)) === undefined || loadedDraft(draft) !== null;
   const load = loaded()
     ? null
@@ -408,6 +432,7 @@ function send(draft: string, sentFrom: ComposerHandle | null, refused: Refused) 
 export function discardOnScreen() {
   const draft = draftOnScreen();
   if (!draft) return;
+  discarded.add(draft);
   act({ type: "discardDraft", draft });
   leave(draft);
   toast("Draft discarded");

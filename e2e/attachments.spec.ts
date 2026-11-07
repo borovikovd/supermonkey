@@ -454,4 +454,41 @@ test.describe("attachments", () => {
     expect(Object.keys(filesOf(reply))).toEqual(["notes.txt"]);
     expect((await gmail.gmail(A)).drafts).toHaveLength(0);
   });
+
+  test("ATT-14 a file attached while a send waits for another goes with the send", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    const heading = app.page.getByRole("heading", { name: "New Message" });
+    await newMessage(app, "Two files", "Both files follow.");
+    // Each file's attach is held on its own, so the first can land before the second.
+    const attach = /\/invoke\/add_attachment$/;
+    const parked = new Map<string, Route>();
+    await app.page.route(attach, (route) => {
+      const body: unknown = JSON.parse(route.request().postData() ?? "{}");
+      const name = typeof body === "object" && body && "filename" in body ? body.filename : "";
+      parked.set(String(name), route);
+    });
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await expect.poll(() => parked.has("notes.txt")).toBe(true);
+    await app.press("Meta+Enter");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.reportPdf]);
+    await expect.poll(() => parked.has("report.pdf")).toBe(true);
+
+    // The first file is in; the send still waits for the second, with the composer on screen.
+    await parked.get("notes.txt")?.continue();
+    await expect(app.page.getByRole("button", { name: "Remove notes.txt" })).toBeVisible();
+    await expect(heading).toBeVisible();
+    await parked.get("report.pdf")?.continue();
+    await app.page.unroute(attach);
+    await expect(heading).toHaveCount(0);
+    await app.settle();
+    await expect(app.toast("Two files")).toBeVisible();
+    await app.advance(10_000);
+    await app.settle();
+    const out = filesOf(await sentWithSubject(gmail, "Two files"));
+    expect(Object.keys(out).toSorted()).toEqual(["notes.txt", "report.pdf"]);
+    expect((await gmail.gmail(A)).drafts).toHaveLength(0);
+  });
 });

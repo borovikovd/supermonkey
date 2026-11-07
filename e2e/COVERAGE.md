@@ -234,6 +234,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ATT-11 · P1 · A draft reopened while its close waits for a file keeps the new text and the file · §Drafts, §Actions
 - ATT-12 · P1 · A file sent inline, as Apple Mail sends every file, is an attachment · §Reading
 - ATT-13 · P1 · A file Gmail serves inside the message opens and forwards · §Reading, §Addressing
+- ATT-14 · P1 · A file attached while a send waits for another goes with the send · §Drafts
 
 ### drafts.spec.ts (DRF)
 
