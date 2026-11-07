@@ -812,7 +812,7 @@ The thread list is virtualized. The conversation view does not virtualize a thre
 |---|---|
 | Shell | Tauri 2.12. Rust stable, 1.90 or newer |
 | UI | React 19.3, TypeScript 7.0.2 |
-| Style | Tailwind CSS 4, shadcn/ui on Base UI, Lucide, Sonner toasts |
+| Style | Tailwind CSS 4, Lucide, Sonner toasts |
 | Palette | cmdk 1.1 |
 | List | TanStack Virtual |
 | Mailbox state | Subscriptions pushed by Rust, mirrored in a Zustand 5 store. See UI state |
@@ -824,7 +824,7 @@ The thread list is virtualized. The conversation view does not virtualize a thre
 | MIME | mail-builder, for every message and draft Rust writes |
 | IPC types | ts-rs 12, generated from Rust |
 | Gmail | reqwest and the oauth2 crate |
-| Plugins | notification, opener, window-state, single-instance |
+| Plugins | notification, opener, window-state, single-instance, all driven from Rust: the webview's only Tauri permissions are the core defaults and dragging the window |
 
 The command surface is defined once, in Rust: each command's name, its arguments, and its reply. The app registers two Tauri commands, `connect`, which takes the channel, and `dispatch`, which runs every other command by name through the same code as the debug web bridge. Every type that crosses it is generated from the Rust types with ts-rs into `src/bindings/`: actions, settings, channel messages, rows, notices, app events, and each command's name, arguments, and reply, so the UI's typed `invoke` can't call a command Rust lacks or misname an argument. No IPC type is written by hand in TypeScript. `cargo test` regenerates the bindings, and the check fails if they differ from the committed files. The UI does not open SQLite itself.
 

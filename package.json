@@ -12,25 +12,19 @@
     "demo": "UBERMENSCH_FAKE=1 UBERMENSCH_WEB_BRIDGE=1 tauri dev --features fake"
   },
   "dependencies": {
-    "@base-ui/react": "^1.9.0",
     "@tanstack/react-virtual": "^3.14.25",
     "@tauri-apps/api": "^2.12.4",
-    "@tauri-apps/plugin-notification": "^2.8.0",
-    "@tauri-apps/plugin-window-state": "^2.5.0",
     "@tiptap/extension-hard-break": "^3.32.2",
-    "@tiptap/extension-link": "^3.32.2",
     "@tiptap/extension-strike": "^3.32.2",
     "@tiptap/extensions": "^3.32.2",
     "@tiptap/pm": "^3.32.2",
     "@tiptap/react": "^3.32.2",
     "@tiptap/starter-kit": "^3.32.2",
-    "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "lucide-react": "^1.66.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "sonner": "^2.0.8",
-    "tailwind-merge": "^3.7.0",
     "zustand": "^5.0.16"
   },
   "devDependencies": {
