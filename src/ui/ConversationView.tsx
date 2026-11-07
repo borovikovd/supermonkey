@@ -5,6 +5,7 @@ import { Composer } from "../compose/Composer";
 import { composerOnScreen, useComposeState } from "../compose/session";
 import { startReply } from "../compose/start";
 import { openAttachment } from "../ipc/bridge";
+import { useCommand, type CommandId } from "../keyboard/table";
 import type { AttachmentInfo, DraftSummary, MessageSummary, OutboxRow } from "../ipc/types";
 import { markReadOnOpen } from "../navigation";
 import { useChrome } from "../store/chrome";
@@ -151,10 +152,10 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
         <div className="mb-6 flex items-start gap-4">
           <h1 className="selectable flex-1 text-subject">{data.subject || "(no subject)"}</h1>
           <div className="flex h-8 shrink-0 items-center gap-1">
-            <Action title="Mark Done (E)" keyName="e">
+            <Action command="done">
               <Check size={16} strokeWidth={1.5} />
             </Action>
-            <Action title="Snooze (H)" keyName="h">
+            <Action command="snooze">
               <Clock size={16} strokeWidth={1.5} />
             </Action>
           </div>
@@ -235,27 +236,16 @@ function DraftStub({ draft }: { draft: DraftSummary }) {
   );
 }
 
-/** Sends a key to the shortcut handler, so buttons and keys share one path. */
-function press(key: string) {
-  window.dispatchEvent(new KeyboardEvent("keydown", { key }));
-}
-
-/** A subject-row action; it runs the same path as its key. */
-function Action({
-  title,
-  keyName,
-  children,
-}: {
-  title: string;
-  keyName: string;
-  children: React.ReactNode;
-}) {
+/** A subject-row action: its command from the table, as its key runs it. */
+function Action({ command, children }: { command: CommandId; children: React.ReactNode }) {
+  const { title, enabled, run } = useCommand(command);
   return (
     <button
       title={title}
       aria-label={title}
-      onClick={() => press(keyName)}
-      className="flex h-7 w-7 items-center justify-center rounded-md text-text-3 hover:bg-fill hover:text-text"
+      disabled={!enabled}
+      onClick={run}
+      className="flex h-7 w-7 items-center justify-center rounded-md text-text-3 hover:bg-fill hover:text-text disabled:opacity-40 disabled:hover:bg-transparent"
     >
       {children}
     </button>

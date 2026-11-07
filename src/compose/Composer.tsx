@@ -12,6 +12,7 @@ import { toast } from "sonner";
 
 import { act, addAttachment, later } from "../ipc/bridge";
 import type { Addr, DraftAttachment, DraftFields } from "../ipc/types";
+import { command, context, keyText, runKey, shortHintOf, useCommand } from "../keyboard/table";
 import { openPalette } from "../navigation";
 import { useChrome } from "../store/chrome";
 import { useAppState, useDraft } from "../store/hooks";
@@ -19,14 +20,10 @@ import { frameCsp } from "../ui/frameCsp";
 import { frameTokens } from "../ui/frameTokens";
 import { RecipientField, formatAddr, isValidEmail, type RecipientHandle } from "./RecipientField";
 import {
-  blurComposer,
-  closeComposerOnScreen,
   composeBlurred,
   composerFocused,
-  discardOnScreen,
   loadedDraft,
   registerComposer,
-  sendOnScreen,
   type ComposeField,
   type UpdateSave,
   useComposeState,
@@ -148,32 +145,39 @@ function AttachmentList({
 }
 
 /** Send on the left, quiet icons on the right, under a hairline. */
-function Footer({ blurred, onAttach }: { blurred: boolean; onAttach: () => void }) {
+/** Send on the left, quiet icons on the right, under a hairline; each runs its command. */
+function Footer({ blurred }: { blurred: boolean }) {
+  const send = useCommand("send");
+  const attach = useCommand("attach");
+  const discard = useCommand("discard");
+  const hint = (blurred ? (["compose-edit", "compose-escape"] as const) : (["send"] as const))
+    .map((id) => shortHintOf(command(id)))
+    .join(" · ");
   return (
     <div className="mt-6 flex items-center gap-5 border-t border-border-2 pt-3 text-row">
       <button
         tabIndex={-1}
-        onClick={sendOnScreen}
+        onClick={send.run}
         className="font-medium text-text hover:text-accent"
-        title="Send (⌘↵)"
+        title={send.title}
       >
         Send
       </button>
-      <span className="text-text-3">{blurred ? "Enter to edit · Esc to close" : "⌘↵ to send"}</span>
+      <span className="text-text-3">{hint}</span>
       <div className="flex-1" />
       <button
         tabIndex={-1}
-        onClick={onAttach}
+        onClick={attach.run}
         className="text-text-3 hover:text-text-2"
-        title="Attach (⌘⇧A)"
+        title={attach.title}
       >
         <Paperclip size={16} strokeWidth={1.5} />
       </button>
       <button
         tabIndex={-1}
-        onClick={discardOnScreen}
+        onClick={discard.run}
         className="text-text-3 hover:text-text-2"
-        title="Discard (⌘⇧,)"
+        title={discard.title}
       >
         <Trash2 size={16} strokeWidth={1.5} />
       </button>
@@ -422,79 +426,13 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (useChrome.getState().palette) return;
-      const blurredNow = composeBlurred();
-      const handle = (f: () => void) => {
-        e.preventDefault();
-        f();
-      };
-      if (e.metaKey && e.shiftKey) {
-        const k = e.key.toLowerCase();
-        const run: Record<string, () => void> = {
-          o: () => toRef.current?.focus(),
-          c: () => {
-            setShowCc(true);
-            requestAnimationFrame(() => ccRef.current?.focus());
-          },
-          b: () => {
-            setShowBcc(true);
-            requestAnimationFrame(() => bccRef.current?.focus());
-          },
-          f: () => openPalette({ kind: "from" }),
-          s: () => {
-            setShowSubject(true);
-            requestAnimationFrame(() => subjectRef.current?.focus());
-          },
-          m: () => editor?.commands.focus("end"),
-          a: attach,
-          ",": discardOnScreen,
-          "<": discardOnScreen,
-        };
-        const f = run[k];
-        if (f) {
-          handle(f);
-          return;
-        }
-      }
-      if (e.metaKey && e.key === "Enter") {
-        handle(sendOnScreen);
-        return;
-      }
-      if (e.metaKey && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        if (!blurredNow && editor?.isFocused) {
-          const href: unknown = editor.getAttributes("link").href;
-          setLink(typeof href === "string" ? href : "");
-          requestAnimationFrame(() => linkRef.current?.focus());
-        } else {
-          openPalette({ kind: "commands" });
-        }
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        if (link !== null) {
-          setLink(null);
-          editor?.commands.focus();
-          return;
-        }
-        // The first Esc blurs the editor and leaves compose on screen.
-        if (!blurredNow) blurComposer();
-        else closeComposerOnScreen();
-        return;
-      }
-      if (blurredNow) {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          editor?.commands.focus("end");
-        } else if (!e.metaKey) {
-          // Other keys do nothing while compose is blurred.
-          e.preventDefault();
-        }
-      }
+      if (runKey("compose", e, context(), performance.now())) return;
+      // Other keys do nothing while compose is blurred.
+      if (composeBlurred() && !e.metaKey) e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editor, attach, link]);
+  }, []);
 
   const onFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -530,7 +468,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     !showCc || !showBcc ? (
       <button
         tabIndex={-1}
-        title="Cc and Bcc (⌘⇧C, ⌘⇧B)"
+        title={`Cc and Bcc (${keyText(command("focus-cc"))}, ${keyText(command("focus-bcc"))})`}
         className="flex h-6 w-6 items-center justify-center rounded-md text-text-3 hover:bg-fill-half hover:text-text-2"
         onClick={() => {
           setShowCc(true);
@@ -650,7 +588,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       {/* Empty room in the card goes below the quote, as in Superhuman. */}
       <div className="flex-1" />
       <input ref={fileRef} type="file" multiple hidden onChange={(e) => onFiles(e.target.files)} />
-      <Footer blurred={blurred} onAttach={attach} />
+      <Footer blurred={blurred} />
     </div>
   );
 }

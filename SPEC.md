@@ -115,10 +115,10 @@ Account avatars use six fixed hues, assigned in the order accounts are added: `#
 - Split section headers inside the list are 28px tall: name in `text-2`, count in `text-3`.
 - The icon rail is 56px wide, so its icon pill and account badges have room, with 16px Lucide icons at 1.5 stroke.
 - The content panel is `bg` with a 10px radius, on the `surface` canvas.
-- The hint bar is 18px tall, with hints such as `E to Mark Done · H to snooze · ⌘K for commands`. It shows only hints that work on the screen: in Drafts it reads `Enter to open draft · C to compose · ⌘K for commands`, in a conversation `E to Mark Done · R to Reply · Enter to Reply all · ⌘K for commands`, while a composer is open `⌘Enter to Send · Esc to close · ⌘K for commands`, and on the sign-in screen `Enter to sign in · ⌘K for commands`.
+- The hint bar is 18px tall, with hints such as `E to Mark Done · H to snooze · ⌘K for commands`. It shows only hints that work on the screen: in Drafts it reads `Enter to open draft · C to compose · ⌘K for commands`, in a conversation `E to Mark Done · R to Reply · Enter to Reply all · ⌘K for commands`, while a composer is open `⌘Enter to Send · Esc to close · ⌘K for commands`, and on the sign-in screen `Enter to sign in · ⌘K for commands`. A hint whose key would do nothing is left out, so an empty Inbox reads only `⌘K for commands`.
 - The conversation column is at most 768px wide (640px plus 128px of padding) and at least 520px, centered, with 32px top padding.
-- In a conversation, a round back button and a round previous/next pill, white with a soft shadow, sit at the panel's top left, with the subject on the same row. The `c` screen has the back button only. A narrow window moves the column right, so the buttons never cover the subject.
-- Mark Done and Snooze buttons sit at the right of the conversation's subject row and do what `e` and `h` do.
+- In a conversation, a round back button and a round previous/next pill, white with a soft shadow, sit at the panel's top left, with the subject on the same row. Back returns to the list, closing a reply composer as a second `Esc` would; previous and next do what `k` and `j` do. The `c` screen has the back button only, which closes it as a second `Esc` would. A narrow window moves the column right, so the buttons never cover the subject.
+- Mark Done and Snooze buttons sit at the right of the conversation's subject row and do what `e` and `h` do. A button whose key would do nothing on the screen, such as these and previous/next while a reply composer is open, is disabled.
 - The selected message is a white card with a 4px radius, a soft shadow, and a 3px `accent-edge` bar on its left. The other messages sit flat on the panel with no dividers. Every message spans the same width, so selecting one never moves its text, and the reply composer card lines up with them.
 - The composer is a floating white card with a 10px radius and a soft shadow. Its footer has Send on the left and attach and discard buttons on the right.
 - The palette is 680px wide with an 8px radius, placed a third of the way down the window. It shows at most 8 rows of 36px, with shortcut chips on the right.
@@ -202,7 +202,7 @@ Refresh tokens go into `tokens.json` in the app's data folder, keyed by email ad
 
 An account whose token is missing at launch shows Sign in again, as for `invalid_grant`.
 
-If Google rejects the refresh token (`invalid_grant`), the account is signed out. Its rail avatar shows a Sign in again marker, and its screen shows a sign-in screen in place of its mail: "You're signed out of <email>" and a Sign in with Google button, which `Enter` also presses. Only `Enter`, `Cmd+K`, and account switching work there; a composer already open stays until closed. Its queue and outbox wait until sign-in succeeds, then go out. Only the current grant can sign an account out: an `invalid_grant` on a request made with the grant from before a sign-in changes nothing.
+If Google rejects the refresh token (`invalid_grant`), the account is signed out. Its rail avatar shows a Sign in again marker, and its screen shows a sign-in screen in place of its mail: "You're signed out of <email>" and a Sign in with Google button, which `Enter` also presses. Only `Enter`, `Cmd+K`, `Cmd+,`, and account switching work there; a composer already open stays until closed. Its queue and outbox wait until sign-in succeeds, then go out. Only the current grant can sign an account out: an `invalid_grant` on a request made with the grant from before a sign-in changes nothing.
 
 Removing an account deletes its refresh token and its rows from the local database. If it was on screen, the next account in the rail takes its place. An account removed while its Sign in again waits in the browser comes back when that sign-in finishes, under a new id, as Add account would bring it back: the sign-in finished after the removal, so it is the user's last word.
 
@@ -237,7 +237,7 @@ It is judged by value, so text typed and then deleted leaves a composer untouche
 
 `Esc` in the palette closes it. Search has its own `Esc` rule below. While a sheet (Settings, Split Inbox settings, the shortcut sheet) is open, the shortcut table does not apply, and `Esc` or a click outside closes the sheet.
 
-The palette lists actions and views. Each row shows its shortcut on the right. `?` opens the full shortcut sheet.
+The palette lists the actions and views that work where it opened, each with its shortcut on the right. One that would do nothing there is left out: a mail action with nothing to act on, or in Drafts; `Mark done` in Done, `Trash` in Trash, `Mark as spam` in Spam, and `Return to inbox` in Inbox; `Remove current label` where `y` does nothing; `Undo` with nothing to undo; `Reply`, `Forward`, and the selection commands where their keys do nothing; `Go to label` with no labels; and `Switch account` with one account. On the sign-in screen it lists only `Sign in again`, `Add account`, `Switch account`, `Mute notifications`, and `Settings`. While a composer is on screen it lists only the draft actions below. `?` opens the full shortcut sheet, which lists every shortcut. The palette, the shortcut sheet, the hint bar, and the buttons read one table of commands, so they always agree.
 
 | Key | Action |
 |---|---|

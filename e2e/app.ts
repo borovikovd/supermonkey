@@ -482,6 +482,11 @@ export class App {
     return this.page.getByRole("dialog", { name: title });
   }
 
+  /** The hint bar along the bottom (`data-hintbar`). */
+  get hintBar(): Locator {
+    return this.page.locator("[data-hintbar]");
+  }
+
   /** Toasts on screen. A dismissed toast stays in the DOM for its exit animation; it is not counted. */
   get toasts(): Locator {
     return this.page.locator('[data-sonner-toast]:not([data-removed="true"])');

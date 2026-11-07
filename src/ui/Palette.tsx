@@ -1,66 +1,35 @@
 import { Command } from "cmdk";
 import { useEffect, useState } from "react";
-
-import {
-  applyLabel,
-  markDone,
-  removeViewLabel,
-  returnToInbox,
-  snooze,
-  unsubscribe,
-  block,
-  spam,
-  targets,
-  toggleRead,
-  toggleStar,
-  trash,
-  undo,
-} from "../commands";
-import { formatAddr } from "../compose/RecipientField";
-import { discardOnScreen, draftOnScreen, mountedComposer, sendOnScreen } from "../compose/session";
-import { startCompose, startReply } from "../compose/start";
-import {
-  act,
-  addAccount,
-  blockedSenders,
-  signInAgain,
-  snoozeOptions,
-  unblockSender,
-} from "../ipc/bridge";
 import { toast } from "sonner";
-import { reportSignIn } from "./signIn";
-import type { BlockedSenders, PinKind, SnoozeChoice, View } from "../ipc/types";
-import { selectAll } from "../keyboard/nav";
+
+import { applyLabel, block, snooze, spam, targets, unsubscribe } from "../commands";
+import { formatAddr } from "../compose/RecipientField";
+import { mountedComposer } from "../compose/session";
+import { act, blockedSenders, signInAgain, snoozeOptions, unblockSender } from "../ipc/bridge";
+import type { BlockedSenders, PinKind, SnoozeChoice } from "../ipc/types";
 import { measure } from "../keyboard/meter";
 import {
-  closePalette,
-  goTo,
-  goToSplit,
-  openPalette,
-  openSearch,
-  openSheet,
-  switchAccount,
-} from "../navigation";
+  accountChips,
+  context,
+  keyChips,
+  labelOf,
+  paletteCommands,
+  runFromPalette,
+} from "../keyboard/table";
+import { closePalette, goTo, switchAccount } from "../navigation";
 import { useChrome, type PaletteMode } from "../store/chrome";
 import { rowOf } from "../store/current";
 import { useAppState, useCurrent, useSummary } from "../store/hooks";
+import { reportSignIn } from "./signIn";
 
-type Item = { id: string; label: string; keys?: string; run: () => void; keep?: boolean };
+type Item = { id: string; label: string; keys?: string[]; run: () => void };
 
 const close = closePalette;
-const view = (v: View) => () => goTo(v);
 
-/** `⌘K` while a composer is blurred. */
-const DRAFT_ACTIONS: Item[] = [
-  { id: "send", label: "Send", keys: "⌘ ↵", run: sendOnScreen },
-  { id: "attach", label: "Attach a file", keys: "⌘ ⇧ A", run: () => mountedComposer()?.attach() },
-  { id: "discard", label: "Discard draft", keys: "⌘ ⇧ ,", run: discardOnScreen },
-];
-
-function Chip({ keys }: { keys: string }) {
+function Chip({ keys }: { keys: string[] }) {
   return (
     <span className="flex gap-1">
-      {keys.split(" ").map((k) => (
+      {keys.map((k) => (
         <kbd
           key={k}
           className="rounded-sm bg-palette-key px-1.5 text-hint font-medium text-palette-text-2"
@@ -91,7 +60,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
   // while it is open, so the selection cannot move under it.
   const [opened] = useState(() => {
     const threads = targets();
-    return { threads, rows: threads.map((id) => rowOf(String(id))) };
+    return { threads, rows: threads.map((id) => rowOf(String(id))), ctx: context() };
   });
 
   useEffect(() => {
@@ -115,149 +84,20 @@ function useCommands(mode: PaletteMode, query: string): Commands {
   }, [mode.kind, account]);
 
   const userLabels = (summary?.labels ?? []).filter((l) => !l.system);
-  const muted = summary?.account.muted ?? false;
   switch (mode.kind) {
     case "commands": {
-      // While a composer is on screen, the palette holds its draft actions.
-      if (draftOnScreen() !== null) return { items: DRAFT_ACTIONS, placeholder: "Draft actions" };
-      const items: Item[] = [
-        { id: "done", label: "Mark done", keys: "E", run: markDone },
-        { id: "inbox", label: "Return to inbox", keys: "⇧ E", run: returnToInbox },
-        {
-          id: "snooze",
-          label: "Snooze",
-          keys: "H",
-          run: () => openPalette({ kind: "snooze" }),
-          keep: true,
-        },
-        { id: "trash", label: "Trash", keys: "#", run: trash },
-        {
-          id: "spam",
-          label: "Mark as spam",
-          keys: "!",
-          run: () => openPalette({ kind: "spam" }),
-          keep: true,
-        },
-        {
-          id: "block",
-          label: "Block",
-          run: () => openPalette({ kind: "block" }),
-          keep: true,
-        },
-        {
-          id: "blocked",
-          label: "Blocked senders",
-          run: () => openPalette({ kind: "blocked" }),
-          keep: true,
-        },
-        { id: "star", label: "Star or unstar", keys: "S", run: toggleStar },
-        {
-          id: "unsubscribe",
-          label: "Unsubscribe",
-          keys: "⌘ U",
-          run: () => openPalette({ kind: "unsubscribe" }),
-          keep: true,
-        },
-        { id: "read", label: "Mark read or unread", keys: "U", run: toggleRead },
-        { id: "select-all", label: "Select all", keys: "⌘ ⇧ A", run: () => selectAll(false) },
-        {
-          id: "select-from-here",
-          label: "Select all from here",
-          keys: "⌘ A",
-          run: () => selectAll(true),
-        },
-        {
-          id: "label",
-          label: "Add or remove label",
-          keys: "L",
-          run: () => openPalette({ kind: "labels" }),
-          keep: true,
-        },
-        { id: "unlabel", label: "Remove current label", keys: "Y", run: removeViewLabel },
-        { id: "undo", label: "Undo", keys: "Z", run: undo },
-        { id: "reply", label: "Reply", keys: "R", run: () => startReply("reply") },
-        { id: "replyall", label: "Reply all", keys: "↵", run: () => startReply("replyAll") },
-        { id: "forward", label: "Forward", keys: "F", run: () => startReply("forward") },
-        { id: "compose", label: "Compose", keys: "C", run: startCompose },
-        { id: "search", label: "Search", keys: "/", run: openSearch },
-        { id: "g-inbox", label: "Go to Inbox", run: view({ kind: "inbox" }) },
-        {
-          id: "g-imp",
-          label: "Go to Important",
-          keys: "G I",
-          run: () => goToSplit("important"),
-        },
-        {
-          id: "g-other",
-          label: "Go to Other",
-          keys: "G O",
-          run: () => goToSplit("other"),
-        },
-        { id: "g-done", label: "Go to Done", keys: "G E", run: view({ kind: "done" }) },
-        { id: "g-all", label: "Go to All Mail", keys: "G A", run: view({ kind: "allMail" }) },
-        { id: "g-snoozed", label: "Go to Snoozed", keys: "G H", run: view({ kind: "snoozed" }) },
-        { id: "g-starred", label: "Go to Starred", keys: "G S", run: view({ kind: "starred" }) },
-        { id: "g-sent", label: "Go to Sent", keys: "G T", run: view({ kind: "sent" }) },
-        { id: "g-drafts", label: "Go to Drafts", keys: "G D", run: view({ kind: "drafts" }) },
-        { id: "g-trash", label: "Go to Trash", keys: "G #", run: view({ kind: "trash" }) },
-        { id: "g-spam", label: "Go to Spam", keys: "G !", run: view({ kind: "spam" }) },
-        {
-          id: "g-label",
-          label: "Go to label",
-          keys: "G L",
-          run: () => openPalette({ kind: "goLabel" }),
-          keep: true,
-        },
-        {
-          id: "split-add",
-          label: "Add to split",
-          run: () => openPalette({ kind: "addToSplit" }),
-          keep: true,
-        },
-        {
-          id: "split-imp",
-          label: "Move to Important",
-          run: () => openPalette({ kind: "addToSplit", preset: "important" }),
-          keep: true,
-        },
-        {
-          id: "split-other",
-          label: "Move to Other",
-          run: () => openPalette({ kind: "addToSplit", preset: "other" }),
-          keep: true,
-        },
-        {
-          id: "split-settings",
-          label: "Split Inbox settings",
-          run: () => openSheet("splits"),
-        },
-        {
-          id: "switch",
-          label: "Switch account",
-          run: () => openPalette({ kind: "switchAccount" }),
-          keep: true,
-        },
-        { id: "add-account", label: "Add account", run: () => reportSignIn(addAccount()) },
-        {
-          id: "mute",
-          label: muted ? "Unmute notifications" : "Mute notifications",
-          run: () =>
-            act({ type: "setSetting", account, key: "muted", value: muted ? "off" : "on" }),
-        },
-        {
-          id: "settings",
-          label: "Settings",
-          keys: "⌘ ,",
-          run: () => openSheet("settings"),
-        },
-        {
-          id: "shortcuts",
-          label: "Keyboard shortcuts",
-          keys: "?",
-          run: () => openSheet("shortcuts"),
-        },
-      ];
-      return { items, placeholder: "Type a command" };
+      // The commands that work where the palette opened; while a composer is
+      // on screen, its draft actions (SPEC Keyboard).
+      const composing = opened.ctx.composer !== null;
+      return {
+        items: paletteCommands(opened.ctx).map((cmd) => ({
+          id: cmd.id,
+          label: labelOf(cmd, opened.ctx),
+          keys: keyChips(cmd),
+          run: () => runFromPalette(cmd),
+        })),
+        placeholder: composing ? "Draft actions" : "Type a command",
+      };
     }
     case "labels": {
       const items: Item[] = userLabels.map((l) => {
@@ -301,7 +141,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
         items: userLabels.map((l) => ({
           id: l.id,
           label: l.name,
-          run: view({ kind: "label", label: l.id }),
+          run: () => goTo({ kind: "label", label: l.id }),
         })),
         placeholder: "Go to label",
       };
@@ -395,7 +235,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
         items: (app?.accounts ?? []).map((a, i) => ({
           id: String(a.id),
           label: a.email,
-          keys: `⌃ ${i + 1}`,
+          keys: accountChips(i + 1),
           run: () => switchAccount(a.id),
         })),
         placeholder: "Switch account",
@@ -521,7 +361,7 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
                 value={itemValue(it)}
                 onSelect={() => {
                   const start = performance.now();
-                  if (!it.keep) close();
+                  close();
                   it.run();
                   measure(
                     mode.kind === "snooze"
@@ -535,7 +375,7 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
                 className="mx-1 flex h-row cursor-default items-center justify-between rounded-md px-3 text-row"
               >
                 <span className="truncate">{it.label}</span>
-                {it.keys && <Chip keys={it.keys} />}
+                {it.keys && it.keys.length > 0 && <Chip keys={it.keys} />}
               </Command.Item>
             ))}
           </Command.List>

@@ -1,24 +1,13 @@
 import { ArrowLeft, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
-import { closeComposerOnScreen, useComposeState } from "../compose/session";
+import { useComposeState } from "../compose/session";
 import { dom } from "../keyboard/refs";
-import {
-  closeSearch,
-  editSearch,
-  highlight as moveHighlightTo,
-  openSearch,
-  showSearchResults,
-  visibleSplits,
-} from "../navigation";
+import { context, runKey, useCommand, type CommandId } from "../keyboard/table";
+import { editSearch, highlight as moveHighlightTo, visibleSplits } from "../navigation";
 import { useChrome, viewTitle } from "../store/chrome";
 import { useAppState, useCurrent, useSummary } from "../store/hooks";
 import { useCurrentList, useSplitCounts } from "./current-list";
 import { countLabel } from "./format";
-
-/** Sends a key to the shortcut handler, so buttons and keys share one path. */
-function press(key: string) {
-  window.dispatchEvent(new KeyboardEvent("keydown", { key }));
-}
 
 function SearchField() {
   const search = useChrome((s) => s.search);
@@ -44,19 +33,10 @@ function SearchField() {
         placeholder="Search"
         value={search.query}
         onChange={(e) => editSearch(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") {
-            e.preventDefault();
-            e.stopPropagation();
-            closeSearch();
-          } else if (e.key === "Enter" || e.key === "ArrowDown") {
-            e.preventDefault();
-            showSearchResults();
-          }
-        }}
+        onKeyDown={(e) => runKey("search", e.nativeEvent, context(), performance.now())}
       />
       {!online && <span className="shrink-0 text-hint text-text-3">Results from this Mac</span>}
-      <IconButton title="Close search (Esc)" onClick={closeSearch}>
+      <IconButton command="search-close">
         <X size={16} strokeWidth={1.5} />
       </IconButton>
     </div>
@@ -122,20 +102,16 @@ export function TopBar() {
       // buttons as in Superhuman.
       <div className="pointer-events-none absolute top-0 left-0 z-10 flex h-12 items-center gap-2 px-4 [&>*]:pointer-events-auto">
         <div className="flex h-8 items-center rounded-full bg-bg px-0.5 shadow-card">
-          <IconButton
-            round
-            title="Back (Esc)"
-            onClick={() => (screen === "compose" ? closeComposerOnScreen() : press("Escape"))}
-          >
+          <IconButton round command="back">
             <ArrowLeft size={16} strokeWidth={1.5} />
           </IconButton>
         </div>
         {screen === "conversation" && (
           <div className="flex h-8 items-center rounded-full bg-bg px-1 shadow-card">
-            <IconButton round title="Previous conversation (K)" onClick={() => press("k")}>
+            <IconButton round command="prev">
               <ChevronUp size={16} strokeWidth={1.5} />
             </IconButton>
-            <IconButton round title="Next conversation (J)" onClick={() => press("j")}>
+            <IconButton round command="next">
               <ChevronDown size={16} strokeWidth={1.5} />
             </IconButton>
           </div>
@@ -155,7 +131,7 @@ export function TopBar() {
         <>
           <ViewTitle />
           <div className="flex-1" data-tauri-drag-region />
-          <IconButton title="Search (/)" onClick={openSearch}>
+          <IconButton command="search">
             <Search size={16} strokeWidth={1.5} />
           </IconButton>
         </>
@@ -164,22 +140,23 @@ export function TopBar() {
   );
 }
 
+/** A button for a command: its title from the table, disabled where it does nothing. */
 function IconButton({
-  title,
-  onClick,
+  command,
   round = false,
   children,
 }: {
-  title: string;
-  onClick: () => void;
+  command: CommandId;
   round?: boolean;
   children: React.ReactNode;
 }) {
+  const { title, enabled, run } = useCommand(command);
   return (
     <button
       title={title}
-      onClick={onClick}
-      className={`flex h-7 w-7 items-center justify-center text-text-2 hover:bg-fill hover:text-text ${round ? "rounded-full" : "rounded-md"}`}
+      disabled={!enabled}
+      onClick={run}
+      className={`flex h-7 w-7 items-center justify-center text-text-2 hover:bg-fill hover:text-text disabled:opacity-40 disabled:hover:bg-transparent ${round ? "rounded-full" : "rounded-md"}`}
     >
       {children}
     </button>

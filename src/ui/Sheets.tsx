@@ -2,75 +2,12 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { act, checkSplitRule, signInAgain } from "../ipc/bridge";
+import { keyText, sheet as shortcutSheet } from "../keyboard/table";
 import type { AccountInfo, SplitInfo } from "../ipc/types";
 import { closeSheet, openSplitSettings } from "../navigation";
 import { useChrome } from "../store/chrome";
 import { reportSignIn } from "./signIn";
 import { useAppState, useCurrent, useSummary } from "../store/hooks";
-
-const SHORTCUTS: [string, [string, string][]][] = [
-  [
-    "Navigate",
-    [
-      ["J / K", "Next / previous conversation"],
-      ["Enter", "Open conversation · reply all inside it"],
-      ["Esc", "Back to the list · close"],
-      ["Tab / ⇧Tab", "Next / previous split · cycle links in a conversation"],
-      ["N / P", "Next / previous message"],
-      ["O", "Expand or collapse message"],
-      ["⇧O", "Expand everything"],
-      ["X", "Select · ⇧J / ⇧K extend"],
-      ["⌘A", "Select all from here"],
-      ["⌘U", "Unsubscribe"],
-      ["⌘⇧A", "Select all"],
-      ["/", "Search"],
-      ["⌘K", "Commands"],
-      ["⌃1…9", "Switch account"],
-    ],
-  ],
-  [
-    "Act",
-    [
-      ["E", "Mark done"],
-      ["⇧E", "Return to inbox"],
-      ["H", "Snooze"],
-      ["S", "Star"],
-      ["U", "Read / unread"],
-      ["#", "Trash"],
-      ["!", "Spam"],
-      ["L", "Labels"],
-      ["Y", "Remove current label"],
-      ["Z", "Undo"],
-    ],
-  ],
-  [
-    "Write",
-    [
-      ["C", "Compose"],
-      ["R", "Reply"],
-      ["F", "Forward"],
-      ["⌘Enter", "Send"],
-      ["⌘⇧O / C / B", "To / Cc / Bcc"],
-      ["⌘⇧F", "From"],
-      ["⌘⇧S / M", "Subject / message"],
-      ["⌘⇧A", "Attach"],
-      ["⌘⇧,", "Discard draft"],
-    ],
-  ],
-  [
-    "Go to",
-    [
-      ["G I / G O", "Important / Other"],
-      ["G E", "Done"],
-      ["G H", "Snoozed"],
-      ["G S", "Starred"],
-      ["G T", "Sent"],
-      ["G D", "Drafts"],
-      ["G L", "Label"],
-      ["G # / G !", "Trash / Spam"],
-    ],
-  ],
-];
 
 function Sheet({
   title,
@@ -107,17 +44,17 @@ function Shortcuts() {
   return (
     <Sheet title="Keyboard shortcuts" wide>
       <div className="grid grid-cols-2 gap-x-8 gap-y-5">
-        {SHORTCUTS.map(([group, rows]) => (
+        {shortcutSheet().map(({ group, commands }) => (
           <div key={group}>
             <div className="mb-1 text-hint font-medium text-text-3 uppercase">{group}</div>
-            {rows.map(([k, d]) => (
+            {commands.map((cmd) => (
               <div
-                key={k}
+                key={cmd.id}
                 className="flex min-h-7 items-center justify-between gap-3 border-b border-border-2 py-1 text-row"
               >
-                <span className="text-text-2">{d}</span>
+                <span className="text-text-2">{cmd.label}</span>
                 <kbd className="shrink-0 rounded-sm bg-fill px-1.5 text-hint font-medium text-text-2">
-                  {k}
+                  {keyText(cmd)}
                 </kbd>
               </div>
             ))}

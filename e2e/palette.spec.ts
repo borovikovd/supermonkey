@@ -198,3 +198,113 @@ test("PAL-02 palette commands do what their keys do", async ({ app, gmail }) => 
   const { notifications } = await gmail.platform();
   expect(notifications.map((n) => n.account)).toEqual([B]);
 });
+
+/** Opens the palette and returns its items' labels, top to bottom; closes it again. */
+async function listed(app: App): Promise<string[]> {
+  await app.press("Meta+k");
+  await expect(app.palette).toBeVisible();
+  const labels = await items(app).evaluateAll((els) =>
+    els.map((el) => el.querySelector("span")?.textContent ?? ""),
+  );
+  await app.press("Escape");
+  await expect(app.palette).toHaveCount(0);
+  return labels;
+}
+
+test("PAL-03 the palette lists only the commands that work where it opened", async ({
+  app,
+  gmail,
+}) => {
+  test.slow();
+  await seeds.standard(gmail, app);
+  await expect(app.highlighted).toContainText("Person 1");
+
+  // Inbox, a row highlighted: its mail actions; not Return to inbox, Reply
+  // all, or Undo with nothing to undo.
+  let shown = await listed(app);
+  for (const label of ["Mark done", "Trash", "Reply", "Select all", "Go to Starred"]) {
+    expect(shown, label).toContain(label);
+  }
+  for (const label of ["Return to inbox", "Reply all", "Undo", "Sign in again"]) {
+    expect(shown, label).not.toContain(label);
+  }
+  await app.press("e");
+  await expect(app.highlighted).toContainText("Person 2");
+  expect(await listed(app)).toContain("Undo");
+
+  // A conversation: Reply all, and not the list's selection commands.
+  await app.press("Enter");
+  await expect(app.conversationTitle).toHaveText("Person 2");
+  shown = await listed(app);
+  expect(shown).toContain("Reply all");
+  expect(shown).not.toContain("Select all");
+  expect(shown).not.toContain("Select all from here");
+  // With a reply open, the subject row's buttons would do nothing: disabled.
+  await app.reply("r");
+  await expect(app.conversation.getByRole("button", { name: "Mark Done (E)" })).toBeDisabled();
+  await app.press("Escape", "Escape");
+  await expect(app.editor).toHaveCount(0);
+  await expect(app.conversation.getByRole("button", { name: "Mark Done (E)" })).toBeEnabled();
+  await app.press("Escape");
+
+  // Done: Return to inbox, not Mark done.
+  await app.press("g", "e");
+  await expect(viewTitle(app)).toHaveText("Done");
+  await expect(app.highlighted).toHaveCount(1);
+  shown = await listed(app);
+  expect(shown).toContain("Return to inbox");
+  expect(shown).not.toContain("Mark done");
+
+  // Drafts: no mail actions and no Reply, which do nothing there.
+  await app.press("g", "d");
+  await expect(viewTitle(app)).toHaveText("Drafts");
+  shown = await listed(app);
+  for (const label of ["Mark done", "Trash", "Star or unstar", "Reply", "Forward"]) {
+    expect(shown, label).not.toContain(label);
+  }
+  expect(shown).toContain("Compose");
+
+  // The shortcut sheet lists every shortcut, All Mail's too.
+  await app.press("?");
+  const allMail = app
+    .sheet("Keyboard shortcuts")
+    .locator("div")
+    .filter({ has: app.page.getByText("Go to All Mail", { exact: true }) })
+    .last();
+  await expect(allMail.locator("kbd")).toHaveText("g a");
+  await app.press("Escape");
+
+  // Signed out: only Sign in again and the app's own commands.
+  await app.restart(async () => {
+    await gmail.forgetToken(A);
+  });
+  await app.settle();
+  await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
+  expect(await listed(app)).toEqual([
+    "Sign in again",
+    "Switch account",
+    "Add account",
+    "Mute notifications",
+    "Settings",
+  ]);
+});
+
+test("PAL-04 an empty Inbox offers no mail actions and hints only the palette", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.empty(gmail, app);
+  await expect(app.page.getByText("Inbox zero.")).toBeVisible();
+  await expect(app.hintBar).toHaveText("⌘K for commands");
+  const shown = await listed(app);
+  for (const label of ["Mark done", "Snooze", "Trash", "Reply", "Select all", "Switch account"]) {
+    expect(shown, label).not.toContain(label);
+  }
+  expect(shown).toContain("Compose");
+
+  // Mail arrives: the hints that act on it come back.
+  await gmail.deliver({ account: A, from: "Solo <solo@x.test>", subject: "Only one" });
+  await app.settle();
+  await expect(app.highlighted).toContainText("Only one");
+  await expect(app.hintBar).toHaveText(/E to Mark Done\s*·\s*H to snooze\s*·\s*⌘K for commands/);
+});

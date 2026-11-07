@@ -39,7 +39,7 @@ export type ComposerHandle = {
   closeLink: () => boolean;
 };
 
-type ComposeState = {
+export type ComposeState = {
   /** The composer on screen: a reply composer in conversation `thread`, or the `c` screen when null. */
   onScreen: { draft: string; thread: number | null } | null;
   /** The first Esc blurred the editor; compose is still on screen. */
@@ -50,6 +50,9 @@ const useCompose = create<ComposeState>(() => ({ onScreen: null, blurred: false 
 
 /** Reads compose state in a component. */
 export const useComposeState = <T>(select: (s: ComposeState) => T): T => useCompose(select);
+
+/** Compose state now, outside React. */
+export const composeState = () => useCompose.getState();
 
 /** The composer on screen, outside React. */
 export const composerOnScreen = () => useCompose.getState().onScreen;

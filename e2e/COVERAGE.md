@@ -324,6 +324,8 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 
 - PAL-01 · P1 · Open, filter, run, and close the palette · §Keyboard, §Done when
 - PAL-02 · P2 · Palette commands do what their keys do · §Keyboard
+- PAL-03 · P1 · The palette lists only the commands that work where it opened; the shortcut sheet lists every shortcut · §Keyboard, §Accounts, §Layout
+- PAL-04 · P2 · An empty Inbox offers no mail actions and hints only the palette · §Keyboard, §Layout
 
 ### security.spec.ts (SEC)
 

@@ -1,18 +1,44 @@
 import { Archive, Clock, File, Inbox, Send, Star } from "lucide-react";
 
 import type { AccountInfo, View } from "../ipc/types";
-import { goTo, openSheet, switchAccount } from "../navigation";
+import { useCommand, type CommandId } from "../keyboard/table";
+import { openSheet, switchAccount } from "../navigation";
 import { useCurrent } from "../store/hooks";
 import { countLabel } from "./format";
 
-const VIEWS: { view: View; icon: typeof Inbox; title: string }[] = [
-  { view: { kind: "inbox" }, icon: Inbox, title: "Inbox" },
-  { view: { kind: "done" }, icon: Archive, title: "Done (g e)" },
-  { view: { kind: "snoozed" }, icon: Clock, title: "Snoozed (g h)" },
-  { view: { kind: "starred" }, icon: Star, title: "Starred (g s)" },
-  { view: { kind: "sent" }, icon: Send, title: "Sent (g t)" },
-  { view: { kind: "drafts" }, icon: File, title: "Drafts (g d)" },
+/** The rail's views, each the command that goes there. */
+const VIEWS: { kind: View["kind"]; icon: typeof Inbox; command: CommandId }[] = [
+  { kind: "inbox", icon: Inbox, command: "g-inbox" },
+  { kind: "done", icon: Archive, command: "g-done" },
+  { kind: "snoozed", icon: Clock, command: "g-snoozed" },
+  { kind: "starred", icon: Star, command: "g-starred" },
+  { kind: "sent", icon: Send, command: "g-sent" },
+  { kind: "drafts", icon: File, command: "g-drafts" },
 ];
+
+function ViewButton({
+  command,
+  active,
+  children,
+}: {
+  command: CommandId;
+  active: boolean;
+  children: React.ReactNode;
+}) {
+  const { title, enabled, run } = useCommand(command);
+  return (
+    <button
+      title={title}
+      disabled={!enabled}
+      onClick={run}
+      className={`flex h-8 w-8 items-center justify-center rounded-lg disabled:opacity-40 ${
+        active ? "bg-bg text-text shadow-lift" : "text-text-2 hover:text-text"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
 /** What the avatar's tooltip adds: sign in again, or the quiet sync status (SPEC Gmail errors). */
 function status(a: AccountInfo): string {
@@ -40,17 +66,10 @@ export function Rail({ accounts }: { accounts: AccountInfo[] }) {
     <nav className="flex w-rail shrink-0 flex-col items-center pt-1 pb-4">
       {/* View icons in one quiet pill, as Superhuman groups them. */}
       <div className="flex flex-col items-center gap-1 rounded-2xl bg-fill/70 p-1">
-        {VIEWS.map(({ view, icon: Icon, title }) => (
-          <button
-            key={view.kind}
-            title={title}
-            onClick={() => goTo(view)}
-            className={`flex h-8 w-8 items-center justify-center rounded-lg ${
-              active === view.kind ? "bg-bg text-text shadow-lift" : "text-text-2 hover:text-text"
-            }`}
-          >
+        {VIEWS.map(({ kind, icon: Icon, command }) => (
+          <ViewButton key={kind} command={command} active={active === kind}>
             <Icon size={16} strokeWidth={1.5} />
-          </button>
+          </ViewButton>
         ))}
       </div>
       <div className="flex-1" />
