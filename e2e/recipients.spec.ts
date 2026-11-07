@@ -446,6 +446,26 @@ test("RCP-10 the autosave leaves an address being typed alone", async ({ app, gm
   await expect(app.field("To")).toBeFocused();
 });
 
+test("RCP-12 a chip removed while an address is being typed stays removed", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await app.compose();
+  // Addresses with no contacts, so no suggestion list opens.
+  await app.type("kai@kite.test,kay@kite.test,lex@kite.test");
+  await expect(app.chips("To")).toHaveCount(2);
+  await app.settle();
+
+  // The click on × takes focus from the field, which turns the typed text into a chip.
+  await app.page.locator('[data-chip="kai@kite.test"]').hover();
+  await app.page.getByRole("button", { name: "Remove kai@kite.test" }).click();
+  await app.page.clock.runFor(200);
+  await app.settle();
+  expect(await chipAddresses(app, "To")).toEqual(["kay@kite.test", "lex@kite.test"]);
+  await expect(app.field("To")).toHaveValue("");
+});
+
 test("RCP-11 every address the core would refuse shows in danger and blocks send", async ({
   app,
   gmail,

@@ -1,8 +1,8 @@
 // To, Cc, and Bcc as chips with autocomplete (SPEC Recipients and autocomplete).
 
-import { useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 
-import { autocomplete } from "../ipc/bridge";
+import { autocomplete, later } from "../ipc/bridge";
 import type { Addr, ContactSuggestion } from "../ipc/types";
 import { registerKeys } from "../keyboard/dispatch";
 import { measure } from "../keyboard/meter";
@@ -148,6 +148,18 @@ export function RecipientField({
 
   useImperativeHandle(ref, () => ({ focus: () => input.current?.focus(), commit }));
 
+  /** What leaving the field does, as of the latest render: a click that blurred it may change the chips first. */
+  const onLeft = useRef(() => {});
+  useLayoutEffect(() => {
+    onLeft.current = () => {
+      if (text.trim()) commit();
+      setSuggestions([]);
+    };
+  });
+  /** Cancels the pending `onLeft`. */
+  const leaving = useRef<(() => void) | null>(null);
+  useEffect(() => () => leaving.current?.(), []);
+
   const query = (q: string) => {
     const start = performance.now();
     const n = ++seq.current;
@@ -246,11 +258,16 @@ export function RecipientField({
             clearInput();
           }
         }}
+        onFocus={() => {
+          leaving.current?.();
+          leaving.current = null;
+        }}
         onBlur={() => {
           // Leaving the field turns typed text into a chip.
-          setTimeout(() => {
-            if (text.trim()) commit();
-            setSuggestions([]);
+          leaving.current?.();
+          leaving.current = later(() => {
+            leaving.current = null;
+            onLeft.current();
           }, 120);
         }}
         onKeyDown={(e) => {

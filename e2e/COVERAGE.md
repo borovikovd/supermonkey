@@ -218,6 +218,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - RCP-09 · P2 · Suggestions that answer after a chip is made stay closed · §Recipients and autocomplete
 - RCP-10 · P2 · The autosave leaves an address being typed alone · §Recipients and autocomplete, §Drafts
 - RCP-11 · P1 · Every address the core would refuse shows in `danger` and blocks Send · §Recipients and autocomplete
+- RCP-12 · P2 · A chip removed while an address is being typed stays removed · §Recipients and autocomplete
 
 ### attachments.spec.ts (ATT)
 
