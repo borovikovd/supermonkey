@@ -53,6 +53,17 @@ impl CidImages {
 
 static CID_REF: LazyLock<Regex> = LazyLock::new(|| crate::regex(r#"(?i)\bcid:([^"'\s)>]+)"#));
 
+/// The Content-IDs (without brackets) that `html`'s `cid:` references name,
+/// read as [`CidImages`] reads them: as written, and percent-decoded
+/// without brackets.
+pub(crate) fn cid_references(html: &str) -> impl Iterator<Item = String> + '_ {
+    CID_REF.captures_iter(html).flat_map(|c| {
+        let reference = c.get(1).map_or("", |m| m.as_str());
+        let decoded = percent_decode_str(reference).decode_utf8_lossy();
+        [reference.to_owned(), bare_id(&decoded).to_owned()]
+    })
+}
+
 /// Replaces each `cid:` reference with a known image by its `data:` URI.
 /// Unknown references stay; the sanitizer then drops them.
 pub(crate) fn inline_cid_images<'a>(html: &'a str, images: &CidImages) -> Cow<'a, str> {

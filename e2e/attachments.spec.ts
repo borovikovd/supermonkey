@@ -561,4 +561,62 @@ test.describe("attachments", () => {
     await app.settle();
     expect((await gmail.platform()).openedFiles).toHaveLength(1);
   });
+
+  test("ATT-18 an image the body doesn't show is an attachment, and a forward carries it", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    // Apple Mail with a plain-text body sends a photo `inline`, with no Content-ID.
+    await gmail.deliver({
+      account: A,
+      from: "Ann Apple <ann@apple.test>",
+      subject: "Photo from my phone",
+      text: "Here it is.",
+      attachments: [{ ...attachment(files.photoPng), inline: true }],
+    });
+    // HTML that shows its logo but never references the photo.
+    await gmail.deliver({
+      account: A,
+      from: "Carl Chart <carl@chart.test>",
+      subject: "Logo and photo",
+      html: '<p>The photo is attached.</p><p><img src="cid:logo" alt="logo"></p>',
+      attachments: [attachment(files.logoPng, "logo"), attachment(files.photoPng, "unused")],
+    });
+    await app.settle();
+    await expect(app.row("Photo from my phone")).toHaveAttribute("data-attachments");
+    await expect(app.row("Logo and photo")).toHaveAttribute("data-attachments");
+
+    // The logo is in the body, not a chip; the photo is a chip.
+    await app.row("Logo and photo").click();
+    await expect(app.conversationTitle).toHaveText("Logo and photo");
+    await expect(app.messageBody(0).getByRole("img", { name: "logo" })).toHaveAttribute(
+      "src",
+      /^data:image\/png;base64,/,
+    );
+    await expect(app.conversation.getByRole("button", { name: /photo\.png/ })).toHaveCount(1);
+    await expect(app.conversation.getByRole("button", { name: /logo\.png/ })).toHaveCount(0);
+    await app.press("Escape");
+
+    await app.row("Photo from my phone").click();
+    await expect(app.conversationTitle).toHaveText("Photo from my phone");
+    const chip = app.conversation.getByRole("button", { name: /photo\.png/ });
+    await expect(chip).toHaveCount(1);
+    await chip.click();
+    await app.settle();
+    const { openedFiles } = await gmail.platform();
+    expect(openedFiles).toHaveLength(1);
+    expect(readFileSync(openedFiles[0] ?? "").equals(files.photoPng.buffer)).toBe(true);
+
+    await app.reply("f");
+    await app.press("Meta+Shift+o");
+    await app.type("kim@kite.test,");
+    await expect(app.chips("To")).toHaveCount(1);
+    await app.settle();
+    await app.press("Meta+Enter");
+    await app.advance(10_000);
+    await app.settle();
+    const forwarded = filesOf(await sentWithSubject(gmail, "Fwd: Photo from my phone"));
+    expect(forwarded["photo.png"]?.bytes.equals(files.photoPng.buffer)).toBe(true);
+  });
 });

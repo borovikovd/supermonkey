@@ -73,6 +73,7 @@ const Row = memo(function Row({
       data-selected={selected ? true : undefined}
       data-unread={row?.unread ? true : undefined}
       data-starred={row?.starred ? true : undefined}
+      data-attachments={row?.hasAttachments ? true : undefined}
     >
       {highlighted && <span className="absolute top-0 bottom-0 left-0 w-0.75 bg-accent" />}
       <span className="flex w-1.25 shrink-0 justify-center">

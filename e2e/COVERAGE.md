@@ -241,6 +241,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ATT-15 · P1 · Discarding while a send waits for a file cancels the send · §Drafts
 - ATT-16 · P2 · The same file can be attached twice · §Drafts
 - ATT-17 · P2 · An attachment that can't be opened says why · §Reading, §Offline
+- ATT-18 · P1 · An image the body doesn't show, such as a photo sent inline with no Content-ID, is an attachment, and a forward carries it · §Reading, §Addressing
 
 ### drafts.spec.ts (DRF)
 
@@ -426,7 +427,7 @@ Unit tests only for what the suite can't reach (AGENTS.md); the suite doesn't re
 - `crates/ub-domain/src/drafts.rs`: when a draft is untouched, and Gmail draft kinds.
 - `crates/ub-domain/src/labels.rs`, `crates/ub-domain/src/kinds_text.rs`, and `crates/ub-domain/src/hue.rs`: system label ids, label set operations, kind text round trips, label hue slots.
 - `crates/ub-mime/tests/sanitize.rs`: the hostile fixture, what is kept and dropped, `rel=noopener`, `cid:` to `data:`, text extraction (SEC-01).
-- `crates/ub-mime/tests/payload.rs`: a charset with no decoder read as undeclared text; the attachments inside an attached message, and not its body or inline images; only images are inline, here and inside an attached message (ATT-12).
+- `crates/ub-mime/tests/payload.rs`: a charset with no decoder read as undeclared text; the attachments inside an attached message, and not its body or inline images; an image is inline only when the HTML body shows it, by a plain or percent-encoded `cid:` reference, here and inside an attached message, and only those are fetched for the body (ATT-12, ATT-18).
 - `crates/ub-mime/tests/no_panic.rs`: 3,000 seeded random inputs through every parser and the sanitizer.
 - `crates/ub-mime/tests/addresses.rs`: `is_valid_email` against the address table the composer's copy of the rule is held to (RCP-11).
 - `crates/ub-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser and when one-click applies.

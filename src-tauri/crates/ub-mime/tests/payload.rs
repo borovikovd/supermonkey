@@ -4,7 +4,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::{Value, json};
-use ub_mime::parse_message;
+use ub_mime::{ParsedMessage, parse_message};
 
 fn plain(charset: &str, bytes: &[u8]) -> Value {
     json!({
@@ -223,23 +223,134 @@ fn apple_mail() -> Value {
     })
 }
 
-#[test]
-fn only_inline_images_are_inline() {
-    let parsed = parse_message(&apple_mail()).unwrap();
-    let listed: Vec<(&str, bool)> = parsed
+/// Each listed part's filename, and whether it is inline.
+fn listed(parsed: ParsedMessage) -> Vec<(String, bool)> {
+    parsed
         .parts
-        .iter()
-        .map(|p| (p.filename.as_str(), p.is_inline))
-        .collect();
+        .into_iter()
+        .map(|p| (p.filename, p.is_inline))
+        .collect()
+}
+
+fn named(parts: &[(&str, bool)]) -> Vec<(String, bool)> {
+    parts.iter().map(|&(n, i)| (n.to_owned(), i)).collect()
+}
+
+#[test]
+fn a_file_sent_inline_is_an_attachment() {
     // A PDF sent inline is an attachment, here and inside the attached
-    // message; the photo is an inline image of this message's body, and the
-    // attached message's photo belongs to its body.
+    // message. The photo the HTML shows is an inline image of this
+    // message's body; the attached message's photo is an attachment, since
+    // its plain-text body can't show it.
     assert_eq!(
-        listed,
-        [
+        listed(parse_message(&apple_mail()).unwrap()),
+        named(&[
             ("scan.pdf", false),
             ("photo.jpg", true),
-            ("inner.pdf", false)
-        ]
+            ("inner.pdf", false),
+            ("photo.jpg", false),
+        ])
+    );
+}
+
+/// A photo sent `inline`, as Apple Mail sends one, with this Content-ID if any.
+fn photo(id: &str, name: &str, content_id: Option<&str>) -> Value {
+    let mut headers = vec![header(
+        "Content-Disposition",
+        &format!("inline; filename=\"{name}\""),
+    )];
+    if let Some(cid) = content_id {
+        headers.push(header("Content-ID", &format!("<{cid}>")));
+    }
+    json!({
+        "partId": id,
+        "mimeType": "image/jpeg",
+        "filename": name,
+        "headers": headers,
+        "body": { "size": 2048, "attachmentId": format!("ATT-{id}") },
+    })
+}
+
+#[test]
+fn an_image_is_inline_only_when_the_html_body_shows_it() {
+    // Apple Mail with a plain-text body: the photo goes `inline` with no
+    // Content-ID.
+    let plain_text = json!({
+        "partId": "",
+        "mimeType": "multipart/mixed",
+        "parts": [
+            { "partId": "0", "mimeType": "text/plain", "body": data("From my phone.") },
+            photo("1", "IMG_0001.jpeg", None),
+        ],
+    });
+    assert_eq!(
+        listed(parse_message(&plain_text).unwrap()),
+        named(&[("IMG_0001.jpeg", false)])
+    );
+
+    // HTML that shows one image, by a percent-encoded reference, but not a
+    // second one with a Content-ID, nor a photo with none.
+    let html = json!({
+        "partId": "",
+        "mimeType": "multipart/related",
+        "parts": [
+            {
+                "partId": "0",
+                "mimeType": "text/html",
+                "body": data("<p>The chart:<img src=\"cid:chart%40mac\"></p>"),
+            },
+            photo("1", "chart.jpeg", Some("chart@mac")),
+            photo("2", "unused.jpeg", Some("unused@mac")),
+            photo("3", "IMG_0002.jpeg", None),
+        ],
+    });
+    assert_eq!(
+        listed(parse_message(&html).unwrap()),
+        named(&[
+            ("chart.jpeg", true),
+            ("unused.jpeg", false),
+            ("IMG_0002.jpeg", false),
+        ])
+    );
+    // Only the image the body shows is fetched for it.
+    let parsed = parse_message(&html).unwrap();
+    let fetched: Vec<&str> = parsed
+        .inline_images_to_fetch()
+        .map(|f| f.content_id)
+        .collect();
+    assert_eq!(fetched, ["chart@mac"]);
+}
+
+#[test]
+fn an_attached_message_leaves_out_only_the_images_its_html_shows() {
+    let forwarded = json!({
+        "partId": "",
+        "mimeType": "multipart/mixed",
+        "parts": [
+            { "partId": "0", "mimeType": "text/plain", "body": data("Forwarded.") },
+            {
+                "partId": "1",
+                "mimeType": "message/rfc822",
+                "filename": "Fwd.eml",
+                "body": { "size": 0 },
+                "parts": [{
+                    "partId": "1.0",
+                    "mimeType": "multipart/related",
+                    "parts": [
+                        {
+                            "partId": "1.0.0",
+                            "mimeType": "text/html",
+                            "body": data("<p><img src=\"cid:logo@mac\"></p>"),
+                        },
+                        photo("1.0.1", "logo.jpeg", Some("logo@mac")),
+                        photo("1.0.2", "IMG_0003.jpeg", None),
+                    ],
+                }],
+            },
+        ],
+    });
+    assert_eq!(
+        listed(parse_message(&forwarded).unwrap()),
+        named(&[("IMG_0003.jpeg", false)])
     );
 }

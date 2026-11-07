@@ -12,7 +12,10 @@ use crate::StoreError;
 /// from Gmail again: a file with another version is moved aside and a fresh
 /// one created, since there are no migrations (ARCHITECTURE.md, section 6).
 /// 5: only images are inline parts, so files sent `inline` are listed.
-pub const SCHEMA_VERSION: i32 = 5;
+/// 6: an image is inline only when the HTML body shows it, so a photo sent
+/// `inline` with no Content-ID is listed, and stored inside an attached
+/// message.
+pub const SCHEMA_VERSION: i32 = 6;
 
 const SCHEMA: &str = include_str!("schema.sql");
 

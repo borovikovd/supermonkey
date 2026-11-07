@@ -1,13 +1,15 @@
 //! The `payload` of a Gmail `users.messages` resource: its headers, bodies, and
 //! attachment and inline parts.
 
+use std::collections::HashSet;
+
 use serde::Deserialize;
 use ub_domain::{Addr, DraftId, Millis};
 
 use crate::addr::parse_address_list;
 use crate::body::RawBody;
 use crate::charset::{decode_base64, decode_text_part};
-use crate::cid::CidImages;
+use crate::cid::{CidImages, cid_references};
 use crate::encoded_word::decode_encoded_words;
 use crate::headers::{DRAFT_HEADER, bare_id, message_ids, parse_date, parse_draft_id};
 use crate::params::{header_kind, header_param};
@@ -74,10 +76,11 @@ pub struct Part {
     pub attachment_id: Option<String>,
     /// The Content-ID, without angle brackets.
     pub content_id: Option<String>,
-    /// An inline image: an `image/*` part with `Content-Disposition:
-    /// inline`, or with no disposition but a Content-ID. It belongs to the
-    /// body. Any other part is an attachment, whatever its disposition: Apple
-    /// Mail sends every file `inline`.
+    /// An inline image: an `image/*` part whose Content-ID the message's
+    /// HTML body references (`cid:`), so the body shows it. Any other part
+    /// is an attachment, whatever its disposition: Apple Mail sends every
+    /// file `inline`, and a photo with no Content-ID, or one the HTML never
+    /// references, would otherwise show nowhere.
     pub is_inline: bool,
     /// The bytes, when Gmail sent them in the payload.
     pub data: Option<Vec<u8>>,
@@ -95,11 +98,11 @@ pub struct InlineFetch<'a> {
 }
 
 impl ParsedMessage {
-    /// Inline images referenced by Content-ID that Gmail left out of the
+    /// Inline images ([`Part::is_inline`]) that Gmail left out of the
     /// payload. Fetch each, add it to [`ParsedMessage::cid_images`], then render.
     pub fn inline_images_to_fetch(&self) -> impl Iterator<Item = InlineFetch<'_>> {
         self.parts.iter().filter_map(|part| {
-            if part.data.is_some() || !part.mime_type.starts_with("image/") {
+            if part.data.is_some() || !part.is_inline {
                 return None;
             }
             Some(InlineFetch {
@@ -128,22 +131,24 @@ impl ParsedMessage {
 /// Bodies are the base64url `body.data` of `text/html` and `text/plain` parts
 /// without a filename, decoded in their charset; several of one type (Apple
 /// Mail splits a body around attachments) are joined in order. A body Gmail
-/// moved behind an attachment id is skipped. Only images are inline parts
-/// ([`Part::is_inline`]). A message attached to this one (`message/rfc822`,
-/// as a forward as attachment sends it) adds the attachments inside it, not
-/// its body or inline images; the attached message itself is listed only
-/// when Gmail gives it an attachment id.
+/// moved behind an attachment id is skipped. Only the images the HTML body
+/// shows are inline parts ([`Part::is_inline`]). A message attached to this
+/// one (`message/rfc822`, as a forward as attachment sends it) adds the
+/// attachments inside it, not its body or the images its own HTML body
+/// shows; the attached message itself is listed only when Gmail gives it an
+/// attachment id.
 pub fn parse_message(payload: &serde_json::Value) -> Result<ParsedMessage, PayloadError> {
     let root = WirePart::deserialize(payload)?;
-    let mut walk = Walk::default();
-    walk.visit(&root, false);
+    let mut walk = Walk::new();
+    walk.visit(&root, THIS_MESSAGE);
+    let parts = walk.parts();
     Ok(ParsedMessage {
         headers: MessageHeaders::from_part(&root),
         body: RawBody {
             html: walk.html,
             text: walk.text,
         },
-        parts: walk.parts,
+        parts,
     })
 }
 
@@ -216,36 +221,75 @@ impl WirePart<'_> {
     }
 }
 
+/// The index of the message being parsed in [`Walk::messages`]; the messages
+/// attached to it follow in document order.
+const THIS_MESSAGE: usize = 0;
+
 /// What a walk of the part tree collects, in document order.
-#[derive(Default)]
 struct Walk {
     html: Option<String>,
     text: Option<String>,
-    parts: Vec<Part>,
+    /// Each part that is not a body, with the index of the message it is
+    /// in, before [`Walk::parts`] decides which are inline.
+    found: Vec<(usize, Part)>,
+    /// The Content-IDs each message's HTML body references, by index: this
+    /// message, then each attached one.
+    messages: Vec<HashSet<String>>,
 }
 
 impl Walk {
-    /// Visits `part`; `attached` when it is inside an attached message.
-    fn visit(&mut self, part: &WirePart<'_>, attached: bool) {
+    fn new() -> Self {
+        Self {
+            html: None,
+            text: None,
+            found: Vec::new(),
+            messages: vec![HashSet::new()],
+        }
+    }
+
+    /// Visits `part`, which is in message `message` (an index into
+    /// [`Walk::messages`]).
+    fn visit(&mut self, part: &WirePart<'_>, message: usize) {
         let mime_type = part.mime_type.trim().to_ascii_lowercase();
         if mime_type.starts_with("multipart/") {
             for child in &part.parts {
-                self.visit(child, attached);
+                self.visit(child, message);
             }
             return;
         }
         // Gmail serves an attached message's parts under it.
         let is_message = mime_type == "message/rfc822";
-        self.leaf(part, mime_type, attached);
+        self.leaf(part, mime_type, message);
         if is_message {
+            let attached = self.messages.len();
+            self.messages.push(HashSet::new());
             for child in &part.parts {
-                self.visit(child, true);
+                self.visit(child, attached);
             }
         }
     }
 
+    /// The parts found, each image marked inline when its message's HTML
+    /// body references it. An attached message's inline images belong to
+    /// its body, which is not shown, so they are left out.
+    fn parts(&mut self) -> Vec<Part> {
+        let messages = &self.messages;
+        std::mem::take(&mut self.found)
+            .into_iter()
+            .filter_map(|(message, mut part)| {
+                part.is_inline = part.mime_type.starts_with("image/")
+                    && part.content_id.as_ref().is_some_and(|id| {
+                        messages
+                            .get(message)
+                            .is_some_and(|referenced| referenced.contains(id))
+                    });
+                (message == THIS_MESSAGE || !part.is_inline).then_some(part)
+            })
+            .collect()
+    }
+
     /// A part that is not a container: a body, an attachment, or an inline part.
-    fn leaf(&mut self, part: &WirePart<'_>, mime_type: String, attached: bool) {
+    fn leaf(&mut self, part: &WirePart<'_>, mime_type: String, message: usize) {
         let content_type = part.header("Content-Type").unwrap_or_default();
         let disposition = part.header("Content-Disposition").unwrap_or_default();
         let disposition_kind = header_kind(disposition);
@@ -261,13 +305,21 @@ impl Walk {
             && filename.is_empty()
             && disposition_kind != "attachment";
         if is_body {
-            if attached {
+            let is_html = mime_type == "text/html";
+            // An attached message's HTML only says which of its images it shows.
+            if message != THIS_MESSAGE && !is_html {
                 return;
             }
             if let Some(bytes) = data {
                 let charset = header_param(content_type, "charset");
                 let decoded = decode_text_part(bytes, charset.as_deref());
-                let body = if mime_type == "text/html" {
+                if is_html && let Some(referenced) = self.messages.get_mut(message) {
+                    referenced.extend(cid_references(&decoded));
+                }
+                if message != THIS_MESSAGE {
+                    return;
+                }
+                let body = if is_html {
                     &mut self.html
                 } else {
                     &mut self.text
@@ -292,31 +344,25 @@ impl Walk {
             .map(bare_id)
             .filter(|id| !id.is_empty())
             .map(str::to_owned);
-        let is_inline = mime_type.starts_with("image/")
-            && match disposition_kind.as_str() {
-                "inline" => true,
-                "" => content_id.is_some(),
-                _ => false,
-            };
-        // An attached message's inline images belong to its body, not shown.
-        if attached && is_inline {
-            return;
-        }
         let filename = if filename.is_empty() {
             default_filename(&mime_type).to_owned()
         } else {
             filename
         };
-        self.parts.push(Part {
-            part_id: part.part_id.to_owned(),
-            filename,
-            mime_type,
-            size: part.body.size,
-            attachment_id,
-            content_id,
-            is_inline,
-            data,
-        });
+        self.found.push((
+            message,
+            Part {
+                part_id: part.part_id.to_owned(),
+                filename,
+                mime_type,
+                size: part.body.size,
+                attachment_id,
+                content_id,
+                // Decided once every body is in (`Walk::parts`).
+                is_inline: false,
+                data,
+            },
+        ));
     }
 }
 
