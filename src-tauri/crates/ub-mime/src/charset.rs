@@ -5,7 +5,7 @@ use std::borrow::Cow;
 use base64::Engine as _;
 use base64::alphabet;
 use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
-use encoding_rs::{Encoding, WINDOWS_1252};
+use encoding_rs::{Encoding, REPLACEMENT, WINDOWS_1252};
 
 /// Accepts input with or without `=` padding, and stray bits in the last byte.
 const LENIENT: GeneralPurposeConfig = GeneralPurposeConfig::new()
@@ -44,9 +44,15 @@ pub(crate) fn encode_base64(data: &[u8]) -> String {
 /// Decodes `bytes` in the declared charset. With no charset, or one nobody knows,
 /// the bytes are read as UTF-8, and as windows-1252 when they are not valid UTF-8:
 /// undeclared 8-bit mail is nearly always Latin-1 in practice. A known charset
-/// replaces invalid sequences with U+FFFD.
+/// replaces invalid sequences with U+FFFD. Charsets the WHATWG Encoding Standard
+/// declines to decode (ISO-2022-KR, HZ-GB-2312, ISO-2022-CN) map to its
+/// `replacement` encoding, which turns a whole body into one U+FFFD, so they
+/// count as unknown.
 pub(crate) fn decode_charset(bytes: Vec<u8>, charset: Option<&str>) -> String {
-    if let Some(encoding) = charset.and_then(|c| Encoding::for_label(label(c).as_bytes())) {
+    if let Some(encoding) = charset
+        .and_then(|c| Encoding::for_label(label(c).as_bytes()))
+        .filter(|&e| e != REPLACEMENT)
+    {
         // Borrowed means the bytes already are this text in UTF-8.
         if let Cow::Owned(decoded) = encoding.decode_without_bom_handling(&bytes).0 {
             return decoded;
