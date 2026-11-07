@@ -11,7 +11,8 @@ export default defineConfig({
   // parallel agents did) exhausted macOS WindowServer's image buffers and
   // crashed the login session, so one run stays small.
   workers: 4,
-  forbidOnly: !!process.env.CI,
+  // The gate runs locally, so a committed test.only must fail it everywhere.
+  forbidOnly: true,
   retries: 0,
   timeout: 30_000,
   expect: { timeout: 5_000 },
