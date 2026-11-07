@@ -16,6 +16,8 @@ import {
 type MirrorStore = MirrorState & {
   receive: (msg: ChannelMessage) => void;
   pend: (p: Pending) => void;
+  /** Forgets pending actions Rust will never apply: they were never delivered. */
+  dropPending: (ns: number[]) => void;
   addSub: (id: string, sub: Sub) => void;
   /** Closes a subscription and drops its rows unless something else holds them. */
   dropSub: (id: string) => void;
@@ -30,6 +32,11 @@ export const useMirror = create<MirrorStore>((set) => ({
   ...emptyMirror(),
   receive: (msg) => set((s) => applyChannel(s, msg, selected())),
   pend: (p) => set((s) => addPending(s, p)),
+  dropPending: (ns) =>
+    set((s) => {
+      const drop = new Set(ns);
+      return { pending: s.pending.filter((p) => !drop.has(p.n)) };
+    }),
   addSub: (id, sub) => set((s) => ({ subs: { ...s.subs, [id]: sub } })),
   dropSub: (id) =>
     set((s) => {

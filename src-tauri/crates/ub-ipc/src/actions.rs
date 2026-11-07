@@ -1,7 +1,8 @@
 //! UI actions: what the UI asks the core to do, numbered so the channel can
 //! ack them.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_json::Value;
 use ts_rs::TS;
 use ub_domain::{
     AccountId, ActionNo, DraftId, LabelId, Millis, ModifyKind, NoticeId, OutboxId, PinKind,
@@ -16,6 +17,54 @@ use crate::{DraftSave, SplitInfo, SubKey};
 pub struct NumberedAction {
     pub n: ActionNo,
     pub action: Action,
+}
+
+/// A [`NumberedAction`] as `submit` reads it: the number strictly, the
+/// action on its own, so one the core can't read is refused under its
+/// number while the rest of its batch applies (SPEC UI state, Actions).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Submitted {
+    pub n: ActionNo,
+    pub action: Result<Action, Unreadable>,
+}
+
+/// An action the core couldn't read. Only its `type` is kept: the rest may
+/// hold the user's text, which never goes to the logs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unreadable {
+    /// The action's `type`, if it named one.
+    pub kind: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for Submitted {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        /// The envelope: a page that can't number its actions sent nothing usable.
+        #[derive(Deserialize)]
+        struct Envelope {
+            n: ActionNo,
+            action: Value,
+        }
+        let Envelope { n, action } = Envelope::deserialize(deserializer)?;
+        let kind = action
+            .get("type")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        #[expect(
+            clippy::map_err_ignore,
+            reason = "serde's message can quote the user's text, which never reaches the logs"
+        )]
+        let action = Action::deserialize(action).map_err(|_| Unreadable { kind });
+        Ok(Self { n, action })
+    }
+}
+
+impl From<NumberedAction> for Submitted {
+    fn from(NumberedAction { n, action }: NumberedAction) -> Self {
+        Self {
+            n,
+            action: Ok(action),
+        }
+    }
 }
 
 // Something the user did.

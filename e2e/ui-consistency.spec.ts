@@ -300,3 +300,56 @@ test("UIC-06 an action the core rejects tells the user why", async ({ app, gmail
   await app.settle();
   await expect(app.errorToasts).toHaveCount(0);
 });
+
+test("UIC-07 an action the core can't read is refused, and the actions after it still apply", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const labels = async (key: string) =>
+    (await gmail.gmail(A)).messages
+      .filter((m) => m.threadId === s.thread(key).threadId)
+      .flatMap((m) => m.labels);
+  const bug = app.errorToasts.filter({ hasText: "because of a bug in Ubermensch" });
+  await expect(app.highlighted).toContainText("Person 1");
+  // Every submit carries the star with a thread the core can't read, as a
+  // page out of step with the core would send it.
+  const submit = /\/invoke\/submit$/;
+  await app.page.route(submit, (route) =>
+    route.continue({
+      postData: (route.request().postData() ?? "").replace(
+        '"kind":"star","threads":[',
+        '"kind":"star","threads":[null,',
+      ),
+    }),
+  );
+  await app.press("s");
+  await app.press("e");
+  await expect(app.row("Person 1")).toHaveCount(0);
+  await app.settle();
+  expect(await labels("p1"), "the archive after it reached Gmail").not.toContain("INBOX");
+  expect(await labels("p1")).not.toContain("STARRED");
+  await expect(bug).toHaveCount(1);
+
+  // A batch the core can't read at all, here an action with no number, is
+  // not sent again: its actions are refused, and the next one goes through.
+  await app.page.unroute(submit);
+  await app.page.route(submit, (route) =>
+    route.continue({
+      postData: (route.request().postData() ?? "").replace(
+        /"n":\d+(,"action":\{"type":"modify","account":\d+,"kind":"(?:un)?read")/,
+        '"n":null$1',
+      ),
+    }),
+  );
+  await expect(app.highlighted).toContainText("Person 2");
+  await expect(app.row("Person 2")).not.toHaveAttribute("data-unread");
+  await app.press("u");
+  await expect(bug).toHaveCount(2);
+  await expect(app.row("Person 2")).not.toHaveAttribute("data-unread");
+  await app.press("e");
+  await expect(app.row("Person 2")).toHaveCount(0);
+  await app.settle();
+  expect(await labels("p2")).not.toContain("INBOX");
+  expect(await labels("p2")).not.toContain("UNREAD");
+});

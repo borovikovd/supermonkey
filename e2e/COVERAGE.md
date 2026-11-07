@@ -347,6 +347,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - UIC-04 · P2 · A row that changed while no list held it is not shown from an old copy · §Subscriptions
 - UIC-05 · P1 · `Cmd+Q` quits only once the composer's close has committed · §Actions
 - UIC-06 · P1 · An action the core rejects tells the user why · §Actions
+- UIC-07 · P1 · An action the core can't read is refused, and the actions after it still apply · §Actions
 
 ### unwanted.spec.ts (UNW)
 

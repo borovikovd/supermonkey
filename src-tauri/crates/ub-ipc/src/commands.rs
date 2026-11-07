@@ -12,7 +12,7 @@ use serde_json::Value;
 use ts_rs::TS;
 use ub_domain::{AccountId, ActionNo, AttachmentId, DraftId, MessageId, Millis, ThreadId};
 
-use crate::{DraftAttachment, ListRow, MessageBody, NumberedAction};
+use crate::{DraftAttachment, ListRow, MessageBody, NumberedAction, Submitted};
 
 /// Defines every command from one list: [`Command`], what the hosts parse
 /// an invoke into, and [`CommandReply`], what each command answers, for the
@@ -21,7 +21,7 @@ use crate::{DraftAttachment, ListRow, MessageBody, NumberedAction};
 macro_rules! commands {
     ($(
         $(#[doc = $doc:literal])+
-        $command:ident { $($arg:ident: $ty:ty),* $(,)? } -> $reply:ty;
+        $command:ident { $($(#[$attr:meta])* $arg:ident: $ty:ty),* $(,)? } -> $reply:ty;
     )+) => {
         // A command the page invokes, by name, with its arguments.
         #[derive(Deserialize, TS)]
@@ -32,7 +32,7 @@ macro_rules! commands {
                 $(#[doc = $doc])+
                 #[serde(rename_all = "camelCase")]
                 $command {
-                    $($arg: $ty,)*
+                    $($(#[$attr])* $arg: $ty,)*
                     /// Answers the command, with its own reply type only.
                     #[serde(skip)]
                     #[ts(skip)]
@@ -59,7 +59,11 @@ commands! {
     /// Each host connects the page's channel its own way.
     Connect {} -> LaunchInfo;
     /// Queues the page's numbered actions. Returns once they are queued.
-    Submit { actions: Vec<NumberedAction> } -> ();
+    /// Each action is read on its own (`Submitted`).
+    Submit {
+        #[ts(as = "Vec<NumberedAction>")]
+        actions: Vec<Submitted>,
+    } -> ();
     /// Rows outside the pushed window, with their `rev`.
     FetchRows { drafts: bool, keys: Vec<String> } -> Vec<ListRow>;
     /// Sanitized bodies. A message without a stored body is left out.

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use ub_domain::ActionNo;
-use ub_ipc::NumberedAction;
+use ub_ipc::Submitted;
 use ub_store::Priority;
 #[cfg(test)]
 use ub_store::StoreError;
@@ -59,8 +59,10 @@ impl Actions {
     ///
     /// If the job's commit fails, every action in it is rejected: a second
     /// job moves `ack` past them, so the mirror drops them and falls back to
-    /// Rust's state.
-    pub fn submit(&self, actions: Vec<NumberedAction>) {
+    /// Rust's state. An action the page sent that the core couldn't read is
+    /// refused alone.
+    pub fn submit<A: Into<Submitted>>(&self, actions: Vec<A>) {
+        let actions: Vec<Submitted> = actions.into_iter().map(Into::into).collect();
         let Some(last) = actions.iter().map(|a| a.n).max() else {
             return;
         };

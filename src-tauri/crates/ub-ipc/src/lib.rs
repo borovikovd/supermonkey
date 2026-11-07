@@ -24,7 +24,9 @@ pub use account::{
     AccountInfo, AccountSummary, AppState, GlobalSettings, LabelInfo, Notice, PinInfo, SendAs,
     SplitInfo, UndoEntryInfo,
 };
-pub use actions::{Action, ModifyAction, NumberedAction, Setting, SnoozeChange};
+pub use actions::{
+    Action, ModifyAction, NumberedAction, Setting, SnoozeChange, Submitted, Unreadable,
+};
 pub use addr::Addr;
 pub use commands::{
     AppEvent, BlockResult, BlockedSender, BlockedSenders, Command, CommandReply, ContactSuggestion,

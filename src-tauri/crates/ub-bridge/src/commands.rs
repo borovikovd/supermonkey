@@ -8,7 +8,7 @@ use ub_core::{App, MAX_ATTACHMENT_BYTES, NewAttachment, attachment_too_large};
 use ub_domain::{AccountId, AttachmentId, DraftId, MessageId, ThreadId};
 use ub_ipc::{
     BlockResult, BlockedSenders, ChannelMessage, ContactSuggestion, DraftAttachment, LaunchInfo,
-    ListRow, MessageBody, NumberedAction, SnoozeChoice, Unsubscribed,
+    ListRow, MessageBody, SnoozeChoice, Submitted, Unsubscribed,
 };
 
 /// A command's result: its value, or the message the UI shows.
@@ -44,7 +44,7 @@ pub async fn connect(
 }
 
 /// Queues the page's numbered actions. Returns once they are queued.
-pub fn submit(app: &App, actions: Vec<NumberedAction>) {
+pub fn submit(app: &App, actions: Vec<Submitted>) {
     app.actions().submit(actions);
 }
 

@@ -31,6 +31,12 @@ const BRIDGE = import.meta.env.DEV ? "http://127.0.0.1:1430" : "";
 const pending = { invokes: 0, signIns: 0, timers: 0, rev: 0, ack: 0 };
 const SIGN_INS = new Set<CommandName>(["add_account", "sign_in_again"]);
 
+/**
+ * Rust read the command and answered with an error, so sending it again
+ * would get the same answer. A command that got no answer throws an `Error`.
+ */
+class Refused extends Error {}
+
 /** A command's name, as Rust defines it (`ub_ipc::Command`). */
 type CommandName = Command["command"];
 /** A command's arguments, named as Rust names them. */
@@ -54,8 +60,10 @@ async function invoke<K extends CommandName>(command: K, args: ArgsOf<K>): Promi
       body: JSON.stringify(args),
     });
     const body: unknown = await r.json();
-    // A refused command answers with its error string.
-    if (!r.ok) throw new Error(typeof body === "string" ? body : JSON.stringify(body));
+    // A refused command answers 400 with its error string; 503 means no core answered.
+    const text = typeof body === "string" ? body : JSON.stringify(body);
+    if (r.status === 400) throw new Refused(text);
+    if (!r.ok) throw new Error(text);
     // The debug bridge answers with JSON Rust serialized as this command's reply.
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion
     return body as ReplyOf<K>;
@@ -93,17 +101,30 @@ export let launch: LaunchInfo = { lastAction: 0, debug: false };
 /** The wait before resending a failed submit; doubles while submits keep failing. */
 let retryMs = 0;
 
+/** What the user is told about an action Rust could not read. */
+const UNREADABLE = "Couldn't do that because of a bug in Ubermensch";
+
+/** Numbers the UI dropped unsent: Rust never commits them. */
+const dropped = new Set<number>();
+
 async function flush(): Promise<void> {
   if (inFlight || buffer.length === 0) return;
   inFlight = true;
   const actions = buffer;
   buffer = [];
+  const ns = actions.map((a) => a.n);
   try {
     await invoke("submit", { actions });
     retryMs = 0;
   } catch (e) {
+    // In Tauri a failed invoke is Rust's answer; on the web bridge, a 400.
+    if (inTauri || e instanceof Refused) {
+      // Rust can't read this batch; resent, it would hold up every later action.
+      console.error(`submit of actions ${ns.join(", ")} refused; dropping them`, e);
+      refuseUnsent(actions);
+      return;
+    }
     // Resending is safe: Rust drops numbers at or below its ack.
-    const ns = actions.map((a) => a.n);
     console.warn(`submit of actions ${ns.join(", ")} failed; sending again`, e);
     buffer = [...actions, ...buffer];
     retryMs = Math.min(Math.max(retryMs * 2, 100), 5000);
@@ -120,15 +141,20 @@ async function flush(): Promise<void> {
  */
 export function whenCommitted(timeoutMs: number): Promise<void> {
   const last = nextN - 1;
+  // Every number up to `last` is acked, or was dropped unsent.
+  const committed = (ack: number) => {
+    for (let n = ack + 1; n <= last; n++) if (!dropped.has(n)) return false;
+    return true;
+  };
   return new Promise((resolve) => {
-    if (useMirror.getState().ack >= last) return resolve();
+    if (committed(useMirror.getState().ack)) return resolve();
     const done = () => {
       stop();
       clearTimeout(timer);
       resolve();
     };
     const stop = useMirror.subscribe((s) => {
-      if (s.ack >= last) done();
+      if (committed(s.ack)) done();
     });
     const timer = setTimeout(() => {
       console.warn(`actions up to ${last} not committed after ${timeoutMs} ms; going on`);
@@ -193,6 +219,23 @@ function receive(msg: ChannelMessage): void {
     if (n > msg.ack) continue;
     settling.delete(n);
     settled({ refusal: null, before });
+  }
+}
+
+/**
+ * Actions Rust could not read as a batch, dropped unsent: the mirror falls
+ * back to Rust's state, and each is refused as Rust refuses one it can't read.
+ */
+function refuseUnsent(actions: NumberedAction[]): void {
+  const before = useMirror.getState();
+  before.dropPending(actions.map((a) => a.n));
+  for (const { n, action } of actions) {
+    dropped.add(n);
+    const refusal: Rejection = { n, message: UNREADABLE, split: null };
+    const settled = settling.get(n);
+    settling.delete(n);
+    if (settled) settled({ refusal, before });
+    else showRefusal(refusal, action);
   }
 }
 
