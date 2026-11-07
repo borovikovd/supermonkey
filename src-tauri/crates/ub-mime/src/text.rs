@@ -67,9 +67,11 @@ static HIDDEN: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         .collect()
 });
 
-/// A start or end tag: `/`, the name, and the attributes.
+/// A start or end tag: `/`, the name, and the attributes. A value is quoted
+/// only when the quote follows its `=`; a quote inside an unquoted value
+/// (`title=it's`) is just a character, as browsers read it.
 static TAG: LazyLock<Regex> = LazyLock::new(|| {
-    crate::regex(r#"<(/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>"#)
+    crate::regex(r#"<(/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:[^>=]|=\s*(?:"[^"]*"|'[^']*'|[^\s>]*))*)>"#)
 });
 
 static HREF: LazyLock<Regex> =

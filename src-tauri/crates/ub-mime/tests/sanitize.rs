@@ -118,6 +118,18 @@ fn text_leaves_out_a_style_block_in_the_body() {
 }
 
 #[test]
+fn text_keeps_words_after_a_lone_quote_in_an_unquoted_attribute() {
+    assert_eq!(
+        html_to_text("<p title=it's>Hello world</p> <p>don't stop</p>"),
+        "Hello world don't stop"
+    );
+    assert_eq!(
+        html_to_text(r#"<a href=x title=a"b>one</a> <i class='c d'>two</i> <b id="e>f">three</b>"#),
+        "one two three"
+    );
+}
+
+#[test]
 fn text_of_hostile_html_has_no_hidden_content() {
     let text = html_to_text(HOSTILE);
     assert!(text.starts_with("Hello"), "{text}");
