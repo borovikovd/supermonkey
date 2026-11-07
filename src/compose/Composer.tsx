@@ -4,7 +4,7 @@
 import { HardBreak } from "@tiptap/extension-hard-break";
 import { Strike } from "@tiptap/extension-strike";
 import { Placeholder } from "@tiptap/extensions";
-import { EditorContent, useEditor } from "@tiptap/react";
+import { type Editor, EditorContent, useEditor } from "@tiptap/react";
 import { StarterKit } from "@tiptap/starter-kit";
 import { ChevronDown, Paperclip, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -22,6 +22,7 @@ import {
   attachFiles,
   composeBlurred,
   composerFocused,
+  focusNextFrame,
   loadedDraft,
   registerComposer,
   type Attaching,
@@ -47,6 +48,18 @@ const HardBreakKeys = HardBreak.extend({
     return { "Shift-Enter": () => this.editor.commands.setHardBreak() };
   },
 });
+
+/**
+ * Focuses the editor now, at the end of its text or where its cursor was.
+ * Not TipTap's focus command: in WebKit it focuses again a frame later, which
+ * would undo an Esc pressed in that frame (SPEC Keyboard).
+ */
+function focusEditor(editor: Editor | null, atEnd = false) {
+  if (!editor) return;
+  if (atEnd) editor.commands.setTextSelection(editor.state.doc.content.size);
+  editor.view.focus();
+  editor.commands.scrollIntoView();
+}
 
 function QuoteBlock({ html }: { html: string }) {
   const [open, setOpen] = useState(false);
@@ -342,8 +355,10 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       return save;
     };
     const focusLater = (el: () => { focus: () => void } | null) =>
-      requestAnimationFrame(() => el()?.focus());
+      focusNextFrame(() => el()?.focus());
     const focus = (field: ComposeField) => {
+      // The user's key moves focus now, so an Esc that follows blurs rather than closes.
+      composerFocused();
       switch (field) {
         case "to":
           toRef.current?.focus();
@@ -361,7 +376,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
           focusLater(() => subjectRef.current);
           return;
         case "body":
-          editor?.commands.focus("end");
+          focusEditor(editor, true);
       }
     };
     return registerComposer({
@@ -387,17 +402,19 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       closeLink: () => {
         if (!linkRef.current) return false;
         setLink(null);
-        editor?.commands.focus();
+        focusEditor(editor);
         return true;
       },
     });
   }, [draft, editor, update, attach]);
 
-  // Text typed after the reply key, before this editor had focus, starts the reply.
+  // Text typed after the reply key, before this editor had focus, starts the
+  // reply. The focus comes from the effect below.
   useEffect(() => {
     if (!editor || !inline) return;
     const text = takeTypedAhead();
-    if (text) editor.chain().focus("end").insertContent(text).run();
+    if (text)
+      editor.chain().setTextSelection(editor.state.doc.content.size).insertContent(text).run();
   }, [editor, inline]);
 
   // A reply scrolls fully into view with the editor focused; a new message
@@ -431,7 +448,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
         onClick={() => {
           setShowCc(true);
           setShowBcc(true);
-          requestAnimationFrame(() => ccRef.current?.focus());
+          focusNextFrame(() => ccRef.current?.focus());
         }}
       >
         <ChevronDown size={15} strokeWidth={1.5} />
@@ -470,7 +487,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
           if (shift) return;
           if (showCc) ccRef.current?.focus();
           else if (showSubject) subjectRef.current?.focus();
-          else editor?.commands.focus();
+          else focusEditor(editor);
         }}
       />
       {showCc && (
@@ -501,7 +518,7 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
           onKeyDown={(e) => {
             if (e.key === "Tab" && !e.shiftKey) {
               e.preventDefault();
-              editor?.commands.focus();
+              focusEditor(editor);
             }
           }}
         />
@@ -520,13 +537,14 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
                 if (e.key === "Enter") {
                   e.preventDefault();
                   const href = link.trim();
-                  const chain = editor?.chain().focus().extendMarkRange("link");
+                  const chain = editor?.chain().extendMarkRange("link");
                   if (href)
                     chain
                       ?.setLink({ href: /^[a-z]+:/i.test(href) ? href : `https://${href}` })
                       .run();
                   else chain?.unsetLink().run();
                   setLink(null);
+                  focusEditor(editor);
                 }
               }}
             />

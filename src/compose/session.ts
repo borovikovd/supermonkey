@@ -279,10 +279,22 @@ export function openInline(draft: string, thread: number, target: number | null)
   if (target !== null) useChrome.getState().selectMessage(target);
 }
 
+/** Esc presses that blurred compose: a focus asked for before one never lands after it. */
+let blurs = 0;
+
 /** The first Esc: the editor loses focus and compose stays on screen. */
 export function blurComposer() {
+  blurs += 1;
   if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   useCompose.setState({ blurred: true });
+}
+
+/** Moves focus in the next frame, once a field just shown is drawn, unless an Esc blurs compose first. */
+export function focusNextFrame(focus: () => void) {
+  const at = blurs;
+  requestAnimationFrame(() => {
+    if (blurs === at) focus();
+  });
 }
 
 /** Focus came back into the composer. */

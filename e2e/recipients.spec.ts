@@ -47,13 +47,6 @@ async function suggested(app: App): Promise<string[]> {
     .evaluateAll((els) => els.map((el) => el.querySelectorAll("span")[1]?.textContent ?? ""));
 }
 
-/** Waits two frames: TipTap and the Cc/Bcc/Subject shortcuts move focus in the next frame. */
-async function frames(app: App): Promise<void> {
-  await app.page.evaluate(
-    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
-  );
-}
-
 /** Fills Subject and body of the composer on screen. */
 async function subjectAndBody(app: App, subject: string, body: string): Promise<void> {
   await app.press("Meta+Shift+s");
@@ -61,7 +54,6 @@ async function subjectAndBody(app: App, subject: string, body: string): Promise<
   await app.type(subject);
   await app.press("Meta+Shift+m");
   await expect(app.editor).toBeFocused();
-  await frames(app);
   await app.type(body);
 }
 
@@ -303,7 +295,6 @@ test("RCP-06 Tab moves between fields unless the suggestion list is open", async
   await expect(app.subject).toBeFocused();
   await app.press("Tab");
   await expect(app.editor).toBeFocused();
-  await frames(app);
   await app.press("Shift+Tab");
   await expect(app.subject).toBeFocused();
   await app.press("Shift+Tab");
@@ -320,7 +311,6 @@ test("RCP-06 Tab moves between fields unless the suggestion list is open", async
   await expect(app.subject).toBeFocused();
   await app.press("Tab");
   await expect(app.editor).toBeFocused();
-  await frames(app);
   await app.press("Shift+Tab");
   await expect(app.subject).toBeFocused();
   await app.press("Shift+Tab");
@@ -339,7 +329,6 @@ test("RCP-07 Cc and Bcc stay hidden until used", async ({ app, gmail }) => {
   await app.press("Meta+Shift+c");
   await expect(app.field("Cc")).toBeVisible();
   await expect(app.field("Bcc")).toHaveCount(0);
-  // Focus moves to Cc a frame later; an Esc before that would be undone by it.
   await expect(app.field("Cc")).toBeFocused();
   await app.press("Escape", "Escape");
   await expect(app.editor).toHaveCount(0);

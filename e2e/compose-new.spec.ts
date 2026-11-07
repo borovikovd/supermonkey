@@ -83,21 +83,10 @@ async function highlight(app: App, subject: string): Promise<void> {
   await down(40);
 }
 
-/**
- * Waits two frames. TipTap focuses the editor in the next frame, so a field
- * shortcut pressed in the same frame as Cmd+Shift+M is undone by it.
- */
-async function frames(app: App): Promise<void> {
-  await app.page.evaluate(
-    () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))),
-  );
-}
-
 /** Cmd+Shift+M, and waits until the editor has focus. */
 async function focusBody(app: App): Promise<void> {
   await app.press("Meta+Shift+m");
   await expect(app.editor).toBeFocused();
-  await frames(app);
 }
 
 /** Cmd+Shift+S, and waits until Subject has focus (it moves in the next frame). */
@@ -264,7 +253,6 @@ test("NEW-02 compose and send a formatted message, including the last keystrokes
   await app.press("Enter");
   await expect(app.editor.locator('a[href*="example.org"]')).toHaveText("here");
   await expect(app.editor).toBeFocused();
-  await frames(app);
   await app.press("ArrowRight", "Enter");
   // The last keystrokes, then Send at once.
   await app.type("end");
@@ -939,4 +927,74 @@ test("NEW-13 closing search, a new query, or another account's settings closes t
   await app.press("Control+1");
   await expect(newMessage(app)).toHaveCount(0);
   await nothingLeft("another account's settings");
+});
+
+test("NEW-14 an Esc pressed just after a key that moves focus in compose counts, however late the focus would come", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await app.compose();
+  await fill(app, "kim@kite.test", "Late focus", "Body text");
+  await app.settle();
+  /** What has focus: nothing, or the focused element's label or class. */
+  const focused = () =>
+    app.page.evaluate(() => {
+      const el = document.activeElement;
+      if (el === null || el === document.body) return "nothing";
+      return el.getAttribute("aria-label") ?? el.getAttribute("placeholder") ?? el.className;
+    });
+  // Page frames wait, so a focus put off to a later frame lands only after the Esc.
+  await app.page.clock.pauseAt(await app.now());
+  const later = () => app.page.clock.runFor(100);
+
+  // Each key, then Esc at once: the Esc blurs compose, and no focus comes after it.
+  await app.press("Escape");
+  await inOrder(
+    [
+      ["Enter"],
+      ["Meta+Shift+m"],
+      ["Meta+Shift+s"],
+      ["Meta+Shift+c"],
+      ["Meta+Shift+o"],
+      ["Enter", "Meta+Shift+s"],
+    ],
+    async (keys) => {
+      await app.press(...keys, "Escape");
+      await later();
+      expect(await focused(), keys.join(" ")).toBe("nothing");
+      await expect(newMessage(app), keys.join(" ")).toBeVisible();
+    },
+  );
+
+  // Tab from Subject to the message, then Esc.
+  await app.press("Meta+Shift+s");
+  await later();
+  await expect(app.subject).toBeFocused();
+  await app.press("Tab", "Escape");
+  await later();
+  expect(await focused(), "Tab").toBe("nothing");
+
+  // Esc closes the link field and returns to the message; a second Esc at once blurs it.
+  await app.press("Enter");
+  await later();
+  await app.press("Meta+k");
+  await later();
+  const linkField = app.page.getByPlaceholder("https://");
+  await expect(linkField).toBeFocused();
+  await app.press("Escape", "Escape");
+  await later();
+  await expect(linkField).toHaveCount(0);
+  expect(await focused(), "link").toBe("nothing");
+  await expect(newMessage(app)).toBeVisible();
+
+  // No key reached the draft; the next Esc closes it and keeps it.
+  await expect(app.editor).toHaveText("Body text");
+  await app.press("Escape");
+  await expect(newMessage(app)).toHaveCount(0);
+  await app.page.clock.resume();
+  await app.page.clock.setFixedTime(await app.now());
+  await app.settle();
+  const [draft] = await gmailDrafts(gmail, A, "Late focus");
+  expect(htmlOf(parseMime(draft?.message.raw ?? ""))).toContain("Body text");
 });

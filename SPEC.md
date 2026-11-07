@@ -234,7 +234,7 @@ A key goes to the first of these that is open, top first, and the first that tak
 
 A sheet, the palette, the composer, the search field, and a text field keep every other key from the layers below them: the focused field gets it as typing, so the shortcut table never fires there. Keys typed inside a message body take the same way as keys typed in the window.
 
-In compose, `Tab` and `Shift+Tab` move between fields, unless the autocomplete list is open. `Cmd+K` inserts a link, and `Cmd+Enter` sends. The first `Esc` blurs the editor and leaves compose on screen. A composer takes its focus as it opens, so focus never arrives after an `Esc` pressed at once and undoes it. With compose blurred:
+In compose, `Tab` and `Shift+Tab` move between fields, unless the autocomplete list is open. `Cmd+K` inserts a link, and `Cmd+Enter` sends. The first `Esc` blurs the editor and leaves compose on screen. Once it has, nothing the app does on its own focuses compose again: a focus asked for before that `Esc`, as the composer opened or by a key or click just before, never lands after it, however soon the `Esc` follows. Only the user's next action refocuses compose: `Enter`, a compose field shortcut, or a click. A field shortcut counts as soon as it is pressed, so an `Esc` right after it blurs compose rather than closing it. With compose blurred:
 - `Cmd+K` opens the palette with draft actions (send, attach, discard)
 - `Enter` refocuses the editor
 - `Cmd+Enter` sends
