@@ -177,7 +177,7 @@ test.describe("attachments", () => {
     const { openedFiles } = await gmail.platform();
     expect(openedFiles).toHaveLength(1);
     expect(readFileSync(openedFiles[0] ?? "").equals(files.notesTxt.buffer)).toBe(true);
-    await expect(app.errorToasts).toHaveCount(0);
+    await app.expectNoErrorToasts();
   });
 
   test("ATT-03 a forward made offline still sends its attachments", async ({ app, gmail }) => {
@@ -507,14 +507,11 @@ test.describe("attachments", () => {
     await expect(app.toast("Draft discarded")).toBeVisible();
     await expect(heading).toHaveCount(0);
 
-    // The file lands after the discard: nothing is sent, and nothing goes
-    // wrong. Read at once: a toast leaves by itself after 4 s.
+    // The file lands after the discard: nothing is sent, and nothing goes wrong.
     await release();
-    await app.settle();
-    expect(await app.errorToasts.allTextContents()).toEqual([]);
+    await app.expectNoErrorToasts();
     await app.advance(10_000);
-    await app.settle();
-    expect(await app.errorToasts.allTextContents()).toEqual([]);
+    await app.expectNoErrorToasts();
     const state = await gmail.gmail(A);
     expect(subjects(state.messages)).not.toContain("Thrown away");
     expect(state.drafts).toHaveLength(0);

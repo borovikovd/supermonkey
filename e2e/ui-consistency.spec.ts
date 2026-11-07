@@ -297,8 +297,7 @@ test("UIC-06 an action the core rejects tells the user why", async ({ app, gmail
   // Shown once: the refusal came with the message that settled the action,
   // so a reload does not bring it back.
   await app.reload();
-  await app.settle();
-  await expect(app.errorToasts).toHaveCount(0);
+  await app.expectNoErrorToasts();
 });
 
 test("UIC-07 an action the core can't read is refused, and the actions after it still apply", async ({

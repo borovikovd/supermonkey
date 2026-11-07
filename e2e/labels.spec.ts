@@ -244,9 +244,8 @@ test("LAB-05 if labels.create says the name exists, the existing label is used",
   const { id } = await gmail.label(A, "Clients");
   await highlight(app, "Person 5");
   await createLabel(app, "Clients");
-  await app.settle();
 
-  await expect(app.errorToasts).toHaveCount(0);
+  await app.expectNoErrorToasts();
   expect(await labelsNamed(gmail, "Clients")).toEqual([{ id, name: "Clients" }]);
   expect(await has(gmail, s, "p5", id)).toBe(true);
 

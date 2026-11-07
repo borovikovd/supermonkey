@@ -316,7 +316,7 @@ test("UNW-10 block and unsubscribe act on their own account when another one is 
   await app.settle();
   expect(await labelsOf(gmail, promo.id)).toContain("TRASH");
   expect(await trashedIn(B)).toBe(bTrash);
-  await expect(app.errorToasts).toHaveCount(0);
+  await app.expectNoErrorToasts();
   await expect(app.highlighted).toContainText("Bea Blue");
 
   // Mark done all: the sender's mail is listed while B is on screen.
@@ -336,7 +336,7 @@ test("UNW-10 block and unsubscribe act on their own account when another one is 
   await app.settle();
   expect(await labelsOf(gmail, one?.id ?? "")).not.toContain("INBOX");
   expect(await labelsOf(gmail, two?.id ?? "")).not.toContain("INBOX");
-  await expect(app.errorToasts).toHaveCount(0);
+  await app.expectNoErrorToasts();
   await expect(app.highlighted).toContainText("Bea Blue");
   await app.press("Control+1");
   await expect(app.row("News one")).toHaveCount(0);

@@ -7,13 +7,6 @@ import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A } from "./seeds.ts";
 
-declare global {
-  interface Window {
-    /** Texts of error toasts, in the order they appeared (set by `errorToastProbe`). */
-    e2eErrorToasts?: string[];
-  }
-}
-
 // ------------------------------------------------------------------ helpers
 
 /** Runs steps one after another, each waiting for the one before. */
@@ -58,37 +51,12 @@ async function pick(app: App, key: string, query = ""): Promise<void> {
 }
 
 /**
- * Records every error toast as it appears, so a test can count them even
- * after Sonner has dismissed the older ones.
+ * The error toasts shown from now on, even ones Sonner has already
+ * dismissed (`App.errorToastsShown`).
  */
 async function errorToastProbe(app: App): Promise<() => Promise<string[]>> {
-  await app.page.evaluate(() => {
-    const seen: string[] = [];
-    window.e2eErrorToasts = seen;
-    // Each toast once: when it is added, or when it turns into an error toast.
-    const record = (el: Element) => {
-      if (el.matches('[data-sonner-toast][data-type="error"]:not([data-e2e-seen])')) {
-        el.setAttribute("data-e2e-seen", "");
-        seen.push(el.textContent);
-      }
-    };
-    new MutationObserver((records) => {
-      for (const r of records) {
-        if (r.target instanceof Element) record(r.target);
-        for (const node of Array.from(r.addedNodes)) {
-          if (!(node instanceof Element)) continue;
-          record(node);
-          node.querySelectorAll("[data-sonner-toast]").forEach(record);
-        }
-      }
-    }).observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["data-type"],
-    });
-  });
-  return () => app.page.evaluate(() => window.e2eErrorToasts ?? []);
+  const since = (await app.errorToastsShown()).length;
+  return () => app.errorToastsShown(since);
 }
 
 const messagesOf = (state: GmailState, threadId: string): GmailMessage[] =>
@@ -210,7 +178,7 @@ test("ERR-02 back-off timing and Retry-After", async ({ app, gmail }) => {
     expect(gap, `gap ${i}`).toBeGreaterThanOrEqual(0.8 * base - 50);
     expect(gap, `gap ${i}`).toBeLessThanOrEqual(Math.min(1.2 * 1_000 * 2 ** i, 60_000) + 50);
   }
-  await expect(app.errorToasts).toHaveCount(0);
+  await app.expectNoErrorToasts();
 });
 
 test("ERR-03 a quiet sync status after 30 s of retrying", async ({ app, gmail }) => {
@@ -241,7 +209,7 @@ test("ERR-03 a quiet sync status after 30 s of retrying", async ({ app, gmail })
   await expect(app.account(A)).not.toHaveAttribute("title", /Can't reach Gmail/);
   const a = await gmail.gmail(A);
   expect(threadHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
-  await expect(app.errorToasts).toHaveCount(0);
+  await app.expectNoErrorToasts();
 });
 
 test("ERR-04 a rejection rolls the action back and shows Gmail's error", async ({ app, gmail }) => {
@@ -390,6 +358,7 @@ test("ERR-05 an expired token is refreshed once, and the request is retried", as
   const a = await gmail.gmail(A);
   expect(threadHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
   await expect(app.toasts).toHaveCount(0);
+  await app.expectNoErrorToasts();
   await expect(app.signInMarker(A)).toHaveCount(0);
   await expect(app.account(A)).not.toHaveAttribute("title", /Sign in again/);
 });

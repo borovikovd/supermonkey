@@ -129,8 +129,7 @@ test("OFF-01 airplane mode: read, search, autocomplete, and act; it all lands wh
   await highlight(app, "Person 1");
   await app.press("e");
   await expect(app.row("Person 1")).toHaveCount(0);
-  await app.settle();
-  await expect(app.errorToasts).toHaveCount(0);
+  await app.expectNoErrorToasts();
   expect(await app.toasts.count()).toBeLessThanOrEqual(toastsBefore);
 
   // Send: the outbox waits; the send toast says it is delayed.
@@ -291,7 +290,7 @@ test("OFF-02 every kind of queued action replays in order", async ({ app, gmail 
   expect(modifies[7]?.addLabelIds).toEqual([newL?.id]);
   expect(log.at(-1)?.path).toContain(spare.id);
 
-  await expect(app.errorToasts).toHaveCount(0);
+  await app.expectNoErrorToasts();
   await expect(app.toasts.filter({ hasNotText: "Draft discarded" })).toHaveCount(0);
 });
 

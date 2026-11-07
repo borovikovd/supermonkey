@@ -482,7 +482,7 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app);
-  const errors = await app.errorToasts.count();
+  const errors = (await app.errorToastsShown()).length;
 
   // Offline, so the archive and the reply are still waiting when Google revokes the grant.
   await gmail.offline(true);
@@ -522,7 +522,7 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
       (m) => m.threadId === s.thread("p2").threadId && m.labels.includes("SENT"),
     );
   expect(await sentOf()).toEqual([]);
-  await expect(app.errorToasts).toHaveCount(errors);
+  await app.expectNoErrorToasts(errors);
 
   // Settings shows Sign in again on A's block only.
   await app.press("Meta+,");

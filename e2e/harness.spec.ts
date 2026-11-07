@@ -2,6 +2,9 @@
 // the clock, restart and crash, focus, links and remote images, Gmail-side
 // drafts, OAuth, introspection, and the UI helpers. Each case is short; the
 // product's behavior is covered by the other specs.
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+
 import { expect, test } from "./fixtures.ts";
 import { files } from "./files.ts";
 import { htmlOf, parseMime, shape } from "./mime.ts";
@@ -76,6 +79,39 @@ test("a held request can be released with a fault", async ({ app, gmail }) => {
   // A rejection rolls the action back and says so.
   await expect(app.row("Person 2")).toHaveCount(1);
   await expect(app.errorToasts).toHaveCount(1);
+});
+
+test("an error toast that has already left by itself still counts", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  await app.expectNoErrorToasts();
+  const hold = await gmail.hold("messages.batchModify");
+  const released = hold.release({ kind: "status", status: 400, reason: "invalidArgument" });
+  await app.press("j", "e");
+  expect(await released).toBe(1);
+  await app.settle();
+  await expect(app.errorToasts).toHaveCount(1);
+  const [shown] = await app.errorToastsShown();
+  expect(shown).toBeTruthy();
+
+  // Sonner dismisses it 4 s after it shows; `advance` fires that timer now.
+  await app.advance(5_000);
+  // A count of the toasts on screen can no longer tell it was there; the log can.
+  await expect(app.errorToasts).toHaveCount(0);
+  expect(await app.errorToastsShown()).toEqual([shown]);
+  await expect(app.expectNoErrorToasts()).rejects.toThrow("error toasts shown");
+  // From a mark taken after it, there are none.
+  await app.expectNoErrorToasts(1);
+});
+
+test("no spec checks that no error toast showed by counting the ones on screen", () => {
+  // The count passes once a toast has left by itself; `expectNoErrorToasts` reads the log.
+  const onScreen =
+    /expect\(\s*app\.errorToasts\b[^;]*\)\.(?:toHaveCount\(0\)|not\.toBeVisible\(\))/;
+  const dir = import.meta.dirname;
+  const offenders = readdirSync(dir)
+    .filter((f) => f.endsWith(".spec.ts") && f !== path.basename(import.meta.filename))
+    .filter((f) => onScreen.test(readFileSync(path.join(dir, f), "utf8")));
+  expect(offenders).toEqual([]);
 });
 
 test("faults match by account and apply after the work is done", async ({ app, gmail }) => {

@@ -21,6 +21,8 @@ declare global {
   interface Window {
     /** Set by `App.watchRows`. */
     e2eRowsAdded?: string[];
+    /** Texts of the error toasts shown since the page loaded, in order (`App.installToastLog`). */
+    e2eErrorToasts?: string[];
   }
 }
 
@@ -51,7 +53,9 @@ const POLL_MS = 45_000;
  *   release it. Never sleep.
  * - Time moves only through `advance`; nothing waits on the wall clock.
  * - A negative assertion (no request, no toast, nothing changed) needs
- *   `settle()` first, or it passes vacuously.
+ *   `settle()` first, or it passes vacuously. "No error toast" is
+ *   `expectNoErrorToasts()`: a toast leaves by itself 4 s after it shows,
+ *   so a count of the toasts on screen can miss one.
  * - A label is on a thread in Gmail when a message outside trash and spam
  *   carries it (SPEC Views).
  */
@@ -61,6 +65,7 @@ export class App {
   /** URLs of every popup window the page opened (links must never open one). */
   readonly popups: string[] = [];
   private clockInstalled = false;
+  private toastLogInstalled = false;
 
   constructor(page: Page, gmail: Control) {
     this.page = page;
@@ -76,6 +81,7 @@ export class App {
    */
   async open(opts: { timeout?: number } = {}): Promise<void> {
     await this.installClock();
+    await this.installToastLog();
     await this.routeHostile();
     await this.gmail.start();
     await this.load(opts.timeout);
@@ -136,9 +142,9 @@ export class App {
 
   private async installClock(): Promise<void> {
     if (this.clockInstalled) return;
-    // Page timers only run when a test moves the clock, so a dismissed toast
-    // waits for its 200 ms unmount indefinitely. It must not catch clicks
-    // meanwhile; in the app it is gone before a person could click.
+    // A dismissed toast stays in the DOM for its 200 ms exit animation, and a
+    // test clicks sooner than that. It must not catch the click; in the app
+    // it is gone before a person could click.
     await this.page.addInitScript(() => {
       addEventListener("DOMContentLoaded", () => {
         const style = document.createElement("style");
@@ -148,10 +154,50 @@ export class App {
     });
     const now = await this.gmail.now();
     await this.page.clock.install({ time: now });
-    // Date.now() stands still with the core's clock. Page timers run only when
-    // a test moves the clock (`advance`).
+    // Date.now() stands still with the core's clock until a test moves it
+    // (`advance`). Page timers still run in real time (`setFixedTime` keeps
+    // them running): a toast leaves by itself 4 s after it shows, and the
+    // autosave runs 500 ms after typing. `advance` fires the ones due at once;
+    // `page.clock.pauseAt` stops them.
     await this.page.clock.setFixedTime(now);
     this.clockInstalled = true;
+  }
+
+  /**
+   * Records the text of every error toast the page shows, from its first
+   * frame, so a test sees one that Sonner has already dismissed
+   * (`errorToastsShown`, `expectNoErrorToasts`).
+   */
+  private async installToastLog(): Promise<void> {
+    if (this.toastLogInstalled) return;
+    await this.page.addInitScript(() => {
+      if (window !== window.top) return;
+      const seen: string[] = [];
+      window.e2eErrorToasts = seen;
+      // Each toast once: when it is added, or when it turns into an error toast.
+      const record = (el: Element) => {
+        if (el.matches('[data-sonner-toast][data-type="error"]:not([data-e2e-seen])')) {
+          el.setAttribute("data-e2e-seen", "");
+          seen.push(el.textContent);
+        }
+      };
+      new MutationObserver((records) => {
+        for (const r of records) {
+          if (r.target instanceof Element) record(r.target);
+          for (const node of Array.from(r.addedNodes)) {
+            if (!(node instanceof Element)) continue;
+            record(node);
+            node.querySelectorAll("[data-sonner-toast]").forEach(record);
+          }
+        }
+      }).observe(document, {
+        childList: true,
+        subtree: true,
+        attributes: true,
+        attributeFilter: ["data-type"],
+      });
+    });
+    this.toastLogInstalled = true;
   }
 
   /** `evil.test` goes to the server's sink, so a hit is logged instead of failing DNS. */
@@ -496,9 +542,33 @@ export class App {
     return this.toasts.filter({ hasText: text });
   }
 
-  /** Error toasts (Sonner's error style). */
+  /**
+   * Error toasts on screen (Sonner's error style). One leaves by itself 4 s
+   * after it shows: to check that none showed, use `expectNoErrorToasts`.
+   */
   get errorToasts(): Locator {
     return this.page.locator('[data-sonner-toast][data-type="error"]:not([data-removed="true"])');
+  }
+
+  /**
+   * The texts of the error toasts this page has shown since it loaded, in
+   * order, dismissed ones included; from the `since`-th on, a count this
+   * returned earlier. A reload or relaunch starts a new page.
+   */
+  async errorToastsShown(since = 0): Promise<string[]> {
+    const shown = await this.page.evaluate(() => window.e2eErrorToasts ?? null);
+    if (shown === null) throw new Error("the page has no error toast log");
+    return shown.slice(since);
+  }
+
+  /**
+   * Settles, then fails if this page has shown an error toast since it
+   * loaded, or since `since` (see `errorToastsShown`), even one that has
+   * already left.
+   */
+  async expectNoErrorToasts(since = 0): Promise<void> {
+    await this.settle();
+    expect(await this.errorToastsShown(since), "error toasts shown").toEqual([]);
   }
 
   // ---------------------------------------------------------------- composer

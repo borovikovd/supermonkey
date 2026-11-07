@@ -376,7 +376,7 @@ test("VIEW-05 Label, Trash, and Spam views also list from Gmail", async ({ app, 
   await expect(app.row("Project alpha")).toHaveCount(1);
   await expect(app.row("Project beta")).toHaveCount(1);
   await expect(app.row("Project gamma")).toHaveCount(1);
-  await expect(app.errorToasts).toHaveCount(0);
+  await app.expectNoErrorToasts();
 });
 
 test("VIEW-06 All Mail lists every thread outside Trash and Spam, from Gmail too", async ({
