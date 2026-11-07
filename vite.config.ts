@@ -163,9 +163,12 @@ export default defineConfig({
         ],
         dependsOn: ["test:rust"],
       },
-      // Regenerated bindings must be staged or committed.
+      // Regenerated bindings must be staged or committed, new files too.
       bindings: {
-        command: "git diff --exit-code --stat -- src/bindings",
+        command: [
+          "git diff --exit-code --stat -- src/bindings",
+          "git ls-files --others --exclude-standard -- src/bindings | awk '{ print \"not staged: \" $0 } END { exit NR > 0 }'",
+        ],
         dependsOn: ["test:rust"],
       },
       // Builds the UI and the e2e-server first (playwright.config.ts).
