@@ -194,6 +194,17 @@ test("SRC-02 local query language, and what is sent to Gmail", async ({ app, gma
   await search(app, "is:list digest");
   await app.advance(300);
   expect(await gmailSearches(gmail, since)).toEqual(["digest"]);
+
+  // Nothing but `is:list` would reach Gmail empty and list every thread, such
+  // as Invoice 2019, which only Gmail has and which is not list mail.
+  await inOrder(["is:list", "-is:list", "(is:list)"], async (query) => {
+    await search(app, query);
+    await app.advance(300);
+    await app.settle();
+    await expect(app.row(query === "-is:list" ? "Big sale" : "Digest: daily")).toHaveCount(1);
+    await expect(app.row("Invoice 2019"), `${query} asks Gmail nothing`).toHaveCount(0);
+  });
+  expect(await gmailSearches(gmail, since)).toEqual(["digest"]);
 });
 
 test("SRC-03 Gmail hits are merged in as their metadata arrives", async ({ app, gmail }) => {

@@ -68,9 +68,11 @@ pub enum GmailListing {
 
 impl GmailListing {
     /// The listing for a search box query, or `None` when it is blank. Gmail
-    /// gets the query without `is:list`, which it does not know.
+    /// gets the query without `is:list`, which it does not know, and none when
+    /// that leaves it blank: Gmail would list every thread (SPEC Search).
     pub fn search(raw: &str) -> Option<Self> {
-        (!raw.trim().is_empty()).then(|| Self::Query(query::gmail_query(raw)))
+        let q = query::gmail_query(raw);
+        (!q.trim().is_empty()).then_some(Self::Query(q))
     }
 
     fn label(label: LabelId, include_spam_trash: bool) -> Self {
