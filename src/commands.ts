@@ -5,7 +5,14 @@
 import { toast } from "sonner";
 
 import { undoSend } from "./compose/sends";
-import { act, blockSender, senderThreads, signInAgain, unsubscribeFrom } from "./ipc/bridge";
+import {
+  act,
+  blockSender,
+  fetchRows,
+  senderThreads,
+  signInAgain,
+  unsubscribeFrom,
+} from "./ipc/bridge";
 import type { ModifyAction, ModifyKind } from "./ipc/types";
 import { moveOn, openPalette } from "./navigation";
 import { useChrome } from "./store/chrome";
@@ -71,22 +78,59 @@ export function modify(
   moveOn(threads);
 }
 
+/** The account on screen and the threads an action takes, read before it resolves. */
+type Acting = { account: number; threads: number[] };
+
+/**
+ * Runs `resolve` on the targets once the mirror has every one's row: a
+ * selection can hold threads whose rows the list never loaded (Select all
+ * far below the window), and an action resolved against part of them would
+ * resolve the wrong way (SPEC UI state, Actions). With every row in, it runs
+ * at once.
+ */
+function withRows(resolve: (acting: Acting) => void) {
+  const { account } = useChrome.getState();
+  const threads = targets();
+  if (account === null || threads.length === 0) return;
+  const missing = threads.map(String).filter((k) => !rowOf(k));
+  if (missing.length === 0) {
+    resolve({ account, threads });
+    return;
+  }
+  fetchRows(false, missing)
+    .then((rows) => {
+      useMirror.getState().putRows(rows);
+      resolve({ account, threads });
+    })
+    .catch((err: unknown) => {
+      toast.error(`Couldn't read the selected conversations: ${String(err)}`);
+    });
+}
+
 const isSnoozed = (threads: number[]) => threads.some((t) => rowOf(String(t))?.snoozeUntil != null);
 
 /** Archives and marks read, as Superhuman's Mark Done does; z restores both. */
 export const markDone = () => {
   if (currentView()?.kind === "done") return;
-  modify("done", [], ["INBOX", "UNREAD"], {
-    snooze: isSnoozed(targets()) ? { kind: "clear" } : null,
-  });
+  withRows(({ account, threads }) =>
+    modify("done", [], ["INBOX", "UNREAD"], {
+      account,
+      threads,
+      snooze: isSnoozed(threads) ? { kind: "clear" } : null,
+    }),
+  );
 };
 
 export const returnToInbox = () => {
   const view = currentView();
   const remove = view?.kind === "trash" ? ["TRASH"] : view?.kind === "spam" ? ["SPAM"] : [];
-  modify("returnToInbox", ["INBOX"], remove, {
-    snooze: isSnoozed(targets()) ? { kind: "clear" } : null,
-  });
+  withRows(({ account, threads }) =>
+    modify("returnToInbox", ["INBOX"], remove, {
+      account,
+      threads,
+      snooze: isSnoozed(threads) ? { kind: "clear" } : null,
+    }),
+  );
 };
 
 export const trash = () => {
@@ -102,27 +146,28 @@ export const spam = () => {
 export const snooze = (at: number) =>
   modify("snooze", [], ["INBOX"], { snooze: { kind: "set", at } });
 
-const allHave = (field: "starred" | "unread") => {
-  const t = targets();
-  return t.length > 0 && t.every((id) => rowOf(String(id))?.[field]);
-};
+const allHave = (threads: number[], field: "starred" | "unread") =>
+  threads.every((id) => rowOf(String(id))?.[field]);
 
-export const toggleStar = () => {
-  if (allHave("starred")) modify("unstar", [], ["STARRED"]);
-  else modify("star", ["STARRED"], []);
-};
+export const toggleStar = () =>
+  withRows((acting) => {
+    if (allHave(acting.threads, "starred")) modify("unstar", [], ["STARRED"], acting);
+    else modify("star", ["STARRED"], [], acting);
+  });
 
-export const toggleRead = () => {
-  if (allHave("unread")) modify("read", [], ["UNREAD"]);
-  else modify("unread", ["UNREAD"], []);
-};
+export const toggleRead = () =>
+  withRows((acting) => {
+    if (allHave(acting.threads, "unread")) modify("read", [], ["UNREAD"], acting);
+    else modify("unread", ["UNREAD"], [], acting);
+  });
 
 /** `l`: if every target has the label it is removed from all, else added to all. */
 export function applyLabel(labelId: string) {
-  const t = targets();
-  const all = t.length > 0 && t.every((id) => rowOf(String(id))?.labels.includes(labelId));
-  if (all) modify("removeLabel", [], [labelId]);
-  else modify("label", [labelId], []);
+  withRows((acting) => {
+    const all = acting.threads.every((id) => rowOf(String(id))?.labels.includes(labelId));
+    if (all) modify("removeLabel", [], [labelId], acting);
+    else modify("label", [labelId], [], acting);
+  });
 }
 
 /** `y`: remove the current view's label when it can be removed. */

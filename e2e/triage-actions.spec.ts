@@ -799,3 +799,54 @@ test("TRI-14 a selected row that a poll removes is not acted on", async ({ app, 
   expect(await labels("p3")).toContain("TRASH");
   expect(await labels("p2")).not.toContain("TRASH");
 });
+
+test("TRI-15 s, u, and l on Select all count every selected conversation, shown or not", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.empty(gmail, app);
+  const { id: batchy } = await gmail.label(A, "Batchy");
+  // 200 starred, unread, labeled conversations: far more than the rows the
+  // list loads around the viewport.
+  await gmail.deliverMany(
+    Array.from({ length: 200 }, (_, i) => ({
+      account: A,
+      from: `Writer ${i + 1} <writer${i + 1}@rows.test>`,
+      subject: `Batch ${i + 1}`,
+      labels: ["INBOX", "UNREAD", "STARRED", batchy],
+      date: dates.minutesAgo(i + 1),
+      poll: false,
+    })),
+  );
+  await gmail.poll();
+  await app.settle();
+  const withLabel = async (label: string) =>
+    (await gmail.gmail(A)).messages.filter((m) => m.labels.includes(label)).length;
+  const selectAll = async () => {
+    await expect(app.highlighted).toHaveText(/^Writer 1\D/);
+    await app.press("Meta+Shift+A");
+  };
+
+  // Every one is unread, so u marks them all read. A reload starts each step
+  // with only the rows around the viewport loaded.
+  await app.reload();
+  await selectAll();
+  await app.press("u");
+  await app.settle();
+  expect(await withLabel("UNREAD")).toBe(0);
+
+  await app.reload();
+  await selectAll();
+  await app.press("s");
+  await app.settle();
+  expect(await withLabel("STARRED")).toBe(0);
+
+  await app.reload();
+  await selectAll();
+  await app.press("l");
+  await expect(app.palette).toBeVisible();
+  await app.type("Batchy");
+  await app.press("Enter");
+  await app.settle();
+  expect(await withLabel(batchy)).toBe(0);
+});

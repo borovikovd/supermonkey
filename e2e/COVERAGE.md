@@ -97,6 +97,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - TRI-12 · P1 · `e` marks the conversation read, and `z` makes the same messages unread again · §Archive, trash, star, read
 - TRI-13 · P1 · `Cmd+A` selects from the highlight to the end of its split; `Cmd+Shift+A` the whole split · §Keyboard
 - TRI-14 · P1 · A selected row that a poll removes is not acted on · §Keyboard
+- TRI-15 · P1 · `s`, `u`, and `l` on Select all count every selected conversation, shown or not · §Keyboard, §Actions
 
 ### undo.spec.ts (UND)
 

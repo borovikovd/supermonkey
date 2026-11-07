@@ -1,10 +1,12 @@
 // List and conversation navigation: j/k, x, Shift+J/K, select all, Tab
 // between splits, n/p/o inside a conversation.
 
+import { fetchRows } from "../ipc/bridge";
 import type { ConversationData } from "../ipc/types";
 import { focusOf, formerNeighbor, highlight, openConversation, visibleSplits } from "../navigation";
 import { useChrome } from "../store/chrome";
 import { currentListView, currentView, rowOf, visibleIds } from "../store/current";
+import { useMirror } from "../store/mirror";
 import { blocks } from "../ui/folds";
 
 const chrome = () => useChrome.getState();
@@ -103,7 +105,15 @@ export function selectAll(fromHere: boolean) {
   const scope = selectionScope(cur.highlight);
   const at = fromHere && cur.highlight !== null ? scope.indexOf(cur.highlight) : 0;
   if (at < 0) return;
-  chrome().setSelection(scope.slice(at));
+  const keys = scope.slice(at);
+  chrome().setSelection(keys);
+  // The mirror keeps selected rows: read the ones the list never loaded, so
+  // what the next key or the label picker shows counts all of them.
+  const missing = keys.filter((k) => !rowOf(k));
+  if (missing.length === 0) return;
+  fetchRows(false, missing)
+    .then((rows) => useMirror.getState().putRows(rows))
+    .catch((err: unknown) => console.warn("rows of the selection", err));
 }
 
 /** Tab / Shift+Tab: first conversation of the next / previous visible split. */
