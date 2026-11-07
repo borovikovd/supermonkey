@@ -193,6 +193,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - REP-17 · P1 · A forward started while the message's body downloads carries all of it and its attachments · §Addressing
 - REP-18 · P2 · A forwarded attachment that arrives with the body can be removed, and an untouched forward is still discarded · §Addressing, §Actions
 - REP-19 · P2 · An `Esc` pressed as the reply opens counts, however late the editor's focus would come · §Keyboard
+- REP-20 · P2 · `r` on a prefetched row scrolls the reply into view below a long message · §Reply composer
 
 ### compose-new.spec.ts (NEW)
 

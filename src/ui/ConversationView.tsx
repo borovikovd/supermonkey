@@ -111,6 +111,9 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
       latestRef.current = latest;
       const firstUnread = msgs.find((m) => m.unread)?.id ?? latest;
       requestAnimationFrame(() => {
+        // A reply composer opened with the conversation scrolls itself into
+        // view, as it does whenever it opens (SPEC Reply composer).
+        if (composerOnScreen()?.thread === data.thread) return;
         if (firstUnread !== null)
           document
             .querySelector(`[data-message="${firstUnread}"]`)

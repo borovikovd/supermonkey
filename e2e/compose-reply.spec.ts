@@ -1132,3 +1132,31 @@ test("REP-19 an Esc pressed as the reply opens counts, however late the editor's
   // The untouched fresh reply left nothing behind.
   expect((await gmail.gmail(A)).drafts).toHaveLength(0);
 });
+
+test("REP-20 r on a prefetched row scrolls the reply into view below a long message", async ({
+  app,
+  gmail,
+}) => {
+  await app.page.setViewportSize({ width: 1280, height: 500 });
+  await seeds.standard(gmail, app);
+  await gmail.deliver({
+    account: A,
+    from: PERSONS[0] ?? "",
+    subject: "Long read",
+    html: Array.from({ length: 60 }, (_, i) => `<p>Line ${i + 1} of a long read.</p>`).join(""),
+    labels: ["INBOX"],
+  });
+  await app.settle();
+  await highlight(app, "Long read");
+  // The highlight rests: the conversation is prefetched, so r paints it at once.
+  await app.advance(100);
+  await app.settle();
+  await app.reply("r");
+  await expect(app.conversationTitle).toHaveText("Long read");
+
+  const composer = app.editor.locator(
+    "xpath=ancestor::div[.//button[normalize-space(.)='Send']][1]",
+  );
+  await expect(composer).toBeInViewport({ ratio: 0.99 });
+  await expect(app.editor).toBeFocused();
+});

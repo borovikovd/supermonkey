@@ -440,6 +440,27 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     } else toRef.current?.focus();
   }, [editor, inline]);
 
+  // Messages above that finish drawing after the reply opened, such as a
+  // body arriving, push it down. While focus is in it and it was on screen,
+  // the view moves with it, so it keeps its place.
+  useEffect(() => {
+    const el = root.current;
+    const content = el?.parentElement;
+    const scroller = content?.parentElement;
+    if (!inline || !el || !content || !scroller) return;
+    let top = el.offsetTop;
+    const follow = new ResizeObserver(() => {
+      const moved = el.offsetTop - top;
+      top = el.offsetTop;
+      if (moved === 0 || !el.contains(document.activeElement)) return;
+      const view = scroller.getBoundingClientRect();
+      const was = el.getBoundingClientRect().top - moved;
+      if (was < view.bottom && was + el.offsetHeight > view.top) scroller.scrollTop += moved;
+    });
+    follow.observe(content);
+    return () => follow.disconnect();
+  }, [inline]);
+
   const onFiles = (picker: HTMLInputElement) => {
     const files = Array.from(picker.files ?? []);
     // Forget the pick: the browser fires no change for a pick equal to the
