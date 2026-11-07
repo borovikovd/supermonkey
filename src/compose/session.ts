@@ -145,41 +145,52 @@ export function composerFocused() {
   if (composeBlurred()) useCompose.setState({ blurred: false });
 }
 
-/** Closes that wait for their composer's first load or files, by draft: each resolves once sent. */
-const closing = new Map<string, Promise<void>>();
+/**
+ * Closes and sends that wait for their composer's first load or files, by
+ * draft: each resolves once it is sent, or given up.
+ */
+const waiting = new Map<string, Promise<void>>();
+
+/** Runs `then` once `ready` resolves, with the draft waiting meanwhile. */
+function defer(draft: string, ready: Promise<boolean>, then: (ok: boolean) => void) {
+  const done = (async () => {
+    const ok = await ready;
+    waiting.delete(draft);
+    then(ok);
+  })();
+  waiting.set(draft, done);
+}
 
 /**
  * Closes the composer on screen as a second Esc would: kept as a draft, or
- * discarded if untouched. A close that waits is in `closing` until sent.
+ * discarded if untouched.
  */
 export function closeComposerOnScreen() {
   const draft = draftOnScreen();
   if (!draft) return;
   // This composer's own handle: the close may run after it has left the screen.
   const handle = mountedComposer(draft);
+  // A send waiting for its files goes on once they are in (SPEC Drafts).
+  if (waiting.has(draft)) {
+    leave(draft, false);
+    return;
+  }
   const ready = whenReady(draft);
   // Off screen at once. The close itself waits for the first load and for
   // files still attaching, or it could discard the draft as untouched.
   leave(draft, false);
-  if (!ready) {
-    close(draft, handle);
-    return;
-  }
-  const done = (async () => {
-    await ready;
-    closing.delete(draft);
-    close(draft, handle);
-  })();
-  closing.set(draft, done);
+  if (ready) defer(draft, ready, () => close(draft, handle));
+  else close(draft, handle);
 }
 
 /**
- * Cmd+Q: closes the composer on screen, and resolves once every close still
- * waiting for a first load or a file is sent (SPEC UI state, Actions).
+ * Cmd+Q: closes the composer on screen, and resolves once every close or
+ * send still waiting for a first load or a file is sent (SPEC UI state,
+ * Actions).
  */
 export function closeComposers(): Promise<void> {
   closeComposerOnScreen();
-  return Promise.all(closing.values()).then(() => undefined);
+  return Promise.all(waiting.values()).then(() => undefined);
 }
 
 /** Sends a composer's close, with its pending save ahead of it. */
@@ -197,29 +208,39 @@ function leave(draft: string, forget = true) {
   if (mounted?.draft === draft) mounted = null;
 }
 
-/**
- * Cmd+Enter: refuses with a toast while a recipient is invalid. If Rust
- * refuses the send, `refused` gets the draft back (compose/sends.ts, which
- * this module can't import).
- */
-export function sendOnScreen(
-  refused: (account: number, draft: string, thread: number | null, why: string) => void,
-) {
+/** Gets the draft back after Rust refused its send (compose/sends.ts, which this module can't import). */
+type Refused = (account: number, draft: string, thread: number | null, why: string) => void;
+
+/** Cmd+Enter: refuses with a toast while a recipient is invalid. */
+export function sendOnScreen(refused: Refused) {
   const draft = draftOnScreen();
-  if (!draft) return;
-  // Before the first load or while a file is still attaching, the draft is
-  // not complete: send once it is, and not at all if a file fails. The
-  // composer stays on screen meanwhile.
-  const wait = whenReady(draft);
-  if (wait) {
-    void wait.then((ok) => {
-      if (draftOnScreen() !== draft) return;
-      if (ok) sendOnScreen(refused);
-      else toast.error("Not sent: a file could not be attached");
-    });
+  if (!draft || waiting.has(draft)) return;
+  const handle = mountedComposer(draft);
+  const ready = whenReady(draft);
+  if (!ready) {
+    send(draft, handle, refused);
     return;
   }
-  const handle = mountedComposer(draft);
+  // Before the first load or while a file is still attaching, the draft is
+  // not complete: it sends once it is, even if the composer is closed
+  // meanwhile, and not at all if a file fails. The composer stays on screen.
+  defer(draft, ready, (ok) => {
+    if (ok) {
+      send(draft, handle, refused);
+      return;
+    }
+    toast.error("Not sent: a file could not be attached");
+    closeIfLeft(draft, handle);
+  });
+}
+
+/** A send that did not go: a composer closed while it waited closes now, as a second Esc would. */
+function closeIfLeft(draft: string, handle: ComposerHandle | null) {
+  if (draftOnScreen() !== draft) close(draft, handle);
+}
+
+function send(draft: string, sentFrom: ComposerHandle | null, refused: Refused) {
+  const handle = mountedComposer(draft) ?? sentFrom;
   // Taking the pending save ends it, so it is saved here, before any refusal.
   // It also turns typed text into chips, which the checks below must see.
   const save = handle?.pending() ?? null;
@@ -229,11 +250,13 @@ export function sendOnScreen(
     toast.error(
       `Fix ${invalid.length === 1 ? "this address" : "these addresses"}: ${invalid.join(", ")}`,
     );
+    closeIfLeft(draft, handle);
     return;
   }
   const recipients = save?.fields ?? loadedDraft(draft);
   if (recipients && recipients.to.length + recipients.cc.length + recipients.bcc.length === 0) {
     toast.error("Add a recipient");
+    closeIfLeft(draft, handle);
     return;
   }
   const sent = loadedDraft(draft);

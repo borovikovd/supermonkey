@@ -3,6 +3,8 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
+import type { Route } from "@playwright/test";
+
 import type { App } from "./app.ts";
 import type { Control, GmailMessage } from "./control.ts";
 import { files } from "./files.ts";
@@ -10,6 +12,9 @@ import { expect, test } from "./fixtures.ts";
 import { attachments, findPart, htmlOf, parseMime, shape, type MimePart } from "./mime.ts";
 import * as seeds from "./seeds.ts";
 import { A } from "./seeds.ts";
+
+/** The decoded subjects of these messages. */
+const subjects = (msgs: GmailMessage[]) => msgs.map((m) => parseMime(m.raw).headers.subject);
 
 /** A's sent messages, parsed, by decoded subject. */
 async function sent(gmail: Control): Promise<{ message: GmailMessage; mime: MimePart }[]> {
@@ -305,5 +310,53 @@ test.describe("attachments", () => {
     expect(drafts).toHaveLength(1);
     const kept = filesOf(parseMime(drafts[0]?.message.raw ?? ""));
     expect(Object.keys(kept)).toEqual(["notes.txt"]);
+  });
+
+  test("ATT-10 a send waiting for a file still goes when the composer is closed meanwhile", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    const heading = app.page.getByRole("heading", { name: "New Message" });
+    await newMessage(app, "Sent after closing", "The file follows.");
+    const release = await app.park("add_attachment");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await app.press("Meta+Enter");
+    // The composer stays while the send waits for the file; Esc Esc closes it.
+    await expect(heading).toBeVisible();
+    await app.press("Escape", "Escape");
+    await expect(heading).toHaveCount(0);
+    await release();
+    await app.settle();
+    await expect(app.toast("Sent after closing")).toBeVisible();
+    await app.advance(10_000);
+    await app.settle();
+    const out = filesOf(await sentWithSubject(gmail, "Sent after closing"));
+    expect(Object.keys(out)).toEqual(["notes.txt"]);
+    expect((await gmail.gmail(A)).drafts).toHaveLength(0);
+
+    // A file that fails to attach sends nothing, and the closed draft is kept.
+    await newMessage(app, "Kept after closing", "The file fails.");
+    const attach = /\/invoke\/add_attachment$/;
+    const parked: Route[] = [];
+    await app.page.route(attach, (route) => {
+      parked.push(route);
+    });
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await app.press("Meta+Enter");
+    await app.press("Escape", "Escape");
+    await expect(heading).toHaveCount(0);
+    await expect.poll(() => parked.length).toBe(1);
+    await parked[0]?.fulfill({ status: 400, json: "The file is gone" });
+    await app.page.unroute(attach);
+    await expect(app.toast("Not sent: a file could not be attached")).toBeVisible();
+    await app.settle();
+    await app.advance(10_000);
+    await app.settle();
+    const state = await gmail.gmail(A);
+    expect(subjects(state.messages.filter((m) => m.labels.includes("SENT")))).not.toContain(
+      "Kept after closing",
+    );
+    expect(subjects(state.drafts.map((d) => d.message))).toEqual(["Kept after closing"]);
   });
 });

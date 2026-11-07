@@ -227,6 +227,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ATT-07 · P1 · A downloaded attachment is quarantined before it opens · §Reading
 - ATT-08 · P2 · A file over 25 MB is refused before it is read; one of 25 MB is taken · §Drafts
 - ATT-09 · P1 · `Cmd+Q` while a file is attaching quits once the composer's close is sent · §Actions, §Drafts
+- ATT-10 · P1 · A send waiting for a file still goes when the composer is closed meanwhile; a file that fails keeps the draft · §Drafts
 
 ### drafts.spec.ts (DRF)
 
