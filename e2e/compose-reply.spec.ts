@@ -1108,3 +1108,27 @@ test("REP-18 a forwarded attachment that arrives with the body can be removed, a
   await send(app);
   expect(attachments(parseMime((await sentWith(gmail, A, "Just the text")).raw))).toHaveLength(0);
 });
+
+test("REP-19 an Esc pressed as the reply opens counts, however late the editor's focus would come", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await app.row("Person 3").click();
+  await expect(app.conversationTitle).toHaveText("Person 3");
+  await app.settle();
+  // Page timers wait, so a focus put off to a later frame lands only between the two Escs.
+  await app.page.clock.pauseAt(await app.now());
+  await app.press("r");
+  await expect(app.editor).toBeVisible();
+  await app.press("Escape");
+  await app.page.clock.runFor(100);
+  await app.press("Escape");
+  await expect(app.editor).toHaveCount(0);
+  await expect(app.conversationTitle).toHaveText("Person 3");
+  await app.page.clock.resume();
+  await app.page.clock.setFixedTime(await app.now());
+  await app.settle();
+  // The untouched fresh reply left nothing behind.
+  expect((await gmail.gmail(A)).drafts).toHaveLength(0);
+});

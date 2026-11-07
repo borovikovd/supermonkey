@@ -20,6 +20,7 @@ import { frameTokens } from "../ui/frameTokens";
 import { RecipientField, formatAddr, isValidEmail, type RecipientHandle } from "./RecipientField";
 import {
   attachFiles,
+  composeBlurred,
   composerFocused,
   loadedDraft,
   registerComposer,
@@ -265,7 +266,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
       Placeholder.configure({ placeholder: inline ? "Write a reply…" : "Write a message…" }),
     ],
     content: "",
-    autofocus: inline ? "end" : false,
+    // Not TipTap's autofocus, which lands a frame later: see the effect below.
+    autofocus: false,
     // Compose shortcuts (Cmd+Enter among them) are taken by the key
     // dispatcher before the editor sees them (src/keyboard/dispatch.ts).
     onUpdate: ({ editor: ed }) => {
@@ -395,11 +397,16 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     if (text) editor.chain().focus("end").insertContent(text).run();
   }, [editor, inline]);
 
-  // A reply scrolls fully into view with the editor focused; a new message starts in To.
+  // A reply scrolls fully into view with the editor focused; a new message
+  // starts in To. Focus comes as the composer mounts, not a frame later, so
+  // an Esc pressed at once is never undone by it; after that Esc, none comes.
   useEffect(() => {
-    if (inline) root.current?.scrollIntoView({ block: "nearest" });
-    else requestAnimationFrame(() => toRef.current?.focus());
-  }, [inline]);
+    if (composeBlurred()) return;
+    if (inline) {
+      editor?.view.focus();
+      root.current?.scrollIntoView({ block: "nearest" });
+    } else toRef.current?.focus();
+  }, [editor, inline]);
 
   const onFiles = (files: FileList | null) => {
     if (files && files.length > 0) attachFiles(draft, Array.from(files));
