@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { getBodies, openUrlInCore } from "../ipc/bridge";
 import type { MessageBody } from "../ipc/types";
+import { dispatchKey } from "../keyboard/dispatch";
 import { frameCsp } from "./frameCsp";
 import { frameTokens } from "./frameTokens";
 
@@ -119,22 +120,9 @@ export function MessageFrame({
       ro = new ResizeObserver(fit);
       ro.observe(doc.documentElement);
       for (const img of Array.from(doc.images)) img.addEventListener("load", fit);
-      doc.addEventListener("keydown", (e) => {
-        // Keys pressed inside a message go to the app window's listeners: the
-        // shortcut table and an open composer's keys.
-        const copy = new KeyboardEvent("keydown", {
-          key: e.key,
-          code: e.code,
-          metaKey: e.metaKey,
-          ctrlKey: e.ctrlKey,
-          altKey: e.altKey,
-          shiftKey: e.shiftKey,
-          repeat: e.repeat,
-          cancelable: true,
-        });
-        window.dispatchEvent(copy);
-        if (copy.defaultPrevented) e.preventDefault();
-      });
+      // Keys pressed inside a message go to the app's dispatcher, as keys in
+      // the window do: the shortcut table and an open composer's keys.
+      doc.addEventListener("keydown", dispatchKey);
       doc.addEventListener("mousedown", () => onSelect(id));
       doc.addEventListener("click", (e) => {
         // Nodes in the frame belong to the frame's realm, not the app window's.

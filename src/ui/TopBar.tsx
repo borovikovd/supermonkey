@@ -2,7 +2,7 @@ import { ArrowLeft, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
 import { useComposeState } from "../compose/session";
 import { dom } from "../keyboard/refs";
-import { context, runKey, useCommand, type CommandId } from "../keyboard/table";
+import { useCommand, type CommandId } from "../keyboard/table";
 import { editSearch, highlight as moveHighlightTo, visibleSplits } from "../navigation";
 import { useChrome, viewTitle } from "../store/chrome";
 import { useAppState, useCurrent, useSummary } from "../store/hooks";
@@ -33,7 +33,10 @@ function SearchField() {
         placeholder="Search"
         value={search.query}
         onChange={(e) => editSearch(e.target.value)}
-        onKeyDown={(e) => runKey("search", e.nativeEvent, context(), performance.now())}
+        // Its keys (Enter, ↓, Esc) are the search layer of the dispatcher, which
+        // applies while the field has focus.
+        onFocus={() => useChrome.getState().setSearchFocus("field")}
+        onBlur={() => useChrome.getState().setSearchFocus("results")}
       />
       {!online && <span className="shrink-0 text-hint text-text-3">Results from this Mac</span>}
       <IconButton command="search-close">

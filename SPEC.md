@@ -221,6 +221,19 @@ Reply, reply all, and forward send from the account on screen, which owns the th
 
 The shortcut table applies to the list and the conversation view. While compose, search, or the palette is focused, keystrokes go to that field, including keys held with Shift, and the shortcut table does not apply. `Ctrl+1`…`Ctrl+9` and `Cmd+,` still work there.
 
+A key goes to the first of these that is open, top first, and the first that takes it ends its way:
+1. `Ctrl+1`…`Ctrl+9` and `Cmd+,`, which work everywhere
+2. an open sheet, which takes `Esc`
+3. the palette, which takes `Esc`, and `Enter` while its snooze options are catching up with the text
+4. the start of a reply typed after `r`, `f`, or `Enter` (see Reply composer)
+5. an open autocomplete list, which takes `↓`, `↑`, `Enter`, `Tab`, and `Esc`
+6. the composer, which takes the compose shortcuts
+7. the search field, which takes `Enter`, `↓`, and `Esc`
+8. any other text field
+9. the shortcut table
+
+A sheet, the palette, the composer, the search field, and a text field keep every other key from the layers below them: the focused field gets it as typing, so the shortcut table never fires there. Keys typed inside a message body take the same way as keys typed in the window.
+
 In compose, `Tab` and `Shift+Tab` move between fields, unless the autocomplete list is open. `Cmd+K` inserts a link, and `Cmd+Enter` sends. The first `Esc` blurs the editor and leaves compose on screen. With compose blurred:
 - `Cmd+K` opens the palette with draft actions (send, attach, discard)
 - `Enter` refocuses the editor

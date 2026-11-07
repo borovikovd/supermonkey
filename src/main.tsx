@@ -12,7 +12,7 @@ import {
   subscribe,
   whenCommitted,
 } from "./ipc/bridge";
-import { onKeyDown } from "./keyboard/keys";
+import { installKeys } from "./keyboard/dispatch";
 import { openNotification, trackFocus } from "./navigation";
 import { useChrome } from "./store/chrome";
 import { useMirror } from "./store/mirror";
@@ -22,7 +22,7 @@ import { useMirror } from "./store/mirror";
 if (import.meta.env.DEV || !inTauri)
   Object.assign(window, { __ub: { useChrome, useMirror, pending: pendingWork } });
 
-window.addEventListener("keydown", onKeyDown);
+installKeys();
 trackFocus();
 
 // App renders once the app state, subscribed after connecting, arrives.

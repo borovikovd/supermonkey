@@ -29,6 +29,7 @@ import type { View } from "../ipc/types";
 import {
   closeConversation,
   closeSearch,
+  closeSheet,
   goTo,
   goToSplit,
   openConversation,
@@ -77,6 +78,8 @@ export type Ctx = {
   composeBlurred: boolean;
   /** The list's view; null for search results. */
   view: View | null;
+  /** A sheet (Settings, Split Inbox settings, the shortcut sheet) is open. */
+  sheet: boolean;
   searchOpen: boolean;
   /** The search field has focus. */
   searchField: boolean;
@@ -134,6 +137,7 @@ function contextOf(chrome: ChromeState, mirror: MirrorState, compose: ComposeSta
     composer: onScreen === null ? null : onScreen.thread === null ? "screen" : "inline",
     composeBlurred: compose.blurred,
     view,
+    sheet: chrome.sheet !== null,
     searchOpen: chrome.search !== null,
     searchField: chrome.search?.focus === "field",
     targets,
@@ -184,8 +188,12 @@ const isView = (c: Ctx, kind: View["kind"]) => c.view?.kind === kind;
 
 // ------------------------------------------------------------ the table
 
-/** Where a key is looked up: the shortcut table applies only on mail, and compose and search have their own. */
-export type Scope = "global" | "mail" | "compose" | "search";
+/**
+ * Where a key is looked up (src/keyboard/dispatch.ts): keys that work
+ * everywhere, an open sheet, the composer, the search field, and the
+ * shortcut table, which applies only on mail.
+ */
+export type Scope = "global" | "sheet" | "compose" | "search" | "mail";
 
 /** The shortcut sheet's sections, in order. */
 export const GROUPS = ["Navigate", "Act", "Write", "Go to"] as const;
@@ -223,6 +231,15 @@ function escape(c: Ctx) {
 }
 
 const DEFS = {
+  // An open sheet.
+  "close-sheet": {
+    label: "Close the sheet",
+    keys: "Escape",
+    scope: "sheet",
+    when: (c) => c.sheet,
+    run: closeSheet,
+  },
+
   // The sign-in screen.
   signin: {
     label: "Sign in again",

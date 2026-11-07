@@ -12,7 +12,7 @@ import { toast } from "sonner";
 
 import { act, addAttachment, later } from "../ipc/bridge";
 import type { Addr, DraftAttachment, DraftFields } from "../ipc/types";
-import { command, context, keyText, runKey, shortHintOf, useCommand } from "../keyboard/table";
+import { command, keyText, shortHintOf, useCommand } from "../keyboard/table";
 import { openPalette } from "../navigation";
 import { useChrome } from "../store/chrome";
 import { useAppState, useDraft } from "../store/hooks";
@@ -20,7 +20,6 @@ import { frameCsp } from "../ui/frameCsp";
 import { frameTokens } from "../ui/frameTokens";
 import { RecipientField, formatAddr, isValidEmail, type RecipientHandle } from "./RecipientField";
 import {
-  composeBlurred,
   composerFocused,
   loadedDraft,
   registerComposer,
@@ -276,16 +275,8 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     ],
     content: "",
     autofocus: inline ? "end" : false,
-    editorProps: {
-      handleKeyDown: (_view, e) => {
-        // The window listener below sends; this only keeps the editor from acting on it.
-        if (e.metaKey && e.key === "Enter") {
-          e.preventDefault();
-          return true;
-        }
-        return false;
-      },
-    },
+    // Compose shortcuts (Cmd+Enter among them) are taken by the key
+    // dispatcher before the editor sees them (src/keyboard/dispatch.ts).
     onUpdate: ({ editor: ed }) => {
       const html = ed.getHTML();
       update({ bodyHtml: html === "<p></p>" ? "" : html });
@@ -421,18 +412,6 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     if (inline) root.current?.scrollIntoView({ block: "nearest" });
     else requestAnimationFrame(() => toRef.current?.focus());
   }, [inline]);
-
-  // Compose shortcuts work focused or blurred (SPEC Compose).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (useChrome.getState().palette) return;
-      if (runKey("compose", e, context(), performance.now())) return;
-      // Other keys do nothing while compose is blurred.
-      if (composeBlurred() && !e.metaKey) e.preventDefault();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
 
   const onFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;

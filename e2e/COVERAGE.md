@@ -319,6 +319,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SET-03 · P2 · Hint text is 11px and the shortcut chips are readable · §Look
 - SET-04 · P3 · Shortcut sheet rows never overlap · §Look
 - SET-05 · P1 · With remote images off, nothing remote loads in a message or a reply's quote · §Reading, §Settings
+- SET-06 · P2 · `Esc` closes a sheet from one of its fields, and a sheet open over a composer · §Keyboard
 
 ### palette.spec.ts (PAL)
 

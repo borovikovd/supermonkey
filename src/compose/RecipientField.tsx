@@ -1,9 +1,10 @@
 // To, Cc, and Bcc as chips with autocomplete (SPEC Recipients and autocomplete).
 
-import { useImperativeHandle, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState } from "react";
 
 import { autocomplete } from "../ipc/bridge";
 import type { Addr, ContactSuggestion } from "../ipc/types";
+import { registerKeys } from "../keyboard/dispatch";
 import { measure } from "../keyboard/meter";
 
 const utf8 = new TextEncoder();
@@ -168,6 +169,24 @@ export function RecipientField({
   };
 
   const open = suggestions.length > 0;
+  // While the list is open, its keys come before the composer's (src/keyboard/dispatch.ts).
+  useEffect(() => {
+    if (!open) return;
+    return registerKeys("suggestions", (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return false;
+      if (e.key === "ArrowDown") setActive((a) => Math.min(a + 1, suggestions.length - 1));
+      else if (e.key === "ArrowUp") setActive((a) => Math.max(a - 1, 0));
+      else if (e.key === "Enter" || e.key === "Tab") {
+        const pick = suggestions[active];
+        if (pick) accept(pick);
+      } else if (e.key === "Escape") {
+        // Closes the list without leaving the field.
+        setSuggestions([]);
+      } else return false;
+      e.preventDefault();
+      return true;
+    });
+  });
   return (
     <div className="relative flex min-h-10 flex-wrap items-center gap-x-1 py-1 text-body">
       <span className="w-20 shrink-0 text-text">{label}</span>
@@ -235,33 +254,6 @@ export function RecipientField({
           }, 120);
         }}
         onKeyDown={(e) => {
-          if (open) {
-            if (e.key === "ArrowDown") {
-              e.preventDefault();
-              setActive((a) => Math.min(a + 1, suggestions.length - 1));
-              return;
-            }
-            if (e.key === "ArrowUp") {
-              e.preventDefault();
-              setActive((a) => Math.max(a - 1, 0));
-              return;
-            }
-            // Cmd+Enter is send, list or not; send turns the typed text into a chip.
-            if ((e.key === "Enter" && !e.metaKey) || e.key === "Tab") {
-              e.preventDefault();
-              e.stopPropagation();
-              const pick = suggestions[active];
-              if (pick) accept(pick);
-              return;
-            }
-            if (e.key === "Escape") {
-              // Closes the list without leaving the field.
-              e.preventDefault();
-              e.stopPropagation();
-              setSuggestions([]);
-              return;
-            }
-          }
           if (e.key === "Backspace" && text === "" && value.length > 0) {
             e.preventDefault();
             if (selectedChip === null) setSelectedChip(value.length - 1);

@@ -282,3 +282,35 @@ test("SET-05 with remote images off, nothing remote loads in a message or a repl
   await app.settle();
   expect(await imageHits(app)).toEqual([]);
 });
+
+// Esc in a field of the Split Inbox sheet did nothing, and with a composer
+// open, Esc went to the composer while Settings stayed open over it.
+test("SET-06 Esc closes a sheet from one of its fields, and a sheet open over a composer", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+
+  // A field in the Split Inbox sheet has focus: Esc closes the sheet.
+  await app.press("Meta+k");
+  await app.type("Split Inbox settings");
+  await app.press("Enter");
+  const splits = app.sheet(`Split Inbox · ${A}`);
+  await expect(splits).toBeVisible();
+  await splits.getByRole("textbox").first().click();
+  await expect(splits.getByRole("textbox").first()).toBeFocused();
+  await app.press("Escape");
+  await expect(splits).toHaveCount(0);
+
+  // Settings over a new message: Esc closes Settings, and the composer stays.
+  const newMessage = app.page.getByRole("heading", { name: "New Message" });
+  await app.compose();
+  await app.press("Meta+,");
+  await expect(app.sheet("Settings")).toBeVisible();
+  await app.press("Escape");
+  await expect(app.sheet("Settings")).toHaveCount(0);
+  await expect(newMessage).toBeVisible();
+  // Then the composer's own Esc, twice, closes it.
+  await app.press("Escape", "Escape");
+  await expect(newMessage).toHaveCount(0);
+});

@@ -7,6 +7,7 @@ import { formatAddr } from "../compose/RecipientField";
 import { mountedComposer } from "../compose/session";
 import { act, blockedSenders, signInAgain, snoozeOptions, unblockSender } from "../ipc/bridge";
 import type { BlockedSenders, PinKind, SnoozeChoice } from "../ipc/types";
+import { registerKeys } from "../keyboard/dispatch";
 import { measure } from "../keyboard/meter";
 import {
   accountChips,
@@ -306,6 +307,33 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
   const fromRust = mode.kind === "snooze";
   const [picked, setPicked] = useState("");
   const firstValue = items[0] ? itemValue(items[0]) : "";
+
+  // Keys reach the palette first (src/keyboard/dispatch.ts); the rest go to cmdk.
+  useEffect(
+    () =>
+      registerKeys("palette", (e) => {
+        const start = performance.now();
+        if (e.key === "Escape") {
+          e.preventDefault();
+          close();
+          return true;
+        }
+        if (e.key === "Enter" && stale) {
+          // The options on screen are for an earlier query: Enter takes the
+          // first option for what is typed now, once it arrives.
+          e.preventDefault();
+          void snoozeOptions(query).then(([first]) => {
+            if (!first || useChrome.getState().palette !== mode) return;
+            close();
+            snooze(first.at);
+          });
+          return true;
+        }
+        measure("paletteKey", start);
+        return false;
+      }),
+    [stale, query, mode],
+  );
   const selected = items.some((it) => itemValue(it) === picked) ? picked : firstValue;
   return (
     // The backdrop closes on a click outside the palette; Esc closes from the keyboard.
@@ -326,23 +354,6 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
           shouldFilter={!fromRust}
           {...(fromRust ? { value: selected, onValueChange: setPicked } : {})}
           loop
-          onKeyDown={(e) => {
-            const start = performance.now();
-            if (e.key === "Escape") {
-              e.preventDefault();
-              e.stopPropagation();
-              close();
-            } else if (e.key === "Enter" && stale) {
-              // The options on screen are for an earlier query: Enter takes the
-              // first option for what is typed now, once it arrives.
-              e.preventDefault();
-              void snoozeOptions(query).then(([first]) => {
-                if (!first || useChrome.getState().palette !== mode) return;
-                close();
-                snooze(first.at);
-              });
-            } else measure("paletteKey", start);
-          }}
         >
           <Command.Input
             autoFocus
