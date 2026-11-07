@@ -168,14 +168,15 @@ impl<'c> OutboxReads<'c> {
         )
     }
 
-    /// Sent rows whose toast is closed and whose message is stored (or that
-    /// have no thread): done, so the row and its draft can go.
+    /// Sent rows whose toast is closed and whose message is stored, or that
+    /// have no message to wait for (no thread, or no message id): done, so
+    /// the row and its draft can go.
     pub fn finished(self, account: AccountId) -> Result<Vec<(OutboxId, DraftId)>, StoreError> {
         self.db.all(
             "read the finished outbox",
             "SELECT o.id, o.draft_id FROM outbox o
              WHERE o.account_id = ?1 AND o.state = 'sent' AND o.toast_closed = 1
-               AND (o.thread_id IS NULL OR EXISTS (
+               AND (o.thread_id IS NULL OR o.sent_message_id IS NULL OR EXISTS (
                  SELECT 1 FROM messages m
                  WHERE m.account_id = o.account_id AND m.gmail_id = o.sent_message_id))
              ORDER BY o.id",

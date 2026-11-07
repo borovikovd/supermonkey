@@ -919,3 +919,52 @@ test("SND-22 a sent reply stays on the thread, marked Sent, until its message la
   await expect(sentRow).toHaveCount(0);
   await expect(app.conversation.getByText("Sending", { exact: true })).toHaveCount(0);
 });
+
+test("SND-23 a send settled as sent with no message to show leaves the thread once its toast closes", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const lines = /^(Sending|Sent|Email delayed)$/;
+  /**
+   * Sends a reply whose drafts.send gets no clear answer, Gmail never having
+   * sent it. `whileSending` runs once the send is out; then the draft is
+   * deleted from a phone, so Gmail no longer has it and the thread holds no
+   * message this account sent, and the next try settles it.
+   */
+  const lostSend = async (key: string, subject: string, whileSending: () => Promise<void>) => {
+    const thread = s.thread(key).threadId;
+    await gmail.fault("drafts.send", { kind: "drop" }, { times: 1 });
+    await sendReply(app, subject, `lost on the way ${key}`);
+    await app.advance(DELAY);
+    await app.settle();
+    await whileSending();
+    const draft = (await gmail.gmail(A)).drafts.find((d) => d.message.threadId === thread);
+    expect(draft, key).toBeDefined();
+    await gmail.deleteDraft(A, draft?.id ?? "");
+    const gets = await count(gmail, "drafts.get");
+    await app.advance(30_000, { stepwise: true });
+    await app.settle();
+    expect(await count(gmail, "drafts.get"), key).toBeGreaterThan(gets);
+    expect(await sentIn(gmail, thread), key).toEqual([]);
+  };
+
+  // Its toast closes after it settles: the thread shows its one message.
+  await lostSend("p1", "Person 1", () => Promise.resolve());
+  await app.advance(5_000);
+  await expect(sendToast(app, "Person 1")).toHaveCount(0);
+  await app.settle();
+  await expect(app.messages).toHaveCount(1);
+  await expect(app.conversation.getByText("lost on the way p1")).toHaveCount(0);
+  await expect(app.conversation.getByText(lines)).toHaveCount(0);
+  await app.press("Escape");
+
+  // Its toast was closed while it was sending.
+  await lostSend("p3", "Person 3", async () => {
+    await swipeAway(app, sendToast(app, "Person 3"));
+    await expect(sendToast(app, "Person 3")).toHaveCount(0);
+  });
+  await expect(app.messages).toHaveCount(1);
+  await expect(app.conversation.getByText("lost on the way p3")).toHaveCount(0);
+  await expect(app.conversation.getByText(lines)).toHaveCount(0);
+});
