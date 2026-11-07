@@ -98,6 +98,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - TRI-13 · P1 · `Cmd+A` selects from the highlight to the end of its split; `Cmd+Shift+A` the whole split · §Keyboard
 - TRI-14 · P1 · A selected row that a poll removes is not acted on · §Keyboard
 - TRI-15 · P1 · `s`, `u`, and `l` on Select all count every selected conversation, shown or not · §Keyboard, §Actions
+- TRI-16 · P1 · `Shift+E` on mail in Trash or Spam reached by search takes it out of Trash or Spam · §Archive, trash, star, read, §Snooze
 
 ### undo.spec.ts (UND)
 

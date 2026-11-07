@@ -460,7 +460,7 @@ The delay is a fixed ten seconds, as in Superhuman, which does not let users cha
 
 Archive removes the `INBOX` label and marks the thread read: it removes `UNREAD` from its messages, as Superhuman's Mark Done does. `z` puts both back, `UNREAD` only on the messages that had it. On a snoozed thread it also clears `snooze_until`. The thread stays in All Mail and appears in Done. A later reply from someone else puts it back in the inbox, which is ordinary Gmail behavior.
 
-Trash adds `TRASH` and removes `INBOX` and `SPAM`. Spam adds `SPAM` and removes `INBOX` and `TRASH`. Star toggles `STARRED`. Mark unread adds `UNREAD` to the thread's latest message only, as Gmail does, and mark read removes it from every message. Return to inbox adds `INBOX`.
+Trash adds `TRASH` and removes `INBOX` and `SPAM`. Spam adds `SPAM` and removes `INBOX` and `TRASH`. Star toggles `STARRED`. Mark unread adds `UNREAD` to the thread's latest message only, as Gmail does, and mark read removes it from every message. Return to inbox adds `INBOX`, and on a thread in Trash or Spam (see Views) also removes `TRASH` or `SPAM`, wherever the thread was reached: the Trash or Spam view, or a search such as `in:trash`.
 
 Archive, trash, spam, star, read changes, return to inbox, label changes, snooze, and a snooze wake act on the thread's non-draft messages at the time of the action (mark unread on the latest of them only), through `messages.batchModify` with those ids. Gmail does not label drafts, and a draft's message id changes on every update. The op stores the ids, so a delayed replay or retry never touches messages that arrived later. A reply that arrives while an archive is queued still lands in the inbox.
 
@@ -565,7 +565,7 @@ A snoozed thread that gains `INBOX` from outside this app loses its snooze and r
 
 History also returns this app's own label changes. So a poll first applies each message's latest labels from the whole history batch, then judges the rule once on each thread the batch touched, and a single history record never clears a snooze. The rule is also judged whenever a thread is stored from Gmail: a poll's re-read, a resync, or an open. It always skips messages with an op still pending. Undoing a snooze and snoozing again before the next poll leaves the new snooze in place.
 
-Snoozed threads live in the Snoozed view. `z` undoes a snooze by restoring the thread's state from before it: back in the inbox, or the earlier snooze time when it was re-snoozed. `Shift+E` does the same when the thread is snoozed: it clears `snooze_until` and adds `INBOX`. From Trash or Spam, return to inbox also removes `TRASH` or `SPAM`.
+Snoozed threads live in the Snoozed view. `z` undoes a snooze by restoring the thread's state from before it: back in the inbox, or the earlier snooze time when it was re-snoozed. `Shift+E` does the same when the thread is snoozed: it clears `snooze_until` and adds `INBOX`. On a thread in Trash or Spam, from any view or search, return to inbox also removes `TRASH` or `SPAM`.
 
 ## Settings
 

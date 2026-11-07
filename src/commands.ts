@@ -121,17 +121,20 @@ export const markDone = () => {
   );
 };
 
-export const returnToInbox = () => {
-  const view = currentView();
-  const remove = view?.kind === "trash" ? ["TRASH"] : view?.kind === "spam" ? ["SPAM"] : [];
-  withRows(({ account, threads }) =>
+/**
+ * `Shift+E`: back to the Inbox. A thread in Trash or Spam leaves it, by its
+ * own labels, wherever it was reached: its view, or a search for `in:trash`.
+ */
+export const returnToInbox = () =>
+  withRows(({ account, threads }) => {
+    const rows = threads.map((t) => rowOf(String(t)));
+    const remove = ["TRASH", "SPAM"].filter((l) => rows.some((r) => r?.labels.includes(l)));
     modify("returnToInbox", ["INBOX"], remove, {
       account,
       threads,
       snooze: isSnoozed(threads) ? { kind: "clear" } : null,
-    }),
-  );
-};
+    });
+  });
 
 export const trash = () => {
   if (currentView()?.kind === "trash") return;

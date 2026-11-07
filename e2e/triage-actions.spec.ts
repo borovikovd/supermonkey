@@ -850,3 +850,33 @@ test("TRI-15 s, u, and l on Select all count every selected conversation, shown 
   await app.settle();
   expect(await withLabel(batchy)).toBe(0);
 });
+
+test("TRI-16 Shift+E on mail in Trash or Spam reached by search takes it out of Trash or Spam", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const cases: [query: string, row: string, key: string, label: string][] = [
+    ["in:trash", "Old trash", "trashOld", "TRASH"],
+    ["in:spam", "Old spam", "spamOld", "SPAM"],
+  ];
+  await each(cases, async ([query, row]) => {
+    await app.press("/");
+    await app.type(query);
+    // The connect sync stores no Trash or Spam: the Gmail search finds them.
+    await app.advance(300);
+    await expect(app.row(row)).toHaveCount(1);
+    await app.press("Enter");
+    await highlight(app, row);
+    await app.press("Shift+E");
+    await app.settle();
+    await app.press("Escape");
+  });
+
+  const state = await gmail.gmail(A);
+  for (const [, , key, label] of cases) {
+    expect(threadHas(state, s.thread(key).threadId, label), `${key} keeps ${label}`).toBe(false);
+    expect(threadHas(state, s.thread(key).threadId, "INBOX"), key).toBe(true);
+  }
+  await each(cases, ([, row]) => expect(app.row(row)).toHaveCount(1));
+});
