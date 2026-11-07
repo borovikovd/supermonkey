@@ -204,7 +204,7 @@ An account whose token is missing at launch shows Sign in again, as for `invalid
 
 If Google rejects the refresh token (`invalid_grant`), the account is signed out. Its rail avatar shows a Sign in again marker, and its screen shows a sign-in screen in place of its mail: "You're signed out of <email>" and a Sign in with Google button, which `Enter` also presses. Only `Enter`, `Cmd+K`, `Cmd+,`, and account switching work there. A composer already open stays on screen until closed, a reply composer with its conversation, and the hint bar, the palette, and the keys are the composer's, as on any screen with a composer; closing it shows the sign-in screen. Its queue and outbox wait until sign-in succeeds, then go out. Only the current grant can sign an account out: an `invalid_grant` on a request made with the grant from before a sign-in changes nothing.
 
-Removing an account deletes its refresh token and its rows from the local database. If it was on screen, the next account in the rail takes its place, with Settings still open, and an open composer of the removed account leaves the screen with it. An account removed while its Sign in again waits in the browser comes back when that sign-in finishes, under a new id, as Add account would bring it back: the sign-in finished after the removal, so it is the user's last word.
+Removing an account deletes its refresh token and its rows from the local database. If it was on screen, the next account in the rail takes its place, or the one before it when it was last, with Settings still open, and an open composer of the removed account leaves the screen with it. An account removed while its Sign in again waits in the browser comes back when that sign-in finishes, under a new id, as Add account would bring it back: the sign-in finished after the removal, so it is the user's last word.
 
 ### Switching
 
@@ -580,7 +580,7 @@ Changing a setting is an action, as in UI state. It is not an undo entry. Settin
 - drops its queue and outbox, and stops its sync
 - deletes its rows from every table and its downloaded attachments
 - deletes its refresh token and revokes it with Google. The revoke is tried once: offline, or if it fails, the token is only deleted. A sign-in started while a removed account's token is being revoked waits for the revoke before it opens the browser, since the revoke would end the new grant too. Nothing else waits for it
-- if it was on screen, switches to the next account on the rail, or shows the first-run screen if none are left
+- if it was on screen, switches to the next account on the rail, or to the one before it when it was last, or shows the first-run screen if none are left
 
 ## Search
 

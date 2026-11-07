@@ -974,3 +974,41 @@ test("ACC-20 removing the account on screen while its reply is open leaves no co
   await app.press("j");
   await expect(app.highlighted).toContainText("Bo Brown");
 });
+
+test("ACC-21 removing the account on screen shows the next account on the rail, or the one before the last", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app, { connect: ["A", "B", "C"] });
+  expect(await avatarOrder(app)).toEqual([A, B, C]);
+  const settings = app.sheet("Settings");
+  /** Removes the account on screen from Settings, which stays open. */
+  const removeOnScreen = async (email: string) => {
+    await app.press("Meta+,");
+    await settingsBlock(app, email).getByRole("button", { name: "Remove account" }).click();
+    await settings.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(app.account(email)).toHaveCount(0);
+    await expect(settings).toBeVisible();
+    await app.press("Escape");
+    await expect(settings).toHaveCount(0);
+  };
+
+  // C, last on the rail: B, before it, takes its place.
+  await app.press("Control+3");
+  await expect(app.row("Cy 1")).toHaveCount(1);
+  await removeOnScreen(C);
+  await expect(app.row("Bea Blue")).toHaveCount(1);
+  await expect(app.row("Person 1")).toHaveCount(0);
+
+  // C again, added last; then B, in the middle: C, after it, takes its place.
+  await gmail.nextSignIn({ email: C });
+  await command(app, "Add account");
+  await expect(app.account(C)).toBeVisible();
+  await app.settle();
+  expect(await avatarOrder(app)).toEqual([A, B, C]);
+  await app.press("Control+2");
+  await expect(app.row("Bea Blue")).toHaveCount(1);
+  await removeOnScreen(B);
+  await expect(app.row("Cy 1")).toHaveCount(1);
+  await expect(app.row("Person 1")).toHaveCount(0);
+});

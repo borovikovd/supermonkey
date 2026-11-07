@@ -293,17 +293,33 @@ export function switchAccountAt(index: number) {
   if (a) switchAccount(a.id);
 }
 
+/** The rail as `followAccounts` last saw it: where a removed account stood. */
+let rail: number[] = [];
+
 /**
- * Keeps an account on screen: the first one, when none is yet or the one on
- * screen was removed. A removed account's composer leaves the screen with it,
+ * Keeps an account on screen: the first one when none is yet, and when the
+ * one on screen was removed, the next one on the rail, or the one before it
+ * when it was last. A removed account's composer leaves the screen with it,
  * closed as a second Esc would; its draft is already gone, so the close does
  * nothing more. Settings stays open (SPEC Accounts).
  */
 export function followAccounts(ids: number[]) {
+  const before = rail;
+  rail = ids;
   const { account } = chrome();
   if (account !== null && ids.includes(account)) return;
   closeComposerOnScreen();
-  chrome().setAccount(ids[0] ?? null);
+  chrome().setAccount(account === null ? (ids[0] ?? null) : successor(before, ids, account));
+}
+
+/**
+ * The account after `removed` on the rail as it was that is still on it,
+ * else the last one; the first when `removed` was not on it.
+ */
+function successor(before: number[], ids: number[], removed: number): number | null {
+  const at = before.indexOf(removed);
+  if (at < 0) return ids[0] ?? null;
+  return before.slice(at + 1).find((id) => ids.includes(id)) ?? ids.at(-1) ?? null;
 }
 
 /** A notification click: that account, Inbox, the thread highlighted. */

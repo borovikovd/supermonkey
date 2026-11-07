@@ -32,6 +32,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ACC-18 · P1 · An account removed while its Sign in again waits in the browser comes back and syncs · §Accounts
 - ACC-19 · P1 · A reply open when its account signs out stays on screen until it is closed · §Accounts, §Keyboard
 - ACC-20 · P1 · Removing the account on screen while its reply is open leaves no composer behind · §Accounts, §Switching
+- ACC-21 · P2 · Removing the account on screen shows the next account on the rail, or the one before the last · §Accounts, §Settings
 
 ### inbox-navigation.spec.ts (NAV)
 
