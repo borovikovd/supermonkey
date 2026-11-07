@@ -289,3 +289,56 @@ test("UNW-09 unsubscribe, block, and unblock act only on the account's own threa
   expect(await invoke("unblock", { account: a, id: filter?.id })).toBe(200);
   expect(await gmail.filters(A)).toEqual([]);
 });
+
+test("UNW-10 block and unsubscribe act on their own account when another one is on screen by then", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  const trashedIn = async (email: string) =>
+    (await gmail.gmail(email)).messages.filter((m) => m.labels.includes("TRASH")).length;
+  const bTrash = await trashedIn(B);
+  const promo = await gmail.deliver({
+    account: A,
+    from: "Pal <promo@pal.test>",
+    subject: "Flash deal",
+  });
+  await app.settle();
+  await highlight(app, "Flash deal");
+
+  // Block: the filter is made while B is on screen.
+  const filter = await gmail.hold("filters.create");
+  await choose(app, "Block", "Block promo@pal.test");
+  await app.press("Control+2");
+  await expect(app.highlighted).toContainText("Bea Blue");
+  await filter.release();
+  await expect(app.page.getByText("Blocked promo@pal.test")).toBeVisible();
+  await app.settle();
+  expect(await labelsOf(gmail, promo.id)).toContain("TRASH");
+  expect(await trashedIn(B)).toBe(bTrash);
+  await expect(app.errorToasts).toHaveCount(0);
+  await expect(app.highlighted).toContainText("Bea Blue");
+
+  // Mark done all: the sender's mail is listed while B is on screen.
+  await app.press("Control+1");
+  const header: [string, string][] = [["List-Unsubscribe", "<mailto:leave@news.test>"]];
+  const [one, two] = await gmail.deliverMany([
+    newsletter("News one", header),
+    newsletter("News two", header),
+  ]);
+  await app.settle();
+  await highlight(app, "News two");
+  const release = await app.park("sender_threads");
+  await unsubscribe(app, "Unsubscribe, and mark done all");
+  await app.press("Control+2");
+  await expect(app.highlighted).toContainText("Bea Blue");
+  await release();
+  await app.settle();
+  expect(await labelsOf(gmail, one?.id ?? "")).not.toContain("INBOX");
+  expect(await labelsOf(gmail, two?.id ?? "")).not.toContain("INBOX");
+  await expect(app.errorToasts).toHaveCount(0);
+  await expect(app.highlighted).toContainText("Bea Blue");
+  await app.press("Control+1");
+  await expect(app.row("News one")).toHaveCount(0);
+  await expect(app.row("News two")).toHaveCount(0);
+});

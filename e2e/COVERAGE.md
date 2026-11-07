@@ -360,6 +360,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - UNW-07 · P1 · An account signed in before filters were asked for is offered Sign in again · §Unsubscribe and block, §Accounts
 - UNW-08 · P1 · Mark spam, and block the domain · §Unsubscribe and block
 - UNW-09 · P1 · Unsubscribe, block, and unblock act only on the account's own thread and block filter · §Unsubscribe and block
+- UNW-10 · P1 · Block and unsubscribe act on their own account when another one is on screen by then · §Unsubscribe and block, §Switching
 
 ## Not covered end-to-end, and why
 

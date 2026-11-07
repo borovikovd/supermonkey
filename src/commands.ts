@@ -34,19 +34,31 @@ export function targets(): number[] {
   return [];
 }
 
+/**
+ * Sends a mail change. `account` and `threads` name an account and its
+ * threads taken earlier, before an await; by default they are the account
+ * on screen and the targets now. The screen moves on only when its account
+ * is the one acted on.
+ */
 export function modify(
   kind: ModifyKind,
   add: string[],
   remove: string[],
-  opts: { snooze?: ModifyAction["snooze"]; threads?: number[]; undoable?: boolean } = {},
+  opts: {
+    snooze?: ModifyAction["snooze"];
+    account?: number;
+    threads?: number[];
+    undoable?: boolean;
+  } = {},
 ) {
   const c = useChrome.getState();
-  if (c.account === null) return;
+  const account = opts.account ?? c.account;
+  if (account === null) return;
   const threads = opts.threads ?? targets();
   if (threads.length === 0) return;
   act({
     type: "modify",
-    account: c.account,
+    account,
     kind,
     threads,
     add,
@@ -54,6 +66,7 @@ export function modify(
     snooze: opts.snooze ?? null,
     undoable: opts.undoable ?? true,
   });
+  if (account !== c.account) return;
   if (opts.undoable !== false) c.setSelection([]);
   moveOn(threads);
 }
@@ -155,8 +168,8 @@ export async function unsubscribe(then: UnsubscribeThen) {
       return [];
     });
     const threads = same.includes(thread) ? same : [thread, ...same];
-    if (then === "done") modify("done", [], ["INBOX", "UNREAD"], { threads });
-    else modify("trash", ["TRASH"], ["INBOX", "SPAM"], { threads });
+    if (then === "done") modify("done", [], ["INBOX", "UNREAD"], { account, threads });
+    else modify("trash", ["TRASH"], ["INBOX", "SPAM"], { account, threads });
   }
   try {
     const r = await unsubscribeFrom(account, thread);
@@ -181,7 +194,7 @@ export async function unsubscribe(then: UnsubscribeThen) {
 export async function block(thread: number, domain: boolean, asSpam = false) {
   const account = useChrome.getState().account;
   if (account === null) return;
-  if (asSpam) modify("spam", ["SPAM"], ["INBOX", "TRASH"], { threads: [thread] });
+  if (asSpam) modify("spam", ["SPAM"], ["INBOX", "TRASH"], { account, threads: [thread] });
   try {
     const r = await blockSender(account, thread, domain);
     if (r.kind === "needsPermission") {
@@ -190,7 +203,7 @@ export async function block(thread: number, domain: boolean, asSpam = false) {
       });
       return;
     }
-    if (!asSpam) modify("trash", ["TRASH"], ["INBOX", "SPAM"], { threads: [thread] });
+    if (!asSpam) modify("trash", ["TRASH"], ["INBOX", "SPAM"], { account, threads: [thread] });
     toast(`Blocked ${r.from}`);
   } catch (err: unknown) {
     toast.error(`Couldn't block: ${String(err)}`);

@@ -480,6 +480,8 @@ A toast says which happened, "No unsubscribe link in this email" (with a Block s
 
 Block, in the palette, offers "Block <address>" and "Block everyone at <domain>". It creates a Gmail filter with `settings.filters.create`: mail from the address (or from `@domain`) gets `TRASH` and loses `INBOX`. Gmail then keeps that mail out of the Inbox itself, with the app closed and on every device. When the filter is made, the conversation is trashed. The palette's Mark as spam offers *Mark spam*, *Mark spam, and block <address>*, and *Mark spam, and block everyone at <domain>*; these mark the conversation spam at once, then make the filter. `!` still marks spam directly.
 
+Unsubscribe and Block act on the account they started in. A switch to another account while one waits, on Gmail or on the list of the sender's mail, does not change that: the archive or trash still lands on the first account's conversations, and the account now on screen keeps its highlight and selection.
+
 Blocked senders, in the palette, lists the account's filters that match only a sender and add `TRASH`, the shape Block makes; filters the user made in Gmail for other things are left out. Choosing one unblocks it by deleting its filter. The filter id comes from the webview, so Rust lists the filters again and deletes it only if it is one of these blocks.
 
 An account signed in before the app asked for `gmail.settings.basic` gets a 403 `insufficientPermissions` on filters. Block then shows "Blocking needs one more Google permission" with Sign in again, and nothing is blocked or trashed until it succeeds.
