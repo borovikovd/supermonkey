@@ -379,7 +379,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 
 ## Not covered end-to-end, and why
 
-- Window behavior (a second launch focuses the window, closing hides it, a Dock click shows it, size and position restored, the overlay title bar): the native shell is not exercised. Checked by hand on a real Mac against Done when.
+- Window behavior (a second launch focuses the window, closing hides it, a Dock click shows it, size and position restored, the overlay title bar) and the shell's 10 s quit deadline for a page that never answers: the native shell is not exercised. Checked by hand on a real Mac against Done when.
 - Real Google OAuth (the system browser, the unverified-app warning, a production consent screen): the fake OAuth stands in, and ACC-01 checks the token file and the auth URL's scope, PKCE, and loopback. Checked by hand against two real accounts (§Testing).
 - Performance budgets, the keydown-to-paint meter, 60 fps scrolling, cold launch: CI WebKit is not the M1 target. Checked on the perf fixture (§Performance, `crates/ub-core/src/tests/perf.rs`).
 - Look, Motion, and Reduce Motion: visual, not behavior; SET-03 and SET-04 check the hint size and the shortcut sheet. Design review.

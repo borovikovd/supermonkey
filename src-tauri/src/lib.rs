@@ -6,7 +6,8 @@
 //!   Dock click shows it again.
 //! - Cmd+Q asks the page to close an open composer first, then the page
 //!   calls `quit_now`; quitting waits for the user's last actions to commit
-//!   (SPEC Send and undo), then exits.
+//!   (SPEC Send and undo), then exits. A page that has not asked within
+//!   10 s is quit without.
 //! - Debug builds with the `web` feature serve the web bridge on
 //!   127.0.0.1:1430 when `UBERMENSCH_WEB_BRIDGE=1`, for the UI in a browser.
 //! - Debug builds with the `fake` feature run demo mode when
@@ -46,6 +47,10 @@ const ENDPOINT_OVERRIDES: [&str; 4] = [
     "UBERMENSCH_OAUTH_TOKEN_URL",
     "UBERMENSCH_OAUTH_REVOKE_URL",
 ];
+
+/// How long the page has to answer a quit before the app quits without it
+/// (SPEC Actions): longer than the page's own 5 s wait for the core.
+const PAGE_QUIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Quota units a minute per account when the build sets no usable
 /// `UBERMENSCH_QUOTA_PER_MIN` (SPEC Sync).
@@ -129,6 +134,8 @@ pub fn run() {
             } else if let Err(e) = emit(app, &AppEvent::QuitRequested) {
                 tracing::warn!(error = %e, "couldn't ask the page to quit; quitting");
                 quit(app);
+            } else {
+                quit_after_deadline(app);
             }
         }
         _ => {}
@@ -314,6 +321,28 @@ fn emit(app: &AppHandle, event: &AppEvent) -> anyhow::Result<()> {
     let (name, payload) = event.parts()?;
     app.emit(&name, payload)?;
     Ok(())
+}
+
+/// Quits after [`PAGE_QUIT_DEADLINE`] if the page has not asked to by then:
+/// a hung page never keeps the app open. A quit the page asked for first
+/// makes this one do nothing.
+fn quit_after_deadline(app: &AppHandle) {
+    let app = app.clone();
+    let spawned = std::thread::Builder::new()
+        .name("quit deadline".into())
+        .spawn(move || {
+            std::thread::sleep(PAGE_QUIT_DEADLINE);
+            let quitting = app
+                .try_state::<Shell>()
+                .is_some_and(|shell| shell.quitting.load(Ordering::Acquire));
+            if !quitting {
+                tracing::warn!("the page did not answer the quit in time; quitting");
+                quit(&app);
+            }
+        });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "couldn't start the quit deadline");
+    }
 }
 
 /// Exits once the core has committed the UI actions queued so far, so the
