@@ -951,3 +951,60 @@ test("SND-23 a send settled as sent with no message to show leaves the thread on
   await expect(app.conversation.getByText("lost on the way p3")).toHaveCount(0);
   await expect(app.conversation.getByText(lines)).toHaveCount(0);
 });
+
+// A 401 on drafts.send whose refresh got invalid_grant left the row sending,
+// so an Undo held on it stayed at "Undoing…" until the account signed in again.
+test("SND-24 a send whose account signs out or is removed while drafts.send is on its way", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const errors = (await app.errorToastsShown()).length;
+
+  // drafts.send is on its way when the user undoes it; Gmail answers 401
+  // and Google refuses the refresh: the account signs out, and the send was
+  // never taken, so the undo resolves at once as not sent.
+  let send = await gmail.hold("drafts.send");
+  await sendReply(app, "Person 3", "never sent, signed out");
+  await app.press("Escape");
+  await app.advance(DELAY);
+  const toast = sendToast(app, "Person 3");
+  await undoOn(toast).click();
+  await expect(toast).toContainText("Undoing…");
+  await gmail.invalidGrant(A, true);
+  await send.release({ kind: "status", status: 401 });
+  await app.settle();
+  await expect(app.signInMarker(A)).toBeVisible();
+  await expect(toast).toHaveCount(0);
+  await expect(app.editor).toContainText("never sent, signed out");
+  await app.press("Escape", "Escape");
+  await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
+  await gmail.invalidGrant(A, false);
+  await gmail.nextSignIn({ email: A });
+  await app.press("Enter");
+  await expect(app.signInMarker(A)).toHaveCount(0);
+  await app.advance(60_000, { stepwise: true });
+  await app.settle();
+  expect(await sentIn(gmail, s.thread("p3").threadId)).toEqual([]);
+  await app.expectNoErrorToasts(errors);
+
+  // drafts.send is on its way when the account is removed: nothing is left of it.
+  await app.press("Escape");
+  await expect(app.list).toBeVisible();
+  send = await gmail.hold("drafts.send");
+  await sendReply(app, "Person 5", "sent as the account goes");
+  await app.press("Escape");
+  await app.advance(DELAY);
+  await expect
+    .poll(async () => (await gmail.requests("drafts.send")).some((r) => r.held))
+    .toBe(true);
+  await app.removeAccount(A);
+  // The removal stopped the account's requests: the held one may be gone already.
+  await gmail.release({ id: send.id });
+  await app.advance(60_000, { stepwise: true });
+  await app.settle();
+  await expect(app.account(A)).toHaveCount(0);
+  await expect(app.highlighted).toContainText("Bea Blue");
+  await expect(app.toast("Person 5")).toHaveCount(0);
+  await app.expectNoErrorToasts(errors);
+});

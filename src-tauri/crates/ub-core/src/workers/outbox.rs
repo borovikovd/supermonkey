@@ -2,11 +2,11 @@
 //!
 //! When a send's `send_after` passes, it becomes sending, and the runner
 //! downloads any parts not cached, builds the MIME, writes the Gmail draft,
-//! and calls `drafts.send`. Gmail unreachable before `drafts.send` puts it
-//! back to waiting, or, with an undo held on it, resolves it as not sent. No
-//! clear answer from `drafts.send` keeps it sending until `drafts.get`
-//! settles it: a 404 means it was sent. Each step goes through the state
-//! machine in `crate::outbox`.
+//! and calls `drafts.send`. Gmail unreachable before `drafts.send`, or a
+//! revoked grant on it, puts it back to waiting, or, with an undo held on
+//! it, resolves it as not sent. No clear answer from `drafts.send` keeps it
+//! sending until `drafts.get` settles it: a 404 means it was sent. Each step
+//! goes through the state machine in `crate::outbox`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -210,8 +210,11 @@ async fn send_draft(ctx: &AccountCtx, row: &Outbox, gmail: &GmailDraftId) -> Res
     match ctx.gmail.send_draft(Priority::P1, gmail).await {
         Ok(message) => sent(ctx, row, Some(message.id), Some(message.thread_id)).await,
         Err(e) => match e.outcome() {
-            // The request never left: back to waiting.
-            Outcome::Offline => {
+            // The request never left, or Gmail refused its token and the
+            // refresh found the grant revoked: Gmail never took the send,
+            // so it waits again, and a held undo resolves now. The run loop
+            // then signs the account out.
+            Outcome::Offline | Outcome::InvalidGrant => {
                 step(ctx, row, Event::Unreached).await?;
                 Err(e.into())
             }

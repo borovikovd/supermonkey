@@ -659,6 +659,23 @@ export class App {
     return this.account(email).locator('[data-marker="signin"]');
   }
 
+  /** Removes an account from Settings and closes Settings, which stays open after a removal. */
+  async removeAccount(email: string): Promise<void> {
+    await this.press("Meta+,");
+    const settings = this.sheet("Settings");
+    await settings
+      .locator("div")
+      .filter({ has: this.page.getByText(email, { exact: true }) })
+      .filter({ has: this.page.getByRole("button", { name: "Remove account" }) })
+      .last()
+      .getByRole("button", { name: "Remove account" })
+      .click();
+    await settings.getByRole("button", { name: "Remove", exact: true }).click();
+    await expect(this.account(email)).toHaveCount(0);
+    await this.press("Escape");
+    await expect(settings).toHaveCount(0);
+  }
+
   /** Waits until Gmail shows `check` true for this mailbox. */
   async eventually(
     email: string,

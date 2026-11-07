@@ -296,6 +296,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SND-21 · P1 · A held undo resolves at once when the send's access token could not be refreshed · §Send and undo, §Gmail errors
 - SND-22 · P1 · A sent reply stays on the thread, marked Sent, until its message lands without waiting for a poll · §Reply composer, §Send and undo
 - SND-23 · P1 · A send settled as sent with no message to show leaves the thread once its toast closes · §Reply composer, §Send and undo
+- SND-24 · P1 · A send whose account signs out or is removed while `drafts.send` is on its way · §Send and undo, §Accounts
 
 ### offline.spec.ts (OFF)
 
