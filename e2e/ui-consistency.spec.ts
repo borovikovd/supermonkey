@@ -94,10 +94,7 @@ test("UIC-01 rows you just acted on never flash back during fast triage or a pol
   await expect(app.highlighted).toContainText("Bulk 11");
 });
 
-test("UIC-01 an action the core has not applied yet stays applied when the one before it is acked", async ({
-  app,
-  gmail,
-}) => {
+test("UIC-08 an action stays applied when the one before it is acked", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   await expect(app.highlighted).toContainText("Person 1");
   const p2 = await app.rowKey("Person 2");

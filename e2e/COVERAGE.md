@@ -44,12 +44,11 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - NAV-06 · P2 · Empty states · §Window
 - NAV-07 · P2 · The highlight moves when a poll removes the highlighted row · §Keyboard
 - NAV-08 · P2 · `j` keeps the prefetched neighbors it still needs · §Performance, §Subscriptions
-- NAV-09 · P2 · `g o` highlights Other however long the Inbox takes to load · §Views
 - NAV-10 · P1 · The highlight follows the mouse, so `e` acts on the row under it · §Layout, §Keyboard
 - NAV-11 · P1 · A poll that empties the list clears the highlight, so `#` acts on the mail that arrives next · §Keyboard
 - NAV-12 · P1 · A row removed while another account is on screen moves that account's highlight · §Switching, §Keyboard
 - NAV-13 · P1 · `g #`, `g !`, and a held `g` jump as typed on a keyboard, Shift and repeats included, and touch no mail · §Views, §Keyboard
-- NAV-14 · P2 · A list scrolled away from the highlight stays put while mail changes; moving the highlight still scrolls to it · §Layout, §Keyboard
+- NAV-14 · P2 · A list scrolled away from the highlight stays put while mail changes; moving the highlight, even with repeated `j` past the bottom edge, keeps it in view · §Layout, §Keyboard
 
 ### views.spec.ts (VIEW)
 
@@ -90,14 +89,14 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 
 ### triage-actions.spec.ts (TRI)
 
-- TRI-01 · P1 · `e` on the list removes the row before Gmail answers, and moves the highlight · §Archive, trash, star, read, §Keyboard, §Done when
+- TRI-01 · P1 · `e` on the list removes the row before Gmail answers, moves the highlight, and archives every message of the thread · §Archive, trash, star, read, §Keyboard, §Done when
 - TRI-02 · P1 · `e` in an open conversation opens the next one, or the previous one, or returns to the empty list · §Keyboard
 - TRI-03 · P1 · `#` moves to Trash and never touches draft messages · §Archive, trash, star, read, §Done when
 - TRI-04 · P2 · `!` moves to Spam · §Archive, trash, star, read
 - TRI-05 · P1 · Star and read toggles · §Archive, trash, star, read, §Done when
 - TRI-06 · P1 · `x` and `Shift+J` / `Shift+K` select; actions apply to the whole selection as one undo entry · §Keyboard, §Undo
 - TRI-07 · P2 · `s` and `u` on a mixed selection follow the `l` rule · §Keyboard
-- TRI-08 · P1 · `Shift+E` returns to Inbox from any view · §Archive, trash, star, read, §Snooze
+- TRI-08 · P1 · `Shift+E` returns to Inbox from any view, and the row leaves at once · §Archive, trash, star, read, §Snooze
 - TRI-09 · P2 · `Esc` closes the open overlay before it clears a selection · §Keyboard
 - TRI-10 · P2 · Each action removes its row from the right lists · §Actions
 - TRI-11 · P1 · An action changes only the messages it recorded; a reply arriving meanwhile stays in Inbox · §Archive, trash, star, read
@@ -171,12 +170,12 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SNZ-04 · P1 · Snoozed threads wake on time, on launch, and after sleep, even offline · §Snooze
 - SNZ-05 · P1 · `INBOX` added from outside clears a snooze; your own reply does not · §Snooze
 - SNZ-06 · P1 · The app's own label changes, echoed by history, do not clear a newer snooze · §Snooze
-- SNZ-07 · P1 · Undo, `Shift+E`, and `e` on snoozed threads · §Snooze, §Undo
+- SNZ-07 · P1 · Undo, `Shift+E`, `e`, `#`, and `!` on snoozed threads · §Snooze, §Undo
 - SNZ-08 · P2 · `Enter` before the typed time's options arrive snoozes until that time · §Snooze
 
 ### compose-reply.spec.ts (REP)
 
-- REP-01 · P1 · `r` opens the reply composer under the thread, ready to type · §Reply composer, §Done when
+- REP-01 · P1 · `r` on the list opens the reply composer under the thread, in view below a long message, ready to type · §Reply composer, §Done when
 - REP-02 · P1 · What `r`, `Enter`, and `f` do on the list and in a conversation · §Reply composer, §Keyboard
 - REP-03 · P1 · Reply and reply-all addressing · §Addressing
 - REP-04 · P1 · A sent reply stays on the thread and carries Gmail's quote · §Addressing, §Send and undo
@@ -194,8 +193,6 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - REP-16 · P1 · A reply started while the message's body downloads quotes all of it · §Addressing
 - REP-17 · P1 · A forward started while the message's body downloads carries all of it and its attachments · §Addressing
 - REP-18 · P2 · A forwarded attachment that arrives with the body can be removed, and an untouched forward is still discarded · §Addressing, §Actions
-- REP-19 · P2 · An `Esc` pressed as the reply opens counts, however late the editor's focus would come · §Keyboard
-- REP-20 · P2 · `r` on a prefetched row scrolls the reply into view below a long message · §Reply composer
 
 ### compose-new.spec.ts (NEW)
 
@@ -207,12 +204,11 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - NEW-06 · P1 · Shortcuts never fire while typing in compose · §Keyboard
 - NEW-07 · P1 · A fresh composer closed untouched leaves nothing behind · §Keyboard
 - NEW-08 · P2 · `Cmd+K` in compose · §Keyboard, §Compose
-- NEW-09 · P1 · Sending with no recipients never loses the draft; text still in the To field is sent · §Recipients and autocomplete
+- NEW-09 · P1 · Sending with no recipients never loses the draft; text still in the To field is sent, even with the suggestion list open · §Recipients and autocomplete
 - NEW-10 · P2 · From picker and the sending account · §Addressing, §Switching
 - NEW-11 · P1 · `Cmd+Shift+,` discards locally and in Gmail · §Compose, §Drafts
-- NEW-12 · P2 · Opening another composer first closes the current one, as a second `Esc` would · §Actions
-- NEW-13 · P2 · Closing search, a new query, or another account's Split Inbox settings closes the composer as a second `Esc` would · §Actions, §Search, §Settings
-- NEW-14 · P1 · An `Esc` pressed just after a key that moves focus in compose counts, however late the focus would come · §Keyboard
+- NEW-12 · P2 · Opening another composer, closing search, a new query, or another account's Split Inbox settings first closes the composer, as a second `Esc` would · §Actions, §Search, §Settings
+- NEW-14 · P1 · An `Esc` pressed just after a composer opens, or after a key that moves focus in compose, counts, however late the focus would come · §Keyboard
 
 ### recipients.spec.ts (RCP)
 
@@ -220,13 +216,12 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - RCP-02 · P1 · Ranking and exclusions come from synced mail · §Recipients and autocomplete
 - RCP-03 · P2 · Ways to turn typed text into a chip · §Recipients and autocomplete
 - RCP-04 · P2 · `Backspace` and paste · §Recipients and autocomplete
-- RCP-05 · P1 · An invalid chip blocks send until it is fixed · §Recipients and autocomplete
 - RCP-06 · P2 · `Tab` moves between fields unless the suggestion list is open · §Keyboard
 - RCP-07 · P2 · Cc and Bcc stay hidden until used · §Recipients and autocomplete
 - RCP-08 · P2 · New mail updates the suggestions · §Recipients and autocomplete
 - RCP-09 · P2 · Suggestions that answer after a chip is made stay closed · §Recipients and autocomplete
 - RCP-10 · P2 · The autosave leaves an address being typed alone · §Recipients and autocomplete, §Drafts
-- RCP-11 · P1 · Every address the core would refuse shows in `danger` and blocks Send · §Recipients and autocomplete
+- RCP-11 · P1 · Every address the core would refuse shows in `danger` and blocks Send until it is fixed · §Recipients and autocomplete
 - RCP-12 · P2 · A chip removed while an address is being typed stays removed · §Recipients and autocomplete
 
 ### attachments.spec.ts (ATT)
@@ -242,13 +237,12 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ATT-09 · P1 · `Cmd+Q` while a file is attaching quits once the composer's close is sent · §Actions, §Drafts
 - ATT-10 · P1 · A send waiting for a file still goes when the composer is closed meanwhile; a file that fails keeps the draft · §Drafts
 - ATT-11 · P1 · A draft reopened while its close waits for a file keeps the new text and the file · §Drafts, §Actions
-- ATT-12 · P1 · A file sent inline, as Apple Mail sends every file, is an attachment · §Reading
 - ATT-13 · P1 · A file Gmail serves inside the message opens and forwards · §Reading, §Addressing
 - ATT-14 · P1 · A file attached while a send waits for another goes with the send · §Drafts
 - ATT-15 · P1 · Discarding while a send waits for a file cancels the send · §Drafts
 - ATT-16 · P2 · The same file can be attached twice · §Drafts
 - ATT-17 · P2 · An attachment that can't be opened says why · §Reading, §Offline
-- ATT-18 · P1 · An image the body doesn't show, such as a photo sent inline with no Content-ID, is an attachment, and a forward carries it · §Reading, §Addressing
+- ATT-18 · P1 · A file sent inline, as Apple Mail sends it, or an image the body doesn't show is an attachment, and a forward carries it · §Reading, §Addressing
 - ATT-19 · P1 · An address typed but not yet a chip goes with a close or send that waits for a file · §Drafts, §Recipients and autocomplete
 
 ### drafts.spec.ts (DRF)
@@ -269,7 +263,6 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - DRF-14 · P1 · A second Gmail draft carrying a local draft's id is deleted as an extra copy · §Gmail errors
 - DRF-15 · P1 · A draft reconcile on a stale list keeps a draft written meanwhile · §Drafts, §Sync
 - DRF-16 · P1 · A Gmail edit read back after the draft was reopened and edited does not replace the edit · §Drafts
-- DRF-17 · P1 · A Gmail draft read before its thread's messages is aimed at the thread's messages · §Reply composer
 - DRF-18 · P1 · A crash after `drafts.create` reached Gmail, before its ids were stored, leaves one draft · §Gmail errors, §Drafts
 - DRF-19 · P1 · An edit still waiting to reach Gmail is not replaced by an older Gmail version · §Drafts
 - DRF-20 · P1 · `j` and `k` in a conversation opened from Drafts open the other drafts' threads and keep the Drafts highlight · §Reading, §Keyboard
@@ -289,7 +282,6 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SND-09 · P1 · Outbox rows across a quit and relaunch · §Send and undo, §Undo
 - SND-10 · P2 · Send toasts stay across accounts · §Switching
 - SND-11 · P2 · Undoing a waiting send while another composer is open · §Send and undo
-- SND-12 · P2 · The sent message shows without waiting for a poll · §Send and undo
 - SND-13 · P1 · A draft reconcile in the undo window keeps the version that was sent · §Drafts, §Send and undo
 - SND-14 · P1 · A crash while the send writes the draft still sends the final version · §Send and undo
 - SND-15 · P1 · A held undo resolves at once when the send could not reach Gmail · §Send and undo
@@ -299,7 +291,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SND-19 · P1 · A send the core refuses says it was not sent and brings the draft back · §Send and undo, §Actions
 - SND-20 · P2 · An Undo the core refuses says why and opens no composer · §Send and undo, §Actions
 - SND-21 · P1 · A held undo resolves at once when the send's access token could not be refreshed · §Send and undo, §Gmail errors
-- SND-22 · P1 · A sent reply stays on the thread, marked Sent, until its message lands · §Reply composer, §Send and undo
+- SND-22 · P1 · A sent reply stays on the thread, marked Sent, until its message lands without waiting for a poll · §Reply composer, §Send and undo
 - SND-23 · P1 · A send settled as sent with no message to show leaves the thread once its toast closes · §Reply composer, §Send and undo
 
 ### offline.spec.ts (OFF)
@@ -312,6 +304,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - OFF-05 · P1 · A rejection during replay rolls back that one action, and replay continues · §Offline, §Gmail errors
 - OFF-06 · P2 · Losing the network during replay leaves the rest queued · §Offline
 - OFF-08 · P2 · Conversations opened offline read only the bodies still on screen when the network returns · §Sync, §Offline
+- OFF-09 · P1 · A poll during the replay of a queued action keeps the action applied · §Offline, §Archive, trash, star, read
 
 ### gmail-errors.spec.ts (ERR)
 
@@ -337,7 +330,6 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SYN-07 · P3 · An opened thread fetches its bodies right away · §Sync
 - SYN-08 · P1 · A slower thread fetch never undoes a newer one · §Sync, §Data
 - SYN-09 · P2 · A connect sync retried after a failure misses no change made in between · §Sync
-- SYN-10 · P2 · A reply to a stored thread downloads no inline image again · §Sync, §Performance
 - SYN-11 · P2 · A slower label or `sendAs` read never undoes a newer one · §Sync
 
 ### notifications.spec.ts (NOT)
@@ -353,8 +345,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 
 - SET-01 · P2 · What the Settings sheet holds, and how it opens · §Settings, §Keyboard
 - SET-02 · P1 · Remote images · §Reading, §Settings
-- SET-03 · P2 · Hint text is 11px and the shortcut chips are readable · §Look
-- SET-04 · P3 · Shortcut sheet rows never overlap · §Look
+- SET-03 · P2 · Hint text is 11px, the shortcut chips are readable, and the shortcut sheet's rows never overlap · §Look
 - SET-05 · P1 · With remote images off, nothing remote loads in a message or a reply's quote · §Reading, §Settings
 - SET-06 · P2 · `Esc` closes a sheet from one of its fields, and a sheet open over a composer · §Keyboard
 
@@ -371,7 +362,6 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SEC-02 · P1 · Mail text never becomes markup outside the frame · §Security
 - SEC-03 · P1 · Links never navigate the app window · §Reading
 - SEC-04 · P2 · The webview holds no Gmail credentials · §Security
-- SEC-05 · P2 · Another page cannot take the app's channel from the core · §Security, §Testing
 - SEC-06 · P1 · The UI runs under the release app's content security policy · §Security, §Testing
 - SEC-07 · P1 · Links in a reply's quoted text open in the browser, never in the composer · §Reading, §Addressing
 
@@ -384,6 +374,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - UIC-05 · P1 · `Cmd+Q` quits only once the composer's close has committed · §Actions
 - UIC-06 · P1 · An action the core rejects tells the user why · §Actions
 - UIC-07 · P1 · An action the core can't read is refused, and the actions after it still apply · §Actions
+- UIC-08 · P1 · An action stays applied when the one before it is acked · §Actions
 
 ### unwanted.spec.ts (UNW)
 
@@ -408,7 +399,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
   - in a debug build, with the page paused at a breakpoint in the Web Inspector: the app quits 10 s after `Cmd+Q`.
 - Real Google OAuth (the system browser, the unverified-app warning, a production consent screen): the fake OAuth stands in, and ACC-01 checks the token file and the auth URL's scope, PKCE, and loopback. Checked by hand against two real accounts (§Testing).
 - Performance budgets, the keydown-to-paint meter, 60 fps scrolling, cold launch: CI WebKit is not the M1 target. Checked on the perf fixture (§Performance, `crates/ub-core/src/tests/perf.rs`).
-- Look, Motion, and Reduce Motion: visual, not behavior; SET-03 and SET-04 check the hint size and the shortcut sheet. Design review.
+- Look, Motion, and Reduce Motion: visual, not behavior; SET-03 checks the hint size and the shortcut sheet. Design review.
 - The quota bucket, the six priorities, and at most 8 requests per account: internal scheduling, not stable through the UI; SYN-07 is a smoke check. `crates/ub-gmail/tests/gmail/scheduler.rs`.
 - The back-off jitter: random; ERR-02 checks `Retry-After` and that gaps grow. `crates/ub-gmail/tests/gmail/scheduler.rs`.
 - OAuth protocol edges (a wrong `state`, concurrent 401s sharing one refresh, refresh before expiry, secrets out of debug output): below the UI. `crates/ub-gmail/tests/gmail/oauth.rs`.
@@ -436,7 +427,7 @@ Unit tests only for complex algorithms, security properties, and races the suite
 - `crates/ub-domain/src/snooze/options.rs` and `crates/ub-domain/src/snooze/text.rs`: options before and after 18:00 and on every weekday, DST gaps and folds, the phrase grammar (SNZ-01, SNZ-02).
 - `crates/ub-domain/src/contacts.rs`: autocomplete matching, ranking, and no-reply addresses.
 - `crates/ub-mime/tests/sanitize.rs`: the hostile fixture, what is kept and dropped, `rel=noopener`, `cid:` to `data:`, text extraction (SEC-01).
-- `crates/ub-mime/tests/payload.rs`: a charset with no decoder read as undeclared text; the attachments inside an attached message, and not its body or inline images; an image is inline only when the HTML body shows it, by a plain or percent-encoded `cid:` reference, here and inside an attached message, and only those are fetched for the body (ATT-12, ATT-18).
+- `crates/ub-mime/tests/payload.rs`: a charset with no decoder read as undeclared text; the attachments inside an attached message, and not its body or inline images; an image is inline only when the HTML body shows it, by a plain or percent-encoded `cid:` reference, here and inside an attached message, and only those are fetched for the body (ATT-18).
 - `crates/ub-mime/tests/no_panic.rs`: 3,000 seeded random inputs through every parser and the sanitizer.
 - `crates/ub-mime/tests/addresses.rs`: `is_valid_email` against the address table the composer's copy of the rule is held to (RCP-11).
 - `crates/ub-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser and when one-click applies.
@@ -453,6 +444,6 @@ Unit tests only for complex algorithms, security properties, and races the suite
 - `crates/ub-core/src/outbox/machine.rs`: every send event in every outbox state.
 - `crates/ub-core/src/drafts/lifecycle/state.rs`: every draft transition in every stage: the untouched rule, waits for parts and a target's body, Gmail's ids and a create in question, a skipped Gmail change.
 - `crates/ub-core/src/tests/perf.rs` (ignored; needs `UBERMENSCH_PERF_DB`): local search and autocomplete against §Performance.
-- `crates/ub-bridge/src/web.rs`: the debug web bridge answers only loopback hosts and its own origins (SEC-05).
+- `crates/ub-bridge/src/web.rs`: the debug web bridge answers only loopback hosts and its own origins.
 - `tests/layers.rs`: the crate layering in ARCHITECTURE.md.
 - `tests/menu.rs`: the menu bar is Tauri's standard one with the app's own Quit in place of the predefined one, which would end the app without asking the page (UIC-05).

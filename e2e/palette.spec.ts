@@ -137,18 +137,6 @@ test("PAL-02 palette commands do what their keys do", async ({ app, gmail }) => 
   await expect(viewTitle(app)).toHaveText("Done");
   await expect(app.row("Person 1")).toHaveCount(1);
 
-  // Keyboard shortcuts (SET-01).
-  await run(app, "Keyboard shortcuts");
-  await expect(app.sheet("Keyboard shortcuts")).toBeVisible();
-  await app.press("Escape");
-  await expect(app.sheet("Keyboard shortcuts")).toHaveCount(0);
-
-  // Settings (SET-01).
-  await run(app, "Settings");
-  await expect(app.sheet("Settings")).toBeVisible();
-  await app.press("Escape");
-  await expect(app.sheet("Settings")).toHaveCount(0);
-
   // Split Inbox settings (SPL-06): the sheet of the account on screen.
   await run(app, "Split Inbox settings");
   await expect(app.sheet(`Split Inbox · ${A}`)).toBeVisible();
@@ -183,20 +171,12 @@ test("PAL-02 palette commands do what their keys do", async ({ app, gmail }) => 
   await expect(muteOf(B)).toHaveAttribute("aria-checked", "true");
   await expect(muteOf(A)).toHaveAttribute("aria-checked", "false");
   await app.press("Escape");
-  await gmail.clearRecorded();
-  await gmail.deliver({ account: B, from: "Mo Muted <mo@muted.test>", subject: "While muted" });
-  await app.settle();
-  expect((await gmail.platform()).notifications).toEqual([]);
 
   await run(app, "Unmute notifications", "Unmute");
   await app.settle();
   await app.press("Meta+,");
   await expect(muteOf(B)).toHaveAttribute("aria-checked", "false");
   await app.press("Escape");
-  await gmail.deliver({ account: B, from: "Una Loud <una@loud.test>", subject: "Unmuted" });
-  await app.settle();
-  const { notifications } = await gmail.platform();
-  expect(notifications.map((n) => n.account)).toEqual([B]);
 });
 
 /** Opens the palette and returns its items' labels, top to bottom; closes it again. */

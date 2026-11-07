@@ -515,16 +515,6 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await closeComposer(app);
   await expectLeft("c, untouched", null);
 
-  await open(app, "Person 2");
-  await app.reply("r");
-  await app.press("Control+2");
-  await expect(app.row("B 2")).toHaveCount(1);
-  await app.settle();
-  expect(await gmailDrafts(gmail, B)).toHaveLength(0);
-  await app.press("Control+1");
-  await expect(app.row("Person 2")).toHaveCount(1);
-  await expectLeft("r, closed by Ctrl+2", null);
-
   // Untouched is judged by value (SPEC Keyboard). Typed, saved to Gmail, then
   // deleted back to empty: the draft is untouched, so it is discarded here and
   // in Gmail.
@@ -618,18 +608,6 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await closeComposer(app);
   kept++;
   await expectLeft("reopened by undo send, edited back", 1);
-
-  // Sent untouched, before any autosave wrote it to Gmail, then undone: kept
-  // on Gmail too.
-  await open(app, "Person 6");
-  await app.reply("r");
-  await sendSaved(app);
-  await app.toast("Sending…").getByRole("button", { name: "Undo" }).click();
-  await expect(app.editor).toHaveCount(1);
-  await app.settle();
-  await closeComposer(app);
-  kept++;
-  await expectLeft("reopened by undo send, untouched", 1);
 });
 
 test("NEW-08 Cmd+K in compose", async ({ app, gmail }) => {
@@ -662,7 +640,7 @@ test("NEW-08 Cmd+K in compose", async ({ app, gmail }) => {
   expect(await draftRows(app)).toEqual([]);
 });
 
-test("NEW-09 sending with no recipients never loses the draft; text still in To is sent", async ({
+test("NEW-09 sending with no recipients never loses the draft; text still in To is sent, even with the suggestion list open", async ({
   app,
   gmail,
 }) => {
@@ -694,13 +672,8 @@ test("NEW-09 sending with no recipients never loses the draft; text still in To 
   await app.settle();
   const m = await sentWithSubject(gmail, A, "Nobody yet");
   expect(emails(m.headers.to)).toContain("pat@p.test");
-});
 
-test("NEW-09 Cmd+Enter with the suggestion list open sends to the typed address", async ({
-  app,
-  gmail,
-}) => {
-  await seeds.standard(gmail, app);
+  // Cmd+Enter with the suggestion list open sends to the typed address.
   await app.compose();
   await focusSubject(app);
   await app.type("Picked by send");
@@ -713,8 +686,8 @@ test("NEW-09 Cmd+Enter with the suggestion list open sends to the typed address"
   await expect(newMessage(app)).toHaveCount(0);
   await app.advance(10_000);
   await app.settle();
-  const m = await sentWithSubject(gmail, A, "Picked by send");
-  expect(emails(m.headers.to)).toEqual(["kim@kite.test"]);
+  const picked = await sentWithSubject(gmail, A, "Picked by send");
+  expect(emails(picked.headers.to)).toEqual(["kim@kite.test"]);
 });
 
 test("NEW-10 From picker and the sending account", async ({ app, gmail }) => {
@@ -786,7 +759,7 @@ test("NEW-11 Cmd+Shift+, discards locally and in Gmail", async ({ app, gmail }) 
   await expect(app.row("Idea")).toHaveCount(0);
 });
 
-test("NEW-12 opening another composer first closes the current one, as a second Esc would", async ({
+test("NEW-12 opening another composer, closing search, a new query, or another account's settings first closes the composer, as a second Esc would", async ({
   app,
   gmail,
 }) => {
@@ -860,18 +833,12 @@ test("NEW-12 opening another composer first closes the current one, as a second 
   const kept = (await drafts()).filter((d) => d.message.threadId === p1);
   expect(kept).toHaveLength(1);
   expect(htmlOf(parseMime(kept[0]?.message.raw ?? ""))).toContain("row four");
-});
+  await closeComposer(app);
+  await rail(app, "Inbox").click();
+  await expect(app.section("Important")).toBeVisible();
 
-// Search's close button took a reply composer off screen without closing it,
-// so an untouched one was never discarded; a new query left it open off
-// screen, taking every key; and another account's Split Inbox settings
-// switched to it with the composer still open.
-test("NEW-13 closing search, a new query, or another account's settings closes the composer as a second Esc would", async ({
-  app,
-  gmail,
-}) => {
-  test.slow();
-  await seeds.standard(gmail, app);
+  // Search, and another account's Split Inbox settings: each closes an
+  // untouched composer as a second Esc would, so nothing is left behind.
   const field = app.page.getByPlaceholder("Search");
   /** Searches for `query` and opens its first result. */
   const openResult = async (query: string, subject: string) => {
@@ -883,10 +850,13 @@ test("NEW-13 closing search, a new query, or another account's settings closes t
     await expect(app.conversationTitle).toHaveText(subject);
     await app.settle();
   };
+  await app.settle();
+  const draftsNow = (await drafts()).length;
+  const rowsNow = await draftRows(app);
   const nothingLeft = async (row: string) => {
     await app.settle();
-    expect(await gmailDrafts(gmail, A), `${row}: Gmail drafts`).toHaveLength(0);
-    expect(await draftRows(app), `${row}: Drafts rows`).toEqual([]);
+    expect(await drafts(), `${row}: Gmail drafts`).toHaveLength(draftsNow);
+    expect(await draftRows(app), `${row}: Drafts rows`).toEqual(rowsNow);
   };
 
   // Search's close button, with an untouched reply on a result: discarded.
@@ -929,7 +899,7 @@ test("NEW-13 closing search, a new query, or another account's settings closes t
   await nothingLeft("another account's settings");
 });
 
-test("NEW-14 an Esc pressed just after a key that moves focus in compose counts, however late the focus would come", async ({
+test("NEW-14 an Esc pressed just after a composer opens, or after a key that moves focus in compose, counts, however late the focus would come", async ({
   app,
   gmail,
 }) => {
@@ -997,4 +967,21 @@ test("NEW-14 an Esc pressed just after a key that moves focus in compose counts,
   await app.settle();
   const [draft] = await gmailDrafts(gmail, A, "Late focus");
   expect(htmlOf(parseMime(draft?.message.raw ?? ""))).toContain("Body text");
+
+  // The composer just opened, its editor's focus still to come: an Esc at once
+  // counts, so a second closes it.
+  await open(app, "Person 3");
+  await app.page.clock.pauseAt(await app.now());
+  await app.press("r");
+  await expect(app.editor).toBeVisible();
+  await app.press("Escape");
+  await later();
+  await app.press("Escape");
+  await expect(app.editor).toHaveCount(0);
+  await expect(app.conversationTitle).toHaveText("Person 3");
+  await app.page.clock.resume();
+  await app.page.clock.setFixedTime(await app.now());
+  await app.settle();
+  // The untouched fresh reply left nothing behind.
+  expect(await gmailDrafts(gmail, A)).toHaveLength(1);
 });

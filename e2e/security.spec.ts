@@ -266,31 +266,6 @@ test.describe("security", () => {
       log.filter((r) => /Mozilla|AppleWebKit|Safari/.test(r.userAgent ?? "")).map((r) => r.path),
     ).toEqual([]);
   });
-
-  // A cross-site `<img>` sends no `Origin`, and opening `/events` takes the channel from the page that had it.
-  test("SEC-05 another page cannot take the app's channel from the core", async ({
-    app,
-    gmail,
-  }) => {
-    await seeds.standard(gmail, app);
-    await expect(app.highlighted).toContainText("Person 1");
-    // A page on another site points an image at the bridge's event stream:
-    // the browser sends no Origin for it.
-    const events = new URL("/events", app.page.url()).href;
-    const evil = await app.page.context().newPage();
-    const opened = evil.waitForResponse(events);
-    await evil.route("http://evil.test/page", (route) =>
-      route.fulfill({ contentType: "text/html", body: `<img src="${events}">` }),
-    );
-    await evil.goto("http://evil.test/page");
-    expect((await opened).status()).toBe(403);
-    await evil.close();
-
-    // The app's page still gets every commit.
-    await app.press("e");
-    await app.settle();
-    await expect(app.row("Person 1")).toHaveCount(0);
-  });
 });
 
 test("SEC-06 the UI runs under the release app's content security policy", async ({

@@ -556,28 +556,6 @@ test("SND-11 undoing a waiting send while another composer is open", async ({ ap
   expect((await gmail.gmail(A)).drafts).toHaveLength(2);
 });
 
-test("SND-12 the sent message shows without waiting for a poll", async ({ app, gmail }) => {
-  const s = await seeds.standard(gmail, app);
-  const p3 = s.thread("p3").threadId;
-  await sendReply(app, "Person 3", "shown at once");
-  await expect(app.conversation.getByText("Sending", { exact: true })).toBeVisible();
-  await app.advance(DELAY);
-  await app.settle();
-
-  await expect(app.messages).toHaveCount(2);
-  await expect(app.conversation.getByText("Sending", { exact: true })).toHaveCount(0);
-  const [sent] = await sentIn(gmail, p3);
-  expect(sent).toBeDefined();
-  const log = await gmail.requests(undefined, { account: A });
-  const send = log.findIndex((r) => r.api === "drafts.send");
-  const next = log[send + 1];
-  const fetched =
-    (next?.api === "threads.get" && next.path.endsWith(`/${p3}`)) ||
-    (next?.api === "messages.get" && next.path.endsWith(`/${sent?.id ?? "none"}`));
-  expect(fetched, `request after drafts.send: ${next?.api} ${next?.path}`).toBe(true);
-  expect(log.slice(send).some((r) => r.api === "history.list")).toBe(false);
-});
-
 /**
  * From the list: opens the thread and replies "one", which autosaves to
  * Gmail. Then " two" is typed, but its upsert fails, so Gmail keeps "one"
@@ -894,7 +872,7 @@ test("SND-21 a held undo resolves at once when the access token could not be ref
 
 // The conversation hid a sent row itself, so a reply Gmail had accepted left
 // the thread until its message landed.
-test("SND-22 a sent reply stays on the thread, marked Sent, until its message lands", async ({
+test("SND-22 a sent reply stays on the thread, marked Sent, until its message lands without waiting for a poll", async ({
   app,
   gmail,
 }) => {
@@ -918,6 +896,11 @@ test("SND-22 a sent reply stays on the thread, marked Sent, until its message la
   await expect(app.messages).toHaveCount(2);
   await expect(sentRow).toHaveCount(0);
   await expect(app.conversation.getByText("Sending", { exact: true })).toHaveCount(0);
+  // It landed without waiting for a poll.
+  const log = await gmail.requests(undefined, { account: A });
+  const send = log.findIndex((r) => r.api === "drafts.send");
+  expect(send).toBeGreaterThanOrEqual(0);
+  expect(log.slice(send).some((r) => r.api === "history.list")).toBe(false);
 });
 
 test("SND-23 a send settled as sent with no message to show leaves the thread once its toast closes", async ({

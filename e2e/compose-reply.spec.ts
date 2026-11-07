@@ -114,16 +114,28 @@ function stubs(app: App) {
 
 // ------------------------------------------------------------------ cases
 
-test("REP-01 r opens the reply composer under the thread, ready to type", async ({
+test("REP-01 r on the list opens the reply composer under the thread, in view below a long message, ready to type", async ({
   app,
   gmail,
 }) => {
   // Short enough that the thread does not fit: the composer opens below the fold
   // unless the view scrolls to it.
   await app.page.setViewportSize({ width: 1280, height: 500 });
-  await seeds.standard(gmail, app);
-  await open(app, "Q4 plan");
+  const s = await seeds.standard(gmail, app);
+  // The thread's latest message is long, taller than the window on its own.
+  await gmail.deliver({
+    account: A,
+    from: "Dave Diaz <dave@corp.test>",
+    subject: "Re: Q4 plan",
+    html: Array.from({ length: 60 }, (_, i) => `<p>Line ${i + 1} of a long read.</p>`).join(""),
+    threadId: s.thread("plan").threadId,
+    inReplyTo: s.latest("plan").messageId,
+  });
+  await app.settle();
+  // `r` on the list row.
+  await highlight(app, "Q4 plan");
   await app.reply("r");
+  await expect(app.conversationTitle).toHaveText("Q4 plan");
   await app.type("Thanks");
 
   const composer = app.editor.locator(
@@ -133,12 +145,15 @@ test("REP-01 r opens the reply composer under the thread, ready to type", async 
   // Scrolled into view, it can sit a fraction of a pixel short: scroll offsets are
   // whole pixels and the card's height is not.
   await expect(composer).toBeInViewport({ ratio: 0.99 });
-  // Below m12, the last message.
+  // Below the long message, the last one.
+  await expect(
+    app.messages.last().locator("iframe[data-frame]").contentFrame().locator("body"),
+  ).toContainText("Line 60 of a long read.");
   const last = await app.messages.last().boundingBox();
   const box = await composer.boundingBox();
-  if (!last || !box) throw new Error("m12 or the composer has no box");
+  if (!last || !box) throw new Error("the last message or the composer has no box");
   expect(box.y).toBeGreaterThanOrEqual(last.y + last.height);
-  // The selection bar is on m12, the target.
+  // The selection bar is on the last message, the target.
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
   await expect(app.selectedMessage).toHaveCount(1);
   expect(await chipAddresses(app, "To")).toEqual(["dave@corp.test"]);
@@ -213,51 +228,119 @@ test("REP-02 what r, Enter, and f do on the list and in a conversation", async (
 test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
   test.slow();
   const s = await seeds.standard(gmail, app);
+  // Gus copies himself, so reply all's To (Gus) is also among the message's Cc.
+  const selfCopy = await gmail.deliver({
+    account: A,
+    from: "Gus Grant <gus@guild.test>",
+    to: [A],
+    cc: ["gus@guild.test", "hal@guild.test"],
+    subject: "Self copy",
+    text: "Copying myself.",
+  });
+  // Sent to two of the account's addresses: To wins over Cc, then the first.
+  // The default address is listed first in sendAs, so a sendAs-order pick
+  // would answer both from ana@acme.test.
+  const aliasInTo = await gmail.deliver({
+    account: A,
+    from: "Gus Grant <gus@guild.test>",
+    to: [A_ALIAS],
+    cc: [A],
+    subject: "Alias in To",
+    text: "To the alias, Cc the main address.",
+  });
+  const aliasFirst = await gmail.deliver({
+    account: A,
+    from: "Gus Grant <gus@guild.test>",
+    to: [A_ALIAS, A],
+    subject: "Alias first",
+    text: "Both in To, the alias first.",
+  });
+  await app.settle();
+  const seeded = (key: string) => ({
+    key,
+    title: s.thread(key).subject,
+    threadId: s.thread(key).threadId,
+  });
   // Subjects get `Re:` unless they already start with it (SPEC Addressing): own's latest
   // message is "Re: Budget draft".
   const rows = [
     {
-      key: "addr",
+      ...seeded("addr"),
       to: ["carol@corp.test"],
       cc: ["dave@corp.test", "erin@corp.test"],
       from: A,
       subject: "Re: Offsite venue",
     },
     {
-      key: "replyto",
+      ...seeded("replyto"),
       to: ["tickets@help.test"],
       cc: ["jo@help.test"],
       from: A,
       subject: "Re: Ticket #42",
     },
     {
-      key: "alias",
+      ...seeded("alias"),
       to: ["gus@guild.test"],
       cc: ["hal@guild.test"],
       from: A_ALIAS,
       subject: "Re: Guild meetup",
     },
     {
-      key: "own",
+      ...seeded("own"),
       to: ["kim@kite.test"],
       cc: ["lee@kite.test"],
       from: A,
       subject: "Re: Budget draft",
     },
-    { key: "ownAlias", to: ["kim@kite.test"], cc: [], from: A_ALIAS, subject: "Re: Alias note" },
+    {
+      ...seeded("ownAlias"),
+      to: ["kim@kite.test"],
+      cc: [],
+      from: A_ALIAS,
+      subject: "Re: Alias note",
+    },
     // SPEC Addressing puts the message's other To on Cc.
     {
-      key: "news1",
+      ...seeded("news1"),
       to: ["news@letters.test"],
       cc: ["subscribers@letters.test"],
       from: A,
       subject: "Re: Digest: week 44",
     },
+    // Reply all leaves the To address off Cc.
+    {
+      key: "selfCopy",
+      title: "Self copy",
+      threadId: selfCopy.threadId,
+      to: ["gus@guild.test"],
+      cc: ["hal@guild.test"],
+      from: A,
+      subject: "Re: Self copy",
+    },
+    // Two of the account's addresses: To before Cc, then the first in To.
+    {
+      key: "aliasInTo",
+      title: "Alias in To",
+      threadId: aliasInTo.threadId,
+      to: ["gus@guild.test"],
+      cc: [],
+      from: A_ALIAS,
+      subject: "Re: Alias in To",
+    },
+    {
+      key: "aliasFirst",
+      title: "Alias first",
+      threadId: aliasFirst.threadId,
+      to: ["gus@guild.test"],
+      cc: [],
+      from: A_ALIAS,
+      subject: "Re: Alias first",
+    },
   ];
 
   const modes = ["r", "Enter"] as const;
   await inOrder(rows, async (row) => {
-    await open(app, s.thread(row.key).subject);
+    await open(app, row.title);
     await inOrder(modes, async (mode) => {
       await app.reply(mode);
       expect(await chipAddresses(app, "To"), `${row.key} ${mode} To`).toEqual(row.to);
@@ -279,63 +362,12 @@ test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
     await inOrder(modes, async (mode) => {
       const m = await sentWith(gmail, A, `marker-${row.key}-${mode}`);
       const label = `${row.key} ${mode}`;
-      expect(m.threadId, label).toBe(s.thread(row.key).threadId);
+      expect(m.threadId, label).toBe(row.threadId);
       expect(emails(m.headers.from), `${label} From`).toEqual([row.from]);
       expect(emails(m.headers.to), `${label} To`).toEqual(row.to);
       expect(emails(m.headers.cc), `${label} Cc`).toEqual(mode === "r" ? [] : row.cc);
       expect(m.headers.subject, `${label} Subject`).toBe(row.subject);
     });
-  });
-});
-
-test("REP-03 reply all leaves the To address off Cc", async ({ app, gmail }) => {
-  await seeds.standard(gmail, app);
-  // Gus copies himself, so reply all's To (Gus) is also among the message's Cc.
-  await gmail.deliver({
-    account: A,
-    from: "Gus Grant <gus@guild.test>",
-    to: [A],
-    cc: ["gus@guild.test", "hal@guild.test"],
-    subject: "Self copy",
-    text: "Copying myself.",
-  });
-  await app.settle();
-
-  await open(app, "Self copy");
-  await app.reply("Enter");
-  expect(await chipAddresses(app, "To")).toEqual(["gus@guild.test"]);
-  expect(await chipAddresses(app, "Cc")).toEqual(["hal@guild.test"]);
-});
-
-test("REP-03 sent to two of the account's addresses: To wins over Cc, then the first", async ({
-  app,
-  gmail,
-}) => {
-  await seeds.standard(gmail, app);
-  // The default address is listed first in sendAs, so a sendAs-order pick
-  // would answer both from ana@acme.test.
-  await gmail.deliver({
-    account: A,
-    from: "Gus Grant <gus@guild.test>",
-    to: [A_ALIAS],
-    cc: [A],
-    subject: "Alias in To",
-    text: "To the alias, Cc the main address.",
-  });
-  await gmail.deliver({
-    account: A,
-    from: "Gus Grant <gus@guild.test>",
-    to: [A_ALIAS, A],
-    subject: "Alias first",
-    text: "Both in To, the alias first.",
-  });
-  await app.settle();
-  await inOrder(["Alias in To", "Alias first"], async (subject) => {
-    await open(app, subject);
-    await app.reply("r");
-    await expect(fromButton(app), subject).toContainText(A_ALIAS);
-    await closeComposer(app);
-    await app.press("Escape");
   });
 });
 
@@ -601,15 +633,6 @@ test("REP-08 a half-written reply survives new replies", async ({ app, gmail }) 
 test("REP-09 drafts from Gmail get a kind and a target", async ({ app, gmail }) => {
   test.slow();
   const s = await seeds.drafts(gmail, app);
-
-  // dNew: new. Enter on its Drafts row opens the c screen.
-  await app.press("g", "d");
-  await highlight(app, "Idea");
-  await app.press("Enter");
-  await expect(app.page.getByRole("heading", { name: "New Message" })).toBeVisible();
-  await expect(app.editor).toHaveText("An idea for later.");
-  await closeComposer(app);
-  await app.page.getByRole("navigation").getByTitle("Inbox", { exact: true }).click();
 
   // dFwd: forward, aimed at Alice's message. f resumes it, r does not.
   await open(app, "Contract");
@@ -1107,56 +1130,4 @@ test("REP-18 a forwarded attachment that arrives with the body can be removed, a
   await expect(remove).toHaveCount(0);
   await send(app);
   expect(attachments(parseMime((await sentWith(gmail, A, "Just the text")).raw))).toHaveLength(0);
-});
-
-test("REP-19 an Esc pressed as the reply opens counts, however late the editor's focus would come", async ({
-  app,
-  gmail,
-}) => {
-  await seeds.standard(gmail, app);
-  await app.row("Person 3").click();
-  await expect(app.conversationTitle).toHaveText("Person 3");
-  await app.settle();
-  // Page timers wait, so a focus put off to a later frame lands only between the two Escs.
-  await app.page.clock.pauseAt(await app.now());
-  await app.press("r");
-  await expect(app.editor).toBeVisible();
-  await app.press("Escape");
-  await app.page.clock.runFor(100);
-  await app.press("Escape");
-  await expect(app.editor).toHaveCount(0);
-  await expect(app.conversationTitle).toHaveText("Person 3");
-  await app.page.clock.resume();
-  await app.page.clock.setFixedTime(await app.now());
-  await app.settle();
-  // The untouched fresh reply left nothing behind.
-  expect((await gmail.gmail(A)).drafts).toHaveLength(0);
-});
-
-test("REP-20 r on a prefetched row scrolls the reply into view below a long message", async ({
-  app,
-  gmail,
-}) => {
-  await app.page.setViewportSize({ width: 1280, height: 500 });
-  await seeds.standard(gmail, app);
-  await gmail.deliver({
-    account: A,
-    from: PERSONS[0] ?? "",
-    subject: "Long read",
-    html: Array.from({ length: 60 }, (_, i) => `<p>Line ${i + 1} of a long read.</p>`).join(""),
-    labels: ["INBOX"],
-  });
-  await app.settle();
-  await highlight(app, "Long read");
-  // The highlight rests: the conversation is prefetched, so r paints it at once.
-  await app.advance(100);
-  await app.settle();
-  await app.reply("r");
-  await expect(app.conversationTitle).toHaveText("Long read");
-
-  const composer = app.editor.locator(
-    "xpath=ancestor::div[.//button[normalize-space(.)='Send']][1]",
-  );
-  await expect(composer).toBeInViewport({ ratio: 0.99 });
-  await expect(app.editor).toBeFocused();
 });

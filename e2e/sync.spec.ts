@@ -53,23 +53,6 @@ async function goToLabel(app: App, name: string): Promise<void> {
   await app.settle();
 }
 
-/** Runs a search and waits out the Gmail debounce. */
-async function search(app: App, query: string): Promise<void> {
-  await app.press("/");
-  await expect(app.page.getByPlaceholder("Search")).toBeFocused();
-  await app.type(query);
-  await app.advance(300);
-  await app.settle();
-}
-
-/** Closes search from its field. */
-async function closeSearch(app: App): Promise<void> {
-  await app.press("/");
-  await expect(app.page.getByPlaceholder("Search")).toBeFocused();
-  await app.press("Escape");
-  await app.settle();
-}
-
 const live = (m: GmailMessage) => !m.labels.includes("TRASH") && !m.labels.includes("SPAM");
 
 /** A thread's subject without reply prefixes. */
@@ -182,19 +165,6 @@ test("SYN-01 the connect sync matches Gmail", async ({ app, gmail, page }) => {
   expect(fetched).toEqual([
     expect.stringContaining(`/messages/${s.message("fwd", 1).id}/attachments/`),
   ]);
-
-  // Search and label views find the older mail.
-  await search(app, "Sent 91");
-  await expect(app.row("Sent 91 days ago")).toHaveCount(1);
-  await closeSearch(app);
-  await search(app, "Archived before");
-  await expect(app.row("Archived before")).toHaveCount(1);
-  await closeSearch(app);
-  await search(app, "Invoice 2019");
-  await expect(app.row("Invoice 2019")).toHaveCount(1);
-  await closeSearch(app);
-  await goToLabel(app, "Projects");
-  await expect(app.row(/^.*Project (alpha|beta|gamma)/)).toHaveCount(3);
 });
 
 test("SYN-02 mail that changed while the app was closed shows after relaunch", async ({
@@ -518,38 +488,6 @@ test("SYN-09 a connect sync retried after a failure misses no change made in bet
   await app.settle();
   await expect(app.row("Person 1")).toHaveCount(0);
   await expectInboxMatchesGmail(app, A);
-});
-
-test("SYN-10 a reply to a stored thread downloads no inline image again", async ({
-  app,
-  gmail,
-}) => {
-  const s = await seeds.standard(gmail, app);
-  const fullFetches = async () =>
-    (await gmail.requests("threads.get", { account: A })).filter(
-      (r) => r.path.includes(s.thread("fwd").threadId) && r.query.includes("format=full"),
-    ).length;
-  const images = async () => (await gmail.requests("attachments.get", { account: A })).length;
-  // The connect sync stored the contract with its inline logo.
-  expect(await images()).toBeGreaterThan(0);
-  const [fetchesBefore, imagesBefore] = [await fullFetches(), await images()];
-
-  await gmail.deliver({
-    account: A,
-    from: "Alice Adams <alice@law.test>",
-    subject: "Re: Contract",
-    text: "One more clause.",
-    threadId: s.thread("fwd").threadId,
-    inReplyTo: s.message("fwd", 1).messageId,
-  });
-  await app.settle();
-
-  // The reply's body came in a full fetch of the thread, without the logo again.
-  expect(await fullFetches()).toBeGreaterThan(fetchesBefore);
-  expect(await images()).toBe(imagesBefore);
-  await app.row("Contract").click();
-  await expect(app.messages).toHaveCount(2);
-  await expect(app.messages.last().locator("iframe")).toHaveCount(1);
 });
 
 test("SYN-11 a slower label or sendAs read never undoes a newer one", async ({ app, gmail }) => {

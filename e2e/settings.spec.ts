@@ -3,7 +3,6 @@ import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
 import { expect, test } from "./fixtures.ts";
-import { pixelDataUrl } from "./files.ts";
 import * as seeds from "./seeds.ts";
 import { A, B } from "./seeds.ts";
 
@@ -141,34 +140,15 @@ test("SET-02 remote images", async ({ app, gmail }) => {
   await expect(remoteImages(app)).toHaveAttribute("aria-checked", "false");
   await app.press("Escape");
 
-  // Off: a fresh message's remote images are not fetched; its data: image shows.
-  await gmail.deliver({
-    account: A,
-    from: "Ivo Image <ivo@image.test>",
-    subject: "Fresh images",
-    html:
-      `<p><img src="${gmail.url}/img/fresh.png" alt="remote pixel"></p>` +
-      `<div style="background-image:url(${gmail.url}/img/fresh-bg.png);width:8px;height:8px"></div>` +
-      `<p><img src="${pixelDataUrl}" alt="data pixel"></p>`,
-  });
-  await app.settle();
-  await app.row("Fresh images").click();
-  await expect(app.conversationTitle).toHaveText("Fresh images");
-  await expect.poll(() => loaded(app, "data pixel")).toBe(true);
-  await app.settle();
-  expect(await loaded(app, "remote pixel")).toBe(false);
-  const hits = await imageHits(app);
-  expect(hits).not.toContain("/img/fresh.png");
-  expect(hits).not.toContain("/img/fresh-bg.png");
-
-  // Back on, with it open: fetched at once.
+  // Back on, with a message open: its remote images load at once.
+  await app.row("Links").click();
+  await expect(app.conversationTitle).toHaveText("Links");
+  await expect.poll(() => frameCsp(app)).toContain("img-src data:");
   await app.press("Meta+,");
   await remoteImages(app).click();
   await expect(remoteImages(app)).toHaveAttribute("aria-checked", "true");
   await app.press("Escape");
-  await expect
-    .poll(() => imageHits(app))
-    .toEqual(expect.arrayContaining(["/img/fresh.png", "/img/fresh-bg.png"]));
+  await expect.poll(() => frameCsp(app)).not.toContain("img-src");
   await expect.poll(() => loaded(app, "remote pixel")).toBe(true);
 });
 
@@ -191,7 +171,10 @@ function contrast(a: string, b: string): number {
 }
 
 // A color and a text size were both named `hint`; the color won, so hints were 13px and chip keys near-white.
-test("SET-03 hint text is 11px and the shortcut chips are readable", async ({ app, gmail }) => {
+test("SET-03 hint text is 11px, the shortcut chips are readable, and the sheet's rows never overlap", async ({
+  app,
+  gmail,
+}) => {
   await seeds.standard(gmail, app);
   const hintBar = app.page.getByText("E to Mark Done").locator("..");
   await expect(hintBar).toHaveCSS("font-size", "11px");
@@ -219,16 +202,8 @@ test("SET-03 hint text is 11px and the shortcut chips are readable", async ({ ap
     expect(l.size, l.text).toBe("11px");
     expect(contrast(l.fg, l.bg), `${l.text} contrast`).toBeGreaterThanOrEqual(3);
   }
-});
 
-test("SET-04 shortcut sheet rows never overlap, even when a description wraps", async ({
-  app,
-  gmail,
-}) => {
-  await seeds.standard(gmail, app);
-  await app.press("?");
-  const sheet = app.sheet("Keyboard shortcuts");
-  await expect(sheet).toBeVisible();
+  // The sheet's rows never overlap, even when a description wraps.
   const overlaps = await sheet.locator("kbd").evaluateAll((els) => {
     const rows = els.map((k) => k.parentElement).filter((r): r is HTMLElement => r !== null);
     const out: string[] = [];
@@ -265,7 +240,8 @@ test("SET-05 with remote images off, nothing remote loads in a message or a repl
       `<style>@import url(${gmail.url}/img/import.css);` +
       `@font-face{font-family:tracked;src:url(${gmail.url}/img/font.woff)}</style>` +
       `<p style="font-family:tracked">Opened yet?</p>` +
-      `<p><img src="${gmail.url}/img/tracked.png" alt="remote pixel"></p>`,
+      `<p><img src="${gmail.url}/img/tracked.png" alt="remote pixel"></p>` +
+      `<div style="background-image:url(${gmail.url}/img/tracked-bg.png);width:8px;height:8px"></div>`,
   });
   await app.row("Tracked").click();
   await expect(

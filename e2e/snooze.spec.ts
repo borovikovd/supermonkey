@@ -358,28 +358,6 @@ test("SNZ-05 INBOX added from outside clears a snooze; your own reply does not",
     (m) => m.threadId === p3.threadId && m.labels.includes("SENT"),
   );
   expect(sent, "the reply was sent").toHaveLength(1);
-
-  // e, #, and ! from Snoozed clear it: Done, Trash, Spam.
-  const clearing = [
-    ["e", "e", "Person 3"],
-    ["#", "#", "Person 5"],
-    ["!", "!", "Person 6"],
-  ] as const;
-  await inOrder(clearing, async ([key, view, subject]) => {
-    if (subject !== "Person 3") {
-      await goView(app, "i");
-      await highlightRow(app, subject);
-      await snoozeNamed(app, "Next week");
-    }
-    await goView(app, "h");
-    await highlightRow(app, subject);
-    await app.press(key);
-    await expect(app.row(subject)).toHaveCount(0);
-    await app.settle();
-    await expectIn(app, view, subject);
-    await expectNotIn(app, "h", subject);
-    await expectNotIn(app, "i", subject);
-  });
 });
 
 test("SNZ-06 the app's own label changes, echoed by history, do not clear a newer snooze", async ({
@@ -412,7 +390,7 @@ test("SNZ-06 the app's own label changes, echoed by history, do not clear a newe
   expect(await gmailInbox(gmail, p4)).toBe(false);
 });
 
-test("SNZ-07 undo, Shift+E, and e on snoozed threads", async ({ app, gmail }) => {
+test("SNZ-07 undo, Shift+E, e, #, and ! on snoozed threads", async ({ app, gmail }) => {
   test.slow();
   const s = await seeds.standard(gmail, app);
   const p1 = s.thread("p1").threadId;
@@ -480,6 +458,25 @@ test("SNZ-07 undo, Shift+E, and e on snoozed threads", async ({ app, gmail }) =>
   await expectNotIn(app, "i", "Person 1");
   await app.settle();
   expect(await gmailInbox(gmail, p1)).toBe(false);
+
+  // # and ! from Snoozed clear it: Trash, Spam.
+  const clearing = [
+    ["#", "Person 5"],
+    ["!", "Person 6"],
+  ] as const;
+  await inOrder(clearing, async ([key, subject]) => {
+    await goView(app, "i");
+    await highlightRow(app, subject);
+    await snoozeNamed(app, "Next week");
+    await goView(app, "h");
+    await highlightRow(app, subject);
+    await app.press(key);
+    await expect(app.row(subject)).toHaveCount(0);
+    await app.settle();
+    await expectIn(app, key, subject);
+    await expectNotIn(app, "h", subject);
+    await expectNotIn(app, "i", subject);
+  });
 });
 
 test("SNZ-08 Enter before the typed time's options arrive snoozes until that time", async ({

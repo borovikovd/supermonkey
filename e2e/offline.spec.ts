@@ -360,7 +360,7 @@ test("OFF-04 a queued action wins on the messages it recorded, without hiding ne
   await expect(row).toHaveAttribute("data-unread");
 });
 
-test("OFF-04 a poll during the replay keeps the queued change on the messages it recorded", async ({
+test("OFF-09 a poll during the replay of a queued action keeps the action applied", async ({
   app,
   gmail,
 }) => {

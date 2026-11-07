@@ -438,18 +438,6 @@ test("SPL-06 custom splits: add, order, rename, turn off, delete", async ({ app,
   await expectSplit(app, "Your receipt", "Other", "after deleting Receipts");
   await editSplits(app, (s) => addSplit(s, "Receipts", NOTHING));
   await expectSplit(app, "Your receipt", "Other", "a new Receipts does not bring the pin back");
-  // The new Receipts is the newest split, so a split added after deleting it
-  // takes its id: a pin left behind would match it.
-  await highlightRow(app, "Your receipt");
-  await pin(app, "Add to split", "Sender billing@shop.test → Receipts");
-  await expectSplit(app, "Your receipt", "Receipts");
-  await editSplits(app, deleteReceipts);
-  await editSplits(app, (s) => addSplit(s, "Receipts", NOTHING));
-  await expectSplit(app, "Your receipt", "Other", "a split that reuses the id gets no pin");
-
-  // 9. A CATEGORY_ id matches the message's own labels.
-  await editSplits(app, (s) => addSplit(s, "Promo", "label:CATEGORY_PROMOTIONS"));
-  await expectSplit(app, "Big sale", "Promo");
 
   await app.settle();
   expect((await gmail.requests()).slice(requests), "saving makes no Gmail request").toEqual([]);

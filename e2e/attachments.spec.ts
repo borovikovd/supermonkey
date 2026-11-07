@@ -119,29 +119,6 @@ test.describe("attachments", () => {
     expect(readFileSync(again[1] ?? "").equals(files.contractPdf.buffer)).toBe(true);
   });
 
-  test("ATT-12 a file sent inline, as Apple Mail sends every file, is an attachment", async ({
-    app,
-    gmail,
-  }) => {
-    await seeds.standard(gmail, app);
-    await gmail.deliver({
-      account: A,
-      from: "Ann Apple <ann@apple.test>",
-      subject: "Scans from my phone",
-      html: "<p>The scan is attached.</p>",
-      attachments: [{ ...attachment(files.reportPdf), inline: true }],
-    });
-    await app.settle();
-    await app.row("Scans from my phone").click();
-    const chip = app.conversation.getByRole("button", { name: /report\.pdf/ });
-    await expect(chip).toContainText("report.pdf");
-    await chip.click();
-    await app.settle();
-    const { openedFiles } = await gmail.platform();
-    expect(openedFiles).toHaveLength(1);
-    expect(readFileSync(openedFiles[0] ?? "").equals(files.reportPdf.buffer)).toBe(true);
-  });
-
   test("ATT-13 a file Gmail serves inside the message opens and forwards", async ({
     app,
     gmail,
@@ -559,7 +536,7 @@ test.describe("attachments", () => {
     expect((await gmail.platform()).openedFiles).toHaveLength(1);
   });
 
-  test("ATT-18 an image the body doesn't show is an attachment, and a forward carries it", async ({
+  test("ATT-18 a file sent inline, as Apple Mail sends it, or an image the body doesn't show is an attachment, and a forward carries it", async ({
     app,
     gmail,
   }) => {
@@ -580,9 +557,30 @@ test.describe("attachments", () => {
       html: '<p>The photo is attached.</p><p><img src="cid:logo" alt="logo"></p>',
       attachments: [attachment(files.logoPng, "logo"), attachment(files.photoPng, "unused")],
     });
+    // A file sent inline, as Apple Mail sends every file.
+    await gmail.deliver({
+      account: A,
+      from: "Ann Apple <ann@apple.test>",
+      subject: "Scans from my phone",
+      html: "<p>The scan is attached.</p>",
+      attachments: [{ ...attachment(files.reportPdf), inline: true }],
+    });
     await app.settle();
     await expect(app.row("Photo from my phone")).toHaveAttribute("data-attachments");
     await expect(app.row("Logo and photo")).toHaveAttribute("data-attachments");
+    await expect(app.row("Scans from my phone")).toHaveAttribute("data-attachments");
+
+    // The inline PDF is a chip, and opens.
+    await app.row("Scans from my phone").click();
+    await expect(app.conversationTitle).toHaveText("Scans from my phone");
+    const pdf = app.conversation.getByRole("button", { name: /report\.pdf/ });
+    await expect(pdf).toContainText("report.pdf");
+    await pdf.click();
+    await app.settle();
+    const scans = await gmail.platform();
+    expect(scans.openedFiles).toHaveLength(1);
+    expect(readFileSync(scans.openedFiles[0] ?? "").equals(files.reportPdf.buffer)).toBe(true);
+    await app.press("Escape");
 
     // The logo is in the body, not a chip; the photo is a chip.
     await app.row("Logo and photo").click();
@@ -602,8 +600,8 @@ test.describe("attachments", () => {
     await chip.click();
     await app.settle();
     const { openedFiles } = await gmail.platform();
-    expect(openedFiles).toHaveLength(1);
-    expect(readFileSync(openedFiles[0] ?? "").equals(files.photoPng.buffer)).toBe(true);
+    expect(openedFiles).toHaveLength(2);
+    expect(readFileSync(openedFiles[1] ?? "").equals(files.photoPng.buffer)).toBe(true);
 
     await app.reply("f");
     await app.press("Meta+Shift+o");

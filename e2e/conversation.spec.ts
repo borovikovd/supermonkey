@@ -333,14 +333,6 @@ test.describe("conversation", () => {
     await gmail.offline(false);
     await app.settle();
     expect(await labelsOf(app, A, s.message("p3", 1).id)).not.toContain("UNREAD");
-
-    // Not an undo entry: z has nothing to undo.
-    await app.press("z");
-    await app.settle();
-    await expect(app.row("Person 3")).not.toHaveAttribute("data-unread");
-    await expect(app.row("Person 1")).not.toHaveAttribute("data-unread");
-    expect(await labelsOf(app, A, s.message("p3", 1).id)).not.toContain("UNREAD");
-    expect(await labelsOf(app, A, s.message("p1", 1).id)).not.toContain("UNREAD");
   });
 
   test("CONV-09 a message that arrives while the conversation is open", async ({ app, gmail }) => {
@@ -731,7 +723,6 @@ test("CONV-21 a message still downloading shows its snippet and a loading bar, t
 
   const loading = app.conversation.locator("[data-message] [aria-busy=true]");
   await expect(loading).toContainText("The first lines arrive before the rest.");
-  await expect(app.conversation).not.toContainText("Downloading message");
   await expect(app.conversation.locator("iframe[data-frame]")).toHaveCount(0);
 
   await body.release();

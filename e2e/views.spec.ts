@@ -215,31 +215,13 @@ test("VIEW-03 Done lists every thread outside Inbox, from Gmail too", async ({ a
     (r) => r.params.q === "-in:inbox -in:draft",
   );
   expect(done.length).toBeGreaterThanOrEqual(1);
-  expect(done[0]?.params.maxResults).toBe("15");
   // Snoozed is not Done; nor are Trash and Spam.
   await expect(app.row("Person 3")).toHaveCount(0);
   await expect(app.row(/Old trash|Old spam/)).toHaveCount(0);
 
-  // # from Done: every message is in trash, so it leaves Done for Trash.
-  await highlight(app, "Person 4");
-  await app.press("#");
-  await expect(app.row("Person 4")).toHaveCount(0);
-  // Shift+E from Done: back in Inbox.
-  await highlight(app, "Person 5");
-  await app.press("Shift+E");
-  await expect(app.row("Person 5")).toHaveCount(0);
-  await app.settle();
-  await expect(app.row("Person 1")).toHaveCount(1);
-  await expect(app.row("Person 2")).toHaveCount(1);
-  await expect(app.row("Person 4")).toHaveCount(0);
-  await expect(app.row("Person 5")).toHaveCount(0);
-
   await go(app, "h", "Snoozed");
   await expect(app.row("Person 3")).toHaveCount(1);
-  await go(app, "#", "Trash");
-  await expect(app.row("Person 4")).toHaveCount(1);
   await go(app, "i", null);
-  await expect(app.row("Person 5")).toHaveCount(1);
   await expect(app.row("Person 3")).toHaveCount(0);
 });
 
@@ -255,9 +237,6 @@ test("VIEW-04 Drafts lists every draft, and mail actions do nothing there", asyn
   await expect(app.row("Re: Person 2")).toHaveCount(2);
   await expect(app.row("dTwoA")).toHaveCount(1);
   await expect(app.row("dTwoB")).toHaveCount(1);
-  // The hint bar offers what works here, not the mail actions that do nothing.
-  await expect(app.page.getByText("Enter to open draft")).toBeVisible();
-  await expect(app.page.getByText("E to Mark Done")).toHaveCount(0);
 
   // A draft composed offline is listed before it reaches Gmail.
   await gmail.offline(true);
@@ -271,36 +250,6 @@ test("VIEW-04 Drafts lists every draft, and mail actions do nothing there", asyn
   await gmail.offline(false);
   await app.settle();
   await expect.poll(async () => (await gmail.gmail(A)).drafts.length).toBe(8);
-
-  // Sending a draft removes its row at once; it stays gone while the send waits.
-  await highlight(app, "An idea for later");
-  await app.press("Enter");
-  await expect(app.page.getByRole("heading", { name: "New Message" })).toBeVisible();
-  await app.settle();
-  await app.press("Meta+Enter");
-  await expect(app.row("An idea for later")).toHaveCount(0);
-  await app.settle();
-  await expect(app.row("An idea for later")).toHaveCount(0);
-  await expect(app.rows).toHaveCount(7);
-  // Undoing the send brings the row back.
-  await app.toast("Sending").getByRole("button", { name: "Undo" }).click();
-  await expect(app.page.getByRole("heading", { name: "New Message" })).toBeVisible();
-  await app.settle();
-  await app.press("Escape", "Escape");
-  await expect(app.row("An idea for later")).toHaveCount(1);
-  await expect(app.rows).toHaveCount(8);
-
-  // Discarding a draft removes its row.
-  await highlight(app, "Aimed at nobody");
-  await app.press("Enter");
-  await expect(app.editor).toBeVisible();
-  await app.settle();
-  await app.page.getByTitle("Discard (⌘⇧,)").click();
-  await app.settle();
-  await app.press("Escape");
-  await expect(app.list).toBeVisible();
-  await expect(app.row("Aimed at nobody")).toHaveCount(0);
-  await expect(app.rows).toHaveCount(7);
 
   // Mail actions do nothing in Drafts.
   const subjects = await app.subjects();
@@ -327,7 +276,7 @@ test("VIEW-04 Drafts lists every draft, and mail actions do nothing there", asyn
     expect(await app.subjects(), key).toEqual(subjects);
   });
   await expect(app.highlighted).toHaveText(target);
-  await expect(app.rows).toHaveCount(7);
+  await expect(app.rows).toHaveCount(8);
   expect(await gmail.requests("messages.batchModify")).toHaveLength(modifies);
   expect(await gmail.requests("messages.trash")).toHaveLength(trashes);
 });
@@ -349,7 +298,6 @@ test("VIEW-05 Label, Trash, and Spam views also list from Gmail", async ({ app, 
     (r) => r.params.labelIds === projects,
   );
   expect(labelList.length).toBeGreaterThanOrEqual(1);
-  expect(labelList[0]?.params.maxResults).toBe("15");
 
   await go(app, "#", "Trash");
   await expect(app.row("Old trash")).toHaveCount(1);

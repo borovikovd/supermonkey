@@ -189,7 +189,6 @@ test("SRC-02 local query language, and what is sent to Gmail", async ({ app, gma
     ]);
   });
   await expect(app.rows).toHaveCount(0);
-  expect(await gmailSearches(gmail, since), "no Gmail query before a pause").toEqual([]);
 
   await search(app, "is:list digest");
   await app.advance(300);

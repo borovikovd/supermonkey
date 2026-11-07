@@ -205,19 +205,6 @@ test("RCP-03 ways to turn typed text into a chip", async ({ app, gmail }) => {
     "lou@kite.test",
     "zed@z.test",
   ]);
-
-  // Send turns typed text into a chip too (NEW-09).
-  await subjectAndBody(app, "Chips", "Hello");
-  await app.settle();
-  await app.press("Meta+Shift+o");
-  await expect(to).toBeFocused();
-  await app.type("pat@p.test");
-  await app.press("Meta+Enter");
-  await expect(app.editor).toHaveCount(0);
-  await app.advance(10_000);
-  await app.settle();
-  const m = await sentWithSubject(gmail, A, "Chips");
-  expect(emails(m.headers.to)).toContain("pat@p.test");
 });
 
 test("RCP-04 Backspace and paste", async ({ app, gmail }) => {
@@ -238,38 +225,6 @@ test("RCP-04 Backspace and paste", async ({ app, gmail }) => {
   await app.paste("a@x.test, Bob <b@y.test>; c@z.test\nd@w.test");
   expect(await chipAddresses(app, "To")).toEqual(["a@x.test", "b@y.test", "c@z.test", "d@w.test"]);
   await expect(app.chips("To").nth(1)).toHaveText(/^Bob/);
-});
-
-test("RCP-05 an invalid chip blocks send until it is fixed", async ({ app, gmail }) => {
-  await seeds.standard(gmail, app);
-  await app.compose();
-  await app.type("kim@kite,");
-  const bad = app.invalidChips("To");
-  await expect(bad).toHaveCount(1);
-  await expect(bad).toHaveAttribute("data-chip", "kim@kite");
-  await expect(bad).toHaveClass(/text-danger/);
-  await subjectAndBody(app, "Fix me", "Hello");
-
-  // Refused with a toast naming the address: no outbox row, no Sending toast.
-  await app.settle();
-  await app.press("Meta+Enter");
-  await expect(app.errorToasts.filter({ hasText: "kim@kite" }).first()).toBeVisible();
-  await expect(app.editor).toBeVisible();
-  await app.advance(10_000);
-  await app.settle();
-  await expect(app.toast("Sending…")).toHaveCount(0);
-  expect(await gmail.requests("drafts.send")).toEqual([]);
-
-  // Fixed: the message sends.
-  await app.press("Meta+Shift+o");
-  await expect(app.field("To")).toBeFocused();
-  await app.press("Backspace", "Backspace");
-  await expect(app.chips("To")).toHaveCount(0);
-  await app.type("kim@kite.test,");
-  await expect(app.invalidChips("To")).toHaveCount(0);
-  await sendSaved(app);
-  const m = await sentWithSubject(gmail, A, "Fix me");
-  expect(emails(m.headers.to)).toEqual(["kim@kite.test"]);
 });
 
 test("RCP-06 Tab moves between fields unless the suggestion list is open", async ({
@@ -455,7 +410,7 @@ test("RCP-12 a chip removed while an address is being typed stays removed", asyn
   await expect(app.field("To")).toHaveValue("");
 });
 
-test("RCP-11 every address the core would refuse shows in danger and blocks send", async ({
+test("RCP-11 every address the core would refuse shows in danger and blocks send until it is fixed", async ({
   app,
   gmail,
 }) => {
@@ -471,6 +426,13 @@ test("RCP-11 every address the core would refuse shows in danger and blocks send
   expect(Object.fromEntries(flagged)).toEqual(
     Object.fromEntries(ADDRESSES.map((c) => [c.address, c.valid ? null : "true"])),
   );
+  // Each refused address shows in `danger`.
+  const invalid = ADDRESSES.filter((c) => !c.valid);
+  expect(
+    await app
+      .invalidChips("To")
+      .evaluateAll((els) => els.map((el) => el.classList.contains("text-danger"))),
+  ).toEqual(invalid.map(() => true));
   await subjectAndBody(app, "Table", "Hello");
 
   // Refused before anything closes, with a toast naming every refused address.
@@ -479,10 +441,22 @@ test("RCP-11 every address the core would refuse shows in danger and blocks send
   const refused = app.errorToasts.filter({ hasText: "Fix these addresses" });
   await expect(refused).toBeVisible();
   const named = await refused.innerText();
-  expect(ADDRESSES.filter((c) => !c.valid && !named.includes(c.address))).toEqual([]);
+  expect(invalid.filter((c) => !named.includes(c.address))).toEqual([]);
   await expect(app.editor).toBeVisible();
   await app.advance(10_000);
   await app.settle();
   await expect(app.toast("Sending…")).toHaveCount(0);
   expect(await gmail.requests("drafts.send")).toEqual([]);
+
+  // Fixed: with the chips cleared (Backspace selects a chip, a second removes
+  // it) and a valid address typed, the message sends.
+  await app.press("Meta+Shift+o");
+  await expect(app.field("To")).toBeFocused();
+  await app.press(...Array.from({ length: 2 * ADDRESSES.length }, () => "Backspace"));
+  await expect(app.chips("To")).toHaveCount(0);
+  await app.type("kim@kite.test,");
+  await expect(app.invalidChips("To")).toHaveCount(0);
+  await sendSaved(app);
+  const m = await sentWithSubject(gmail, A, "Table");
+  expect(emails(m.headers.to)).toEqual(["kim@kite.test"]);
 });
