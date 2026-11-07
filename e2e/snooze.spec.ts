@@ -61,10 +61,7 @@ const RAIL: Partial<Record<ViewKey, string | RegExp>> = {
 };
 const PALETTE: Partial<Record<ViewKey, string>> = { "#": "Go to Trash", "!": "Go to Spam" };
 
-/**
- * Opens a view from the rail or the palette. Not with `g` keys: a stale `g`
- * timeout can swallow a later `g` prefix (src/keyboard/keys.ts:252).
- */
+/** Opens a view from the rail or the palette. */
 async function goView(app: App, view: ViewKey): Promise<void> {
   const rail = RAIL[view];
   if (rail !== undefined) {

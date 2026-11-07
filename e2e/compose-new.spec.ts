@@ -151,11 +151,7 @@ function rail(app: App, title: string) {
   return app.page.getByRole("navigation").getByTitle(title, { exact: true });
 }
 
-/**
- * Rows in the Drafts view; returns to Inbox afterwards. Uses the rail: a `g`
- * pressed within 1.5 s of an earlier `g` loses its prefix to that one's reset
- * timer (src/keyboard/keys.ts:250-253).
- */
+/** Rows in the Drafts view, opened from the rail; returns to Inbox afterwards. */
 async function draftRows(app: App): Promise<string[]> {
   await rail(app, "Drafts (g d)").click();
   await expect(rail(app, "Drafts (g d)")).toHaveClass(/bg-bg/);

@@ -61,7 +61,7 @@ async function avatarOrder(app: App): Promise<string[]> {
 /**
  * Opens a conversation, then replies with `r`. Opening first keeps these cases
  * off a separate bug: `r` on the list can start more than one draft
- * (src/compose/start.ts:122, whenLoaded runs once per queued frame).
+ * (`whenLoaded` in src/compose/start.ts runs once per queued frame).
  */
 async function replyTo(app: App, subject: string): Promise<void> {
   await app.row(subject).click();
