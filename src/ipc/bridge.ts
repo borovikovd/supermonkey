@@ -96,7 +96,8 @@ export function later(fn: () => void, ms: number): () => void {
 let nextN = 1;
 let buffer: NumberedAction[] = [];
 let inFlight = false;
-export let launch: LaunchInfo = { lastAction: 0, debug: false };
+// Until `connect` answers; nothing is attached before then, and Rust checks the limit too.
+export let launch: LaunchInfo = { lastAction: 0, debug: false, maxAttachmentBytes: Infinity };
 
 /** The wait before resending a failed submit; doubles while submits keep failing. */
 let retryMs = 0;

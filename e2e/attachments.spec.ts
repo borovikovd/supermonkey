@@ -253,4 +253,36 @@ test.describe("attachments", () => {
     expect(agent).toBe("Ubermensch");
     expect(event).toMatch(/^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[0-9A-F]{4}-[0-9A-F]{12}$/);
   });
+
+  test("ATT-08 a file over 25 MB is refused before it is read", async ({ app, gmail }) => {
+    await seeds.standard(gmail, app);
+    await newMessage(app, "Too big", "This one stays small.");
+    const added: string[] = [];
+    app.page.on("request", (r) => {
+      if (r.url().endsWith("/invoke/add_attachment")) added.push(r.url());
+    });
+    const big = {
+      name: "big.bin",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.alloc(25 * 1024 * 1024 + 1),
+    };
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [big]);
+    await expect(
+      app.toast("Couldn't attach big.bin: attachments can be at most 25 MB"),
+    ).toBeVisible();
+    await app.settle();
+    expect(added, "the file never went to the core").toEqual([]);
+    await expect(app.page.locator('[aria-busy="true"]')).toHaveCount(0);
+
+    // A file of exactly 25 MB is taken. Reading and storing it takes a while.
+    await app.chooseFiles(
+      () => app.press("Meta+Shift+a"),
+      [{ ...big, name: "max.bin", buffer: Buffer.alloc(25 * 1024 * 1024) }],
+    );
+    await expect(app.page.getByRole("button", { name: "Remove max.bin" })).toBeVisible({
+      timeout: 20_000,
+    });
+    await app.settle();
+    expect(added).toHaveLength(1);
+  });
 });

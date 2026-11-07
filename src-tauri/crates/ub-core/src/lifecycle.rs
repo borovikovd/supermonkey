@@ -11,6 +11,7 @@ use ub_store::{Priority, ReadPool, StoreError};
 use crate::actions::{ActionError, Received};
 use crate::activity::{Kick, Tasks};
 use crate::clock::Clock;
+use crate::mail::MAX_ATTACHMENT_BYTES;
 use crate::workers::{AccountWorkers, Network, Notifier, snooze};
 use crate::writer::CoreWriter;
 use crate::{Error, Notification};
@@ -67,14 +68,15 @@ impl Lifecycle {
         Ok(self.launch_info())
     }
 
-    /// Where a page's action numbers continue, and whether this is a debug
-    /// build: what [`Lifecycle::connect`] returns, for a page whose channel
-    /// was connected apart from its first call (the debug web bridge's event
-    /// stream).
+    /// Where a page's action numbers continue, whether this is a debug
+    /// build, and the attachment limit: what [`Lifecycle::connect`] returns,
+    /// for a page whose channel was connected apart from its first call (the
+    /// debug web bridge's event stream).
     pub fn launch_info(&self) -> LaunchInfo {
         LaunchInfo {
             last_action: self.deps.received.last(),
             debug: self.debug,
+            max_attachment_bytes: u32::try_from(MAX_ATTACHMENT_BYTES).unwrap_or(u32::MAX),
         }
     }
 

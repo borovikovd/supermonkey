@@ -224,6 +224,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - ATT-05 · P1 · A send while a file is still attaching carries the file · §Compose, §Drafts
 - ATT-06 · P1 · Closing a fresh composer while a file is attaching keeps the draft · §Keyboard, §Drafts
 - ATT-07 · P1 · A downloaded attachment is quarantined before it opens · §Reading
+- ATT-08 · P2 · A file over 25 MB is refused before it is read; one of 25 MB is taken · §Drafts
 
 ### drafts.spec.ts (DRF)
 

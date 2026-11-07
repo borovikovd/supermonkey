@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
-use axum::extract::{Path, Request, State};
+use axum::extract::{DefaultBodyLimit, Path, Request, State};
 use axum::http::header::{HOST, ORIGIN};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
@@ -38,8 +38,8 @@ use serde_json::{Value, json};
 use tokio::sync::Notify;
 use tokio::sync::futures::Notified;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-use ub_core::App;
 use ub_core::activity::{Activity, busy_scope};
+use ub_core::{App, MAX_ATTACHMENT_BYTES};
 use ub_domain::{ActionNo, Rev};
 use ub_ipc::{AppEvent, ChannelMessage};
 
@@ -51,6 +51,11 @@ pub(crate) const LOCAL_ADDR: &str = "127.0.0.1:1430";
 /// The Vite dev server's origins (`vite.config.ts`), whose page calls the
 /// bridge across origins.
 const DEV_ORIGINS: [&str; 2] = ["http://localhost:5173", "http://127.0.0.1:5173"];
+
+/// The largest invoke body: a file at the attachment limit, in base64, with
+/// room for the JSON around it. Axum's own default (2 MB) refused larger
+/// files before the core could judge them.
+const BODY_LIMIT: usize = MAX_ATTACHMENT_BYTES.div_ceil(3) * 4 + 1024 * 1024;
 
 /// The bridge's state: the core it serves, which the E2E server swaps when
 /// it restarts the core, and the pages it streams to.
@@ -147,6 +152,7 @@ impl WebBridge {
         Router::new()
             .route("/events", get(events))
             .route("/invoke/{cmd}", post(invoke).options(preflight))
+            .layer(DefaultBodyLimit::max(BODY_LIMIT))
             .layer(middleware::from_fn(local_only))
             .with_state(self.clone())
     }

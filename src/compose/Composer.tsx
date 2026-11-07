@@ -10,7 +10,7 @@ import { ChevronDown, Paperclip, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
-import { act, addAttachment, later } from "../ipc/bridge";
+import { act, addAttachment, launch, later } from "../ipc/bridge";
 import type { Addr, DraftAttachment, DraftFields } from "../ipc/types";
 import { command, keyText, shortHintOf, useCommand } from "../keyboard/table";
 import { openPalette } from "../navigation";
@@ -415,7 +415,17 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
 
   const onFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return;
-    const picked = Array.from(files).map((file) => ({ file, key: ++attachSeq.current }));
+    // A file over the limit is refused before it is read (SPEC Drafts).
+    const max = launch.maxAttachmentBytes;
+    const fits = Array.from(files).filter((file) => {
+      if (file.size <= max) return true;
+      toast.error(
+        `Couldn't attach ${file.name}: attachments can be at most ${Math.floor(max / 2 ** 20)} MB`,
+      );
+      return false;
+    });
+    if (fits.length === 0) return;
+    const picked = fits.map((file) => ({ file, key: ++attachSeq.current }));
     setAttaching((a) => [...a, ...picked.map((p) => ({ key: p.key, name: p.file.name }))]);
     const store = async (): Promise<boolean> => {
       const results = await Promise.all(

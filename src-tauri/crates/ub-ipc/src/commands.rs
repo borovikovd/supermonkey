@@ -185,6 +185,9 @@ pub struct LaunchInfo {
     /// Continue numbering actions after this.
     pub last_action: ActionNo,
     pub debug: bool,
+    /// The largest file a draft takes, in bytes: the page refuses a larger
+    /// one before reading it (SPEC Drafts).
+    pub max_attachment_bytes: u32,
 }
 
 // One `autocomplete` match.

@@ -4,4 +4,9 @@ export type LaunchInfo = {
 /**
  * Continue numbering actions after this.
  */
-lastAction: number, debug: boolean, };
+lastAction: number, debug: boolean, 
+/**
+ * The largest file a draft takes, in bytes: the page refuses a larger
+ * one before reading it (SPEC Drafts).
+ */
+maxAttachmentBytes: number, };
