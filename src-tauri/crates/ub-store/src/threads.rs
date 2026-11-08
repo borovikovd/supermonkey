@@ -333,6 +333,17 @@ impl<'c> ThreadReads<'c> {
         )
     }
 
+    /// The account's threads with no history id: a full resync found them
+    /// changed and owes them a metadata read, which writes it back.
+    pub fn owed_reads(self, account: AccountId) -> Result<Vec<GmailThreadId>, StoreError> {
+        self.db.all(
+            "read the threads owed a read",
+            "SELECT gmail_id FROM threads WHERE account_id = ?1 AND history_id IS NULL ORDER BY id",
+            [account],
+            |r| r.get("gmail_id"),
+        )
+    }
+
     /// Every cached thread's Gmail id, history id, and `rev`, for a full resync.
     pub fn sync_states(self, account: AccountId) -> Result<Vec<ThreadSyncState>, StoreError> {
         self.db.all(
@@ -496,6 +507,18 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
     }
 
     /// Stores Gmail's `historyId` for the thread, as a history batch moves it.
+    /// Marks threads as owed a metadata read (see [`ThreadReads::owed_reads`]).
+    pub fn clear_history_ids(&mut self, ids: &[ThreadId]) -> Result<(), StoreError> {
+        for &id in ids {
+            self.tx.db().execute(
+                "mark a thread owed a read",
+                "UPDATE threads SET history_id = NULL WHERE id = ?1",
+                [id],
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn set_history_id(
         &mut self,
         id: ThreadId,

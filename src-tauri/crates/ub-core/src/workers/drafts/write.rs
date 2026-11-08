@@ -38,7 +38,7 @@ pub(crate) async fn load(pool: &Arc<ReadPool>, id: DraftId) -> Result<Option<Dra
 /// for by its header first, and updated if found. Every write carries all
 /// of the draft's attachments: `drafts.update` replaces the whole message.
 /// `None` when the draft went (discarded, or its account removed) while its
-/// target's body was read: nothing is written.
+/// target's body was read or its message built: nothing is written.
 pub(crate) async fn write(
     ctx: &AccountCtx,
     draft: &Draft,
@@ -71,9 +71,7 @@ pub(crate) async fn write(
             Err(e) => return Err(e.into()),
         }
     }
-    create(ctx, &draft.id, &raw, thread.as_ref())
-        .await
-        .map(Some)
+    create(ctx, &draft.id, &raw, thread.as_ref()).await
 }
 
 /// A draft that quotes its target's snippet is never written so (SPEC
@@ -127,17 +125,22 @@ async fn gmail_thread(
 /// looks for the draft it may have made before trying again. A thread
 /// Gmail no longer has went with the Gmail draft that was alone in it
 /// (deleted elsewhere): the draft starts a thread of its own.
+/// `None` when the draft went before the mark: a discard while the message
+/// was being built. Nothing is created then, and a discard after the mark
+/// finds the create in question and deletes its copy by header.
 async fn create(
     ctx: &AccountCtx,
     local: &DraftId,
     raw: &[u8],
     thread: Option<&GmailThreadId>,
-) -> Result<ub_gmail::Draft, WriteFailure> {
-    mark_create_sent(ctx, local.clone()).await?;
+) -> Result<Option<ub_gmail::Draft>, WriteFailure> {
+    if !mark_create_sent(ctx, local.clone()).await? {
+        return Ok(None);
+    }
     let mut thread = thread;
     for _ in 0..CREATE_TRIES {
         match ctx.gmail.create_draft(Priority::P1, raw, thread).await {
-            Ok(created) => return Ok(created),
+            Ok(created) => return Ok(Some(created)),
             Err(e) if *e.outcome() == Outcome::NotFound && thread.is_some() => thread = None,
             Err(e)
                 if matches!(
@@ -146,7 +149,7 @@ async fn create(
                 ) =>
             {
                 if let Some(found) = recover_create(ctx, local).await? {
-                    return Ok(found);
+                    return Ok(Some(found));
                 }
             }
             Err(e) => return Err(e.into()),
@@ -156,20 +159,22 @@ async fn create(
 }
 
 /// Records, before a `drafts.create` goes out, that one did: committed
-/// first, so no answer can be lost without the next write knowing.
-async fn mark_create_sent(ctx: &AccountCtx, local: DraftId) -> Result<(), Error> {
-    ctx.writer()
+/// first, so no answer can be lost without the next write knowing. Returns
+/// whether the draft is still stored.
+async fn mark_create_sent(ctx: &AccountCtx, local: DraftId) -> Result<bool, Error> {
+    Ok(ctx
+        .writer()
         .call(WritePriority::Sync, move |tx, _| {
-            if let Some(record) = tx.read().drafts().get(&local)? {
-                let mut draft = record.draft;
-                if lifecycle::begin_create(&mut draft) {
-                    tx.drafts().put(&draft)?;
-                }
+            let Some(record) = tx.read().drafts().get(&local)? else {
+                return Ok(false);
+            };
+            let mut draft = record.draft;
+            if lifecycle::begin_create(&mut draft) {
+                tx.drafts().put(&draft)?;
             }
-            Ok::<_, StoreError>(())
+            Ok::<_, StoreError>(true)
         })
-        .await?;
-    Ok(())
+        .await?)
 }
 
 /// After a `drafts.create` with no clear answer (SPEC Gmail errors): if

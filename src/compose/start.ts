@@ -2,6 +2,8 @@
 // `c`, `r`, `Enter`, `f`, a draft from Drafts or a thread, and a draft that
 // comes back after an undone or refused send.
 
+import { toast } from "sonner";
+
 import { fixedHighlight, fixedTargets, stillShown } from "../acting";
 import { openConversation, switchAccount } from "../navigation";
 import { act } from "../ipc/bridge";
@@ -9,6 +11,7 @@ import type { ConversationData, DraftKind } from "../ipc/types";
 import { useChrome } from "../store/chrome";
 import { conversationData, openConversationData } from "../store/current";
 import { useMirror } from "../store/mirror";
+import { appState } from "../store/mirror-core";
 import {
   closeComposerOnScreen,
   composerOnScreen,
@@ -52,7 +55,14 @@ export function resumeDraft(draft: string, thread: number | null, target: number
   if (cur?.screen.kind !== "conversation" || cur.screen.thread !== thread) {
     openConversation(thread);
   }
-  openInline(draft, thread, target);
+  // Once the conversation has loaded, as after `r`: keys typed meanwhile
+  // start the text, and the same things drop it.
+  const screen = useChrome.getState().current()?.screen;
+  const trashMode = screen?.kind === "conversation" && screen.trashMode;
+  typedAhead ??= "";
+  whenLoaded(thread, trashMode, (data) =>
+    openInline(draft, thread, target ?? data.drafts.find((d) => d.id === draft)?.target ?? null),
+  );
 }
 
 /**
@@ -229,6 +239,12 @@ function resumeDraftById(draft: string) {
  * it has left the current view.
  */
 export function reopenDraft(account: number, draft: string, thread: number | null) {
+  // An Open draft toast can outlive its account: removed since, it has
+  // nothing to reopen into.
+  if (!appState(useMirror.getState())?.accounts.some((a) => a.id === account)) {
+    toast("That account was removed");
+    return;
+  }
   switchAccount(account);
   // The user asked for it (Undo, Open draft): what was open over the screen
   // closes, so the composer's keys are theirs.

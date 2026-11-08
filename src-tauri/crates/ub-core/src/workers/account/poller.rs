@@ -41,7 +41,13 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
     // says drafts changed.
     let mut drafts_due: Option<Occasion> = None;
     match is_connected(&ctx.deps.pool, ctx.account).await {
-        Ok(true) => queue_inbox(&ctx),
+        Ok(true) => {
+            queue_inbox(&ctx);
+            queue_owed(&ctx).await;
+            // A draft reconcile the last run owed may have been cut off by
+            // the quit: the first poll runs one.
+            drafts_due = Some(Occasion::Poll);
+        }
         Ok(false) => loop {
             match connect(&ctx, &mut drafts_due).await {
                 Ok(()) => break,
@@ -174,6 +180,30 @@ async fn connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<
         tracing::warn!(account = account.0, error = %e, "couldn't mark the account connected");
     }
     Ok(())
+}
+
+/// At launch: the threads a full resync owed a metadata read when the app
+/// quit (their history id cleared), read in the background.
+async fn queue_owed(ctx: &AccountCtx) {
+    let account = ctx.account;
+    let owed = ctx.read(move |r| r.threads().owed_reads(account)).await;
+    match owed {
+        Ok(owed) => {
+            for thread in owed {
+                ctx.queue.push(
+                    LATE,
+                    Work::Meta {
+                        thread,
+                        history: None,
+                        body: None,
+                    },
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(account = account.0, error = %e, "couldn't read the threads owed a read");
+        }
+    }
 }
 
 /// Inbox, newest first: metadata, then bodies. Unchanged threads are

@@ -131,6 +131,7 @@ async fn reconcile_cached(
             tracing::warn!(account = account.0, error = %e, "couldn't read the cached threads");
             Vec::new()
         });
+    let mut owed = Vec::new();
     for thread in cached {
         match listed.get(&thread.gmail_id) {
             None if thread.rev <= started => {
@@ -161,6 +162,7 @@ async fn reconcile_cached(
                 }
             }
             Some(history) if thread.history_id != *history => {
+                owed.push(thread.id);
                 ctx.queue.push(
                     LATE,
                     Work::Meta {
@@ -172,6 +174,17 @@ async fn reconcile_cached(
             }
             _ => {}
         }
+    }
+    // Recorded before the cursor moves on: a quit before these reads land
+    // leaves them owed, and the next launch reads them (see `queue_owed`).
+    let marked = ctx
+        .writer()
+        .call(WritePriority::Sync, move |tx, _| {
+            tx.threads().clear_history_ids(&owed)
+        })
+        .await;
+    if let Err(e) = marked {
+        tracing::warn!(account = account.0, error = %e, "couldn't mark the threads a resync owes a read");
     }
     Ok(())
 }

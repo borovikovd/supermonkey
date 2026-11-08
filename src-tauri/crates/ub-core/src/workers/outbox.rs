@@ -292,7 +292,7 @@ async fn settle(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
 
 /// The message a send that resolved as sent with no message id in hand
 /// became: the one its draft was last written as, which Gmail keeps as it
-/// sends, else the newest this account sent on the thread no earlier than
+/// sends, else the first this account sent on the thread no earlier than
 /// the send's time. Never an older message of the thread, which an undo
 /// would trash.
 async fn sent_message(
@@ -320,10 +320,12 @@ async fn sent_message(
     if let Some(m) = sent.iter().find(|m| Some(&m.id) == written) {
         return Ok(Some(m.id.clone()));
     }
+    // The first sent since: this send went out before any later reply,
+    // say one sent from a phone meanwhile.
     sent.retain(|m| m.internal_date.is_some_and(|d| d >= since));
     Ok(sent
         .into_iter()
-        .max_by_key(|m| m.internal_date)
+        .min_by_key(|m| m.internal_date)
         .map(|m| m.id))
 }
 
