@@ -1,6 +1,6 @@
 [package]
 name = "supermonkey"
-version = "0.6.1"
+version = "0.7.0"
 description = "A keyboard-first Gmail client for macOS"
 edition.workspace = true
 rust-version.workspace = true
