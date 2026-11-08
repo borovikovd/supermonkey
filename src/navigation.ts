@@ -4,6 +4,7 @@
 // conversation marks it read once loaded, and the highlight moves on when its
 // row leaves the list.
 
+import { fixedTargets } from "./acting";
 import { closeComposerOnScreen } from "./compose/session";
 import { act } from "./ipc/bridge";
 import type { View } from "./ipc/types";
@@ -331,7 +332,11 @@ export function openNotification(account: number, thread: number | null) {
 
 // ------------------------------------------------------------ overlays
 
-export const openPalette = (mode: PaletteMode) => chrome().openPalette(mode);
+/** A palette opened by a palette's command is bound to what the first one opened on. */
+export const openPalette = (mode: PaletteMode) => {
+  const bound = fixedTargets();
+  chrome().openPalette(bound && mode.threads === undefined ? { ...mode, threads: bound } : mode);
+};
 
 export const closePalette = () => chrome().closePalette();
 

@@ -185,11 +185,17 @@ async fn recover_create(
         .await?
         .and_then(|d| lifecycle::gmail_draft(&d).cloned())
     {
-        let found = ctx
+        match ctx
             .gmail
             .get_draft(Priority::P1, &stored, Format::Metadata)
-            .await?;
-        return Ok(Some(found));
+            .await
+        {
+            Ok(found) => return Ok(Some(found)),
+            // A stored id Gmail no longer has (deleted elsewhere before this
+            // create): the copies are looked for as with no id.
+            Err(e) if *e.outcome() == Outcome::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
     }
     let mut found = copies_of(ctx, local).await?.into_iter();
     let keep = found.next();
@@ -227,7 +233,25 @@ pub(super) async fn copies_of(
         let read = match read {
             Ok(read) => read,
             Err(e) if *e.outcome() == Outcome::NotFound => continue,
-            Err(e) => return Err(e.into()),
+            // The account can't reach Gmail now: the scan runs again later.
+            Err(e)
+                if matches!(
+                    e.outcome(),
+                    Outcome::Offline
+                        | Outcome::InvalidGrant
+                        | Outcome::Unauthorized
+                        | Outcome::RateLimited { .. }
+                ) =>
+            {
+                return Err(e.into());
+            }
+            // One draft Gmail fails to read must not hold up the account's
+            // queue: it is skipped. A copy missed this way is an extra copy,
+            // which sync deletes.
+            Err(e) => {
+                tracing::warn!(account = account.0, outcome = %e.outcome(), "couldn't read a Gmail draft while looking for copies; skipping it");
+                continue;
+            }
         };
         if parse(&read.message).headers.draft_id.as_ref() == Some(local) {
             ours.push(read);

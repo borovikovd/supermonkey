@@ -110,6 +110,7 @@ pub(crate) fn undo_send(
             }
             tx.outbox().delete(outbox)?;
             tx.drafts().delete(&row.draft)?;
+            state.draft_gone(account, row.draft.clone());
             state.effect(Effect::DraftFilesGone(row.draft));
         }
     }
@@ -179,6 +180,7 @@ pub(crate) fn finish(
         tx.undo().delete_for_outbox(outbox)?;
         tx.outbox().delete(outbox)?;
         tx.drafts().delete(&draft)?;
+        state.draft_gone(account, draft.clone());
         state.effect(Effect::DraftFilesGone(draft));
     }
     Ok(())

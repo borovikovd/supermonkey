@@ -2,6 +2,7 @@ import { Command } from "cmdk";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { stillShown, withFixedTargets } from "../acting";
 import { applyLabel, block, snooze, spam, targets, unsubscribe } from "../commands";
 import { formatAddr } from "../compose/RecipientField";
 import { mountedComposer } from "../compose/session";
@@ -60,9 +61,18 @@ function useCommands(mode: PaletteMode, query: string): Commands {
     BlockedSenders | { kind: "error"; message: string } | null
   >(null);
   // What the palette acts on, read once when it opens: keys go to the palette
-  // while it is open, so the selection cannot move under it.
+  // while it is open, so the selection cannot move under it. Opened from a
+  // palette, it is bound to what that one opened on; opened by a toast about
+  // one conversation, to that conversation, on its own account.
   const [opened] = useState(() => {
-    const threads = targets();
+    const threads =
+      mode.kind === "block" && mode.of
+        ? mode.of.account === useChrome.getState().account
+          ? [mode.of.thread]
+          : []
+        : mode.threads
+          ? stillShown(mode.threads)
+          : targets();
     return { threads, rows: threads.map((id) => rowOf(String(id))), ctx: context() };
   });
 
@@ -97,7 +107,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           id: cmd.id,
           label: labelOf(cmd, opened.ctx),
           keys: keyChips(cmd),
-          run: () => runFromPalette(cmd),
+          run: () => withFixedTargets(opened.threads, () => runFromPalette(cmd)),
         })),
         placeholder: composing ? "Draft actions" : "Type a command",
       };

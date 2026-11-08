@@ -15,6 +15,7 @@ import {
 } from "./ipc/bridge";
 import type { ModifyAction, ModifyKind } from "./ipc/types";
 import { moveOn, openPalette } from "./navigation";
+import { fixedTargets, stillShown } from "./acting";
 import { useChrome } from "./store/chrome";
 import { currentView, rowOf, visibleIds } from "./store/current";
 import { accountSummary, undoTarget, viewLabel } from "./store/mirror-core";
@@ -27,6 +28,8 @@ import { reportSignIn } from "./ui/signIn";
  * poll took away is never acted on.
  */
 export function targets(): number[] {
+  const bound = fixedTargets();
+  if (bound) return stillShown(bound);
   const c = useChrome.getState();
   const cur = c.current();
   if (!cur) return [];
@@ -39,20 +42,6 @@ export function targets(): number[] {
     return Number.isNaN(n) ? [] : [n];
   }
   return [];
-}
-
-/**
- * Of threads fixed when the user acted (a palette's, read as it opened), the
- * ones still on screen: a row that left meanwhile is not acted on, and the
- * action never falls to the row the highlight moved to.
- */
-function stillShown(threads: number[]): number[] {
-  const cur = useChrome.getState().current();
-  if (!cur) return [];
-  const { screen } = cur;
-  if (screen.kind === "conversation") return threads.filter((t) => t === screen.thread);
-  const shown = new Set(visibleIds());
-  return threads.filter((t) => shown.has(String(t)));
 }
 
 /**
@@ -245,7 +234,10 @@ export async function unsubscribe(then: UnsubscribeThen, fixed?: number[]) {
     const r = await unsubscribeFrom(account, thread);
     if (r.kind === "noLink") {
       toast("No unsubscribe link in this email", {
-        action: { label: "Block sender", onClick: () => openPalette({ kind: "block" }) },
+        action: {
+          label: "Block sender",
+          onClick: () => openPalette({ kind: "block", of: { account, thread } }),
+        },
       });
     } else if (r.kind === "openedPage") toast(`Opened the unsubscribe page of ${r.sender}`);
     else toast(`Unsubscribed from ${r.sender}`);

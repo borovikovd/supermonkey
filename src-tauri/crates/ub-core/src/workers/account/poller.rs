@@ -15,7 +15,7 @@ use super::history::HistoryBatch;
 use super::ingest::{Polled, apply_history};
 use super::profile::{refresh_labels, refresh_send_as};
 use super::queue::{
-    BACKFILL, INBOX_BODIES, INBOX_META, LATE, Listing, OTHER_META, POLL_BODIES, Work,
+    BACKFILL, INBOX_BODIES, INBOX_META, LATE, Listing, OTHER_META, POLL_BODIES, POLL_META, Work,
 };
 use super::read::read_thread;
 use super::resync::full_resync;
@@ -271,6 +271,7 @@ async fn poll(ctx: &AccountCtx, drafts_due: &mut bool) -> Result<(), GmailError>
     }
     let now = ctx.clock().now();
     let notifier = Arc::clone(&ctx.deps.notifier);
+    let kept = deferred.clone();
     let applied = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
@@ -278,6 +279,7 @@ async fn poll(ctx: &AccountCtx, drafts_due: &mut bool) -> Result<(), GmailError>
                 account,
                 batch: &batch,
                 read,
+                deferred: &kept,
                 cursor: latest,
                 now,
                 ticket: &ticket,
@@ -304,7 +306,7 @@ fn queue_after_poll(ctx: &AccountCtx, read: BTreeSet<GmailThreadId>, deferred: &
     }
     for thread in deferred.iter().cloned() {
         ctx.queue.push(
-            INBOX_META,
+            POLL_META,
             Work::Meta {
                 thread,
                 history: None,

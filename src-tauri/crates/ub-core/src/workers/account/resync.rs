@@ -4,10 +4,10 @@
 use std::collections::HashMap;
 
 use ub_domain::{GmailThreadId, Rev, SystemLabel};
-use ub_gmail::{Format, GmailError, HistoryId, Outcome, PageToken, Priority, ThreadQuery};
+use ub_gmail::{Backoff, Format, GmailError, HistoryId, Outcome, PageToken, Priority, ThreadQuery};
 use ub_store::{Priority as WritePriority, ThreadSyncState};
 
-use super::ctx::AccountCtx;
+use super::ctx::{AccountCtx, OFFLINE_RETRY};
 use super::ingest::drop_thread;
 use super::poller::{queue_starred_and_sent, store_cursor};
 use super::queue::{INBOX_BODIES, INBOX_META, LATE, Work};
@@ -15,6 +15,33 @@ use crate::workers::drafts::{Occasion, reconcile};
 
 /// Threads per resync `threads.list` page: about 10 units per 500 threads.
 const RESYNC_PAGE: u32 = 500;
+
+/// A resync step's Gmail call, retried as background reads are: a
+/// transient outcome or no connection waits and calls again, so one error
+/// does not start the whole resync over. Any other outcome stops the resync,
+/// which runs again from the start at the next poll.
+async fn step<T, F, Fut>(ctx: &AccountCtx, mut call: F) -> Result<T, GmailError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, GmailError>>,
+{
+    let mut backoff = Backoff::new();
+    loop {
+        match call().await {
+            Ok(value) => return Ok(value),
+            Err(e) if *e.outcome() == Outcome::Offline => {
+                ctx.health.failed(&e);
+                ctx.deps.network.wait(ctx.clock(), OFFLINE_RETRY).await;
+            }
+            Err(e) if e.is_transient() => {
+                ctx.health.failed(&e);
+                let wait = backoff.next_delay(&e);
+                ctx.deps.network.wait(ctx.clock(), wait).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
 
 /// Runs the full resync. It notifies nothing.
 pub(crate) async fn full_resync(ctx: &AccountCtx) -> Result<(), GmailError> {
@@ -24,7 +51,7 @@ pub(crate) async fn full_resync(ctx: &AccountCtx) -> Result<(), GmailError> {
     );
     // 1. A fresh cursor, stored once the resync is done: one cut short by an
     // error or a quit leaves the old cursor, so the next poll runs it again.
-    let profile = ctx.gmail.get_profile(Priority::P3).await?;
+    let profile = step(ctx, || ctx.gmail.get_profile(Priority::P3)).await?;
     let started = ctx.read(|r| r.meta().rev()).await.unwrap_or_else(|e| {
         tracing::warn!(error = %e, "couldn't read the rev; keeping every cached thread");
         Rev(0)
@@ -42,7 +69,7 @@ pub(crate) async fn full_resync(ctx: &AccountCtx) -> Result<(), GmailError> {
                 include_spam_trash: true,
                 ..ThreadQuery::default()
             };
-            let threads = ctx.gmail.list_threads(Priority::P4, &query).await?;
+            let threads = step(ctx, || ctx.gmail.list_threads(Priority::P4, &query)).await?;
             for thread in threads.threads {
                 if label.is_some() && !listed.contains_key(&thread.id) {
                     ctx.queue.push(
@@ -67,7 +94,7 @@ pub(crate) async fn full_resync(ctx: &AccountCtx) -> Result<(), GmailError> {
     // Of the threads not cached, those the connect sync would read.
     queue_starred_and_sent(ctx);
     // 5. Drafts.
-    reconcile(ctx, Occasion::Sync).await?;
+    step(ctx, || reconcile(ctx, Occasion::Sync)).await?;
     // 6. The snooze rule runs as each thread is stored.
     store_cursor(ctx, profile.history_id).await;
     Ok(())
@@ -93,10 +120,11 @@ async fn reconcile_cached(
     for thread in cached {
         match listed.get(&thread.gmail_id) {
             None if thread.rev <= started => {
-                let check = ctx
-                    .gmail
-                    .get_thread(Priority::P4, &thread.gmail_id, Format::Minimal, &[])
-                    .await;
+                let check = step(ctx, || {
+                    ctx.gmail
+                        .get_thread(Priority::P4, &thread.gmail_id, Format::Minimal, &[])
+                })
+                .await;
                 match check {
                     Ok(_) => {}
                     Err(e) if *e.outcome() == Outcome::NotFound => {
@@ -111,7 +139,11 @@ async fn reconcile_cached(
                             tracing::warn!(account = account.0, error = %e, "couldn't drop a thread Gmail no longer has");
                         }
                     }
-                    Err(e) => return Err(e),
+                    Err(e) if *e.outcome() == Outcome::InvalidGrant => return Err(e),
+                    // Gmail refuses to say: the thread stays as it is.
+                    Err(e) => {
+                        tracing::info!(account = account.0, outcome = %e.outcome(), "couldn't check a cached thread in the resync; keeping it");
+                    }
                 }
             }
             Some(history) if thread.history_id != *history => {

@@ -2,6 +2,7 @@
 // `c`, `r`, `Enter`, `f`, a draft from Drafts or a thread, and a draft that
 // comes back after an undone or refused send.
 
+import { fixedTargets, stillShown } from "../acting";
 import { openConversation, switchAccount } from "../navigation";
 import { act } from "../ipc/bridge";
 import type { ConversationData, DraftKind } from "../ipc/types";
@@ -153,12 +154,15 @@ export function startReply(mode: ReplyMode, draftId?: string) {
 
   let fromList = false;
   if (cur.screen.kind === "list") {
-    if (cur.highlight === null) return;
     if (cur.where.kind === "view" && cur.where.view.kind === "drafts") {
-      resumeDraftById(cur.highlight);
+      if (cur.highlight !== null) resumeDraftById(cur.highlight);
       return;
     }
-    const thread = Number(cur.highlight);
+    // From a palette: the row it opened on, if still shown.
+    const bound = fixedTargets();
+    const row = bound ? (stillShown(bound).map(String)[0] ?? null) : cur.highlight;
+    if (row === null) return;
+    const thread = Number(row);
     if (Number.isNaN(thread)) return;
     // `r` and `f` on the list open the conversation first and aim at its latest message.
     openConversation(thread);

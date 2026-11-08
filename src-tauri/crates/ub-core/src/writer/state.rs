@@ -1,8 +1,9 @@
 //! The core's state on the writer thread: the `S` of `ub_store::Writer<S>`.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use ub_domain::{ActionNo, Millis};
+use ub_domain::{AccountId, ActionNo, DraftId, Millis};
 use ub_ipc::{ChannelMessage, Rejection};
 
 use crate::actions::NOT_SAVED;
@@ -43,6 +44,12 @@ pub(crate) struct WriterState {
     /// Refusals the page has not heard of: they go with the next channel
     /// message, which is never later than the first whose `ack` covers them.
     rejected: Vec<Rejection>,
+    /// Local drafts discarded or sent this run, by account: a Gmail copy
+    /// that names one is a stray, never a draft to bring back. Kept on the
+    /// writer thread, so a reconcile job after the discard's commit sees it.
+    /// An account removed and added again gets a new id, so its own drafts
+    /// are still read back.
+    gone_drafts: HashSet<(AccountId, DraftId)>,
     /// Tests: the next action batch's commit fails.
     #[cfg(test)]
     pub(crate) fail_next_commit: bool,
@@ -75,6 +82,7 @@ impl WriterState {
             sent_ack: ActionNo(0),
             batch: Vec::new(),
             rejected: Vec::new(),
+            gone_drafts: HashSet::new(),
             #[cfg(test)]
             fail_next_commit: false,
         }
@@ -100,6 +108,18 @@ impl WriterState {
             effect: self.activity.track("effect", effect),
             survives_rollback,
         });
+    }
+
+    /// The local draft was discarded or sent. Kept even if the job rolls
+    /// back: it is read only for a draft no longer stored, so a stale entry
+    /// changes nothing.
+    pub(crate) fn draft_gone(&mut self, account: AccountId, draft: DraftId) {
+        self.gone_drafts.insert((account, draft));
+    }
+
+    /// Whether the local draft was discarded or sent this run.
+    pub(crate) fn is_draft_gone(&self, account: AccountId, draft: &DraftId) -> bool {
+        self.gone_drafts.contains(&(account, draft.clone()))
     }
 
     /// Where the effects recorded so far end, for [`WriterState::drop_effects_from`].

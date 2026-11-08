@@ -12,10 +12,10 @@ use parking_lot::Mutex;
 use tokio::sync::{mpsc, watch};
 use ub_domain::{AccountId, DraftId, ThreadId};
 use ub_gmail::{Gmail, HttpClient, RefreshToken, Scheduler, TokenStore, Tokens};
-use ub_store::Priority;
+use ub_store::{AccountRecord, Priority};
 
 use super::account::{AccountWorker, SignOutSender, WorkerDeps, WorkerId, WorkerParts};
-use super::files::{attachments_dir, draft_dir};
+use super::files::{ATTACHMENTS_DIR, attachments_dir, draft_dir};
 use super::grants::{Grant, Grants};
 use super::ops::OpsLane;
 use crate::activity::{Tasks, Tracked, parked};
@@ -183,6 +183,7 @@ impl AccountWorkers {
                     return;
                 }
             };
+            workers.sweep(&accounts).await;
             for record in accounts.into_iter().filter(|a| !a.needs_signin) {
                 let grant = workers.live.grants.current(record.id);
                 if let Err(e) = workers.start_stored(record.id, &record.email, grant).await {
@@ -190,6 +191,46 @@ impl AccountWorkers {
                 }
             }
         });
+    }
+
+    /// At launch: what a removal left when a quit or crash cut it off before
+    /// its clean-up, a refresh token or an attachments folder of an account
+    /// no longer stored, is deleted (SPEC Accounts).
+    async fn sweep(&self, accounts: &[AccountRecord]) {
+        let emails: HashSet<String> = accounts.iter().map(|a| a.email.clone()).collect();
+        let ids: HashSet<String> = accounts.iter().map(|a| a.id.0.to_string()).collect();
+        let tokens = Arc::clone(&self.tokens);
+        let dir = self.deps.data_dir.join(ATTACHMENTS_DIR);
+        let swept = tokio::task::spawn_blocking(move || {
+            match tokens.entries() {
+                Ok(entries) => {
+                    for (email, _) in entries.iter().filter(|(e, _)| !emails.contains(e)) {
+                        if let Err(e) = tokens.delete(email) {
+                            tracing::warn!(error = %e, "couldn't delete a removed account's token");
+                        } else {
+                            tracing::info!("deleted the token of an account removed before a quit");
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!(error = %e, "couldn't read the stored tokens"),
+            }
+            let Ok(folders) = std::fs::read_dir(&dir) else {
+                return;
+            };
+            for folder in folders.flatten() {
+                let is_dir = folder.file_type().is_ok_and(|t| t.is_dir());
+                if !is_dir || ids.contains(&folder.file_name().to_string_lossy().into_owned()) {
+                    continue;
+                }
+                if let Err(e) = std::fs::remove_dir_all(folder.path()) {
+                    tracing::warn!(error = %e, "couldn't delete a removed account's files");
+                }
+            }
+        })
+        .await;
+        if let Err(e) = swept {
+            tracing::warn!(error = %e, "the launch clean-up failed");
+        }
     }
 
     /// An account was added or signed in again with the refresh token in

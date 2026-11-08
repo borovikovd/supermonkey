@@ -215,6 +215,14 @@ pub(crate) fn apply_gmail_draft(
         return Ok(());
     }
     let existing = local_for(reads, account, &gmail.id, header.as_ref())?;
+    // A copy of a draft discarded or sent this run, read before its delete
+    // landed or missed by it: deleted, never brought back.
+    if existing.is_none()
+        && let Some(local) = &header
+        && state.is_draft_gone(account, local)
+    {
+        return delete_gmail_draft(tx, state, account, &gmail.id, now);
+    }
     if let Some(record) = &existing {
         let local = &record.draft;
         if record.in_outbox || reconcile.moved(&local.id, record.rev) {

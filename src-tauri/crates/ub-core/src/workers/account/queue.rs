@@ -21,6 +21,12 @@ pub(crate) struct Slot {
     rank: u8,
 }
 
+/// The metadata of a thread a poll reported but could not read: priority 3,
+/// as the poll's own reads (SPEC Sync).
+pub(crate) const POLL_META: Slot = Slot {
+    priority: Priority::P3,
+    rank: 0,
+};
 /// Bodies of new messages from a poll or a full resync.
 pub(crate) const POLL_BODIES: Slot = Slot {
     priority: Priority::P4,

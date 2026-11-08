@@ -99,23 +99,37 @@ fn until(ctx: &AccountCtx, due: Millis) -> Duration {
 }
 
 /// One look at the outbox: settles each sending row and sends each due
-/// waiting one, oldest first. Returns when the next waiting row is due.
+/// waiting one, oldest first. Returns when the next waiting row is due. A
+/// row that fails does not hold up the rows after it: the pass goes on and
+/// reports the first failure at the end, unless the account signed out.
 async fn pass(ctx: &AccountCtx) -> Result<Option<Millis>, Failure> {
     let account = ctx.account;
     let rows = ctx.read(move |r| r.outbox().unsent(account)).await?;
     let now = ctx.clock().now();
     let mut next_due: Option<Millis> = None;
+    let mut failed: Option<Failure> = None;
     for record in rows {
         let row = record.outbox;
-        if row.state == OutboxState::Sending {
-            settle(ctx, &row).await?;
+        let done = if row.state == OutboxState::Sending {
+            settle(ctx, &row).await
         } else if row.send_after <= now {
-            send(ctx, &row).await?;
+            send(ctx, &row).await
         } else {
             next_due = Some(next_due.map_or(row.send_after, |d| d.min(row.send_after)));
+            Ok(())
+        };
+        match done {
+            Err(Failure::Gmail(e)) if *e.outcome() == Outcome::InvalidGrant => {
+                return Err(Failure::Gmail(e));
+            }
+            Err(e) => {
+                tracing::info!(account = account.0, outbox = %row.id, error = ?e, "a send couldn't go on; trying the next");
+                failed.get_or_insert(e);
+            }
+            Ok(()) => {}
         }
     }
-    Ok(next_due)
+    failed.map_or(Ok(next_due), Err)
 }
 
 /// Writes a step of the row's state machine. Returns whether it applied:
@@ -286,10 +300,16 @@ async fn sent_message(
     written: Option<&GmailMessageId>,
     since: Millis,
 ) -> Result<Option<GmailMessageId>, Failure> {
-    let read = ctx
+    let read = match ctx
         .gmail
         .get_thread(Priority::P1, thread, Format::Minimal, &[])
-        .await?;
+        .await
+    {
+        Ok(read) => read,
+        // The thread went with the draft, deleted elsewhere: nothing was sent on it.
+        Err(e) if *e.outcome() == Outcome::NotFound => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
     let sent = SystemLabel::Sent.label_id();
     let mut sent = read
         .messages

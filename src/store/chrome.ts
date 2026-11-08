@@ -16,18 +16,23 @@ export type Screen =
   | { kind: "list" }
   | { kind: "conversation"; thread: number; trashMode: boolean };
 
-export type PaletteMode =
+export type PaletteMode = (
   | { kind: "commands" }
   | { kind: "labels" }
   | { kind: "goLabel" }
   | { kind: "snooze" }
   | { kind: "unsubscribe" }
-  | { kind: "block" }
+  /** `of`: the conversation to block the sender of, named by a toast about it. */
+  | { kind: "block"; of?: { account: number; thread: number } }
   | { kind: "spam" }
   | { kind: "blocked" }
   | { kind: "switchAccount" }
   | { kind: "addToSplit"; preset?: "important" | "other" }
-  | { kind: "from" };
+  | { kind: "from" }
+) & {
+  /** The threads a palette opened from another palette is bound to: the first one's. */
+  threads?: number[];
+};
 
 export type Sheet = "shortcuts" | "settings" | "splits" | null;
 

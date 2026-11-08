@@ -136,6 +136,10 @@ pub(crate) struct Polled<'a> {
     /// The threads read for messages the app did not know; `None` when the
     /// thread is gone.
     pub(crate) read: Vec<(GmailThreadId, Option<ReadThread>)>,
+    /// Threads with messages the app did not know whose read failed: left
+    /// to the fetch queue, they keep their stored history, so nothing takes
+    /// them for current before that read lands.
+    pub(crate) deferred: &'a [GmailThreadId],
     /// Where the account's history cursor moves.
     pub(crate) cursor: HistoryId,
     pub(crate) now: Millis,
@@ -161,6 +165,7 @@ pub(crate) fn apply_history(
         account,
         batch,
         read,
+        deferred,
         cursor,
         now,
         ticket,
@@ -213,7 +218,7 @@ pub(crate) fn apply_history(
         }
     }
     tx.messages().set_labels(&changed)?;
-    for (thread, newest) in &batch.newest {
+    for (thread, newest) in batch.newest.iter().filter(|(t, _)| !deferred.contains(t)) {
         let Some(id) = tx.read().threads().by_gmail_id(account, thread)? else {
             continue;
         };

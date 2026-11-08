@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { act, signInAgain } from "../ipc/bridge";
@@ -188,6 +188,13 @@ function Splits() {
   const [saving, setSaving] = useState(false);
   // New splits get negative ids until saved.
   const nextNewId = useRef(-1);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   if (!summary || account === null) return null;
   const rows = edited ?? summary.splits;
   const update = (i: number, patch: Partial<SplitInfo>) => {
@@ -205,6 +212,12 @@ function Splits() {
     if (saving) return;
     setSaving(true);
     act({ type: "saveSplits", account, splits: rows, deleted }, ({ refusal }) => {
+      // This sheet closed while the save was on its way: its answer must not
+      // close or mark a sheet opened since. A refusal still says why.
+      if (!alive.current) {
+        if (refusal !== null) toast.error(refusal.message);
+        return;
+      }
       setSaving(false);
       if (refusal === null) {
         if (useChrome.getState().sheet === "splits") closeSheet();

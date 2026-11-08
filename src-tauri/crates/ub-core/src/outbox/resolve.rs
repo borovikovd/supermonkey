@@ -6,6 +6,7 @@ use ub_store::{NewNotice, StoreError, WriteTx};
 use super::machine::{Event, Step, step};
 use super::queue::{finish, trash_sent};
 use crate::drafts::lifecycle;
+use crate::drafts::queue_upsert;
 use crate::writer::WriterState;
 
 /// Applies what the outbox runner saw (`event`) to send `outbox`, and
@@ -53,6 +54,9 @@ pub(crate) fn resolve(
                     let mut draft = draft.draft;
                     lifecycle::keep(&mut draft);
                     tx.drafts().put(&draft)?;
+                    // Gmail may never have got it: a send made before any
+                    // autosave, cut short before its write.
+                    queue_upsert(tx, state, account, &draft.id, now)?;
                     draft.thread
                 }
                 None => None,
