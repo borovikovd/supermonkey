@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.7.0](https://github.com/borovikovd/ubermensch/compare/v0.6.1...v0.7.0) (2026-11-08)
+
+
+### ⚠ BREAKING CHANGES
+
+* the new bundle id gives the app a new data folder, so it starts fresh: accounts are added again and mail syncs back. The old folder is left as it was. Drafts written before the rename carry the old header and are treated as drafts from elsewhere.
+
+### Features
+
+* rename the app to Supermonkey ([26c3e09](https://github.com/borovikovd/ubermensch/commit/26c3e098c96aab6f2363770b2ef56884666cd23d))
+
+
+### Bug Fixes
+
+* **accounts:** a sign-in replaced by another no longer shows "Sign-in cancelled" ([685cd28](https://github.com/borovikovd/ubermensch/commit/685cd28762c7808290a86a6370bd6060d07829f1))
+* close nine races a concurrency review found ([507f5a8](https://github.com/borovikovd/ubermensch/commit/507f5a8308c9234e8d3452fb73bd089024c89ecb))
+* close seven more races from a third concurrency review ([6dcdc7a](https://github.com/borovikovd/ubermensch/commit/6dcdc7abcc5bb0d4de87b00388867667a6cec1e4))
+* close six more races from a fourth concurrency review ([3505656](https://github.com/borovikovd/ubermensch/commit/35056566aaef7d42e4b4ddfab692a736792d0c82))
+* close twelve more races from a second concurrency review ([05a7a0a](https://github.com/borovikovd/ubermensch/commit/05a7a0a1081ba31afe2f1d9a030213be1c645d4c))
+* **drafts:** a new message deleted in Gmail while open reaches Gmail again ([ae80b35](https://github.com/borovikovd/ubermensch/commit/ae80b3526dc4a13e4a99e58612e88fd9a9c4cbea))
+* **drafts:** a reply discarded while its quote downloads is never written to Gmail ([2ebc676](https://github.com/borovikovd/ubermensch/commit/2ebc676b05c2fdb53ea345e38e2e29ba68d540ec))
+* **drafts:** removing an account while a send waits for a file no longer switches back to it ([5d160da](https://github.com/borovikovd/ubermensch/commit/5d160da8b1543234733016e658b4794a8371805e))
+* **reading:** a message opening as it downloads grows into its body without shrinking first ([70fde5e](https://github.com/borovikovd/ubermensch/commit/70fde5e1af9d50ec9f4697eb29ea2f9da0ac22fb))
+* **search:** Enter on the sign-in screen signs in with a search left open ([56a3f8e](https://github.com/borovikovd/ubermensch/commit/56a3f8e741e46d939cef769a530a104349cf1997))
+* **send:** Undo answers at once when the account signs out as the send goes out ([a66ba5c](https://github.com/borovikovd/ubermensch/commit/a66ba5cddd58f250111a4c54aa027964ae0ba372))
+
 ## [0.6.1](https://github.com/borovikovd/ubermensch/compare/v0.6.0...v0.6.1) (2026-11-07)
 
 
