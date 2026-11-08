@@ -2,7 +2,7 @@
 // `c`, `r`, `Enter`, `f`, a draft from Drafts or a thread, and a draft that
 // comes back after an undone or refused send.
 
-import { fixedTargets, stillShown } from "../acting";
+import { fixedHighlight, fixedTargets, stillShown } from "../acting";
 import { openConversation, switchAccount } from "../navigation";
 import { act } from "../ipc/bridge";
 import type { ConversationData, DraftKind } from "../ipc/types";
@@ -118,8 +118,10 @@ function whenLoaded(thread: number, trashMode: boolean, run: (data: Conversation
     cancelAnimationFrame(frame);
     if (stopWaiting === stop) stopWaiting = null;
   };
-  const unsubChrome = useChrome.subscribe(() => {
-    if (onScreen()) return;
+  // Leaving the conversation, or opening a palette or sheet over it before
+  // it loads, drops the reply: it would open under them and take their keys.
+  const unsubChrome = useChrome.subscribe((s) => {
+    if (onScreen() && s.palette === null && s.sheet === null) return;
     stop();
     typedAhead = null;
   });
@@ -158,9 +160,12 @@ export function startReply(mode: ReplyMode, draftId?: string) {
       if (cur.highlight !== null) resumeDraftById(cur.highlight);
       return;
     }
-    // From a palette: the row it opened on, if still shown.
-    const bound = fixedTargets();
-    const row = bound ? (stillShown(bound).map(String)[0] ?? null) : cur.highlight;
+    // From a palette: the row highlighted when it opened, as `r` takes the
+    // highlighted row, if still shown.
+    const row =
+      fixedTargets() === null
+        ? cur.highlight
+        : (stillShown([Number(fixedHighlight())]).map(String)[0] ?? null);
     if (row === null) return;
     const thread = Number(row);
     if (Number.isNaN(thread)) return;
@@ -225,5 +230,10 @@ function resumeDraftById(draft: string) {
  */
 export function reopenDraft(account: number, draft: string, thread: number | null) {
   switchAccount(account);
+  // The user asked for it (Undo, Open draft): what was open over the screen
+  // closes, so the composer's keys are theirs.
+  const c = useChrome.getState();
+  c.closePalette();
+  c.closeSheet();
   resumeDraft(draft, thread, null);
 }

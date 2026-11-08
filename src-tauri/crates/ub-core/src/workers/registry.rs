@@ -153,6 +153,12 @@ impl AccountWorkers {
         });
     }
 
+    /// A draft whose files went is stored again (its account removed and
+    /// added back, and the draft read from Gmail): it takes files again.
+    pub(crate) fn draft_back(&self, draft: &DraftId) {
+        self.gone_drafts.lock().remove(draft);
+    }
+
     /// Whether the draft's files were deleted with it this run.
     pub(crate) fn draft_files_gone(&self, draft: &DraftId) -> bool {
         self.gone_drafts.lock().contains(draft)

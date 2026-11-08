@@ -17,6 +17,7 @@ import {
   subscribe,
 } from "../ipc/bridge";
 import type { Addr, DraftAttachment, DraftSave, DraftState, SubKey } from "../ipc/types";
+import { dom } from "../keyboard/refs";
 import { useChrome } from "../store/chrome";
 import { conversationData } from "../store/current";
 import { useMirror } from "../store/mirror";
@@ -110,6 +111,18 @@ export function mountedComposer(draft?: string): ComposerHandle | null {
 
 /** The user is typing in a composer: it is mounted and its editor is not blurred. */
 export const typingInComposer = () => mounted !== null && !composeBlurred();
+
+/**
+ * Whether the user is busy where a composer opening by itself would take
+ * the keys from them: a palette, a sheet, or the search field.
+ */
+export function inOverlay(): boolean {
+  const { palette, sheet } = useChrome.getState();
+  const search = dom.searchInput;
+  return (
+    palette !== null || sheet !== null || (search !== null && document.activeElement === search)
+  );
+}
 
 export const composerKey = (draft: string): SubKey => ({ type: "composer", draft });
 

@@ -73,7 +73,12 @@ function useCommands(mode: PaletteMode, query: string): Commands {
         : mode.threads
           ? stillShown(mode.threads)
           : targets();
-    return { threads, rows: threads.map((id) => rowOf(String(id))), ctx: context() };
+    return {
+      threads,
+      highlight: useChrome.getState().current()?.highlight ?? null,
+      rows: threads.map((id) => rowOf(String(id))),
+      ctx: context(),
+    };
   });
 
   useEffect(() => {
@@ -107,7 +112,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           id: cmd.id,
           label: labelOf(cmd, opened.ctx),
           keys: keyChips(cmd),
-          run: () => withFixedTargets(opened.threads, () => runFromPalette(cmd)),
+          run: () => withFixedTargets(opened.threads, opened.highlight, () => runFromPalette(cmd)),
         })),
         placeholder: composing ? "Draft actions" : "Type a command",
       };
@@ -133,20 +138,25 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           label: `Create label "${q}"`,
           run: () => {
             const id = `local-${crypto.randomUUID()}`;
+            // Made either way; applied only to what is still shown.
+            const threads = stillShown(opened.threads);
             act({
               type: "createLabel",
               account,
               id,
               name: q,
-              apply: {
-                account,
-                kind: "label",
-                threads: opened.threads,
-                add: [id],
-                remove: [],
-                snooze: null,
-                undoable: true,
-              },
+              apply:
+                threads.length === 0
+                  ? null
+                  : {
+                      account,
+                      kind: "label",
+                      threads,
+                      add: [id],
+                      remove: [],
+                      snooze: null,
+                      undoable: true,
+                    },
             });
           },
         });

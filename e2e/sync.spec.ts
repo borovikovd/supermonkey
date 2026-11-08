@@ -477,8 +477,10 @@ test("SYN-09 a connect sync retried after a failure misses no change made in bet
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app, { open: false });
-  // The connect sync lists Inbox, then fails at the drafts.
-  await gmail.fault("drafts.list", { kind: "status", status: 500 }, { account: A, times: 1 });
+  // The connect sync lists Inbox, then fails at the drafts: rate-limited, the
+  // account can't reach Gmail, so the connect sync is tried again. (A draft
+  // Gmail fails to read only defers the drafts to the first poll.)
+  await gmail.fault("drafts.list", { kind: "status", status: 429 }, { account: A, times: 1 });
   await app.open();
   await expect(app.row("Person 1")).toHaveCount(1);
 

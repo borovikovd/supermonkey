@@ -6,16 +6,17 @@
 import { useChrome } from "./store/chrome";
 import { visibleIds } from "./store/current";
 
-/** The threads the running palette command is bound to, if one runs. */
-let fixed: number[] | null = null;
+/** What the running palette command is bound to, if one runs. */
+let fixed: { threads: number[]; highlight: string | null } | null = null;
 
 /**
- * Runs `run` bound to `threads`, fixed when the palette opened: `targets()`
- * gives those still shown, and a palette it opens takes them too.
+ * Runs `run` bound to `threads` and the `highlight`ed row, fixed when the
+ * palette opened: `targets()` gives those threads still shown, a reply takes
+ * that row, and a palette it opens takes the threads too.
  */
-export function withFixedTargets<T>(threads: number[], run: () => T): T {
+export function withFixedTargets<T>(threads: number[], highlight: string | null, run: () => T): T {
   const before = fixed;
-  fixed = threads;
+  fixed = { threads, highlight };
   try {
     return run();
   } finally {
@@ -24,7 +25,10 @@ export function withFixedTargets<T>(threads: number[], run: () => T): T {
 }
 
 /** The threads the running palette command is bound to, or `null`. */
-export const fixedTargets = (): number[] | null => fixed;
+export const fixedTargets = (): number[] | null => fixed?.threads ?? null;
+
+/** The row highlighted when the running palette command's palette opened. */
+export const fixedHighlight = (): string | null => fixed?.highlight ?? null;
 
 /**
  * Of threads fixed when the user acted, the ones still on screen: a row that

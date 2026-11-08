@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { act } from "../ipc/bridge";
 import type { Notice, OutboxRow } from "../ipc/types";
 import { accountSummary } from "../store/mirror-core";
-import { typingInComposer } from "./session";
+import { inOverlay, typingInComposer } from "./session";
 import { reopenDraft } from "./start";
 
 /**
@@ -35,8 +35,9 @@ export const isSendNotice = (n: Notice) => n.kind === "sendFailed" || n.kind ===
 /**
  * A send that did not go out: refused by Rust or Gmail (`failed` says why),
  * or a held undo that resolved as not sent. Its draft goes back in a
- * composer, unless the user is typing in one: then it stays put, and a toast
- * offers it until acted on or closed, since it is otherwise only in Drafts.
+ * composer, unless the user is typing in one, or in a palette, a sheet, or
+ * the search field: then it stays put, and a toast offers it until acted on
+ * or closed, since it is otherwise only in Drafts.
  */
 export function notSent(
   account: number,
@@ -45,7 +46,7 @@ export function notSent(
   failed: string | null,
 ) {
   if (failed !== null) toast.error(failed);
-  if (!typingInComposer()) {
+  if (!typingInComposer() && !inOverlay()) {
     reopenDraft(account, draft, thread);
     return;
   }

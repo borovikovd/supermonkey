@@ -80,6 +80,7 @@ impl Router {
                 }
             }
             Effect::DraftFilesGone(draft) => self.workers.delete_draft_files(&draft),
+            Effect::DraftBack(draft) => self.workers.draft_back(&draft),
             Effect::Notify(notification) => self.notifier.show(notification),
             Effect::Snoozes => self.snoozes.kick(),
         }

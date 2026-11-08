@@ -45,6 +45,9 @@ pub enum Effect {
     },
     /// A draft's row is gone: delete its attachment files.
     DraftFilesGone(DraftId),
+    /// A draft's row is back under an id gone before, read from Gmail for a
+    /// re-added account: files can be added to it again.
+    DraftBack(DraftId),
     /// A composer closed without edits on a draft whose Gmail change was
     /// skipped while it was open: read that change now (SPEC Drafts).
     ReadDraft {
@@ -88,6 +91,7 @@ impl Effect {
             Self::CancelSub(_) => "cancel sub",
             Self::DraftParts { .. } => "draft parts",
             Self::DraftFilesGone(_) => "draft files gone",
+            Self::DraftBack(_) => "draft back",
             Self::ReadDraft { .. } => "read draft",
             Self::Outbox(_) => "outbox",
             Self::RefreshLabels(_) => "refresh labels",

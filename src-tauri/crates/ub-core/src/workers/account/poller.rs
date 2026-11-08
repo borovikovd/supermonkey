@@ -21,7 +21,7 @@ use super::read::read_thread;
 use super::resync::full_resync;
 use crate::Error;
 use crate::read::read;
-use crate::workers::drafts::{Occasion, reconcile};
+use crate::workers::drafts::{Occasion, reconcile, stops_the_account};
 use crate::workers::snooze;
 use ub_domain::AccountId;
 use ub_store::ReadPool;
@@ -36,10 +36,14 @@ const WOKE_AFTER: Duration = Duration::from_secs(3 * 45);
 /// The account's sync loop: the connect sync if it never finished, else a
 /// resume; then a poll at once and on every interval, kick, and focus.
 pub(crate) async fn run(ctx: Arc<AccountCtx>) {
+    // A draft reconcile a sync or poll asked for that failed: the next poll
+    // runs it, as that sync or poll would have, since its history no longer
+    // says drafts changed.
+    let mut drafts_due: Option<Occasion> = None;
     match is_connected(&ctx.deps.pool, ctx.account).await {
         Ok(true) => queue_inbox(&ctx),
         Ok(false) => loop {
-            match connect(&ctx).await {
+            match connect(&ctx, &mut drafts_due).await {
                 Ok(()) => break,
                 Err(e) if *e.outcome() == Outcome::InvalidGrant => {
                     ctx.health.failed(&e);
@@ -60,9 +64,6 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
     }
     let mut polls = 0u32;
     let mut last = ctx.clock().now();
-    // A draft reconcile a poll asked for that failed: the next poll runs it,
-    // since its history no longer says drafts changed.
-    let mut drafts_due = false;
     loop {
         match poll(&ctx, &mut drafts_due).await {
             Ok(()) => ctx.health.succeeded(),
@@ -125,7 +126,7 @@ async fn is_connected(pool: &Arc<ReadPool>, account: AccountId) -> Result<bool, 
 /// lists to read (Inbox, starred, recent sent, drafts) and the contacts
 /// backfill. Marked done only at the end, so a launch before that runs it
 /// again.
-async fn connect(ctx: &AccountCtx) -> Result<(), GmailError> {
+async fn connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(), GmailError> {
     ctx.health.syncing();
     let profile = ctx.gmail.get_profile(Priority::P3).await?;
     refresh_send_as(ctx).await?;
@@ -152,7 +153,16 @@ async fn connect(ctx: &AccountCtx) -> Result<(), GmailError> {
     }
     queue_inbox(ctx);
     queue_starred_and_sent(ctx);
-    reconcile(ctx, Occasion::Sync).await?;
+    // A draft that fails to read does not hold up the connect sync: the
+    // first poll runs the reconcile again. No connection does.
+    match reconcile(ctx, Occasion::Sync).await {
+        Ok(()) => {}
+        Err(e) if stops_the_account(&e) => return Err(e),
+        Err(e) => {
+            tracing::info!(account = account.0, outcome = %e.outcome(), "the connect sync's draft reconcile failed; the first poll runs it");
+            *drafts_due = Some(Occasion::Sync);
+        }
+    }
     ctx.queue.push(BACKFILL, Work::Backfill { page: None });
     let connected = ctx
         .writer()
@@ -205,7 +215,7 @@ pub(crate) fn queue_starred_and_sent(ctx: &AccountCtx) {
 
 /// One poll from the stored cursor. A cursor Gmail no longer keeps runs the
 /// full resync.
-async fn poll(ctx: &AccountCtx, drafts_due: &mut bool) -> Result<(), GmailError> {
+async fn poll(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(), GmailError> {
     let account = ctx.account;
     let start = ctx
         .read(move |r| Ok(r.accounts().get(account)?.and_then(|a| a.history_id)))
@@ -220,7 +230,7 @@ async fn poll(ctx: &AccountCtx, drafts_due: &mut bool) -> Result<(), GmailError>
     // Before history is read: ops that land from now on are kept on top of it.
     let ticket = ctx.lane.landed.read();
     let Some((records, latest)) = history_since(ctx, start).await? else {
-        return full_resync(ctx).await;
+        return full_resync(ctx, drafts_due).await;
     };
     if records.is_empty() {
         if latest != start {
@@ -320,15 +330,17 @@ fn queue_after_poll(ctx: &AccountCtx, read: BTreeSet<GmailThreadId>, deferred: &
 /// an old version deleted, or a poll before asked and failed.
 async fn reconcile_drafts(
     ctx: &AccountCtx,
-    due: &mut bool,
+    due: &mut Option<Occasion>,
     changed: bool,
 ) -> Result<(), GmailError> {
-    if !(changed || *due) {
-        return Ok(());
-    }
-    *due = true;
-    reconcile(ctx, Occasion::Poll).await?;
-    *due = false;
+    let occasion = match (*due, changed) {
+        (Some(occasion), _) => occasion,
+        (None, true) => Occasion::Poll,
+        (None, false) => return Ok(()),
+    };
+    *due = Some(occasion);
+    reconcile(ctx, occasion).await?;
+    *due = None;
     Ok(())
 }
 

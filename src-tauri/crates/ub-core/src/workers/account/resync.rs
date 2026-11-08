@@ -28,7 +28,10 @@ where
     let mut backoff = Backoff::new();
     loop {
         match call().await {
-            Ok(value) => return Ok(value),
+            Ok(value) => {
+                ctx.health.succeeded();
+                return Ok(value);
+            }
             Err(e) if *e.outcome() == Outcome::Offline => {
                 ctx.health.failed(&e);
                 ctx.deps.network.wait(ctx.clock(), OFFLINE_RETRY).await;
@@ -44,7 +47,10 @@ where
 }
 
 /// Runs the full resync. It notifies nothing.
-pub(crate) async fn full_resync(ctx: &AccountCtx) -> Result<(), GmailError> {
+pub(crate) async fn full_resync(
+    ctx: &AccountCtx,
+    drafts_due: &mut Option<Occasion>,
+) -> Result<(), GmailError> {
     tracing::info!(
         account = ctx.account.0,
         "history expired; running a full resync"
@@ -93,8 +99,16 @@ pub(crate) async fn full_resync(ctx: &AccountCtx) -> Result<(), GmailError> {
     reconcile_cached(ctx, &listed, started).await?;
     // Of the threads not cached, those the connect sync would read.
     queue_starred_and_sent(ctx);
-    // 5. Drafts.
-    step(ctx, || reconcile(ctx, Occasion::Sync)).await?;
+    // 5. Drafts. One that fails does not hold up the resync: the next poll
+    // runs the reconcile again.
+    match reconcile(ctx, Occasion::Sync).await {
+        Ok(()) => {}
+        Err(e) if *e.outcome() == Outcome::InvalidGrant => return Err(e),
+        Err(e) => {
+            tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "the resync's draft reconcile failed; the next poll runs it");
+            *drafts_due = Some(Occasion::Sync);
+        }
+    }
     // 6. The snooze rule runs as each thread is stored.
     store_cursor(ctx, profile.history_id).await;
     Ok(())

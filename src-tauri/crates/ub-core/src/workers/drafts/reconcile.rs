@@ -42,7 +42,21 @@ impl Occasion {
     }
 }
 
-/// Reconciles the account's local drafts with `drafts.list`.
+/// Whether a failed call says the account can't reach Gmail now, rather
+/// than that one item can't be read: then the whole reconcile stops.
+pub(crate) fn stops_the_account(e: &GmailError) -> bool {
+    matches!(
+        e.outcome(),
+        Outcome::Offline
+            | Outcome::InvalidGrant
+            | Outcome::Unauthorized
+            | Outcome::RateLimited { .. }
+    )
+}
+
+/// Reconciles the account's local drafts with `drafts.list`. One draft that
+/// fails to read does not hold up the others: it is skipped, and a
+/// transient failure is returned at the end, so the reconcile runs again.
 pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<(), GmailError> {
     let (meta, body) = occasion.priorities();
     let started = started(&ctx.deps.pool, ctx.account).await;
@@ -65,56 +79,25 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
         writing: Arc::clone(&ctx.lane.writing),
     };
     let account = ctx.account;
-    let local = ctx
-        .read(move |r| {
-            let drafts = r.drafts().for_account(account)?;
-            let sending = r.outbox().gmail_draft_ids(account)?;
-            let unconfirmed: HashSet<DraftId> =
-                r.ops().upserted_drafts(account)?.into_iter().collect();
-            Ok((drafts, sending, unconfirmed))
-        })
-        .await;
-    let (local, sending, unconfirmed) = match local {
-        Ok(local) => local,
-        Err(e) => {
-            tracing::warn!(account = account.0, error = %e, "couldn't read the drafts to reconcile");
-            return Ok(());
-        }
+    let Some(Sorted {
+        sending,
+        mut known,
+        unconfirmed,
+    }) = sort_local(ctx, &reconcile).await
+    else {
+        return Ok(());
     };
-    // The outbox writes and sends its drafts itself, so Gmail's copy of one
-    // is never read back over the version being sent.
-    let mut sending: HashSet<GmailDraftId> = sending.into_iter().collect();
-    // Gmail draft id to the local draft and its last message id, for the
-    // drafts Gmail still has.
-    let mut known: HashMap<GmailDraftId, (DraftId, Option<GmailMessageId>)> = HashMap::new();
-    let mut gone = Vec::new();
-    for record in local {
-        let draft = record.draft;
-        let Some(gmail) = lifecycle::gmail_draft(&draft).cloned() else {
-            continue;
-        };
-        if record.in_outbox {
-            sending.insert(gmail);
-        } else if reconcile.live.contains(&gmail) {
-            let message = lifecycle::gmail_message(&draft).cloned();
-            known.insert(gmail, (draft.id, message));
-        } else {
-            gone.push(draft.id);
+    let mut failed: Option<GmailError> = None;
+    let mut skip = |e: GmailError| -> Result<(), GmailError> {
+        if stops_the_account(&e) {
+            return Err(e);
         }
-    }
-    if !gone.is_empty() {
-        let r = reconcile.clone();
-        let now = ctx.clock().now();
-        let dropped = ctx
-            .writer()
-            .call(WritePriority::Sync, move |tx, state| {
-                drop_gone(tx, state, &gone, &r, now)
-            })
-            .await;
-        if let Err(e) = dropped {
-            tracing::warn!(account = account.0, error = %e, "couldn't drop drafts Gmail deleted");
+        tracing::warn!(account = account.0, outcome = %e.outcome(), "couldn't read a Gmail draft; skipping it");
+        if e.is_transient() {
+            failed.get_or_insert(e);
         }
-    }
+        Ok(())
+    };
     for listed in listed {
         if sending.contains(&listed.id) {
             continue;
@@ -139,15 +122,20 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
         {
             // A draft new to the app gets its kind and target from its
             // thread's messages, once: they must be stored first.
-            fetch_thread(ctx, &listed.message.thread_id, Format::Metadata, meta).await?;
+            if let Err(e) =
+                fetch_thread(ctx, &listed.message.thread_id, Format::Metadata, meta).await
+            {
+                skip(e)?;
+                continue;
+            }
         }
         match ctx.gmail.get_draft(body, &listed.id, Format::Full).await {
             Ok(full) => store(ctx, full, reconcile.clone()).await,
             Err(e) if *e.outcome() == Outcome::NotFound => {}
-            Err(e) => return Err(e),
+            Err(e) => skip(e)?,
         }
     }
-    Ok(())
+    failed.map_or(Ok(()), Err)
 }
 
 /// Reads a Gmail change to the draft that was skipped while a composer had
@@ -264,4 +252,76 @@ async fn store(ctx: &AccountCtx, full: ub_gmail::Draft, reconcile: Reconcile) {
     if let Err(e) = stored {
         tracing::warn!(account = account.0, error = %e, "couldn't store a Gmail draft");
     }
+}
+
+/// The local drafts against `drafts.list`, sorted for a reconcile.
+struct Sorted {
+    /// Gmail drafts the outbox holds: never read back.
+    sending: HashSet<GmailDraftId>,
+    /// Gmail draft id to the local draft and its last message id, for the
+    /// drafts Gmail still has.
+    known: HashMap<GmailDraftId, (DraftId, Option<GmailMessageId>)>,
+    /// Local drafts with an edit Gmail has not confirmed.
+    unconfirmed: HashSet<DraftId>,
+}
+
+/// Reads the local drafts, sorts them against the listing, and drops those
+/// Gmail no longer has. `None` when they can't be read.
+async fn sort_local(ctx: &AccountCtx, reconcile: &Reconcile) -> Option<Sorted> {
+    let account = ctx.account;
+    let local = ctx
+        .read(move |r| {
+            let drafts = r.drafts().for_account(account)?;
+            let sending = r.outbox().gmail_draft_ids(account)?;
+            let unconfirmed: HashSet<DraftId> =
+                r.ops().upserted_drafts(account)?.into_iter().collect();
+            Ok((drafts, sending, unconfirmed))
+        })
+        .await;
+    let (local, sending, unconfirmed) = match local {
+        Ok(local) => local,
+        Err(e) => {
+            tracing::warn!(account = account.0, error = %e, "couldn't read the drafts to reconcile");
+            return None;
+        }
+    };
+    // The outbox writes and sends its drafts itself, so Gmail's copy of one
+    // is never read back over the version being sent.
+    let mut sending: HashSet<GmailDraftId> = sending.into_iter().collect();
+    // Gmail draft id to the local draft and its last message id, for the
+    // drafts Gmail still has.
+    let mut known: HashMap<GmailDraftId, (DraftId, Option<GmailMessageId>)> = HashMap::new();
+    let mut gone = Vec::new();
+    for record in local {
+        let draft = record.draft;
+        let Some(gmail) = lifecycle::gmail_draft(&draft).cloned() else {
+            continue;
+        };
+        if record.in_outbox {
+            sending.insert(gmail);
+        } else if reconcile.live.contains(&gmail) {
+            let message = lifecycle::gmail_message(&draft).cloned();
+            known.insert(gmail, (draft.id, message));
+        } else {
+            gone.push(draft.id);
+        }
+    }
+    if !gone.is_empty() {
+        let r = reconcile.clone();
+        let now = ctx.clock().now();
+        let dropped = ctx
+            .writer()
+            .call(WritePriority::Sync, move |tx, state| {
+                drop_gone(tx, state, &gone, &r, now)
+            })
+            .await;
+        if let Err(e) = dropped {
+            tracing::warn!(account = account.0, error = %e, "couldn't drop drafts Gmail deleted");
+        }
+    }
+    Some(Sorted {
+        sending,
+        known,
+        unconfirmed,
+    })
 }

@@ -260,9 +260,14 @@ pub(crate) fn apply_gmail_draft(
         Some(row) => message_attachments(reads, row.id)?,
         None => Vec::new(),
     };
-    let mut draft = match existing {
-        Some(record) => record.draft,
-        None => new_gmail_draft(reads, account, &gmail, thread)?,
+    let mut draft = if let Some(record) = existing {
+        record.draft
+    } else {
+        let draft = new_gmail_draft(reads, account, &gmail, thread)?;
+        // Its id may be one whose files went before (its account removed,
+        // then added back): it takes files again.
+        state.effect(Effect::DraftBack(draft.id.clone()));
+        draft
     };
     lifecycle::read_from_gmail(&mut draft, gmail.ids(), !attachments.is_empty());
     draft.thread = (draft.kind != DraftKind::New).then_some(thread);

@@ -221,10 +221,11 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
 
 /// `drafts.send`, unless an undo is held on the row: then it is not sent.
 async fn send_draft(ctx: &AccountCtx, row: &Outbox, gmail: &GmailDraftId) -> Result<(), Failure> {
-    if current(&ctx.deps.pool, row)
-        .await?
-        .is_some_and(|r| r.undo_requested)
-    {
+    // Gone meanwhile, with its account: never sent.
+    let Some(now) = current(&ctx.deps.pool, row).await? else {
+        return Ok(());
+    };
+    if now.undo_requested {
         step(ctx, row, Event::Held).await?;
         return Ok(());
     }
