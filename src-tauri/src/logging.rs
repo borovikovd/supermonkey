@@ -11,16 +11,16 @@ use tracing_subscriber::util::SubscriberInitExt as _;
 
 /// The app's own crates, by target prefix.
 const OURS: [&str; 10] = [
-    "ubermensch",
+    "supermonkey",
     "e2e_server",
-    "ub_bridge",
-    "ub_core",
-    "ub_domain",
-    "ub_fake_gmail",
-    "ub_gmail",
-    "ub_mime",
-    "ub_store",
-    "ub_testkit",
+    "sm_bridge",
+    "sm_core",
+    "sm_domain",
+    "sm_fake_gmail",
+    "sm_gmail",
+    "sm_mime",
+    "sm_store",
+    "sm_testkit",
 ];
 
 /// Installs the stderr logger, once per process. `log` records (Tauri's,

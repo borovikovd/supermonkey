@@ -1,5 +1,5 @@
 // A typed client for the E2E server's `/__test` control API
-// (src-tauri/crates/ub-testkit/src/control). Changes made as another Gmail
+// (src-tauri/crates/sm-testkit/src/control). Changes made as another Gmail
 // client don't poll unless asked (`{ poll: true }` or `poll()`); `deliver`
 // polls unless `poll: false`.
 

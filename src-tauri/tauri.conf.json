@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Ubermensch",
+  "productName": "Supermonkey",
   "version": "../package.json",
-  "identifier": "app.ubermensch.mail",
+  "identifier": "app.supermonkey.mail",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Ubermensch",
+        "title": "Supermonkey",
         "width": 1200,
         "height": 800,
         "minWidth": 720,

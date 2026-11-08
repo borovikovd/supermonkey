@@ -1,6 +1,6 @@
 // Recipient chips, autocomplete and its ranking, invalid addresses, and Cc/Bcc
 // (SPEC Recipients and autocomplete, Keyboard).
-import ADDRESSES from "../src-tauri/crates/ub-mime/tests/fixtures/email-addresses.json" with { type: "json" };
+import ADDRESSES from "../src-tauri/crates/sm-mime/tests/fixtures/email-addresses.json" with { type: "json" };
 import type { App } from "./app.ts";
 import type { Control, GmailMessage } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
@@ -26,7 +26,7 @@ async function sentWithSubject(
   const found = messages.filter(
     (m) =>
       m.labels.includes("SENT") &&
-      m.headers["x-ubermensch-draft"] !== undefined &&
+      m.headers["x-supermonkey-draft"] !== undefined &&
       m.headers.subject === subject,
   );
   expect(found, `one sent message "${subject}"`).toHaveLength(1);
@@ -365,7 +365,7 @@ test("RCP-09 suggestions that answer after a chip is made stay closed", async ({
   await app.type("sam,");
   await expect(app.chips("To")).toHaveCount(1);
   await release();
-  await expect.poll(() => app.page.evaluate<number>("window.__ub.pending().invokes")).toBe(0);
+  await expect.poll(() => app.page.evaluate<number>("window.__sm.pending().invokes")).toBe(0);
   await expect(app.suggestions()).toHaveCount(0);
 
   // Tab leaves the field without adding anyone.

@@ -21,7 +21,7 @@ function emails(header: string | undefined): string[] {
 async function sentByApp(gmail: Control, account: string): Promise<GmailMessage[]> {
   const { messages } = await gmail.gmail(account);
   return messages.filter(
-    (m) => m.labels.includes("SENT") && m.headers["x-ubermensch-draft"] !== undefined,
+    (m) => m.labels.includes("SENT") && m.headers["x-supermonkey-draft"] !== undefined,
   );
 }
 

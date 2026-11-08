@@ -10,7 +10,7 @@ const two = (i: number) => String(i).padStart(2, "0");
 
 /** The last action number the page has seen acked on the channel. */
 const pageAck = (app: App): Promise<number> =>
-  app.page.evaluate<number>("window.__ub.pending().ack");
+  app.page.evaluate<number>("window.__sm.pending().ack");
 
 test("UIC-01 rows you just acted on never flash back during fast triage or a poll", async ({
   app,
@@ -254,7 +254,7 @@ test("UIC-05 Cmd+Q quits only once the composer's close has committed", async ({
   const quitting = app.quit();
   await expect.poll(() => parked.length).toBe(1);
   await app.page.clock.runFor(2_000);
-  const owed = await app.page.evaluate<number>("window.__ub.pending().invokes");
+  const owed = await app.page.evaluate<number>("window.__sm.pending().invokes");
   expect(owed, "only the close is in flight: the page has not asked to quit").toBe(1);
 
   await Promise.all(parked.map((r) => r.continue()));
@@ -287,7 +287,7 @@ test("UIC-06 an action the core rejects tells the user why", async ({ app, gmail
   await app.page.unroute(submit);
 
   await expect(
-    app.errorToasts.filter({ hasText: "That account is no longer in Ubermensch" }),
+    app.errorToasts.filter({ hasText: "That account is no longer in Supermonkey" }),
   ).toHaveCount(1);
   // The switch falls back to what the core holds.
   await expect(mute).toHaveAttribute("aria-checked", "false");
@@ -306,7 +306,7 @@ test("UIC-07 an action the core can't read is refused, and the actions after it 
     (await gmail.gmail(A)).messages
       .filter((m) => m.threadId === s.thread(key).threadId)
       .flatMap((m) => m.labels);
-  const bug = app.errorToasts.filter({ hasText: "because of a bug in Ubermensch" });
+  const bug = app.errorToasts.filter({ hasText: "because of a bug in Supermonkey" });
   await expect(app.highlighted).toContainText("Person 1");
   // Every submit carries the star with a thread the core can't read, as a
   // page out of step with the core would send it.

@@ -1,4 +1,4 @@
-//! The E2E server (`ub_testkit::run`): the real core against the fake Gmail,
+//! The E2E server (`sm_testkit::run`): the real core against the fake Gmail,
 //! behind the web bridge and the `/__test` control API.
 //!
 //! `e2e-server [--port N] [--dist PATH] [--now MS]`: port 0 picks a free
@@ -9,8 +9,8 @@
 use std::path::PathBuf;
 
 use anyhow::Context as _;
-use ub_core::clock::{Clock as _, SystemClock};
-use ub_domain::Millis;
+use sm_core::clock::{Clock as _, SystemClock};
+use sm_domain::Millis;
 
 /// The value after `--name` on the command line.
 fn arg(name: &str) -> Option<String> {
@@ -25,7 +25,7 @@ fn arg(name: &str) -> Option<String> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    ubermensch_lib::init_logging();
+    supermonkey_lib::init_logging();
     let port = arg("--port").map_or(Ok(0), |p| p.parse().context("--port"))?;
     let dist = arg("--dist").map_or_else(
         || PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist"),
@@ -35,5 +35,5 @@ async fn main() -> anyhow::Result<()> {
         Some(ms) => Millis(ms.parse().context("--now")?),
         None => SystemClock.now(),
     };
-    ub_testkit::run(port, dist, now).await
+    sm_testkit::run(port, dist, now).await
 }

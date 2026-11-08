@@ -261,7 +261,7 @@ Tests catch what their author thought of. Close the gap from outside:
 
 The only section that changes from project to project.
 
-- **Product:** Ubermensch, a keyboard-first Gmail client for macOS. Tauri 2, React
+- **Product:** Supermonkey, a keyboard-first Gmail client for macOS. Tauri 2, React
   19 with the React Compiler, TypeScript 7, Tailwind 4, Vite+, Rust with SQLite.
 - **Docs:** [SPEC.md](SPEC.md) (behavior), [ARCHITECTURE.md](ARCHITECTURE.md)
   (design).
@@ -282,12 +282,12 @@ The only section that changes from project to project.
   - `src-tauri/src`: the Tauri shell and the `e2e-server` and `perf-fixture`
     binaries.
   - `src-tauri/crates`, lowest layer first (`src-tauri/tests/layers.rs` checks the
-    edges): `ub-domain` (newtypes, mail model, views, splits, the query language),
-    `ub-mime`, `ub-gmail` (client, quota, OAuth, token store), `ub-store` (schema,
-    writer, read pool), `ub-ipc` (types generated into `src/bindings`), `ub-core`
-    (actions, subscriptions, per-account workers), `ub-bridge` (command dispatch
-    for Tauri and the debug web bridge), `ub-testkit` (E2E server, demo, perf
-    fixture), `ub-fake-gmail`.
+    edges): `sm-domain` (newtypes, mail model, views, splits, the query language),
+    `sm-mime`, `sm-gmail` (client, quota, OAuth, token store), `sm-store` (schema,
+    writer, read pool), `sm-ipc` (types generated into `src/bindings`), `sm-core`
+    (actions, subscriptions, per-account workers), `sm-bridge` (command dispatch
+    for Tauri and the debug web bridge), `sm-testkit` (E2E server, demo, perf
+    fixture), `sm-fake-gmail`.
   - `src`: the UI: `store/` (mirror and chrome state), `keyboard/`, `ui/`,
     `compose/`, `ipc/`; `src/theme.css` holds the design tokens.
 - **Tests.** [e2e/COVERAGE.md](e2e/COVERAGE.md) is the test plan, one line per case;

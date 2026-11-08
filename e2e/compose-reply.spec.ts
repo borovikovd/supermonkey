@@ -22,7 +22,7 @@ function emails(header: string | undefined): string[] {
 async function sentByApp(gmail: Control, account: string): Promise<GmailMessage[]> {
   const { messages } = await gmail.gmail(account);
   return messages.filter(
-    (m) => m.labels.includes("SENT") && m.headers["x-ubermensch-draft"] !== undefined,
+    (m) => m.labels.includes("SENT") && m.headers["x-supermonkey-draft"] !== undefined,
   );
 }
 
@@ -393,7 +393,7 @@ test("REP-04 a sent reply stays on the thread and carries Gmail's quote", async 
   expect(m.threadId).toBe(s.thread("addr").threadId);
   expect(m.headers["in-reply-to"]).toBe(carol);
   expect(m.headers.references).toContain(carol);
-  expect(m.headers["x-ubermensch-draft"]).toBeTruthy();
+  expect(m.headers["x-supermonkey-draft"]).toBeTruthy();
   const html = htmlOf(parseMime(m.raw));
   const at = html.indexOf('<div class="gmail_quote"');
   expect(at).toBeGreaterThan(-1);

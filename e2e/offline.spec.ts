@@ -531,7 +531,7 @@ test("OFF-08 conversations opened offline read only the bodies still on screen w
   }, Promise.resolve());
   const shown = Object.keys(
     await app.page.evaluate<Record<string, string>>(`Object.fromEntries(
-      Object.entries(window.__ub.useMirror.getState().subs)
+      Object.entries(window.__sm.useMirror.getState().subs)
         .filter(([, s]) => s.type === "conversation").map(([id, s]) => [String(s.key.thread), id]))`),
   );
   const needed = shown.flatMap((key) => gmailIds.get(key) ?? []);

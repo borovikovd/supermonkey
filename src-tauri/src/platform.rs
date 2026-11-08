@@ -4,10 +4,10 @@
 
 use std::path::Path;
 
+use sm_core::{Notification, Platform, PlatformError};
 use tauri::{AppHandle, Manager as _};
 use tauri_plugin_notification::NotificationExt as _;
 use tauri_plugin_opener::OpenerExt as _;
-use ub_core::{Notification, Platform, PlatformError};
 
 /// The operating system, through Tauri and its plugins.
 pub(crate) struct TauriPlatform(pub(crate) AppHandle);

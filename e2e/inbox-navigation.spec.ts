@@ -349,8 +349,8 @@ test("NAV-07 the highlight moves when a poll removes the highlighted row", async
   await expect(app.conversationTitle).toHaveText("Person 6");
 });
 
-/** Conversation subscriptions in the mirror, as thread → subscription id. A string: `__ub` is the app's hook. */
-const CONVERSATION_SUBS = `Object.fromEntries(Object.entries(window.__ub.useMirror.getState().subs)
+/** Conversation subscriptions in the mirror, as thread → subscription id. A string: `__sm` is the app's hook. */
+const CONVERSATION_SUBS = `Object.fromEntries(Object.entries(window.__sm.useMirror.getState().subs)
   .filter(([, s]) => s.type === "conversation").map(([id, s]) => [String(s.key.thread), id]))`;
 
 test("NAV-08 j keeps the prefetched neighbors it still needs", async ({ app, gmail }) => {

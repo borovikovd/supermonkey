@@ -1,4 +1,4 @@
-# Ubermensch core: architecture
+# Supermonkey core: architecture
 
 The design of the Rust side, as rewritten from scratch on branch `rewrite`. It
 says how the code is split, how data and control flow, and the rules every module
@@ -30,21 +30,21 @@ The rewrite is judged against these, which it may not change without a decision:
 | Surface      | What is fixed                                                                                                                                                                                                                                                             | Checked by                                                                            |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | IPC types    | The files in `src/bindings`: field names, tags, optionality, and doc comments                                                                                                                                                                                             | The gate's bindings step: generated TS must be byte-identical                         |
-| Commands     | `ub_ipc::Command`, one list of every command's name, arguments, and reply; the UI's `invoke` is typed from its bindings; the Tauri `dispatch` command and the web bridge run the same `bridge::dispatch`; error strings where the UI reads them                           | Compiler (exhaustive match, typed replies), bindings step, E2E through the web bridge |
+| Commands     | `sm_ipc::Command`, one list of every command's name, arguments, and reply; the UI's `invoke` is typed from its bindings; the Tauri `dispatch` command and the web bridge run the same `bridge::dispatch`; error strings where the UI reads them                           | Compiler (exhaustive match, typed replies), bindings step, E2E through the web bridge |
 | Channel      | One `ChannelMessage { rev, ack, rejected, updates }` per commit, each refused action listed in or before the first message whose `ack` covers it; the update types `list`, `conversation`, `composer`, `account`, `app`; first loads as their own message (SPEC UI state) | E2E, and the writer/channel property test                                             |
 | Actions      | The 17 `Action` types (`reset` … `moreResults`) and their semantics                                                                                                                                                                                                       | E2E                                                                                   |
 | Test control | The 34 `/__test/*` endpoints `e2e/control.ts` calls, their JSON, and `settle()` meaning "idle"                                                                                                                                                                            | E2E                                                                                   |
-| Fake Gmail   | `crates/ub-fake-gmail`, unchanged                                                                                                                                                                                                                                         | E2E                                                                                   |
-| Packaging    | `tauri.conf.json`, capabilities, `build.rs` inputs (OAuth client file, quota env), binaries `ubermensch` and `e2e-server`, the `fake` feature                                                                                                                             | Release dry run                                                                       |
+| Fake Gmail   | `crates/sm-fake-gmail`, unchanged                                                                                                                                                                                                                                         | E2E                                                                                   |
+| Packaging    | `tauri.conf.json`, capabilities, `build.rs` inputs (OAuth client file, quota env), binaries `supermonkey` and `e2e-server`, the `fake` feature                                                                                                                            | Release dry run                                                                       |
 
 Adding a command touches three places, and the build checks each: a line in the `commands!` list in `ipc/src/commands.rs` (name, arguments, reply, doc); an arm in `bridge::dispatch`, which the exhaustive match requires and whose `Replier` takes only the declared reply type; and a wrapper in `src/ipc/bridge.ts`, whose `invoke` the type check holds to the generated `Command` and `CommandReply`. Neither host lists commands, so the Tauri path the release app uses and the web bridge the E2E suite drives are one code path. App events (`AppEvent`) and settings (`Setting`) are typed the same way.
 
 ## 3. Crates
 
-Crates live under `src-tauri/crates/` with a `ub-` prefix (`ub-domain`, `ub-mime`, `ub-gmail`, `ub-store`, `ub-ipc`, `ub-core`, `ub-bridge`, `ub-testkit`): a crate named `core` would shadow Rust's own. Below and in code paths they are written without the prefix.
+Crates live under `src-tauri/crates/` with a `ub-` prefix (`sm-domain`, `sm-mime`, `sm-gmail`, `sm-store`, `sm-ipc`, `sm-core`, `sm-bridge`, `sm-testkit`): a crate named `core` would shadow Rust's own. Below and in code paths they are written without the prefix.
 
 ```
-                 app (src-tauri: Tauri shell, binary `ubermensch`)
+                 app (src-tauri: Tauri shell, binary `supermonkey`)
                   │        │
                   │     testkit (debug + `fake`: /__test server, e2e-server, demo, perf fixture)
                   │        │
@@ -65,7 +65,7 @@ Crates live under `src-tauri/crates/` with a `ub-` prefix (`ub-domain`, `ub-mime
 | `ipc`     | The contract: the command surface (`Command`, every command's name, arguments, and reply from one list) and every type exported to TypeScript (`src/bindings`), with serde and ts-rs derives                                                                                     | `domain` (`ts`), `serde`, `serde_json`, `ts-rs`                                          | Behavior                                    |
 | `core`    | The application: action handlers, queries, subscriptions and patches, the per-account workers (sync, fetch, ops, outbox, drafts, contacts), notifications, snooze timer, launch and shutdown. Takes `ipc` actions in and gives `ipc` read models and channel messages out        | `domain`, `mime`, `gmail`, `store`, `ipc`, `tokio`, `tokio-util`                         | Tauri, HTTP servers                         |
 | `bridge`  | `dispatch(name, args)`: parses an `ipc::Command` and runs it over `core`. The app's Tauri `dispatch` command and the debug web bridge (`axum`, behind a `web` feature) both call it                                                                                              | `core`, `ipc`, `axum` (optional)                                                         | Business rules                              |
-| `testkit` | The `/__test` control server, the `e2e-server` code, demo mode, the perf fixture (written through `store`), the recording `Platform`                                                                                                                                             | `core`, `bridge`, `ipc`, `store`, `ub-fake-gmail`                                        | Being linked into release builds            |
+| `testkit` | The `/__test` control server, the `e2e-server` code, demo mode, the perf fixture (written through `store`), the recording `Platform`                                                                                                                                             | `core`, `bridge`, `ipc`, `store`, `sm-fake-gmail`                                        | Being linked into release builds            |
 | `app`     | Tauri setup, plugins, window, menu bar, and Dock, the Tauri `Platform`, and two Tauri commands: `connect` (the page's channel) and `dispatch` (every other command, through `bridge::dispatch`)                                                                                  | `bridge`, `core`, `ipc`, `tauri*`                                                        | Logic beyond wiring                         |
 
 `rusqlite` is used only in `store` (and in `domain`'s `sqlite` impls), `reqwest` only in `gmail` (the one-click unsubscribe POST goes through `gmail`'s HTTP client too), and `tauri` only in `app`. A workspace test (`tests/layers.rs`, reading `cargo metadata`) fails on any other dependency edge, so the layering can't drift.
@@ -205,8 +205,8 @@ Every task, timer, kick, and queued job counts in one `Activity`, so the E2E ser
   - `domain`: query language, splits, snooze;
   - `mime`: sanitize, no-panic fuzz, unsubscribe header;
   - `gmail`: scheduler, OAuth.
-- **Core tests** (`ub-core/src/tests`) for what E2E can't observe: a started `App` on a temporary database.
-- **Perf bench:** the ignored `perf` tests in `ub-core` time local search and autocomplete per keystroke on the perf fixture (`perf-fixture`, fake feature) against SPEC Performance. The UI budgets so far were measured in Chrome through the web bridge on a development Mac, not on an M1 MacBook Air in WKWebView.
+- **Core tests** (`sm-core/src/tests`) for what E2E can't observe: a started `App` on a temporary database.
+- **Perf bench:** the ignored `perf` tests in `sm-core` time local search and autocomplete per keystroke on the perf fixture (`perf-fixture`, fake feature) against SPEC Performance. The UI budgets so far were measured in Chrome through the web bridge on a development Mac, not on an M1 MacBook Air in WKWebView.
 - **Property test:** the writer/channel invariants (`store` + `core`), replacing `tests/writer_channel.rs`.
 - **Layering test** (section 3), and a test that no crate but `store` names `rusqlite`.
 - **Mutation probes** for every new guard, per AGENTS.md.
@@ -245,7 +245,7 @@ The rewrite landed in slices, each green on its own E2E specs before the next st
 
 ## 14. Running and building
 
-- **Debug web bridge:** debug builds started with `UBERMENSCH_WEB_BRIDGE=1` serve the command surface on `127.0.0.1:1430`, so the UI can run in a browser against the real core for automated checks. Release builds leave the `web` feature off and never start it.
-- **Demo mode:** `vp run demo` is a debug build with `--features fake` and `UBERMENSCH_FAKE=1`. It runs the in-process fake Gmail with demo mail and two accounts, on a data folder in the system's temporary directory that is emptied at each launch.
+- **Debug web bridge:** debug builds started with `SUPERMONKEY_WEB_BRIDGE=1` serve the command surface on `127.0.0.1:1430`, so the UI can run in a browser against the real core for automated checks. Release builds leave the `web` feature off and never start it.
+- **Demo mode:** `vp run demo` is a debug build with `--features fake` and `SUPERMONKEY_FAKE=1`. It runs the in-process fake Gmail with demo mail and two accounts, on a data folder in the system's temporary directory that is emptied at each launch.
 - **Attachments** are picked with the webview's file input and copied into the draft's folder by the `add_attachment` command, so no dialog plugin is needed.
 - **App icon:** `src-tauri/icons/app-icon.svg` is the source. `vp run tauri icon src-tauri/icons/app-icon.svg` makes every size; delete the `android` and `ios` folders it adds.

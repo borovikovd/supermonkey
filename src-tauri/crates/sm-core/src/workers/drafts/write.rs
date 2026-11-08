@@ -1,0 +1,439 @@
+//! Writing a draft to Gmail: its MIME built with its files, then
+//! `drafts.update`, or `drafts.create` with recovery (SPEC Gmail errors).
+
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+use sm_domain::{Addr, DraftId, GmailDraftId, GmailThreadId};
+use sm_gmail::{Format, GmailError, Outcome, PageToken, Priority};
+use sm_mime::{InlinePart, OutAttachment, Outgoing};
+use sm_store::{Draft, Priority as WritePriority, StoreError};
+
+use super::WriteFailure;
+use crate::Error;
+use crate::drafts::lifecycle::{self, GmailWrite};
+use crate::drafts::settle;
+use crate::read::read;
+use crate::workers::account::{AccountCtx, fetch_thread, parse};
+use crate::workers::attachments::{DownloadError, ensure};
+use crate::workers::files::{attachments_dir, draft_dir, is_inside};
+use sm_store::ReadPool;
+use std::sync::Arc;
+
+/// How many times a `drafts.create` with no clear answer is tried, each
+/// after looking for the draft the last one may have made.
+const CREATE_TRIES: usize = 3;
+
+/// The draft as stored, or `None` when it is gone.
+pub(crate) async fn load(pool: &Arc<ReadPool>, id: DraftId) -> Result<Option<Draft>, Error> {
+    Ok(read(pool, move |r| r.drafts().get(&id))
+        .await?
+        .map(|record| record.draft))
+}
+
+/// Writes the draft to Gmail: an update of its Gmail draft, or a create
+/// when it has none or Gmail no longer has it (sent or deleted elsewhere).
+/// A draft whose last create never got its answer stored (the app quit, or
+/// the write was cancelled) may have a Gmail draft already: it is looked
+/// for by its header first, and updated if found. Every write carries all
+/// of the draft's attachments: `drafts.update` replaces the whole message.
+/// `None` when the draft went (discarded, or its account removed) while its
+/// target's body was read or its message built: nothing is written.
+pub(crate) async fn write(
+    ctx: &AccountCtx,
+    draft: &Draft,
+) -> Result<Option<sm_gmail::Draft>, WriteFailure> {
+    let filled;
+    let draft = if lifecycle::awaits_target_body(draft) {
+        let Some(settled) = with_target_body(ctx, draft).await? else {
+            return Ok(None);
+        };
+        filled = settled;
+        &filled
+    } else {
+        draft
+    };
+    let raw = build_raw(ctx, draft).await?;
+    let thread = gmail_thread(&ctx.deps.pool, draft).await?;
+    let existing = match lifecycle::gmail_write(draft) {
+        GmailWrite::Update(id) => Some(id.clone()),
+        GmailWrite::Recover => recover_create(ctx, &draft.id).await?.map(|d| d.id),
+        GmailWrite::Create => None,
+    };
+    if let Some(id) = existing {
+        match ctx
+            .gmail
+            .update_draft(Priority::P1, &id, &raw, thread.as_ref())
+            .await
+        {
+            Ok(written) => return Ok(Some(written)),
+            Err(e) if *e.outcome() == Outcome::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    create(ctx, &draft.id, &raw, thread.as_ref()).await
+}
+
+/// A draft that quotes its target's snippet is never written so (SPEC
+/// Addressing): the target's body is read now, ahead of other reads, and fills
+/// the draft as it lands. Offline, the write waits like any other. If Gmail
+/// no longer has the target, the snippet's quote goes. `None` when the draft
+/// is gone once the body is in.
+async fn with_target_body(ctx: &AccountCtx, draft: &Draft) -> Result<Option<Draft>, WriteFailure> {
+    if let Some(target) = draft.target {
+        let thread = ctx
+            .read(move |r| {
+                let Some(message) = r.messages().get(target)? else {
+                    return Ok(None);
+                };
+                if message.has_body {
+                    return Ok(None);
+                }
+                Ok(r.threads().row(message.thread)?.map(|row| row.gmail_id))
+            })
+            .await?;
+        if let Some(thread) = thread {
+            fetch_thread(ctx, &thread, Format::Full, Priority::P1).await?;
+        }
+    }
+    let id = draft.id.clone();
+    let settled = ctx
+        .writer()
+        .call(WritePriority::Sync, move |tx, _| settle(tx, &id))
+        .await
+        .map_err(Error::from)?;
+    Ok(settled)
+}
+
+/// The Gmail thread the draft goes on: its thread's, else the one its last
+/// upsert returned.
+async fn gmail_thread(
+    pool: &Arc<ReadPool>,
+    draft: &Draft,
+) -> Result<Option<GmailThreadId>, WriteFailure> {
+    let last = lifecycle::gmail_thread(draft).cloned();
+    let Some(thread) = draft.thread else {
+        return Ok(last);
+    };
+    let row = read(pool, move |r| r.threads().row(thread)).await?;
+    Ok(row.map(|row| row.gmail_id).or(last))
+}
+
+/// `drafts.create`, which is unsafe to repeat: the draft is marked as sent
+/// to create first, so a create whose answer is lost to a quit is
+/// recovered on the next write, and after one with no clear answer, it
+/// looks for the draft it may have made before trying again. A thread
+/// Gmail no longer has went with the Gmail draft that was alone in it
+/// (deleted elsewhere): the draft starts a thread of its own.
+/// `None` when the draft went before the mark: a discard while the message
+/// was being built. Nothing is created then, and a discard after the mark
+/// finds the create in question and deletes its copy by header.
+async fn create(
+    ctx: &AccountCtx,
+    local: &DraftId,
+    raw: &[u8],
+    thread: Option<&GmailThreadId>,
+) -> Result<Option<sm_gmail::Draft>, WriteFailure> {
+    if !mark_create_sent(ctx, local.clone()).await? {
+        return Ok(None);
+    }
+    let mut thread = thread;
+    for _ in 0..CREATE_TRIES {
+        match ctx.gmail.create_draft(Priority::P1, raw, thread).await {
+            Ok(created) => return Ok(Some(created)),
+            Err(e) if *e.outcome() == Outcome::NotFound && thread.is_some() => thread = None,
+            Err(e)
+                if matches!(
+                    e.outcome(),
+                    Outcome::NoResponse | Outcome::ServerError { .. }
+                ) =>
+            {
+                if let Some(found) = recover_create(ctx, local).await? {
+                    return Ok(Some(found));
+                }
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(GmailError::new(Outcome::NoResponse).into())
+}
+
+/// Records, before a `drafts.create` goes out, that one did: committed
+/// first, so no answer can be lost without the next write knowing. Returns
+/// whether the draft is still stored.
+async fn mark_create_sent(ctx: &AccountCtx, local: DraftId) -> Result<bool, Error> {
+    Ok(ctx
+        .writer()
+        .call(WritePriority::Sync, move |tx, _| {
+            let Some(record) = tx.read().drafts().get(&local)? else {
+                return Ok(false);
+            };
+            let mut draft = record.draft;
+            if lifecycle::begin_create(&mut draft) {
+                tx.drafts().put(&draft)?;
+            }
+            Ok::<_, StoreError>(true)
+        })
+        .await?)
+}
+
+/// After a `drafts.create` with no clear answer (SPEC Gmail errors): if
+/// sync has stored Gmail ids on the draft meanwhile, the create succeeded.
+/// Otherwise every Gmail draft the app does not know is read
+/// (`format=metadata`) for its `X-Supermonkey-Draft` header: one with this
+/// draft's id is kept, and any other copies are deleted.
+async fn recover_create(
+    ctx: &AccountCtx,
+    local: &DraftId,
+) -> Result<Option<sm_gmail::Draft>, WriteFailure> {
+    if let Some(stored) = load(&ctx.deps.pool, local.clone())
+        .await?
+        .and_then(|d| lifecycle::gmail_draft(&d).cloned())
+    {
+        match ctx
+            .gmail
+            .get_draft(Priority::P1, &stored, Format::Metadata)
+            .await
+        {
+            Ok(found) => return Ok(Some(found)),
+            // A stored id Gmail no longer has (deleted elsewhere before this
+            // create): the copies are looked for as with no id.
+            Err(e) if *e.outcome() == Outcome::NotFound => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    let mut found = copies_of(ctx, local).await?.into_iter();
+    let keep = found.next();
+    for extra in found {
+        if let Err(e) = ctx.gmail.delete_draft(Priority::P1, &extra.id).await {
+            tracing::warn!(account = ctx.account.0, outcome = %e.outcome(), "couldn't delete an extra copy of a draft");
+        }
+    }
+    Ok(keep)
+}
+
+/// The Gmail drafts the app has no id for whose `X-Supermonkey-Draft` header
+/// names `local`, each read with `format=metadata`.
+pub(super) async fn copies_of(
+    ctx: &AccountCtx,
+    local: &DraftId,
+) -> Result<Vec<sm_gmail::Draft>, WriteFailure> {
+    let account = ctx.account;
+    let known: HashSet<GmailDraftId> = ctx
+        .read(move |r| r.drafts().for_account(account))
+        .await?
+        .into_iter()
+        .filter_map(|record| lifecycle::gmail_draft(&record.draft).cloned())
+        .collect();
+    let mut ours = Vec::new();
+    for id in list_all(ctx)
+        .await?
+        .into_iter()
+        .filter(|id| !known.contains(id))
+    {
+        let read = ctx
+            .gmail
+            .get_draft(Priority::P1, &id, Format::Metadata)
+            .await;
+        let read = match read {
+            Ok(read) => read,
+            Err(e) if *e.outcome() == Outcome::NotFound => continue,
+            // The account can't reach Gmail now: the scan runs again later.
+            Err(e)
+                if matches!(
+                    e.outcome(),
+                    Outcome::Offline
+                        | Outcome::InvalidGrant
+                        | Outcome::Unauthorized
+                        | Outcome::RateLimited { .. }
+                ) =>
+            {
+                return Err(e.into());
+            }
+            // One draft Gmail fails to read must not hold up the account's
+            // queue: it is skipped. A copy missed this way is an extra copy,
+            // which sync deletes.
+            Err(e) => {
+                tracing::warn!(account = account.0, outcome = %e.outcome(), "couldn't read a Gmail draft while looking for copies; skipping it");
+                continue;
+            }
+        };
+        if parse(&read.message).headers.draft_id.as_ref() == Some(local) {
+            ours.push(read);
+        }
+    }
+    Ok(ours)
+}
+
+/// The ids of every Gmail draft of the account.
+pub(super) async fn list_all(ctx: &AccountCtx) -> Result<Vec<GmailDraftId>, GmailError> {
+    Ok(list_drafts(ctx, Priority::P2)
+        .await?
+        .into_iter()
+        .map(|d| d.id)
+        .collect())
+}
+
+/// Every page of `drafts.list`.
+pub(super) async fn list_drafts(
+    ctx: &AccountCtx,
+    priority: Priority,
+) -> Result<Vec<sm_gmail::Draft>, GmailError> {
+    let mut out = Vec::new();
+    let mut page: Option<PageToken> = None;
+    loop {
+        let listed = ctx.gmail.list_drafts(priority, page.as_ref()).await?;
+        out.extend(listed.drafts);
+        match listed.next_page_token {
+            Some(next) => page = Some(next),
+            None => return Ok(out),
+        }
+    }
+}
+
+/// The draft's RFC 5322 bytes (SPEC Compose): its HTML and quote, its
+/// attachments (downloading those not cached yet), and the quoted
+/// message's `cid:` images turned back from `data:`.
+async fn build_raw(ctx: &AccountCtx, draft: &Draft) -> Result<Vec<u8>, WriteFailure> {
+    let attachments = attachment_bytes(ctx, draft).await?;
+    let html = format!(
+        "{}{}",
+        draft.body_html,
+        draft.quote_html.as_deref().unwrap_or_default()
+    );
+    let known = quoted_inline(ctx, draft, &html).await?;
+    let from = draft
+        .from
+        .clone()
+        .unwrap_or_else(|| Addr::new(String::new()));
+    let date = ctx.clock().now();
+    let id = draft.id.clone();
+    let (to, cc, bcc) = (draft.to.clone(), draft.cc.clone(), draft.bcc.clone());
+    let (subject, in_reply_to) = (draft.subject.clone(), draft.in_reply_to.clone());
+    let references: Vec<String> = draft
+        .references
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+    let built = tokio::task::spawn_blocking(move || {
+        let (html, inline) = sm_mime::data_images_to_cid(&html, known);
+        sm_mime::build_mime(&Outgoing {
+            from: &from,
+            to: &to,
+            cc: &cc,
+            bcc: &bcc,
+            subject: &subject,
+            html: &html,
+            in_reply_to: in_reply_to.as_deref(),
+            references: &references,
+            draft_id: &id,
+            attachments: &attachments,
+            inline: &inline,
+            date,
+        })
+    })
+    .await
+    .map_err(Error::from)?;
+    built.map_err(|e| WriteFailure::Local(format!("The message can't be built: {e}")))
+}
+
+/// The bytes of every attachment of the draft: a file added to it, or a
+/// stored attachment it carries, downloaded if needed. A file outside the
+/// app's own folders is never read: its path came from the webview.
+async fn attachment_bytes(
+    ctx: &AccountCtx,
+    draft: &Draft,
+) -> Result<Vec<OutAttachment>, WriteFailure> {
+    let mut out = Vec::with_capacity(draft.attachments.len());
+    for a in &draft.attachments {
+        let path = match (&a.path, a.source) {
+            (Some(path), source) if kept_file(ctx, draft, path, source.is_some()).await => {
+                PathBuf::from(path)
+            }
+            (_, Some(source)) => download(ctx, source).await?,
+            (Some(_), None) => {
+                return Err(WriteFailure::Local(format!(
+                    "The file {} is gone",
+                    a.filename
+                )));
+            }
+            (None, None) => continue,
+        };
+        out.push(OutAttachment {
+            filename: a.filename.clone(),
+            mime_type: a.mime_type.clone(),
+            data: read_file(path).await?,
+        });
+    }
+    Ok(out)
+}
+
+/// Whether `path` is a file the app keeps for this draft: one added to it,
+/// or, for an attachment it carries, one downloaded for the account.
+async fn kept_file(ctx: &AccountCtx, draft: &Draft, path: &str, carried: bool) -> bool {
+    let path = PathBuf::from(path);
+    let added = draft_dir(&ctx.deps.data_dir, &draft.id);
+    let downloaded = carried.then(|| attachments_dir(&ctx.deps.data_dir, draft.account));
+    tokio::task::spawn_blocking(move || {
+        is_inside(&path, &added) || downloaded.is_some_and(|dir| is_inside(&path, &dir))
+    })
+    .await
+    .unwrap_or(false)
+}
+
+/// The quoted message's inline parts, when the HTML may show one as a
+/// `data:` image.
+async fn quoted_inline(
+    ctx: &AccountCtx,
+    draft: &Draft,
+    html: &str,
+) -> Result<Vec<InlinePart>, WriteFailure> {
+    let Some(target) = draft.target else {
+        return Ok(Vec::new());
+    };
+    if !html.contains("data:") {
+        return Ok(Vec::new());
+    }
+    let parts = ctx.read(move |r| r.messages().attachments(target)).await?;
+    let mut out = Vec::new();
+    for part in parts {
+        let Some(content_id) = part.content_id else {
+            continue;
+        };
+        let path = download(ctx, part.id).await?;
+        out.push(InlinePart {
+            content_id,
+            mime_type: part.mime_type,
+            filename: Some(part.filename),
+            data: read_file(path).await?,
+        });
+    }
+    Ok(out)
+}
+
+/// Downloads a stored attachment for a draft write. Offline and transient
+/// failures leave the write to run again; one Gmail no longer has, or that
+/// is not the account's, rejects it.
+pub(super) async fn download(
+    ctx: &AccountCtx,
+    attachment: sm_domain::AttachmentId,
+) -> Result<PathBuf, WriteFailure> {
+    match ensure(ctx, attachment).await {
+        Ok(path) => Ok(path),
+        Err(DownloadError::Gone) => Err(WriteFailure::Local("An attachment is gone".to_owned())),
+        Err(DownloadError::Stopped) => Err(GmailError::new(Outcome::Offline).into()),
+        Err(DownloadError::Gmail(e)) if *e.outcome() == Outcome::NotFound => Err(
+            WriteFailure::Local("An attachment is gone from Gmail".to_owned()),
+        ),
+        Err(DownloadError::Gmail(e)) => Err(e.into()),
+        Err(DownloadError::Core(e)) => Err(e.into()),
+    }
+}
+
+/// A file's bytes. A file that can't be read rejects the write.
+async fn read_file(path: PathBuf) -> Result<Vec<u8>, WriteFailure> {
+    let read = tokio::task::spawn_blocking(move || std::fs::read(Path::new(&path)))
+        .await
+        .map_err(Error::from)?;
+    read.map_err(|e| WriteFailure::Local(format!("A file can't be read: {e}")))
+}

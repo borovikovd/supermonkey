@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
 /// Reads the Desktop OAuth client from `google-oauth-client.json` (or the
-/// path in `UBERMENSCH_OAUTH_CLIENT`) and bakes its ID and secret into the
+/// path in `SUPERMONKEY_OAUTH_CLIENT`) and bakes its ID and secret into the
 /// binary. Google treats a desktop client secret as not confidential.
 fn oauth_client() {
-    println!("cargo:rerun-if-env-changed=UBERMENSCH_OAUTH_CLIENT");
-    let path = std::env::var("UBERMENSCH_OAUTH_CLIENT").map_or_else(
+    println!("cargo:rerun-if-env-changed=SUPERMONKEY_OAUTH_CLIENT");
+    let path = std::env::var("SUPERMONKEY_OAUTH_CLIENT").map_or_else(
         |_| PathBuf::from("../google-oauth-client.json"),
         PathBuf::from,
     );
@@ -39,7 +39,7 @@ fn oauth_client() {
             (String::new(), String::new())
         }
         Err(e) => panic!(
-            "Missing OAuth client {}: {e}. Put the Desktop client JSON from Google Cloud there, or set UBERMENSCH_OAUTH_CLIENT.",
+            "Missing OAuth client {}: {e}. Put the Desktop client JSON from Google Cloud there, or set SUPERMONKEY_OAUTH_CLIENT.",
             path.display()
         ),
     };
@@ -48,9 +48,9 @@ fn oauth_client() {
 
     // Quota budget, units per minute per account (see SPEC Sync). Projects that
     // used the Gmail API before May 2026 keep a higher quota and can raise it.
-    println!("cargo:rerun-if-env-changed=UBERMENSCH_QUOTA_PER_MIN");
-    let quota = std::env::var("UBERMENSCH_QUOTA_PER_MIN").unwrap_or_else(|_| "5800".into());
-    println!("cargo:rustc-env=UBERMENSCH_QUOTA_PER_MIN={quota}");
+    println!("cargo:rerun-if-env-changed=SUPERMONKEY_QUOTA_PER_MIN");
+    let quota = std::env::var("SUPERMONKEY_QUOTA_PER_MIN").unwrap_or_else(|_| "5800".into());
+    println!("cargo:rustc-env=SUPERMONKEY_QUOTA_PER_MIN={quota}");
 }
 
 fn main() {

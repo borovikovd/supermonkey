@@ -3,21 +3,21 @@
 //!
 //! `cargo run --features fake --bin perf-fixture -- <db path> [perf|demo]`
 //!
-//! Point the app at it with `UBERMENSCH_DB=<db path>`, or the search bench
-//! with `UBERMENSCH_PERF_DB=<db path>`.
+//! Point the app at it with `SUPERMONKEY_DB=<db path>`, or the search bench
+//! with `SUPERMONKEY_PERF_DB=<db path>`.
 
 use std::path::Path;
 use std::time::Instant;
 
 use anyhow::Context as _;
-use ub_core::clock::{Clock as _, SystemClock};
-use ub_testkit::fixture::{DEMO, PERF, generate};
+use sm_core::clock::{Clock as _, SystemClock};
+use sm_testkit::fixture::{DEMO, PERF, generate};
 
 /// The fixture's accounts.
 const ACCOUNTS: [&str; 2] = ["alex@example.com", "sam@example.com"];
 
 fn main() -> anyhow::Result<()> {
-    ubermensch_lib::init_logging();
+    supermonkey_lib::init_logging();
     let mut args = std::env::args().skip(1);
     let path = args
         .next()

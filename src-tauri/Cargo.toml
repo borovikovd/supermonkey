@@ -1,18 +1,18 @@
 [package]
-name = "ubermensch"
+name = "supermonkey"
 version = "0.6.1"
 description = "A keyboard-first Gmail client for macOS"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-default-run = "ubermensch"
+default-run = "supermonkey"
 
 [lib]
-name = "ubermensch_lib"
+name = "supermonkey_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "ubermensch"
+name = "supermonkey"
 path = "src/main.rs"
 
 [[bin]]
@@ -36,12 +36,12 @@ tauri-build = { version = "2", features = [] }
 serde_json = "1"
 
 [dependencies]
-ub-core = { path = "crates/ub-core" }
-ub-bridge = { path = "crates/ub-bridge" }
-ub-ipc = { path = "crates/ub-ipc" }
-ub-domain = { path = "crates/ub-domain" }
-ub-gmail = { path = "crates/ub-gmail" }
-ub-testkit = { path = "crates/ub-testkit", optional = true }
+sm-core = { path = "crates/sm-core" }
+sm-bridge = { path = "crates/sm-bridge" }
+sm-ipc = { path = "crates/sm-ipc" }
+sm-domain = { path = "crates/sm-domain" }
+sm-gmail = { path = "crates/sm-gmail" }
+sm-testkit = { path = "crates/sm-testkit", optional = true }
 tauri = { version = "2.12", features = ["macos-private-api"] }
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
@@ -58,12 +58,12 @@ tracing-subscriber = "0.3"
 tauri = { version = "2.12", features = ["macos-private-api", "test"] }
 
 [features]
-# Debug only: the web bridge on 127.0.0.1:1430 (UBERMENSCH_WEB_BRIDGE=1), for
+# Debug only: the web bridge on 127.0.0.1:1430 (SUPERMONKEY_WEB_BRIDGE=1), for
 # the UI in a browser. Release builds leave it off.
-web = ["ub-bridge/web"]
-# Debug only: the E2E server (`e2e-server`), demo mode (UBERMENSCH_FAKE=1),
+web = ["sm-bridge/web"]
+# Debug only: the E2E server (`e2e-server`), demo mode (SUPERMONKEY_FAKE=1),
 # against an in-process fake Gmail, and the perf fixture (`perf-fixture`).
-fake = ["web", "dep:ub-testkit", "tokio/rt-multi-thread", "tokio/macros"]
+fake = ["web", "dep:sm-testkit", "tokio/rt-multi-thread", "tokio/macros"]
 
 [lints]
 workspace = true
@@ -77,15 +77,15 @@ license = "MIT"
 [workspace]
 members = [
     ".",
-    "crates/ub-domain",
-    "crates/ub-mime",
-    "crates/ub-gmail",
-    "crates/ub-store",
-    "crates/ub-core",
-    "crates/ub-ipc",
-    "crates/ub-bridge",
-    "crates/ub-testkit",
-    "crates/ub-fake-gmail",
+    "crates/sm-domain",
+    "crates/sm-mime",
+    "crates/sm-gmail",
+    "crates/sm-store",
+    "crates/sm-core",
+    "crates/sm-ipc",
+    "crates/sm-bridge",
+    "crates/sm-testkit",
+    "crates/sm-fake-gmail",
 ]
 resolver = "3"
 

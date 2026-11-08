@@ -7,9 +7,9 @@
 //! No test harness: macOS makes menus only on the main thread, and only
 //! `main` runs there.
 
+use supermonkey_lib::{QUIT_MENU_ITEM, app_menu};
 use tauri::menu::{Menu, MenuItemKind};
 use tauri::test::{MockRuntime, mock_app};
-use ubermensch_lib::{QUIT_MENU_ITEM, app_menu};
 
 /// Each menu as `title >`, then each of its items as `title > text`, with
 /// `#id` for an item of the app's own rather than a predefined one.

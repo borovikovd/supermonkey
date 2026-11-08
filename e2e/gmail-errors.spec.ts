@@ -478,7 +478,7 @@ test("ERR-07 drafts.create with no clear answer never makes a duplicate draft", 
   const expectOneDraft = async (key: string) => {
     const drafts = await draftsOn(s.thread(key).threadId);
     expect(drafts, key).toHaveLength(1);
-    expect(drafts[0]?.message.headers["x-ubermensch-draft"], key).toBeTruthy();
+    expect(drafts[0]?.message.headers["x-supermonkey-draft"], key).toBeTruthy();
     expect(drafts[0]?.message.raw, key).toContain("First words and more words");
     return drafts[0]?.id;
   };
@@ -519,14 +519,14 @@ test("ERR-07 drafts.create with no clear answer never makes a duplicate draft", 
     .poll(async () => (await gmail.requests("drafts.list")).some((r) => r.held))
     .toBe(true);
   const [copy] = await draftsOn(s.thread("p6").threadId);
-  const localId = copy?.message.headers["x-ubermensch-draft"] ?? "";
+  const localId = copy?.message.headers["x-supermonkey-draft"] ?? "";
   expect(localId).not.toBe("");
   await gmail.createDraft(A, {
     to: [seeds.PERSONS[5] ?? ""],
     subject: "Re: Person 6",
     threadId: s.thread("p6").threadId,
     inReplyTo: s.latest("p6").messageId,
-    headers: [["X-Ubermensch-Draft", localId]],
+    headers: [["X-Supermonkey-Draft", localId]],
     html: "<p>First words</p>",
   });
   expect(await draftsOn(s.thread("p6").threadId)).toHaveLength(2);

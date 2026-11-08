@@ -48,16 +48,16 @@ img{max-width:100%;height:auto}
 table{max-width:100%}
 a{color:var(--color-link)}
 blockquote{margin:0 0 0 8px;padding-left:12px;border-left:2px solid var(--color-border-2);color:var(--color-text-2)}
-.ub-toggle{display:block;width:fit-content;margin:4px 0;color:var(--color-text-3);font-size:15px;line-height:15px;letter-spacing:2px;cursor:pointer;user-select:none}.ub-toggle:hover{color:var(--color-text-2)}
-.ub-quote{display:none}
-.ub-quote.ub-open{display:block}
-a.ub-link-focus{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:2px}
+.sm-toggle{display:block;width:fit-content;margin:4px 0;color:var(--color-text-3);font-size:15px;line-height:15px;letter-spacing:2px;cursor:pointer;user-select:none}.sm-toggle:hover{color:var(--color-text-2)}
+.sm-quote{display:none}
+.sm-quote.sm-open{display:block}
+a.sm-link-focus{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:2px}
 `;
 
 function srcdoc(body: MessageBody, remoteImages: boolean, quoteOpen: boolean): string {
   const csp = frameCsp(remoteImages);
   const quote = body.quoteHtml
-    ? `<div class="ub-toggle" data-ub-toggle>•••</div><div class="ub-quote${quoteOpen ? " ub-open" : ""}">${body.quoteHtml}</div>`
+    ? `<div class="sm-toggle" data-sm-toggle>•••</div><div class="sm-quote${quoteOpen ? " sm-open" : ""}">${body.quoteHtml}</div>`
     : "";
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><style>${frameTokens()}${BASE_STYLE}</style></head><body>${body.html}${quote}</body></html>`;
 }
@@ -136,8 +136,8 @@ export function MessageFrame({
         const t = e.target;
         const view = doc.defaultView;
         if (!view || !(t instanceof view.Element)) return;
-        if (t.closest("[data-ub-toggle]")) {
-          doc.querySelector(".ub-quote")?.classList.toggle("ub-open");
+        if (t.closest("[data-sm-toggle]")) {
+          doc.querySelector(".sm-quote")?.classList.toggle("sm-open");
           requestAnimationFrame(fit);
         }
       });

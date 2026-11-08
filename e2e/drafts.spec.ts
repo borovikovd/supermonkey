@@ -61,7 +61,7 @@ test("DRF-01 drafts autosave and update a single Gmail draft", async ({ app, gma
   expect(first).toHaveLength(1);
   const gmailId = first[0]?.id;
   expect(bodyOf(first[0])).toContain("one");
-  const local = first[0]?.message.headers["x-ubermensch-draft"];
+  const local = first[0]?.message.headers["x-supermonkey-draft"];
   expect(local).toMatch(/\S/);
 
   const updatesBefore = (await updates(gmail)).length;
@@ -153,7 +153,7 @@ test("DRF-14 a second Gmail draft carrying a local draft's id is deleted as an e
   await app.press("Escape", "Escape");
   await app.settle();
   const [mine] = await draftsIn(gmail, thread);
-  const local = mine?.message.headers["x-ubermensch-draft"] ?? "";
+  const local = mine?.message.headers["x-supermonkey-draft"] ?? "";
   expect(local).toMatch(/\S/);
 
   // Another Gmail draft turns up with the same local id, for example from a
@@ -165,7 +165,7 @@ test("DRF-14 a second Gmail draft carrying a local draft's id is deleted as an e
       threadId: thread,
       inReplyTo: s.latest("p3").messageId,
       html: "<p>a stray copy</p>",
-      headers: [["X-Ubermensch-Draft", local]],
+      headers: [["X-Supermonkey-Draft", local]],
     },
     { poll: true },
   );
@@ -638,8 +638,8 @@ test("DRF-09 the app's own drafts are read back after the account is re-added", 
   expect((await gmail.gmail(A)).drafts).toHaveLength(1);
 });
 
-/** The open composer's body as Rust last sent it (the mirror's copy). A string: `__ub` is the app's hook. */
-const MIRROR_BODY = `Object.values(window.__ub.useMirror.getState().subs)
+/** The open composer's body as Rust last sent it (the mirror's copy). A string: `__sm` is the app's hook. */
+const MIRROR_BODY = `Object.values(window.__sm.useMirror.getState().subs)
   .find((s) => s.type === "composer")?.draft?.bodyHtml ?? null`;
 
 test("DRF-10 text deleted while its save is on the way stays deleted", async ({ app, gmail }) => {

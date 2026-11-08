@@ -1,14 +1,14 @@
 //! The Tauri commands: `connect`, which hands the core the page's channel,
 //! and `dispatch`, which runs every other command through
-//! [`ub_bridge::dispatch`], the code the debug web bridge runs too. A
-//! command is defined once, in `ub_ipc::Command`; nothing here names one.
+//! [`sm_bridge::dispatch`], the code the debug web bridge runs too. A
+//! command is defined once, in `sm_ipc::Command`; nothing here names one.
 
 use serde_json::Value;
+use sm_bridge::Answer;
+use sm_bridge::commands::{self as cmd, CmdResult};
+use sm_ipc::{ChannelMessage, LaunchInfo};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
-use ub_bridge::Answer;
-use ub_bridge::commands::{self as cmd, CmdResult};
-use ub_ipc::{ChannelMessage, LaunchInfo};
 
 use crate::Shell;
 
@@ -43,7 +43,7 @@ pub(crate) async fn dispatch(
     command: String,
     args: Value,
 ) -> CmdResult<Value> {
-    match ub_bridge::dispatch(&shell.core, &command, args).await? {
+    match sm_bridge::dispatch(&shell.core, &command, args).await? {
         Answer::Reply(reply) => Ok(reply.into_json()),
         Answer::Quit => {
             crate::quit(&app);

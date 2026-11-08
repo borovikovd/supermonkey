@@ -7,48 +7,48 @@ use std::process::Command;
 
 /// Each workspace crate and the workspace crates it may depend on.
 const ALLOWED: &[(&str, &[&str])] = &[
-    ("ub-domain", &[]),
-    ("ub-mime", &["ub-domain"]),
-    ("ub-gmail", &["ub-domain"]),
-    ("ub-store", &["ub-domain"]),
-    ("ub-ipc", &["ub-domain"]),
+    ("sm-domain", &[]),
+    ("sm-mime", &["sm-domain"]),
+    ("sm-gmail", &["sm-domain"]),
+    ("sm-store", &["sm-domain"]),
+    ("sm-ipc", &["sm-domain"]),
     (
-        "ub-core",
-        &["ub-domain", "ub-mime", "ub-gmail", "ub-store", "ub-ipc"],
+        "sm-core",
+        &["sm-domain", "sm-mime", "sm-gmail", "sm-store", "sm-ipc"],
     ),
-    ("ub-bridge", &["ub-core", "ub-ipc", "ub-domain"]),
+    ("sm-bridge", &["sm-core", "sm-ipc", "sm-domain"]),
     (
-        "ub-testkit",
+        "sm-testkit",
         &[
-            "ub-core",
-            "ub-bridge",
-            "ub-ipc",
-            "ub-domain",
-            "ub-gmail",
-            "ub-store",
-            "ub-fake-gmail",
+            "sm-core",
+            "sm-bridge",
+            "sm-ipc",
+            "sm-domain",
+            "sm-gmail",
+            "sm-store",
+            "sm-fake-gmail",
         ],
     ),
-    ("ub-fake-gmail", &[]),
+    ("sm-fake-gmail", &[]),
     (
-        "ubermensch",
+        "supermonkey",
         &[
-            "ub-core",
-            "ub-bridge",
-            "ub-ipc",
-            "ub-domain",
-            "ub-gmail",
-            "ub-testkit",
+            "sm-core",
+            "sm-bridge",
+            "sm-ipc",
+            "sm-domain",
+            "sm-gmail",
+            "sm-testkit",
         ],
     ),
 ];
 
 /// Third-party crates that only some workspace crates may use directly.
 const CONFINED: &[(&str, &[&str])] = &[
-    ("rusqlite", &["ub-store", "ub-domain"]),
-    ("reqwest", &["ub-gmail", "ub-testkit", "ub-fake-gmail"]),
-    ("tauri", &["ubermensch"]),
-    ("axum", &["ub-bridge", "ub-testkit", "ub-fake-gmail"]),
+    ("rusqlite", &["sm-store", "sm-domain"]),
+    ("reqwest", &["sm-gmail", "sm-testkit", "sm-fake-gmail"]),
+    ("tauri", &["supermonkey"]),
+    ("axum", &["sm-bridge", "sm-testkit", "sm-fake-gmail"]),
 ];
 
 /// Every workspace crate's direct dependencies by name, each with whether it is
@@ -100,7 +100,7 @@ fn workspace_crates_depend_only_on_lower_layers() {
             .filter(|(d, _)| members.contains(d.as_str()))
         {
             // Tests anywhere may run against the fake Google.
-            let fake_in_tests = *dev_only && dep == "ub-fake-gmail";
+            let fake_in_tests = *dev_only && dep == "sm-fake-gmail";
             assert!(
                 fake_in_tests || allowed.contains(&dep.as_str()),
                 "{krate} may not depend on {dep}"

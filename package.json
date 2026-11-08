@@ -1,5 +1,5 @@
 {
-  "name": "ubermensch",
+  "name": "supermonkey",
   "version": "0.6.1",
   "private": true,
   "license": "MIT",
@@ -9,7 +9,7 @@
     "build": "vp build",
     "check": "vp check",
     "tauri": "tauri",
-    "demo": "UBERMENSCH_FAKE=1 UBERMENSCH_WEB_BRIDGE=1 tauri dev --features fake"
+    "demo": "SUPERMONKEY_FAKE=1 SUPERMONKEY_WEB_BRIDGE=1 tauri dev --features fake"
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.14.25",

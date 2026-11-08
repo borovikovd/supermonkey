@@ -14,11 +14,11 @@ const BAD_LOCAL = /[\p{White_Space}\p{Cc}<>()[\],;:\\"@]/u;
 const LABEL = /^[\p{Alphabetic}\p{N}-]+$/u;
 
 /**
- * Whether the core would send to this address: `ub_mime::is_valid_email`,
+ * Whether the core would send to this address: `sm_mime::is_valid_email`,
  * ported rule for rule, so a chip shows in `danger` exactly when Send would
  * be refused. It runs on every chip and keystroke, so it can't wait on a
  * command. Both are held to one table of cases
- * (`src-tauri/crates/ub-mime/tests/fixtures/email-addresses.json`, RCP-11).
+ * (`src-tauri/crates/sm-mime/tests/fixtures/email-addresses.json`, RCP-11).
  */
 export function isValidEmail(s: string): boolean {
   const at = s.lastIndexOf("@");

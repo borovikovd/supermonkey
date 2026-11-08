@@ -37,7 +37,7 @@ const SIGN_INS = new Set<CommandName>(["add_account", "sign_in_again"]);
  */
 class Refused extends Error {}
 
-/** A command's name, as Rust defines it (`ub_ipc::Command`). */
+/** A command's name, as Rust defines it (`sm_ipc::Command`). */
 type CommandName = Command["command"];
 /** A command's arguments, named as Rust names them. */
 type ArgsOf<K extends CommandName> = Extract<Command, { command: K }>["args"];
@@ -46,7 +46,7 @@ type ReplyOf<K extends CommandName> = Extract<CommandReply, { command: K }>["rep
 
 /**
  * Runs a command in Rust. Its name, arguments, and reply are typed from
- * `ub_ipc::Command`. In Tauri, every command but `connect` goes through the
+ * `sm_ipc::Command`. In Tauri, every command but `connect` goes through the
  * one `dispatch` command, which runs the web bridge's code.
  */
 async function invoke<K extends CommandName>(command: K, args: ArgsOf<K>): Promise<ReplyOf<K>> {
@@ -103,7 +103,7 @@ export let launch: LaunchInfo = { lastAction: 0, debug: false, maxAttachmentByte
 let retryMs = 0;
 
 /** What the user is told about an action Rust could not read. */
-const UNREADABLE = "Couldn't do that because of a bug in Ubermensch";
+const UNREADABLE = "Couldn't do that because of a bug in Supermonkey";
 
 /** Numbers the UI dropped unsent: Rust never commits them. */
 const dropped = new Set<number>();
@@ -314,7 +314,7 @@ export function subIdFor(key: SubKey): string | undefined {
 
 // ------------------------------------------------------------ app events
 
-/** An app event's name, as Rust defines it (`ub_ipc::AppEvent`). */
+/** An app event's name, as Rust defines it (`sm_ipc::AppEvent`). */
 type EventName = AppEvent["event"];
 /** An app event's payload; null for one that has none. */
 type PayloadOf<K extends EventName> =

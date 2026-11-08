@@ -1,8 +1,8 @@
-# Ubermensch
+# Supermonkey
 
 A fast, keyboard-first Gmail client for macOS, in the spirit of Superhuman.
 
-![Ubermensch Inbox, split into Important and Other](docs/screenshot.png)
+![Supermonkey Inbox, split into Important and Other](docs/screenshot.png)
 
 - **Every action from the keyboard.** `j`/`k` to move, `e` to mark done, `h` to
   snooze, `r` to reply, `⌘K` for every command, `?` for the shortcut sheet.
@@ -22,12 +22,12 @@ A fast, keyboard-first Gmail client for macOS, in the spirit of Superhuman.
 ## Install
 
 Download the `.dmg` from the latest
-[release](https://github.com/borovikovd/ubermensch/releases/latest), open it, and
-drag Ubermensch to Applications. The app is not signed yet, so clear the download
+[release](https://github.com/borovikovd/supermonkey/releases/latest), open it, and
+drag Supermonkey to Applications. The app is not signed yet, so clear the download
 flag once before the first launch:
 
 ```sh
-xattr -cr /Applications/Ubermensch.app
+xattr -cr /Applications/Supermonkey.app
 ```
 
 ## Development
@@ -48,7 +48,7 @@ sign in again every 7 days.
 ### Build
 
 ```sh
-vp run tauri build     # src-tauri/target/release/bundle/macos/Ubermensch.app
+vp run tauri build     # src-tauri/target/release/bundle/macos/Supermonkey.app
 ```
 
 ### Release
@@ -86,12 +86,12 @@ Perf fixture (two accounts × 20,000 threads):
 
 ```sh
 cargo run --manifest-path src-tauri/Cargo.toml --release --features fake --bin perf-fixture -- /tmp/perf.db perf
-UBERMENSCH_DB=/tmp/perf.db vp run tauri dev
-UBERMENSCH_PERF_DB=/tmp/perf.db cargo test --manifest-path src-tauri/Cargo.toml -p ub-core --release --lib perf -- --ignored --nocapture
+SUPERMONKEY_DB=/tmp/perf.db vp run tauri dev
+SUPERMONKEY_PERF_DB=/tmp/perf.db cargo test --manifest-path src-tauri/Cargo.toml -p sm-core --release --lib perf -- --ignored --nocapture
 ```
 
 Debug builds log keydown-to-paint for each shortcut and warn when one is over
-budget. `UBERMENSCH_WEB_BRIDGE=1` serves the command surface on
+budget. `SUPERMONKEY_WEB_BRIDGE=1` serves the command surface on
 `127.0.0.1:1430`, so the UI can run in a browser at `http://localhost:5173`
 against the real core.
 
@@ -99,14 +99,14 @@ against the real core.
 
 - `src-tauri/src` — the Tauri shell, and the `e2e-server` and `perf-fixture`
   binaries.
-- `src-tauri/crates`, lowest layer first: `ub-domain` (newtypes, mail model,
-  views, splits, the query language), `ub-mime`, `ub-gmail` (client, quota,
-  OAuth, token store), `ub-store` (schema, writer, read pool), `ub-ipc` (IPC
-  types), `ub-core` (actions, subscriptions, per-account workers), `ub-bridge`
-  (command dispatch for Tauri and the debug web bridge), `ub-testkit` (E2E
-  server, demo, perf fixture), `ub-fake-gmail`.
+- `src-tauri/crates`, lowest layer first: `sm-domain` (newtypes, mail model,
+  views, splits, the query language), `sm-mime`, `sm-gmail` (client, quota,
+  OAuth, token store), `sm-store` (schema, writer, read pool), `sm-ipc` (IPC
+  types), `sm-core` (actions, subscriptions, per-account workers), `sm-bridge`
+  (command dispatch for Tauri and the debug web bridge), `sm-testkit` (E2E
+  server, demo, perf fixture), `sm-fake-gmail`.
 - `src` — the React UI: `store/` (mirror and chrome state), `keyboard/`, `ui/`,
-  `compose/`, `ipc/`. `src/bindings` is generated from `ub-ipc` by ts-rs.
+  `compose/`, `ipc/`. `src/bindings` is generated from `sm-ipc` by ts-rs.
 - `e2e` — the end-to-end suite and its test plan, `COVERAGE.md`.
 
 How to work on the code, for people and coding agents, is in

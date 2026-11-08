@@ -1,6 +1,6 @@
 //! The Tauri shell (ARCHITECTURE.md, section 3): plugins, the window and
-//! Dock, the [`Platform`](ub_core::Platform) port, and commands that call
-//! `ub_bridge`. No logic beyond wiring: the core decides.
+//! Dock, the [`Platform`](sm_core::Platform) port, and commands that call
+//! `sm_bridge`. No logic beyond wiring: the core decides.
 //!
 //! - Closing the window hides it; the app keeps syncing in the Dock, and a
 //!   Dock click shows it again.
@@ -12,9 +12,9 @@
 //!   shutdown), the page can't answer: the exit still waits, within the
 //!   core's own deadline, for the UI actions the core has queued.
 //! - Debug builds with the `web` feature serve the web bridge on
-//!   127.0.0.1:1430 when `UBERMENSCH_WEB_BRIDGE=1`, for the UI in a browser.
+//!   127.0.0.1:1430 when `SUPERMONKEY_WEB_BRIDGE=1`, for the UI in a browser.
 //! - Debug builds with the `fake` feature run demo mode when
-//!   `UBERMENSCH_FAKE=1` (`vp run demo`): an in-process fake Gmail with demo
+//!   `SUPERMONKEY_FAKE=1` (`vp run demo`): an in-process fake Gmail with demo
 //!   mail and two accounts, on fresh data in its own folder each launch.
 
 mod commands;
@@ -26,14 +26,14 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use sm_core::activity::{Activity, Tasks};
+use sm_core::clock::SystemClock;
+use sm_core::{App, Config, Deps, GmailConfig};
+use sm_gmail::{OAuthConfig, QuotaConfig, TokenFile, TokenStore, Units};
+use sm_ipc::AppEvent;
 use tauri::{AppHandle, Emitter as _, Manager as _, RunEvent, WindowEvent};
 use tauri_plugin_window_state::StateFlags;
 use tokio::sync::OnceCell;
-use ub_core::activity::{Activity, Tasks};
-use ub_core::clock::SystemClock;
-use ub_core::{App, Config, Deps, GmailConfig};
-use ub_gmail::{OAuthConfig, QuotaConfig, TokenFile, TokenStore, Units};
-use ub_ipc::AppEvent;
 
 pub use crate::logging::init_logging;
 pub use crate::menu::{QUIT_MENU_ITEM, app_menu};
@@ -49,10 +49,10 @@ compile_error!("the `fake` feature is for debug builds only");
 
 /// Endpoint overrides a debug build takes (`gmail_config`).
 const ENDPOINT_OVERRIDES: [&str; 4] = [
-    "UBERMENSCH_GMAIL_BASE",
-    "UBERMENSCH_OAUTH_AUTH_URL",
-    "UBERMENSCH_OAUTH_TOKEN_URL",
-    "UBERMENSCH_OAUTH_REVOKE_URL",
+    "SUPERMONKEY_GMAIL_BASE",
+    "SUPERMONKEY_OAUTH_AUTH_URL",
+    "SUPERMONKEY_OAUTH_TOKEN_URL",
+    "SUPERMONKEY_OAUTH_REVOKE_URL",
 ];
 
 /// How long after launch the window shows even if the page has not
@@ -64,7 +64,7 @@ const SHOW_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
 const PAGE_QUIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Quota units a minute per account when the build sets no usable
-/// `UBERMENSCH_QUOTA_PER_MIN` (SPEC Sync).
+/// `SUPERMONKEY_QUOTA_PER_MIN` (SPEC Sync).
 const DEFAULT_QUOTA_PER_MIN: u32 = 5800;
 
 /// What the commands and window events share.
@@ -80,7 +80,7 @@ pub(crate) struct Shell {
     pub(crate) connected: AtomicBool,
     /// Demo mode's fake Gmail, kept running for as long as the app.
     #[cfg(feature = "fake")]
-    _demo: Option<ub_testkit::Demo>,
+    _demo: Option<sm_testkit::Demo>,
 }
 
 impl Shell {
@@ -103,7 +103,7 @@ struct Setup {
     config: Config,
     tokens: Arc<dyn TokenStore>,
     #[cfg(feature = "fake")]
-    demo: Option<ub_testkit::Demo>,
+    demo: Option<sm_testkit::Demo>,
 }
 
 /// Starts the app.
@@ -153,7 +153,7 @@ pub fn run() {
     let app = match built {
         Ok(app) => app,
         Err(e) => {
-            tracing::error!(error = %e, "couldn't start Ubermensch");
+            tracing::error!(error = %e, "couldn't start Supermonkey");
             std::process::exit(1);
         }
     };
@@ -211,8 +211,8 @@ fn start_core(app: &AppHandle) -> anyhow::Result<Shell> {
 /// mode, the demo's.
 fn setup(app: &AppHandle) -> anyhow::Result<Setup> {
     #[cfg(feature = "fake")]
-    if cfg!(debug_assertions) && std::env::var("UBERMENSCH_FAKE").as_deref() == Ok("1") {
-        let demo = ub_testkit::Demo::start()?;
+    if cfg!(debug_assertions) && std::env::var("SUPERMONKEY_FAKE").as_deref() == Ok("1") {
+        let demo = sm_testkit::Demo::start()?;
         return Ok(Setup {
             config: Config::in_data_dir(demo.data_dir(), true, demo.gmail_config()),
             tokens: demo.tokens(),
@@ -228,7 +228,7 @@ fn setup(app: &AppHandle) -> anyhow::Result<Setup> {
     let mut config = Config::in_data_dir(&data_dir, cfg!(debug_assertions), gmail_config());
     // Debug only: a perf fixture or other test database (`perf-fixture`).
     #[cfg(debug_assertions)]
-    if let Some(path) = std::env::var_os("UBERMENSCH_DB") {
+    if let Some(path) = std::env::var_os("SUPERMONKEY_DB") {
         config.db_path = std::path::PathBuf::from(path);
     }
     Ok(Setup {
@@ -243,10 +243,10 @@ fn setup(app: &AppHandle) -> anyhow::Result<Setup> {
 /// (`build.rs`). Debug builds may point every endpoint elsewhere, such as at
 /// a fake.
 fn gmail_config() -> GmailConfig {
-    let per_minute = env!("UBERMENSCH_QUOTA_PER_MIN")
+    let per_minute = env!("SUPERMONKEY_QUOTA_PER_MIN")
         .parse()
         .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "UBERMENSCH_QUOTA_PER_MIN is not a number; using the default");
+            tracing::warn!(error = %e, "SUPERMONKEY_QUOTA_PER_MIN is not a number; using the default");
             DEFAULT_QUOTA_PER_MIN
         });
     let oauth = OAuthConfig::google(env!("GOOGLE_CLIENT_ID"), env!("GOOGLE_CLIENT_SECRET"));
@@ -280,14 +280,14 @@ fn token_store(data_dir: &Path) -> Arc<dyn TokenStore> {
             .iter()
             .any(|name| std::env::var_os(name).is_some())
     {
-        return Arc::new(ub_gmail::MemoryTokenStore::default());
+        return Arc::new(sm_gmail::MemoryTokenStore::default());
     }
     Arc::new(TokenFile::new(data_dir.join(Config::TOKEN_FILE)))
 }
 
-/// Whether `UBERMENSCH_WEB_BRIDGE=1` asks for the debug web bridge.
+/// Whether `SUPERMONKEY_WEB_BRIDGE=1` asks for the debug web bridge.
 fn wants_web_bridge() -> bool {
-    std::env::var("UBERMENSCH_WEB_BRIDGE").as_deref() == Ok("1")
+    std::env::var("SUPERMONKEY_WEB_BRIDGE").as_deref() == Ok("1")
 }
 
 /// Serves the debug web bridge when asked for, in debug builds with the
@@ -297,9 +297,9 @@ fn start_web_bridge(core: &Arc<App>, tasks: &Tasks) {
     if !wants_web_bridge() {
         return;
     }
-    let bridge = ub_bridge::WebBridge::new(Some(Arc::clone(core)), Arc::clone(tasks.activity()));
+    let bridge = sm_bridge::WebBridge::new(Some(Arc::clone(core)), Arc::clone(tasks.activity()));
     tasks.spawn("web bridge", async move {
-        if let Err(e) = ub_bridge::serve_local(bridge).await {
+        if let Err(e) = sm_bridge::serve_local(bridge).await {
             tracing::warn!(error = %e, "the web bridge stopped");
         }
     });
@@ -310,7 +310,7 @@ fn start_web_bridge(core: &Arc<App>, tasks: &Tasks) {
 fn start_web_bridge(_core: &Arc<App>, _tasks: &Tasks) {
     if wants_web_bridge() {
         tracing::warn!(
-            "UBERMENSCH_WEB_BRIDGE=1 needs a debug build with the `web` feature (--features web)"
+            "SUPERMONKEY_WEB_BRIDGE=1 needs a debug build with the `web` feature (--features web)"
         );
     }
 }

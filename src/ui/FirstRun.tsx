@@ -7,7 +7,7 @@ export function FirstRun() {
       data-tauri-drag-region
       className="flex h-full flex-col items-center justify-center gap-4 bg-surface"
     >
-      <div className="text-subject font-semibold">Ubermensch</div>
+      <div className="text-subject font-semibold">Supermonkey</div>
       <div className="text-row text-text-2">A fast, keyboard-first client for Gmail.</div>
       <button
         className="mt-2 rounded-md bg-accent px-4 py-2 text-row font-medium text-inverse"

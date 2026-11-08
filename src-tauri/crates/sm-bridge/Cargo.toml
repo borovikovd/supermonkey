@@ -1,0 +1,29 @@
+[package]
+name = "sm-bridge"
+version = "0.1.0"
+description = "Command dispatch over sm-core for the Tauri commands and the debug web bridge"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+sm-core = { path = "../sm-core" }
+sm-ipc = { path = "../sm-ipc" }
+sm-domain = { path = "../sm-domain" }
+base64 = "0.22"
+serde = "1"
+serde_json = "1"
+tracing = "0.1"
+axum = { version = "0.8", optional = true }
+futures-core = { version = "0.3", optional = true }
+parking_lot = { version = "0.12", optional = true }
+tokio = { version = "1", features = ["net", "sync"], optional = true }
+
+[features]
+# The debug web bridge: the command surface over HTTP for a UI in a browser.
+# Only debug builds of the app and the E2E server turn it on.
+web = ["dep:axum", "dep:futures-core", "dep:parking_lot", "dep:tokio"]
+
+[lints]
+workspace = true

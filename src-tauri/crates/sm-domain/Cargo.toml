@@ -1,0 +1,29 @@
+[package]
+name = "sm-domain"
+version = "0.1.0"
+description = "Supermonkey's mail model and rules: pure, with no I/O"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+# Date math only: no `clock` feature, so nothing here can read the time.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+rusqlite = { version = "0.40", optional = true }
+ts-rs = { version = "12", optional = true }
+
+[dev-dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+chrono-tz = "0.10"
+
+[features]
+# SQLite conversions for the newtypes, for sm-store.
+sqlite = ["dep:rusqlite"]
+# TypeScript bindings for the newtypes, for sm-ipc.
+ts = ["dep:ts-rs"]
+
+[lints]
+workspace = true

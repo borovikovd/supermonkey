@@ -7,7 +7,7 @@ import { expect, type Locator, type Page, type Route } from "@playwright/test";
 import type { Control, GmailState } from "./control.ts";
 import type { FileFixture } from "./files.ts";
 
-/** The page's pending work, from `window.__ub.pending()` (src/ipc/bridge.ts). */
+/** The page's pending work, from `window.__sm.pending()` (src/ipc/bridge.ts). */
 type PagePending = {
   invokes: number;
   signIns: number;
@@ -29,12 +29,12 @@ declare global {
 /**
  * Reads the page's pending work after two frames, so work a frame defers is
  * counted; null when no app page is loaded. A string, because the hook is
- * `window.__ub` (src/main.tsx).
+ * `window.__sm` (src/main.tsx).
  */
 const PAGE_PENDING = `(async () => {
-  if (!window.__ub) return null;
+  if (!window.__sm) return null;
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-  return window.__ub.pending();
+  return window.__sm.pending();
 })()`;
 
 /** What `settle()` reads from a page that is mid-navigation: busy. */

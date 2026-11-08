@@ -23,7 +23,7 @@ function allLinks(): [number, HTMLAnchorElement][] {
 export function cycleLink(back: boolean) {
   const c = useChrome.getState();
   const links = allLinks();
-  for (const [, a] of links) a.classList.remove("ub-link-focus");
+  for (const [, a] of links) a.classList.remove("sm-link-focus");
   if (links.length === 0) return;
   const current = c.link;
   let at = current
@@ -36,7 +36,7 @@ export function cycleLink(back: boolean) {
   if (!picked) return;
   const [id, a] = picked;
   const first = links.findIndex(([x]) => x === id);
-  a.classList.add("ub-link-focus");
+  a.classList.add("sm-link-focus");
   a.scrollIntoView({ block: "nearest" });
   a.ownerDocument.defaultView?.frameElement?.scrollIntoView({ block: "nearest" });
   c.setLink([id, at - first]);
@@ -54,8 +54,8 @@ export function openLink() {
 export function clearLink() {
   for (const f of frames()) {
     f.contentDocument
-      ?.querySelectorAll(".ub-link-focus")
-      .forEach((x) => x.classList.remove("ub-link-focus"));
+      ?.querySelectorAll(".sm-link-focus")
+      .forEach((x) => x.classList.remove("sm-link-focus"));
   }
   useChrome.getState().setLink(null);
 }

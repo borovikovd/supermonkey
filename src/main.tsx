@@ -22,7 +22,7 @@ import { useMirror } from "./store/mirror";
 // Debug builds and the web bridge: the stores, for inspection and the E2E
 // harness. `pending` is what the UI still owes the core (see `settle()`).
 if (import.meta.env.DEV || !inTauri)
-  Object.assign(window, { __ub: { useChrome, useMirror, pending: pendingWork } });
+  Object.assign(window, { __sm: { useChrome, useMirror, pending: pendingWork } });
 
 installKeys();
 trackFocus();

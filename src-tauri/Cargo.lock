@@ -4063,6 +4063,165 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
+name = "sm-bridge"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "futures-core",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sm-core",
+ "sm-domain",
+ "sm-ipc",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "sm-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "futures-util",
+ "parking_lot",
+ "proptest",
+ "serde",
+ "serde_json",
+ "sm-domain",
+ "sm-gmail",
+ "sm-ipc",
+ "sm-mime",
+ "sm-store",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "url",
+ "uuid",
+ "xattr",
+]
+
+[[package]]
+name = "sm-domain"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "chrono-tz",
+ "rusqlite",
+ "serde",
+ "thiserror 2.0.21",
+ "ts-rs",
+]
+
+[[package]]
+name = "sm-fake-gmail"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "hyper",
+ "hyper-util",
+ "parking_lot",
+ "reqwest",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tower",
+ "url",
+]
+
+[[package]]
+name = "sm-gmail"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "oauth2",
+ "parking_lot",
+ "percent-encoding",
+ "rand 0.9.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sm-domain",
+ "sm-fake-gmail",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "sm-ipc"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sm-domain",
+ "ts-rs",
+]
+
+[[package]]
+name = "sm-mime"
+version = "0.1.0"
+dependencies = [
+ "ammonia",
+ "base64 0.22.1",
+ "chrono",
+ "encoding_rs",
+ "html-escape",
+ "mail-builder",
+ "percent-encoding",
+ "regex",
+ "serde",
+ "serde_json",
+ "sm-domain",
+ "thiserror 2.0.21",
+ "url",
+]
+
+[[package]]
+name = "sm-store"
+version = "0.1.0"
+dependencies = [
+ "parking_lot",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sm-domain",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tracing",
+]
+
+[[package]]
+name = "sm-testkit"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "parking_lot",
+ "rand 0.9.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sm-bridge",
+ "sm-core",
+ "sm-domain",
+ "sm-fake-gmail",
+ "sm-gmail",
+ "sm-ipc",
+ "sm-store",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4209,6 +4368,29 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "supermonkey"
+version = "0.6.1"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "sm-bridge",
+ "sm-core",
+ "sm-domain",
+ "sm-gmail",
+ "sm-ipc",
+ "sm-testkit",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-window-state",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "swift-rs"
@@ -5096,188 +5278,6 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
-
-[[package]]
-name = "ub-bridge"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "futures-core",
- "parking_lot",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "ub-core",
- "ub-domain",
- "ub-ipc",
-]
-
-[[package]]
-name = "ub-core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "futures-util",
- "parking_lot",
- "proptest",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
- "tracing",
- "ub-domain",
- "ub-gmail",
- "ub-ipc",
- "ub-mime",
- "ub-store",
- "url",
- "uuid",
- "xattr",
-]
-
-[[package]]
-name = "ub-domain"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "chrono-tz",
- "rusqlite",
- "serde",
- "thiserror 2.0.21",
- "ts-rs",
-]
-
-[[package]]
-name = "ub-fake-gmail"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64 0.22.1",
- "hyper",
- "hyper-util",
- "parking_lot",
- "reqwest",
- "serde_json",
- "sha2",
- "tokio",
- "tower",
- "url",
-]
-
-[[package]]
-name = "ub-gmail"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "oauth2",
- "parking_lot",
- "percent-encoding",
- "rand 0.9.5",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "ub-domain",
- "ub-fake-gmail",
- "url",
-]
-
-[[package]]
-name = "ub-ipc"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "ts-rs",
- "ub-domain",
-]
-
-[[package]]
-name = "ub-mime"
-version = "0.1.0"
-dependencies = [
- "ammonia",
- "base64 0.22.1",
- "chrono",
- "encoding_rs",
- "html-escape",
- "mail-builder",
- "percent-encoding",
- "regex",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "ub-domain",
- "url",
-]
-
-[[package]]
-name = "ub-store"
-version = "0.1.0"
-dependencies = [
- "parking_lot",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
- "ub-domain",
-]
-
-[[package]]
-name = "ub-testkit"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "base64 0.22.1",
- "parking_lot",
- "rand 0.9.5",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "ub-bridge",
- "ub-core",
- "ub-domain",
- "ub-fake-gmail",
- "ub-gmail",
- "ub-ipc",
- "ub-store",
- "url",
-]
-
-[[package]]
-name = "ubermensch"
-version = "0.6.1"
-dependencies = [
- "anyhow",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-plugin-single-instance",
- "tauri-plugin-window-state",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "ub-bridge",
- "ub-core",
- "ub-domain",
- "ub-gmail",
- "ub-ipc",
- "ub-testkit",
-]
 
 [[package]]
 name = "uds_windows"

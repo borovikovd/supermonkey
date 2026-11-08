@@ -453,13 +453,13 @@ test.describe("conversation", () => {
     const url = app.page.url();
 
     await app.press("Tab");
-    await expect(linkA).toHaveClass(/ub-link-focus/);
+    await expect(linkA).toHaveClass(/sm-link-focus/);
     await app.press("Tab");
-    await expect(mailX).toHaveClass(/ub-link-focus/);
-    await expect(linkA).not.toHaveClass(/ub-link-focus/);
+    await expect(mailX).toHaveClass(/sm-link-focus/);
+    await expect(linkA).not.toHaveClass(/sm-link-focus/);
     await app.press("Shift+Tab");
-    await expect(linkA).toHaveClass(/ub-link-focus/);
-    await expect(mailX).not.toHaveClass(/ub-link-focus/);
+    await expect(linkA).toHaveClass(/sm-link-focus/);
+    await expect(mailX).not.toHaveClass(/sm-link-focus/);
 
     await app.press("Enter");
     await app.settle();
@@ -468,7 +468,7 @@ test.describe("conversation", () => {
     await expect(app.editor).toHaveCount(0);
 
     await app.press("Escape");
-    await expect(body.locator(".ub-link-focus")).toHaveCount(0);
+    await expect(body.locator(".sm-link-focus")).toHaveCount(0);
     await expect(app.conversationTitle).toHaveText("Links");
     await app.press("Escape");
     await expect(app.conversationTitle).toHaveCount(0);

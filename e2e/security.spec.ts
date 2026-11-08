@@ -17,7 +17,7 @@ function pwned(app: App): Promise<string[]> {
 
 /**
  * Everything the webview keeps: localStorage, sessionStorage, IndexedDB, the
- * `window.__ub` stores as JSON, and the DOM. A string, because `__ub` is the
+ * `window.__sm` stores as JSON, and the DOM. A string, because `__sm` is the
  * app's own hook (src/main.tsx).
  */
 const WEBVIEW_STATE = `(async () => {
@@ -35,7 +35,7 @@ const WEBVIEW_STATE = `(async () => {
     return stores.join("\\n");
   }));
   const json = (v) => JSON.stringify(v, (_k, x) => (x instanceof Map ? Object.fromEntries(x) : x));
-  const stores = [window.__ub.useChrome.getState(), window.__ub.useMirror.getState()].map(json);
+  const stores = [window.__sm.useChrome.getState(), window.__sm.useMirror.getState()].map(json);
   return [dump(localStorage), dump(sessionStorage), ...idb, ...stores, document.documentElement.outerHTML].join("\\n");
 })()`;
 

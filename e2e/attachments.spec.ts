@@ -293,7 +293,7 @@ test.describe("attachments", () => {
     const [flags, time, agent, event] = flag.split(";");
     expect(flags).toBe("0081");
     expect(Number.parseInt(time ?? "", 16)).toBe(Math.floor((await gmail.now()) / 1000));
-    expect(agent).toBe("Ubermensch");
+    expect(agent).toBe("Supermonkey");
     expect(event).toMatch(/^[0-9A-F]{8}-[0-9A-F]{4}-4[0-9A-F]{3}-[0-9A-F]{4}-[0-9A-F]{12}$/);
   });
 
