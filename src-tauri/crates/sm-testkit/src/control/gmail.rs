@@ -118,7 +118,7 @@ fn added_json(m: &AddedMessage) -> Value {
 fn deliver_one(s: &Server, req: DeliverReq) -> Result<AddedMessage, Fail> {
     let user = s.user(&req.account)?;
     let date = req.date.unwrap_or_else(|| app_now(s));
-    Ok(user.add_message(&NewMessage {
+    Ok(user.add_message(NewMessage {
         from: req.from,
         to: if req.to.is_empty() {
             vec![user.email().to_owned()]
@@ -426,7 +426,7 @@ pub(crate) async fn create_draft(
 ) -> Ctl {
     let user = s.user(&email)?;
     let poll = req.poll;
-    let added = user.add_draft(&draft_message(&s, &user, req)?);
+    let added = user.add_draft(draft_message(&s, &user, req)?);
     if poll {
         s.poll().await;
     }
@@ -442,7 +442,7 @@ pub(crate) async fn update_draft(
     let user = s.user(&email)?;
     let poll = req.poll;
     let updated = user
-        .update_draft(&id, &draft_message(&s, &user, req)?)
+        .update_draft(&id, draft_message(&s, &user, req)?)
         .ok_or_else(|| Fail(format!("no draft {id}")))?;
     if poll {
         s.poll().await;

@@ -170,10 +170,7 @@ fn blocked_sender(filter: Filter) -> Option<BlockedSender> {
     } = filter;
     let from = criteria.from?;
     let trashes = action.add_label_ids.iter().any(|l| l.as_str() == "TRASH");
-    (criteria.other.is_empty() && trashes).then(|| BlockedSender {
-        id: id.as_str().to_owned(),
-        from,
-    })
+    (criteria.other.is_empty() && trashes).then_some(BlockedSender { id: id.0, from })
 }
 
 /// The thread's messages, oldest first; the thread must be the account's,

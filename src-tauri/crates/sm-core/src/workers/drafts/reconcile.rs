@@ -312,7 +312,7 @@ async fn sort_local(ctx: &AccountCtx, reconcile: &Reconcile) -> Option<Sorted> {
         let dropped = ctx
             .writer()
             .call(WritePriority::Sync, move |tx, state| {
-                drop_gone(tx, state, &gone, &r, now)
+                drop_gone(tx, state, gone, &r, now)
             })
             .await;
         if let Err(e) = dropped {

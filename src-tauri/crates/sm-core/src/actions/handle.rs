@@ -29,7 +29,6 @@ impl Received {
 }
 
 /// Takes the UI's numbered actions (SPEC UI state, Actions).
-#[derive(Clone)]
 pub struct Actions {
     writer: CoreWriter,
     received: Arc<Received>,

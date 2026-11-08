@@ -36,7 +36,7 @@ pub(crate) async fn download_parts(ctx: &AccountCtx, id: DraftId) -> Result<(), 
             let mut draft = record.draft;
             for a in &mut draft.attachments {
                 if a.path.is_none() {
-                    a.path = paths.get(&a.id).cloned();
+                    a.path = paths.remove(&a.id);
                 }
             }
             lifecycle::parts_downloaded(&mut draft);

@@ -29,10 +29,10 @@ impl Routing {
     }
 
     fn place(&self, thread: &Thread, digest: &ThreadDigest) -> Option<SplitId> {
-        let names: Vec<String> = digest
+        let names: Vec<&str> = digest
             .labels
             .iter()
-            .filter_map(|l| self.user_labels.get(l).cloned())
+            .filter_map(|l| self.user_labels.get(l).map(String::as_str))
             .collect();
         self.router.place(thread, digest, &self.identity, &names)
     }

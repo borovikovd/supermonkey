@@ -42,8 +42,8 @@ pub(crate) fn new_mail(
     let mine: Vec<Identity> = reads
         .accounts()
         .all()?
-        .iter()
-        .map(sm_store::AccountRecord::identity)
+        .into_iter()
+        .map(sm_store::AccountRecord::into_identity)
         .collect();
     let mut notes = Vec::new();
     for &id in stored {
@@ -61,7 +61,7 @@ pub(crate) fn new_mail(
                 account,
                 &record.email,
                 message.thread,
-                &message,
+                message,
             ));
         }
     }
@@ -86,17 +86,15 @@ fn notification(
     account: AccountId,
     email: &str,
     thread: ThreadId,
-    message: &MessageRecord,
+    message: MessageRecord,
 ) -> Notification {
     let title = message
         .from
         .name
-        .as_deref()
         .filter(|n| !n.is_empty())
-        .unwrap_or(&message.from.email)
-        .to_owned();
+        .unwrap_or(message.from.email);
     let body = if message.subject.is_empty() {
-        message.snippet.clone()
+        message.snippet
     } else {
         format!("{}\n{}", message.subject, message.snippet)
     };

@@ -385,17 +385,17 @@ fn emit(app: &AppHandle, event: &AppEvent) -> anyhow::Result<()> {
 /// page that never connected can't answer, so the app quits at once.
 fn request_quit(app: &AppHandle) {
     let Some(shell) = app.try_state::<Shell>() else {
-        quit(app);
+        quit(app.clone());
         return;
     };
     if shell.quitting.load(Ordering::Acquire) {
         return;
     }
     if !shell.connected.load(Ordering::Acquire) {
-        quit(app);
+        quit(app.clone());
     } else if let Err(e) = emit(app, &AppEvent::QuitRequested) {
         tracing::warn!(error = %e, "couldn't ask the page to quit; quitting");
-        quit(app);
+        quit(app.clone());
     } else {
         quit_after_deadline(app);
     }
@@ -415,7 +415,7 @@ fn quit_after_deadline(app: &AppHandle) {
                 .is_some_and(|shell| shell.quitting.load(Ordering::Acquire));
             if !quitting {
                 tracing::warn!("the page did not answer the quit in time; quitting");
-                quit(&app);
+                quit(app);
             }
         });
     if let Err(e) = spawned {
@@ -425,8 +425,7 @@ fn quit_after_deadline(app: &AppHandle) {
 
 /// Exits once the core has committed the UI actions queued so far, so the
 /// last ones the page sent are not lost; queued sync work is dropped.
-pub(crate) fn quit(app: &AppHandle) {
-    let app = app.clone();
+pub(crate) fn quit(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         if let Some(shell) = app.try_state::<Shell>() {
             if shell.quitting.swap(true, Ordering::AcqRel) {

@@ -129,6 +129,11 @@ impl Pin {
     pub fn value(&self) -> &str {
         &self.value
     }
+
+    /// Its value, taken.
+    pub fn into_value(self) -> String {
+        self.value
+    }
 }
 
 /// The domain of an address: what follows its last `@`, lowercased.
@@ -145,7 +150,8 @@ pub fn email_domain(email: &str) -> Option<String> {
 pub struct Router {
     /// In split order.
     splits: Vec<RouteSplit>,
-    pins: HashMap<(PinKind, String), SplitId>,
+    /// By kind, then by value: a lookup borrows the value.
+    pins: HashMap<PinKind, HashMap<String, SplitId>>,
 }
 
 #[derive(Debug, Clone)]
@@ -174,11 +180,14 @@ impl Router {
                     .then(|| Query::parse(&s.query)),
             })
             .collect();
-        let pins = pins
-            .into_iter()
-            .map(|p| ((p.kind, p.value), p.split))
-            .collect();
-        Self { splits, pins }
+        let mut by_kind: HashMap<PinKind, HashMap<String, SplitId>> = HashMap::new();
+        for p in pins {
+            by_kind.entry(p.kind).or_default().insert(p.value, p.split);
+        }
+        Self {
+            splits,
+            pins: by_kind,
+        }
     }
 
     /// The split a message lands in (SPEC Where a conversation lands), given
@@ -188,7 +197,7 @@ impl Router {
     /// 2. enabled custom splits, top to bottom;
     /// 3. Important, when enabled and the message is person-to-person;
     /// 4. Other.
-    pub fn route(&self, message: &MessageFacts, thread_label_names: &[String]) -> Option<SplitId> {
+    pub fn route(&self, message: &MessageFacts, thread_label_names: &[&str]) -> Option<SplitId> {
         self.pinned(message, thread_label_names)
             .or_else(|| {
                 let target = MatchTarget::rule(message, thread_label_names);
@@ -220,7 +229,7 @@ impl Router {
         thread: &Thread,
         digest: &ThreadDigest,
         me: &Identity,
-        thread_label_names: &[String],
+        thread_label_names: &[&str],
     ) -> Option<SplitId> {
         if !digest.in_inbox() {
             return None;
@@ -229,20 +238,21 @@ impl Router {
         self.route(message, thread_label_names)
     }
 
-    fn pinned(&self, message: &MessageFacts, thread_label_names: &[String]) -> Option<SplitId> {
-        let pin = |kind: PinKind, value: String| {
+    fn pinned(&self, message: &MessageFacts, thread_label_names: &[&str]) -> Option<SplitId> {
+        let pin = |kind: PinKind, value: &str| {
             self.pins
-                .get(&(kind, value))
+                .get(&kind)
+                .and_then(|values| values.get(value))
                 .copied()
                 .filter(|&id| self.is_enabled(id))
         };
         let email = message.from.email.to_lowercase();
-        pin(PinKind::Sender, email.clone())
-            .or_else(|| email_domain(&email).and_then(|d| pin(PinKind::Domain, d)))
+        pin(PinKind::Sender, &email)
+            .or_else(|| email_domain(&email).and_then(|d| pin(PinKind::Domain, &d)))
             .or_else(|| {
                 thread_label_names
                     .iter()
-                    .filter_map(|name| pin(PinKind::Label, name.to_lowercase()))
+                    .filter_map(|name| pin(PinKind::Label, &name.to_lowercase()))
                     .min_by_key(|&id| self.order(id))
             })
     }

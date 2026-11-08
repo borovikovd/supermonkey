@@ -496,7 +496,7 @@ fn blank_custom_rules_match_nothing() {
 
 #[test]
 fn pins_beat_rules_sender_then_domain_then_label() {
-    let labels = vec!["Clients".to_owned(), "Work".to_owned()];
+    let labels = vec!["Clients", "Work"];
     let m = MessageFacts {
         is_list: true,
         ..message(1, Addr::new("Alice@A.io"), &["INBOX"])
@@ -522,7 +522,7 @@ fn pins_beat_rules_sender_then_domain_then_label() {
 
 #[test]
 fn several_label_pins_take_the_first_split_in_order() {
-    let labels = vec!["Work".to_owned(), "Clients".to_owned()];
+    let labels = vec!["Work", "Clients"];
     let m = message(1, alice(), &["INBOX"]);
     let router = Router::new(
         splits(true, true, true),

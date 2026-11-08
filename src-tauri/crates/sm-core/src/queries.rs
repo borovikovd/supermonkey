@@ -19,7 +19,6 @@ const SUGGESTIONS: usize = 6;
 
 /// Reads for the UI's lookups: rows outside the pushed window, bodies,
 /// autocomplete, snooze times, and a sender's threads.
-#[derive(Clone)]
 pub struct Queries {
     pool: Arc<ReadPool>,
     clock: Arc<dyn Clock>,

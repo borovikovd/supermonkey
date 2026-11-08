@@ -128,6 +128,11 @@ impl Registry {
     }
 
     /// One subscription.
+    pub(crate) fn get(&self, id: &SubId) -> Option<&Sub> {
+        self.subs.get(id)
+    }
+
+    /// One subscription, to change.
     pub(crate) fn get_mut(&mut self, id: &SubId) -> Option<&mut Sub> {
         self.subs.get_mut(id)
     }

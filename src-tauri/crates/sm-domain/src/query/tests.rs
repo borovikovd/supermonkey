@@ -283,8 +283,8 @@ fn msg() -> MessageFacts {
     }
 }
 
-fn thread_labels() -> Vec<String> {
-    vec!["Work/Projects".into(), "Clients".into()]
+fn thread_labels() -> Vec<&'static str> {
+    vec!["Work/Projects", "Clients"]
 }
 
 const BODY: &str = "Please read the attached draft.";

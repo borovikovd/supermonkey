@@ -135,9 +135,9 @@ impl AccountWorkers {
     /// Deletes a draft's added files: its row is gone. It is marked gone
     /// first, so a file written before the mark is in the folder this
     /// deletes, and one written after it sees the mark.
-    pub(crate) fn delete_draft_files(&self, draft: &DraftId) {
-        self.gone_drafts.lock().insert(draft.clone());
-        let dir = self.draft_dir(draft);
+    pub(crate) fn delete_draft_files(&self, draft: DraftId) {
+        let dir = self.draft_dir(&draft);
+        self.gone_drafts.lock().insert(draft);
         self.tasks.spawn("delete draft files", async move {
             let deleted =
                 tokio::task::spawn_blocking(move || match std::fs::remove_dir_all(&dir) {

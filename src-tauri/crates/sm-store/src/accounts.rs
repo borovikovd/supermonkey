@@ -43,12 +43,8 @@ pub struct AccountRecord {
 
 impl AccountRecord {
     /// Who the account is, for "mail from me" and From defaults.
-    pub fn identity(&self) -> Identity {
-        Identity::new(
-            self.email.clone(),
-            self.display_name.clone(),
-            self.send_as.clone(),
-        )
+    pub fn into_identity(self) -> Identity {
+        Identity::new(self.email, self.display_name, self.send_as)
     }
 
     /// The sync state the rail shows: Sign in again overrides the rest.

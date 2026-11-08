@@ -8,7 +8,7 @@ use crate::{Addr, Identity, MessageFacts};
 #[derive(Debug, Clone, Copy)]
 pub struct MatchTarget<'a> {
     message: &'a MessageFacts,
-    thread_label_names: &'a [String],
+    thread_label_names: &'a [&'a str],
     /// The plain body, in search only.
     body: Option<&'a str>,
     /// The thread is snoozed, in search only.
@@ -21,7 +21,7 @@ impl<'a> MatchTarget<'a> {
     /// For a split rule: bare words match the sender's name or address, or
     /// the subject. `thread_label_names` are the names of the thread's user
     /// labels, since Gmail does not copy them onto later messages.
-    pub fn rule(message: &'a MessageFacts, thread_label_names: &'a [String]) -> Self {
+    pub fn rule(message: &'a MessageFacts, thread_label_names: &'a [&'a str]) -> Self {
         Self {
             message,
             thread_label_names,
@@ -36,7 +36,7 @@ impl<'a> MatchTarget<'a> {
     /// match `me`'s addresses, and `in:snoozed` matches when `snoozed`.
     pub fn search(
         message: &'a MessageFacts,
-        thread_label_names: &'a [String],
+        thread_label_names: &'a [&'a str],
         body: &'a str,
         snoozed: bool,
         me: &'a Identity,

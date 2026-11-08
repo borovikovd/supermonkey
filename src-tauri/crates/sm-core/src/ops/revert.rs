@@ -137,7 +137,7 @@ pub(crate) fn queue_revert(
 pub(crate) fn reject(
     tx: &mut WriteTx<'_>,
     id: OpId,
-    message: &str,
+    message: String,
     now: Millis,
 ) -> Result<(), StoreError> {
     let Some(op) = tx.read().ops().get(id)? else {
@@ -168,7 +168,7 @@ pub(crate) fn reject(
     tx.notices().add(&NewNotice {
         account: op.account,
         kind: NoticeKind::Rejected,
-        message: message.to_owned(),
+        message,
         draft: op.draft,
         thread: None,
         created_at: now,

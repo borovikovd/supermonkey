@@ -225,7 +225,7 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
     }
 
     /// Adds a waiting send. Its id is never reused.
-    pub fn insert(&mut self, new: &NewOutbox) -> Result<OutboxId, StoreError> {
+    pub fn insert(&mut self, new: NewOutbox) -> Result<OutboxId, StoreError> {
         let rev = self.tx.stamp();
         let id = OutboxId(self.tx.db().insert(
             "add a send",
@@ -238,7 +238,7 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
         )?);
         self.changed(new.account, id, [new.thread, None])?;
         // The draft is in the outbox now.
-        self.tx.record().drafts.insert(new.draft.clone());
+        self.tx.record().drafts.insert(new.draft);
         Ok(id)
     }
 

@@ -25,7 +25,7 @@ pub(crate) fn resolve(
     let row = record.outbox;
     let account = row.account;
     let stored = matches!(event, Event::Stored(_));
-    let step = step(&row, event);
+    let step = step(row, event);
     let applied = step != Step::Ignore;
     match step {
         Step::Ignore => {}
@@ -46,18 +46,22 @@ pub(crate) fn resolve(
                 tx.undo().delete_for_outbox(outbox)?;
             }
         }
-        Step::Return { kind, message } => {
+        Step::Return {
+            draft,
+            kind,
+            message,
+        } => {
             tx.undo().delete_for_outbox(outbox)?;
             tx.outbox().delete(outbox)?;
-            let thread = match tx.read().drafts().get(&row.draft)? {
-                Some(draft) => {
-                    let mut draft = draft.draft;
-                    lifecycle::keep(&mut draft);
-                    tx.drafts().put(&draft)?;
+            let thread = match tx.read().drafts().get(&draft)? {
+                Some(record) => {
+                    let mut kept = record.draft;
+                    lifecycle::keep(&mut kept);
+                    tx.drafts().put(&kept)?;
                     // Gmail may never have got it: a send made before any
                     // autosave, cut short before its write.
-                    queue_upsert(tx, state, account, &draft.id, now)?;
-                    draft.thread
+                    queue_upsert(tx, state, account, &kept.id, now)?;
+                    kept.thread
                 }
                 None => None,
             };
@@ -65,7 +69,7 @@ pub(crate) fn resolve(
                 account,
                 kind,
                 message,
-                draft: Some(row.draft),
+                draft: Some(draft),
                 thread,
                 created_at: now,
             })?;

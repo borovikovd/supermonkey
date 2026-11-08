@@ -137,7 +137,7 @@ impl Label {
 
 impl Msg {
     /// The message in the shape `format` asks for.
-    pub fn json(&self, format: &str, metadata_headers: &[String]) -> Value {
+    pub fn json(&self, format: &str, metadata_headers: &[&str]) -> Value {
         let mut out = json!({
             "id": self.id,
             "threadId": self.thread_id,
@@ -447,7 +447,7 @@ impl Mailbox {
         messages
     }
 
-    pub fn thread_json(&self, thread_id: &str, format: &str, headers: &[String]) -> Option<Value> {
+    pub fn thread_json(&self, thread_id: &str, format: &str, headers: &[&str]) -> Option<Value> {
         let messages = self.thread_messages(thread_id);
         if messages.is_empty() {
             return None;
@@ -462,14 +462,14 @@ impl Mailbox {
     pub fn search_threads(
         &self,
         q: &str,
-        label_ids: &[String],
+        label_ids: &[&str],
         include_spam_trash: bool,
         now_ms: u64,
     ) -> Vec<&str> {
         let query = Query::parse(q, self, now_ms);
         let wants_spam_trash = include_spam_trash
             || query.wants_spam_trash
-            || label_ids.iter().any(|l| l == "SPAM" || l == "TRASH");
+            || label_ids.iter().any(|&l| l == "SPAM" || l == "TRASH");
         let mut latest: HashMap<&str, u64> = HashMap::new();
         for msg in self.messages.values() {
             let date = latest.entry(&msg.thread_id).or_default();
@@ -481,7 +481,9 @@ impl Mailbox {
             .filter(|msg| {
                 let hidden = msg.label_ids.iter().any(|l| l == "SPAM" || l == "TRASH");
                 (!hidden || wants_spam_trash)
-                    && label_ids.iter().all(|l| msg.label_ids.contains(l))
+                    && label_ids
+                        .iter()
+                        .all(|l| msg.label_ids.iter().any(|x| x == l))
                     && query.matches(msg)
             })
             .map(|msg| msg.thread_id.as_str())

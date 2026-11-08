@@ -55,15 +55,19 @@ pub(crate) async fn write(
     };
     let raw = build_raw(ctx, draft).await?;
     let thread = gmail_thread(&ctx.deps.pool, draft).await?;
+    let recovered;
     let existing = match lifecycle::gmail_write(draft) {
-        GmailWrite::Update(id) => Some(id.clone()),
-        GmailWrite::Recover => recover_create(ctx, &draft.id).await?.map(|d| d.id),
+        GmailWrite::Update(id) => Some(id),
+        GmailWrite::Recover => {
+            recovered = recover_create(ctx, &draft.id).await?.map(|d| d.id);
+            recovered.as_ref()
+        }
         GmailWrite::Create => None,
     };
     if let Some(id) = existing {
         match ctx
             .gmail
-            .update_draft(Priority::P1, &id, &raw, thread.as_ref())
+            .update_draft(Priority::P1, id, &raw, thread.as_ref())
             .await
         {
             Ok(written) => return Ok(Some(written)),

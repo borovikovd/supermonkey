@@ -20,10 +20,9 @@ use crate::{Error, Notification};
 pub(crate) const QUIT_DEADLINE: Duration = Duration::from_secs(5);
 
 /// Connecting pages, the online flag, and quitting.
-#[derive(Clone)]
 pub struct Lifecycle {
     deps: Arc<LifecycleDeps>,
-    launched: Arc<AtomicBool>,
+    launched: AtomicBool,
     debug: bool,
 }
 
@@ -45,7 +44,7 @@ impl Lifecycle {
     pub(crate) fn new(deps: LifecycleDeps, debug: bool) -> Self {
         Self {
             deps: Arc::new(deps),
-            launched: Arc::default(),
+            launched: AtomicBool::default(),
             debug,
         }
     }

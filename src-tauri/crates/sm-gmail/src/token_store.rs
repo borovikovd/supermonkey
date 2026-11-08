@@ -47,7 +47,7 @@ pub enum TokenStoreError {
 /// the file, or memory for tests and demo mode.
 pub trait TokenStore: Send + Sync {
     /// Saves or replaces the account's refresh token.
-    fn store(&self, email: &str, token: &RefreshToken) -> Result<(), TokenStoreError>;
+    fn store(&self, email: &str, token: RefreshToken) -> Result<(), TokenStoreError>;
     /// The account's refresh token, or `None` if there is none.
     fn load(&self, email: &str) -> Result<Option<RefreshToken>, TokenStoreError>;
     /// Deletes the account's refresh token. A missing one is not an error.
@@ -161,7 +161,7 @@ fn restrict(file: &fs::File) -> io::Result<()> {
 }
 
 impl TokenStore for TokenFile {
-    fn store(&self, email: &str, token: &RefreshToken) -> Result<(), TokenStoreError> {
+    fn store(&self, email: &str, token: RefreshToken) -> Result<(), TokenStoreError> {
         self.update(|tokens| {
             tokens.insert(email.to_owned(), token.secret().to_owned());
             true
@@ -195,8 +195,8 @@ pub struct MemoryTokenStore {
 }
 
 impl TokenStore for MemoryTokenStore {
-    fn store(&self, email: &str, token: &RefreshToken) -> Result<(), TokenStoreError> {
-        self.tokens.lock().insert(email.to_owned(), token.clone());
+    fn store(&self, email: &str, token: RefreshToken) -> Result<(), TokenStoreError> {
+        self.tokens.lock().insert(email.to_owned(), token);
         Ok(())
     }
 

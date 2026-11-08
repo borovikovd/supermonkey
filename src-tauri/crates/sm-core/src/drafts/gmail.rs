@@ -124,22 +124,22 @@ fn delete_gmail_draft(
 pub(crate) fn drop_gone(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
-    gone: &[DraftId],
+    gone: Vec<DraftId>,
     reconcile: &Reconcile,
     now: Millis,
 ) -> Result<(), StoreError> {
     for id in gone {
-        let Some(record) = tx.read().drafts().get(id)? else {
+        let Some(record) = tx.read().drafts().get(&id)? else {
             continue;
         };
         let still_gone =
             lifecycle::gmail_draft(&record.draft).is_some_and(|g| !reconcile.live.contains(g));
-        if !still_gone || record.in_outbox || reconcile.moved(id, record.rev) {
+        if !still_gone || record.in_outbox || reconcile.moved(&id, record.rev) {
             continue;
         }
         let mut draft = record.draft;
-        let open = state.subs.has_composer(id);
-        if open || tx.read().ops().upserts_draft(id)? {
+        let open = state.subs.has_composer(&id);
+        if open || tx.read().ops().upserts_draft(&id)? {
             lifecycle::gmail_gone(&mut draft);
             tx.drafts().put(&draft)?;
             if open {
@@ -153,8 +153,8 @@ pub(crate) fn drop_gone(
                 })?;
             }
         } else {
-            tx.drafts().delete(id)?;
-            state.effect(Effect::DraftFilesGone(id.clone()));
+            tx.drafts().delete(&id)?;
+            state.effect(Effect::DraftFilesGone(id));
         }
     }
     Ok(())
@@ -199,57 +199,56 @@ pub(crate) fn apply_gmail_draft(
     if reads.ops().deletes_gmail_draft(account, &gmail.id)? {
         return Ok(());
     }
-    let header = gmail.message.message.sm_draft.clone();
+    let header = gmail.message.message.sm_draft.as_ref();
     // A copy of a draft discarded while its create had no answer: the queued
     // delete removes it from Gmail.
-    if let Some(local) = &header
+    if let Some(local) = header
         && reads.ops().deletes_copies_of(account, local)?
     {
         return Ok(());
     }
     // A write of the draft it names is in flight: its answer settles it.
-    if header
-        .as_ref()
-        .is_some_and(|d| reconcile.writing.is_busy(d))
-    {
+    if header.is_some_and(|d| reconcile.writing.is_busy(d)) {
         return Ok(());
     }
-    let existing = local_for(reads, account, &gmail.id, header.as_ref())?;
+    let existing = local_for(reads, account, &gmail.id, header)?;
     // A copy of a draft discarded or sent this run, read before its delete
     // landed or missed by it: deleted, never brought back.
     if existing.is_none()
-        && let Some(local) = &header
+        && let Some(local) = header
         && state.is_draft_gone(account, local)
     {
         return delete_gmail_draft(tx, state, account, &gmail.id, now);
     }
-    if let Some(record) = &existing {
-        let local = &record.draft;
-        if record.in_outbox || reconcile.moved(&local.id, record.rev) {
-            return Ok(());
-        }
-        if lifecycle::gmail_draft(local) != Some(&gmail.id) {
-            return match lifecycle::gmail_draft(local) {
-                Some(other) if reconcile.live.contains(other) => {
-                    delete_gmail_draft(tx, state, account, &gmail.id, now)
+    let existing = match existing {
+        Some(record) => {
+            let local = &record.draft;
+            if record.in_outbox || reconcile.moved(&local.id, record.rev) {
+                return Ok(());
+            }
+            if lifecycle::gmail_draft(local) != Some(&gmail.id) {
+                let other_live = lifecycle::gmail_draft(local)
+                    .is_some_and(|other| reconcile.live.contains(other));
+                if other_live {
+                    return delete_gmail_draft(tx, state, account, &gmail.id, now);
                 }
-                _ => {
-                    let mut adopted = local.clone();
-                    lifecycle::written(&mut adopted, gmail.ids());
-                    tx.drafts().put(&adopted)
-                }
-            };
+                let mut adopted = record.draft;
+                lifecycle::written(&mut adopted, gmail.ids());
+                return tx.drafts().put(&adopted);
+            }
+            // An edit Gmail has not confirmed (its upsert waits to run or to
+            // retry) wins over what Gmail has: the upsert writes it over it.
+            if tx.read().ops().upserts_draft(&local.id)? {
+                return Ok(());
+            }
+            // Opened since the list was read: read once its composer closes.
+            if defer_if_open(tx, state, &local.id)? {
+                return Ok(());
+            }
+            Some(record)
         }
-        // An edit Gmail has not confirmed (its upsert waits to run or to
-        // retry) wins over what Gmail has: the upsert writes it over it.
-        if tx.read().ops().upserts_draft(&local.id)? {
-            return Ok(());
-        }
-        // Opened since the list was read: read once its composer closes.
-        if defer_if_open(tx, state, &local.id)? {
-            return Ok(());
-        }
-    }
+        None => None,
+    };
     let Some(thread) = store_draft_message(tx, state, account, &gmail.thread, &gmail.message)?
     else {
         return Ok(());
@@ -270,12 +269,13 @@ pub(crate) fn apply_gmail_draft(
         draft
     };
     lifecycle::read_from_gmail(&mut draft, gmail.ids(), !attachments.is_empty());
+    let message = gmail.message.message;
     draft.thread = (draft.kind != DraftKind::New).then_some(thread);
-    draft.from = Some(message.from.clone());
-    draft.to.clone_from(&message.to);
-    draft.cc.clone_from(&message.cc);
-    draft.bcc.clone_from(&message.bcc);
-    draft.subject.clone_from(&message.subject);
+    draft.from = Some(message.from);
+    draft.to = message.to;
+    draft.cc = message.cc;
+    draft.bcc = message.bcc;
+    draft.subject = message.subject;
     draft.snippet = snippet(&gmail.editor_html);
     draft.body_html = gmail.editor_html;
     draft.quote_html = gmail.quote_html;

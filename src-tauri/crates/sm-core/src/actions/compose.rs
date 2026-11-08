@@ -14,14 +14,14 @@ use crate::outbox;
 /// sent or discarded is dropped.
 pub(super) fn save_draft(
     ctx: &mut ActionCtx<'_, '_>,
-    draft: &DraftId,
+    draft: DraftId,
     save: DraftSave,
 ) -> Result<(), ActionError> {
     if ctx
         .tx
         .read()
         .drafts()
-        .get(draft)?
+        .get(&draft)?
         .is_some_and(|d| d.in_outbox)
     {
         return Ok(());
@@ -48,7 +48,7 @@ pub(super) fn save_draft(
             ctx.now,
         ),
         DraftSave::Update { fields, rev } => Ok(drafts::update(
-            ctx.tx, ctx.state, draft, fields, rev, ctx.now,
+            ctx.tx, ctx.state, &draft, fields, rev, ctx.now,
         )?),
     }
 }

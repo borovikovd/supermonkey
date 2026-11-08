@@ -26,7 +26,7 @@ async fn a_wrong_state_is_refused_and_the_sign_in_goes_on() {
     let fake = FakeGmail::start();
     fake.add_user(ME);
     let http = HttpClient::new().unwrap();
-    let sign_in = SignIn::start(&oauth_config(&fake)).await.unwrap();
+    let sign_in = SignIn::start(oauth_config(&fake)).await.unwrap();
     let consent = sign_in.consent_url().to_owned();
     let redirect = redirect_uri(&consent);
     let finishing = tokio::spawn(async move { sign_in.finish(&http).await });
@@ -58,7 +58,7 @@ async fn sign_in_finishes_past_a_connection_that_sends_nothing() {
     let fake = FakeGmail::start();
     fake.add_user(ME);
     let http = HttpClient::new().unwrap();
-    let sign_in = SignIn::start(&oauth_config(&fake)).await.unwrap();
+    let sign_in = SignIn::start(oauth_config(&fake)).await.unwrap();
     let consent = sign_in.consent_url().to_owned();
     let port = url::Url::parse(&redirect_uri(&consent))
         .unwrap()
@@ -89,7 +89,7 @@ async fn a_denied_sign_in_says_why() {
     fake.add_user(ME);
     fake.deny_next_sign_in();
     let http = HttpClient::new().unwrap();
-    let sign_in = SignIn::start(&oauth_config(&fake)).await.unwrap();
+    let sign_in = SignIn::start(oauth_config(&fake)).await.unwrap();
     let consent = sign_in.consent_url().to_owned();
     tokio::spawn(async move { reqwest::get(consent).await.map(drop) });
     let result = sign_in.finish(&http).await;

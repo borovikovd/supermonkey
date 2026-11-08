@@ -123,11 +123,11 @@ pub(crate) fn account_summary(
     let pins = reads
         .splits()
         .pins(account)?
-        .iter()
+        .into_iter()
         .map(|p| PinInfo {
             kind: p.kind,
-            value: p.value().to_owned(),
             split: p.split,
+            value: p.into_value(),
         })
         .collect();
     let undo = reads

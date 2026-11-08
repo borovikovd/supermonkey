@@ -61,18 +61,19 @@ pub(super) fn subscribe(
     // Offline, the listing waits for Gmail, and the list does not show it
     // searching meanwhile (SPEC Search).
     let online = ctx.state.online();
-    if let Some((account, query)) = &gmail {
+    let searching = online && gmail.is_some();
+    if let Some((account, query)) = gmail {
         effects.push(Effect::GmailList {
             sub: sub.clone(),
-            account: *account,
-            query: query.clone(),
+            account,
+            query,
             page: None,
         });
     }
     for effect in effects {
         ctx.state.sub_effect(effect);
     }
-    if let Some(replaced) = ctx.state.subs.open(sub, key, online && gmail.is_some()) {
+    if let Some(replaced) = ctx.state.subs.open(sub, key, searching) {
         released(ctx, &replaced);
     }
     Ok(())
@@ -101,18 +102,23 @@ fn released(ctx: &mut ActionCtx<'_, '_>, key: &SubKey) {
 /// Asks Gmail for a list's next page. The page token is taken, so asking
 /// again while the page loads does nothing instead of restarting it; the
 /// page brings the next token.
-pub(super) fn more_results(ctx: &mut ActionCtx<'_, '_>, sub: &SubId) -> Result<(), ActionError> {
-    let Some(key) = ctx.state.subs.get_mut(sub).map(|s| s.key.clone()) else {
+pub(super) fn more_results(ctx: &mut ActionCtx<'_, '_>, sub: SubId) -> Result<(), ActionError> {
+    let Some(open) = ctx.state.subs.get(&sub) else {
         return Ok(());
     };
-    let Some((account, query)) = gmail_query(ctx.tx.read(), &key)? else {
+    let Some((account, query)) = gmail_query(ctx.tx.read(), &open.key)? else {
         return Ok(());
     };
-    let Some(page) = ctx.state.subs.get_mut(sub).and_then(|s| s.next_page.take()) else {
+    let Some(page) = ctx
+        .state
+        .subs
+        .get_mut(&sub)
+        .and_then(|s| s.next_page.take())
+    else {
         return Ok(());
     };
     ctx.state.sub_effect(Effect::GmailList {
-        sub: sub.clone(),
+        sub,
         account,
         query,
         page: Some(page),

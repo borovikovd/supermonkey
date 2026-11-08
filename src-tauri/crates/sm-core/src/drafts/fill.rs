@@ -16,9 +16,9 @@ use super::text::{escape_text, local_offset};
 use crate::actions::ActionError;
 
 /// What a fresh composer's first save says.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct NewDraft<'a> {
-    pub(crate) id: &'a DraftId,
+#[derive(Debug, Clone)]
+pub(crate) struct NewDraft {
+    pub(crate) id: DraftId,
     pub(crate) account: AccountId,
     pub(crate) kind: DraftKind,
     pub(crate) reply_all: bool,
@@ -31,13 +31,9 @@ pub(crate) struct NewDraft<'a> {
 /// and the quote by the rules in Addressing, and for a forward its target's
 /// attachments. Those are its defaults for the untouched check. A draft that
 /// exists already is left alone: the save came twice.
-pub(crate) fn create(
-    tx: &mut WriteTx<'_>,
-    new: NewDraft<'_>,
-    now: Millis,
-) -> Result<(), ActionError> {
+pub(crate) fn create(tx: &mut WriteTx<'_>, new: NewDraft, now: Millis) -> Result<(), ActionError> {
     let reads = tx.read();
-    if reads.drafts().get(new.id)?.is_some() {
+    if reads.drafts().get(&new.id)?.is_some() {
         return Ok(());
     }
     let Some(me) = reads.accounts().identity(new.account)? else {
@@ -77,7 +73,7 @@ pub(crate) fn create(
         &me,
         new.reply_all,
     );
-    let mut draft = Draft::new(new.id.clone(), new.account, new.kind, now);
+    let mut draft = Draft::new(new.id, new.account, new.kind, now);
     draft.reply_all = new.reply_all;
     draft.thread = new.thread;
     draft.target = new.target;

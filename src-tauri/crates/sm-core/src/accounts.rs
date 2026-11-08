@@ -16,14 +16,13 @@ use crate::writer::CoreWriter;
 use crate::{Error, Platform};
 
 /// Signing accounts in, and waking their workers.
-#[derive(Clone)]
 pub struct Accounts {
     writer: CoreWriter,
     workers: Arc<AccountWorkers>,
     platform: Arc<dyn Platform>,
     /// The sign-in waiting in the browser, if any, by its number.
-    waiting: Arc<Mutex<Option<(u64, CancellationToken)>>>,
-    next: Arc<AtomicU64>,
+    waiting: Mutex<Option<(u64, CancellationToken)>>,
+    next: AtomicU64,
 }
 
 /// A sign-in that finished: whose grant it is.
@@ -42,8 +41,8 @@ impl Accounts {
             writer,
             workers,
             platform,
-            waiting: Arc::default(),
-            next: Arc::default(),
+            waiting: Mutex::default(),
+            next: AtomicU64::default(),
         }
     }
 
@@ -142,7 +141,7 @@ impl Accounts {
             email.to_owned(),
             token.clone(),
         );
-        tokio::task::spawn_blocking(move || store.store(&email, &token)).await??;
+        tokio::task::spawn_blocking(move || store.store(&email, token)).await??;
         Ok(())
     }
 
@@ -178,7 +177,7 @@ impl Accounts {
             ));
         }
         let http = self.workers.http();
-        let sign_in = SignIn::start(&config.oauth).await?;
+        let sign_in = SignIn::start(config.oauth.clone()).await?;
         self.platform.open_sign_in(sign_in.consent_url())?;
         let grant = sign_in.finish(http).await?;
         let tokens = Arc::new(Tokens::from_grant(

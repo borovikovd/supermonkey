@@ -129,10 +129,11 @@ pub(crate) fn change_threads(
     }
     let relabels = entry.iter().any(|t| !t.changes.is_empty());
     if relabels && !messages.is_empty() {
+        let (add, remove) = delta.into_parts();
         let op = ModifyOp {
             messages,
-            add: delta.add().clone(),
-            remove: delta.remove().clone(),
+            add,
+            remove,
             threads: entry.clone(),
         };
         queue_modify(tx, state, account, action, &op, now)?;

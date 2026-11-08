@@ -58,7 +58,7 @@ pub(crate) async fn add_account(State(s): State<Arc<Server>>, Json(req): Json<Us
     let user = create_user(&s, &req);
     let token = RefreshToken::new(user.refresh_token());
     let email = req.email.clone();
-    token_file(&s, move |tokens| tokens.store(&email, &token)).await?;
+    token_file(&s, move |tokens| tokens.store(&email, token)).await?;
     let id = app.accounts().register(&req.email).await?;
     Ok(Json(json!({ "id": id })))
 }

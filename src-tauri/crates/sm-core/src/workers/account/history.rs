@@ -41,7 +41,7 @@ impl HistoryBatch {
             }
             for deleted in record.messages_deleted {
                 let m = deleted.message;
-                batch.touch(record.id, m.thread_id.clone());
+                batch.touch(record.id, m.thread_id);
                 batch.deleted.insert(m.id);
             }
         }

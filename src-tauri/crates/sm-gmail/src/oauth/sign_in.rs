@@ -40,7 +40,7 @@ pub enum SignInError {
 ///
 /// ```no_run
 /// # async fn demo(config: &sm_gmail::OAuthConfig, http: &sm_gmail::HttpClient) -> Result<(), sm_gmail::SignInError> {
-/// let sign_in = sm_gmail::SignIn::start(config).await?;
+/// let sign_in = sm_gmail::SignIn::start(config.clone()).await?;
 /// // Open `sign_in.consent_url()` in the system browser, then:
 /// let grant = sign_in.finish(http).await?;
 /// # let _ = grant; Ok(()) }
@@ -61,7 +61,7 @@ impl SignIn {
     /// Opens a loopback port on `127.0.0.1` and makes the consent URL: PKCE
     /// S256, a random state, both scopes, offline access, and forced consent
     /// so Google always returns a refresh token.
-    pub async fn start(config: &OAuthConfig) -> Result<Self, SignInError> {
+    pub async fn start(config: OAuthConfig) -> Result<Self, SignInError> {
         let loopback = Loopback::bind().await.map_err(SignInError::Loopback)?;
         let redirect_uri = loopback.redirect_uri();
         let auth_url =
@@ -81,7 +81,7 @@ impl SignIn {
             .add_extra_param("prompt", "consent")
             .url();
         Ok(Self {
-            config: config.clone(),
+            config,
             loopback,
             redirect_uri,
             consent_url: url.into(),

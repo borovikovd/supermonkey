@@ -67,6 +67,11 @@ impl LabelDelta {
         &self.remove
     }
 
+    /// The labels added and the labels removed, taken.
+    pub fn into_parts(self) -> (LabelSet, LabelSet) {
+        (self.add, self.remove)
+    }
+
     /// Mark unread: adds `UNREAD` to the latest live message only, as Gmail does.
     pub fn marks_unread(&self) -> bool {
         self.add.has(SystemLabel::Unread)

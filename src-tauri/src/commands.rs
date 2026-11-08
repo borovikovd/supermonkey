@@ -46,7 +46,7 @@ pub(crate) async fn dispatch(
     match sm_bridge::dispatch(&shell.core, &command, args).await? {
         Answer::Reply(reply) => Ok(reply.into_json()),
         Answer::Quit => {
-            crate::quit(&app);
+            crate::quit(app);
             Ok(Value::Null)
         }
     }

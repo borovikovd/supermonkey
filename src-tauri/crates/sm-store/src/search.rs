@@ -135,12 +135,12 @@ impl<'c> SearchReads<'c> {
                 .filter(|m| scope.admits(m))
                 .collect();
             // User labels are the thread's, from the messages search looks at.
-            let label_names: Vec<String> = looked_at
+            let label_names: Vec<&str> = looked_at
                 .iter()
                 .flat_map(|m| m.labels.iter())
                 .collect::<BTreeSet<_>>()
                 .into_iter()
-                .filter_map(|l| names.get(l).cloned())
+                .filter_map(|l| names.get(l).map(String::as_str))
                 .collect();
             for m in looked_at {
                 let body = if query.reads_body() {

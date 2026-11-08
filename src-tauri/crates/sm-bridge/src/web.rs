@@ -195,14 +195,19 @@ fn is_allowed(host: Option<&str>, origin: Option<&str>, fetch_site: Option<&str>
 /// server's page with CORS headers for its own origin.
 async fn local_only(request: Request, next: Next) -> Response {
     let headers = request.headers();
-    let (host, origin) = (header(headers, HOST), header(headers, ORIGIN));
-    let fetch_site = header(headers, SEC_FETCH_SITE);
-    if !is_allowed(host.as_deref(), origin.as_deref(), fetch_site.as_deref()) {
+    // Kept past the request, for the response's CORS headers.
+    let origin = headers.get(ORIGIN).filter(|v| v.to_str().is_ok()).cloned();
+    let allowed = is_allowed(
+        header(headers, HOST),
+        origin.as_ref().and_then(|o| o.to_str().ok()),
+        header(headers, SEC_FETCH_SITE),
+    );
+    if !allowed {
         tracing::warn!("the web bridge refused a request from another page or host");
         return StatusCode::FORBIDDEN.into_response();
     }
     let mut response = next.run(request).await;
-    if let Some(origin) = origin.and_then(|o| HeaderValue::from_str(&o).ok()) {
+    if let Some(origin) = origin {
         let headers = response.headers_mut();
         headers.insert("access-control-allow-origin", origin);
         headers.insert("vary", HeaderValue::from_static("origin"));
@@ -219,11 +224,8 @@ async fn local_only(request: Request, next: Next) -> Response {
 }
 
 /// A request header's value as text.
-fn header(headers: &HeaderMap, name: HeaderName) -> Option<String> {
-    headers
-        .get(name)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_owned)
+fn header(headers: &HeaderMap, name: HeaderName) -> Option<&str> {
+    headers.get(name).and_then(|v| v.to_str().ok())
 }
 
 async fn preflight() -> Response {

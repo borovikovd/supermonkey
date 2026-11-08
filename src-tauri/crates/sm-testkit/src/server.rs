@@ -108,7 +108,7 @@ impl Server {
 
     /// The database file.
     pub(crate) fn db_path(&self) -> PathBuf {
-        self.config(fast_quota()).db_path
+        self.data_dir.join(Config::DB_FILE)
     }
 
     /// The launched core, if it is up.

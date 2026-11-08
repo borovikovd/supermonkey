@@ -55,9 +55,9 @@ pub(crate) fn send(
         tx.drafts().put(&draft)?;
     }
     let delay = i64::try_from(SEND_DELAY.as_millis()).unwrap_or(i64::MAX);
-    let outbox = tx.outbox().insert(&NewOutbox {
+    let outbox = tx.outbox().insert(NewOutbox {
         account: draft.account,
-        draft: id.clone(),
+        draft: draft.id,
         thread: draft.thread,
         send_after: Millis(now.0.saturating_add(delay)),
     })?;

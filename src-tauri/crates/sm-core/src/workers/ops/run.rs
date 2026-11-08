@@ -81,7 +81,7 @@ pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure
             }
         },
         OpKind::DraftUpsert => {
-            if let Some(draft) = &op.draft {
+            if let Some(draft) = op.draft {
                 let (answer, guard) = draft_upsert(ctx, draft).await?;
                 writing = guard;
                 answer
@@ -109,7 +109,7 @@ pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure
             }
         }
         OpKind::TrashMessage => match op.payload::<GmailMessageId>() {
-            Ok(message) => trash_message(ctx, &message).await?,
+            Ok(message) => trash_message(ctx, message).await?,
             Err(e) => {
                 tracing::error!(op = %op.id, error = %e, "a queued op does not parse; dropping it");
                 Answer::Unreadable
@@ -228,9 +228,9 @@ async fn create_label(ctx: &AccountCtx, op: LabelCreateOp) -> Result<Answer, Fai
 /// this write to end looks again.
 async fn draft_upsert(
     ctx: &AccountCtx,
-    draft: &DraftId,
+    draft: DraftId,
 ) -> Result<(Answer, Option<WritingDraft>), Failure> {
-    let upserted = upsert(ctx, draft).await;
+    let upserted = upsert(ctx, &draft).await;
     // A written draft's write ends once its ids are stored (`run_op`).
     if !matches!(upserted, Ok(Upserted::Written { .. })) {
         wake_outbox_if_sending(ctx, draft.clone());
@@ -241,14 +241,14 @@ async fn draft_upsert(
             writing,
         }) => Ok((
             Answer::Done(Landing::Draft {
-                draft: draft.clone(),
+                draft,
                 written: Some(written),
             }),
             Some(writing),
         )),
         Ok(Upserted::Nothing) => Ok((
             Answer::Done(Landing::Draft {
-                draft: draft.clone(),
+                draft,
                 written: None,
             }),
             None,
@@ -282,12 +282,10 @@ fn wake_outbox_if_sending(ctx: &AccountCtx, draft: DraftId) {
 
 /// `messages.trash` of a sent message whose send was undone. One Gmail no
 /// longer has is gone already.
-async fn trash_message(ctx: &AccountCtx, message: &GmailMessageId) -> Result<Answer, Failure> {
-    match ctx.gmail.trash_message(Priority::P1, message).await {
+async fn trash_message(ctx: &AccountCtx, message: GmailMessageId) -> Result<Answer, Failure> {
+    match ctx.gmail.trash_message(Priority::P1, &message).await {
         // Kept on top of reads that were in flight, as a modify is.
-        Ok(_) => Ok(Answer::Done(Landing::Modify(ModifyOp::trash(
-            message.clone(),
-        )))),
+        Ok(_) => Ok(Answer::Done(Landing::Modify(ModifyOp::trash(message)))),
         Err(e) if *e.outcome() == Outcome::NotFound => Ok(Answer::Done(Landing::Plain)),
         Err(e) => refused(e),
     }
@@ -321,7 +319,7 @@ async fn write(ctx: &AccountCtx, id: OpId, answer: Answer) -> Result<(), Error> 
     let (account, now, lane) = (ctx.account, ctx.clock().now(), Arc::clone(&ctx.lane));
     ctx.writer()
         .call(WritePriority::Sync, move |tx, state| match answer {
-            Answer::Rejected(message) => reject(tx, id, &message, now),
+            Answer::Rejected(message) => reject(tx, id, message, now),
             Answer::Unreadable => tx.ops().delete(id),
             // Stored even when a newer save replaced the op: the next write
             // updates this Gmail draft instead of making another.

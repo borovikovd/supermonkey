@@ -2,7 +2,7 @@
 //! runner sees does to an outbox row. Pure, so every transition is plain to
 //! read and to test; `resolve` writes the step it gives.
 
-use sm_domain::{GmailDraftId, GmailMessageId, NoticeKind, OutboxState, ThreadId};
+use sm_domain::{DraftId, GmailDraftId, GmailMessageId, NoticeKind, OutboxState, ThreadId};
 use sm_store::Outbox;
 
 /// The notice a held undo that resolved as not sent leaves.
@@ -46,11 +46,15 @@ pub(crate) enum Step {
     },
     /// It was not sent: the row goes, and a notice puts its draft back in a
     /// composer.
-    Return { kind: NoticeKind, message: String },
+    Return {
+        draft: DraftId,
+        kind: NoticeKind,
+        message: String,
+    },
 }
 
 /// What `event` does to `row`.
-pub(crate) fn step(row: &Outbox, event: Event) -> Step {
+pub(crate) fn step(row: Outbox, event: Event) -> Step {
     let sending = row.state == OutboxState::Sending;
     match event {
         Event::Start { late } if row.state == OutboxState::Waiting => Step::Write(Outbox {
@@ -59,22 +63,23 @@ pub(crate) fn step(row: &Outbox, event: Event) -> Step {
             // Until this pass has written the final version, the Gmail draft
             // may hold an older autosave: settling must not send that.
             gmail_draft_id: None,
-            ..row.clone()
+            ..row
         }),
         Event::Written(draft) if sending => Step::Write(Outbox {
             gmail_draft_id: Some(draft),
-            ..row.clone()
+            ..row
         }),
         // Gmail never got it, or a held undo stopped it first: an undo held
         // on it resolves as not sent.
         Event::Unreached | Event::Held if sending && row.undo_requested => Step::Return {
+            draft: row.draft,
             kind: NoticeKind::SendUndone,
             message: SEND_UNDONE.to_owned(),
         },
         Event::Unreached if sending => Step::Write(Outbox {
             state: OutboxState::Waiting,
             delayed: true,
-            ..row.clone()
+            ..row
         }),
         Event::Accepted(message) if sending => {
             let trash = message.clone().filter(|_| row.undo_requested);
@@ -84,18 +89,19 @@ pub(crate) fn step(row: &Outbox, event: Event) -> Step {
                     state: OutboxState::Sent,
                     sent_message_id: message,
                     toast_closed: row.toast_closed || trash.is_some(),
-                    ..row.clone()
+                    ..row
                 },
                 trash,
             }
         }
         Event::Rejected(message) if sending => Step::Return {
+            draft: row.draft,
             kind: NoticeKind::SendFailed,
             message: format!("Couldn't send: {message}"),
         },
         Event::Stored(thread) if row.thread.is_none() => Step::Write(Outbox {
             thread: Some(thread),
-            ..row.clone()
+            ..row
         }),
         Event::Start { .. }
         | Event::Written(_)
@@ -109,7 +115,7 @@ pub(crate) fn step(row: &Outbox, event: Event) -> Step {
 
 #[cfg(test)]
 mod tests {
-    use sm_domain::{AccountId, DraftId, Millis, OutboxId};
+    use sm_domain::{AccountId, Millis, OutboxId};
 
     use super::*;
 
@@ -139,7 +145,7 @@ mod tests {
 
     #[test]
     fn only_a_waiting_row_starts_and_it_forgets_older_gmail_drafts() {
-        let Step::Write(started) = step(&row(OutboxState::Waiting), Event::Start { late: true })
+        let Step::Write(started) = step(row(OutboxState::Waiting), Event::Start { late: true })
         else {
             panic!("a waiting row starts");
         };
@@ -147,29 +153,26 @@ mod tests {
         assert!(started.delayed);
         assert_eq!(started.gmail_draft_id, None);
         for state in [OutboxState::Sending, OutboxState::Sent] {
-            assert_eq!(
-                step(&row(state), Event::Start { late: false }),
-                Step::Ignore
-            );
+            assert_eq!(step(row(state), Event::Start { late: false }), Step::Ignore);
         }
     }
 
     #[test]
     fn unreached_goes_back_to_waiting_unless_an_undo_is_held() {
-        let Step::Write(back) = step(&row(OutboxState::Sending), Event::Unreached) else {
+        let Step::Write(back) = step(row(OutboxState::Sending), Event::Unreached) else {
             panic!("an unreached send waits again");
         };
         assert_eq!(back.state, OutboxState::Waiting);
         assert!(back.delayed, "it missed its time");
         assert!(matches!(
-            step(&held(OutboxState::Sending), Event::Unreached),
+            step(held(OutboxState::Sending), Event::Unreached),
             Step::Return {
                 kind: NoticeKind::SendUndone,
                 ..
             }
         ));
         assert_eq!(
-            step(&row(OutboxState::Waiting), Event::Unreached),
+            step(row(OutboxState::Waiting), Event::Unreached),
             Step::Ignore
         );
     }
@@ -177,13 +180,13 @@ mod tests {
     #[test]
     fn a_held_undo_stops_the_send_only_when_one_was_asked() {
         assert!(matches!(
-            step(&held(OutboxState::Sending), Event::Held),
+            step(held(OutboxState::Sending), Event::Held),
             Step::Return {
                 kind: NoticeKind::SendUndone,
                 ..
             }
         ));
-        assert_eq!(step(&row(OutboxState::Sending), Event::Held), Step::Ignore);
+        assert_eq!(step(row(OutboxState::Sending), Event::Held), Step::Ignore);
     }
 
     #[test]
@@ -194,7 +197,7 @@ mod tests {
             trash,
             drop_entry,
         } = step(
-            &held(OutboxState::Sending),
+            held(OutboxState::Sending),
             Event::Accepted(Some(message.clone())),
         )
         else {
@@ -212,7 +215,7 @@ mod tests {
         let Step::Sent {
             trash, drop_entry, ..
         } = step(
-            &row(OutboxState::Sending),
+            row(OutboxState::Sending),
             Event::Accepted(Some(message.clone())),
         )
         else {
@@ -224,7 +227,7 @@ mod tests {
             toast_closed: true,
             ..row(OutboxState::Sending)
         };
-        let Step::Sent { drop_entry, .. } = step(&closed, Event::Accepted(Some(message))) else {
+        let Step::Sent { drop_entry, .. } = step(closed, Event::Accepted(Some(message))) else {
             panic!("an accepted send is sent");
         };
         assert!(drop_entry, "a stray z must not trash delivered mail");
@@ -234,10 +237,11 @@ mod tests {
     fn a_rejection_returns_the_draft_with_gmails_reason() {
         assert_eq!(
             step(
-                &row(OutboxState::Sending),
+                row(OutboxState::Sending),
                 Event::Rejected("Invalid To header".to_owned())
             ),
             Step::Return {
+                draft: DraftId::from("d"),
                 kind: NoticeKind::SendFailed,
                 message: "Couldn't send: Invalid To header".to_owned(),
             }
@@ -246,10 +250,10 @@ mod tests {
 
     #[test]
     fn a_stored_message_gives_a_new_messages_row_its_thread_once() {
-        let Step::Write(stored) = step(&row(OutboxState::Sent), Event::Stored(ThreadId(4))) else {
+        let Step::Write(stored) = step(row(OutboxState::Sent), Event::Stored(ThreadId(4))) else {
             panic!("a send with no thread gets one");
         };
         assert_eq!(stored.thread, Some(ThreadId(4)));
-        assert_eq!(step(&stored, Event::Stored(ThreadId(5))), Step::Ignore);
+        assert_eq!(step(stored, Event::Stored(ThreadId(5))), Step::Ignore);
     }
 }

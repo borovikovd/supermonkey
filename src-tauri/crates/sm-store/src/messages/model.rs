@@ -137,25 +137,6 @@ pub struct MessageRecord {
 }
 
 impl MessageRecord {
-    /// The message as the domain rules read it.
-    pub fn facts(&self) -> MessageFacts {
-        MessageFacts {
-            id: self.id,
-            gmail_id: self.gmail_id.clone(),
-            date: self.date,
-            from: self.from.clone(),
-            to: self.to.clone(),
-            cc: self.cc.clone(),
-            bcc: self.bcc.clone(),
-            subject: self.subject.clone(),
-            snippet: self.snippet.clone(),
-            is_draft: self.is_draft,
-            is_list: self.is_list,
-            has_attachments: self.has_attachments,
-            labels: self.labels.clone(),
-        }
-    }
-
     pub(super) fn into_facts(self) -> MessageFacts {
         MessageFacts {
             id: self.id,

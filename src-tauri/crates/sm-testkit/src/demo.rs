@@ -36,7 +36,7 @@ impl Demo {
             let user = fake.add_user(email);
             user.set_display_name(email.split('@').next().unwrap_or(email));
             seed(&user, email);
-            tokens.store(email, &RefreshToken::new(user.refresh_token()))?;
+            tokens.store(email, RefreshToken::new(user.refresh_token()))?;
         }
         tracing::info!(base = %fake.base_url(), "demo mode: fake Gmail started");
         Ok(Self {
@@ -145,7 +145,7 @@ fn seed_people(user: &FakeUser, me: &str) {
             .unwrap_or_default();
         let line = LINES.get(i % LINES.len()).copied().unwrap_or_default();
         let first_name = name.split(' ').next().unwrap_or(name);
-        let first = user.add_message(&NewMessage {
+        let first = user.add_message(NewMessage {
             from: from.clone(),
             to: vec![me.to_owned()],
             subject: subject.to_owned(),
@@ -160,7 +160,7 @@ fn seed_people(user: &FakeUser, me: &str) {
         }
         // A reply from the account, then theirs: a three-message thread.
         let reply_subject = format!("Re: {subject}");
-        let mine = user.add_message(&NewMessage {
+        let mine = user.add_message(NewMessage {
             from: me.to_owned(),
             to: vec![from.clone()],
             subject: reply_subject.clone(),
@@ -173,7 +173,7 @@ fn seed_people(user: &FakeUser, me: &str) {
         let cc = PEOPLE
             .get((i + 1) % PEOPLE.len())
             .map(|(_, e)| (*e).to_owned());
-        user.add_message(&NewMessage {
+        user.add_message(NewMessage {
             from,
             to: vec![me.to_owned()],
             cc: cc.into_iter().collect(),
@@ -217,7 +217,7 @@ fn seed_the_rest(user: &FakeUser, me: &str) {
     let receipts = user.add_label("Receipts");
     let travel = user.add_label("Travel");
     for issue in 100..106 {
-        user.add_message(&NewMessage {
+        user.add_message(NewMessage {
             from: "Weekly Digest <digest@news.example>".into(),
             to: vec![me.to_owned()],
             subject: format!("This week in tech #{issue}"),
@@ -233,7 +233,7 @@ fn seed_the_rest(user: &FakeUser, me: &str) {
             ..Default::default()
         });
     }
-    user.add_message(&NewMessage {
+    user.add_message(NewMessage {
         from: "Acme Store <orders@acme.shop>".into(),
         to: vec![me.to_owned()],
         subject: "Your receipt #4821".into(),
@@ -241,7 +241,7 @@ fn seed_the_rest(user: &FakeUser, me: &str) {
         labels: vec!["INBOX".into(), "CATEGORY_PROMOTIONS".into(), receipts],
         ..Default::default()
     });
-    user.add_message(&NewMessage {
+    user.add_message(NewMessage {
         from: "Airline <trips@fly.example>".into(),
         to: vec![me.to_owned()],
         subject: "Your trip to Lisbon".into(),
@@ -249,7 +249,7 @@ fn seed_the_rest(user: &FakeUser, me: &str) {
         labels: vec!["STARRED".into(), travel],
         ..Default::default()
     });
-    user.add_message(&NewMessage {
+    user.add_message(NewMessage {
         from: "Mallory <mallory@evil.example>".into(),
         to: vec![me.to_owned()],
         subject: "Totally safe message".into(),

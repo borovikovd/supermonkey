@@ -235,11 +235,11 @@ impl Params {
             .map(|(_, v)| v.as_str())
     }
 
-    fn all(&self, name: &str) -> Vec<String> {
+    fn all(&self, name: &str) -> Vec<&str> {
         self.0
             .iter()
             .filter(|(k, _)| k == name)
-            .map(|(_, v)| v.clone())
+            .map(|(_, v)| v.as_str())
             .collect()
     }
 

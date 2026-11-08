@@ -15,7 +15,7 @@ use crate::ops::LabelCreateOp;
 pub(super) fn create_label(
     ctx: &mut ActionCtx<'_, '_>,
     account: AccountId,
-    id: &LabelId,
+    id: LabelId,
     name: &str,
     apply: Option<ModifyAction>,
 ) -> Result<(), ActionError> {
@@ -29,17 +29,18 @@ pub(super) fn create_label(
             "That account is no longer in Supermonkey",
         ));
     }
-    if reads.labels().get(account, id)?.is_some() {
+    if reads.labels().get(account, &id)?.is_some() {
         return Err(ActionError::Invalid(
             "Couldn't create that label. Try again.",
         ));
     }
     // A system label's name is Gmail's to refuse, as a rejection.
     let existing = reads.labels().by_name(account, name)?.filter(|l| !l.system);
-    let label = if let Some(existing) = existing {
-        existing.id
+    // An existing user label takes the place of the requested id in `apply`.
+    let rename = if let Some(existing) = existing {
+        Some((id, existing.id))
     } else {
-        ctx.tx.labels().create_local(account, id, name)?;
+        ctx.tx.labels().create_local(account, &id, name)?;
         ctx.tx.ops().push(&NewOp {
             account,
             action: Some(ctx.n),
@@ -47,13 +48,13 @@ pub(super) fn create_label(
             draft: None,
             gmail_draft: None,
             payload: &LabelCreateOp {
-                label: id.clone(),
+                label: id,
                 name: name.to_owned(),
             },
             created_at: ctx.now,
         })?;
         ctx.state.effect(Effect::Ops(account));
-        id.clone()
+        None
     };
     let Some(mut apply) = apply else {
         return Ok(());
@@ -63,9 +64,11 @@ pub(super) fn create_label(
             "A label applies only in its own account",
         ));
     }
-    for ids in [&mut apply.add, &mut apply.remove] {
-        for l in ids.iter_mut().filter(|l| *l == id) {
-            l.clone_from(&label);
+    if let Some((requested, existing)) = &rename {
+        for ids in [&mut apply.add, &mut apply.remove] {
+            for l in ids.iter_mut().filter(|l| *l == requested) {
+                l.clone_from(existing);
+            }
         }
     }
     mail::modify(ctx, apply)

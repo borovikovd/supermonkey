@@ -1,6 +1,6 @@
 //! The core's state on the writer thread: the `S` of `sm_store::Writer<S>`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use sm_domain::{AccountId, ActionNo, DraftId, Millis};
@@ -49,7 +49,7 @@ pub(crate) struct WriterState {
     /// writer thread, so a reconcile job after the discard's commit sees it.
     /// An account removed and added again gets a new id, so its own drafts
     /// are still read back.
-    gone_drafts: HashSet<(AccountId, DraftId)>,
+    gone_drafts: HashMap<AccountId, HashSet<DraftId>>,
     /// Tests: the next action batch's commit fails.
     #[cfg(test)]
     pub(crate) fail_next_commit: bool,
@@ -82,7 +82,7 @@ impl WriterState {
             sent_ack: ActionNo(0),
             batch: Vec::new(),
             rejected: Vec::new(),
-            gone_drafts: HashSet::new(),
+            gone_drafts: HashMap::new(),
             #[cfg(test)]
             fail_next_commit: false,
         }
@@ -114,12 +114,14 @@ impl WriterState {
     /// back: it is read only for a draft no longer stored, so a stale entry
     /// changes nothing.
     pub(crate) fn draft_gone(&mut self, account: AccountId, draft: DraftId) {
-        self.gone_drafts.insert((account, draft));
+        self.gone_drafts.entry(account).or_default().insert(draft);
     }
 
     /// Whether the local draft was discarded or sent this run.
     pub(crate) fn is_draft_gone(&self, account: AccountId, draft: &DraftId) -> bool {
-        self.gone_drafts.contains(&(account, draft.clone()))
+        self.gone_drafts
+            .get(&account)
+            .is_some_and(|gone| gone.contains(draft))
     }
 
     /// Where the effects recorded so far end, for [`WriterState::drop_effects_from`].

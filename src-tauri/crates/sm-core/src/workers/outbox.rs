@@ -198,17 +198,13 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
         }
     };
     // The draft keeps the Gmail ids and the send its Gmail draft together.
-    let (id, now, local, stored) = (
-        row.id,
-        ctx.clock().now(),
-        row.draft.clone(),
-        written.clone(),
-    );
+    let (id, now, local) = (row.id, ctx.clock().now(), row.draft.clone());
+    let (ids, gmail) = (GmailIds::of(&written), written.id.clone());
     let applied = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
-            store_ids(tx, state, &local, GmailIds::of(&stored), None, now)?;
-            resolve(tx, state, id, Event::Written(stored.id.clone()), now)
+            store_ids(tx, state, &local, ids, None, now)?;
+            resolve(tx, state, id, Event::Written(gmail), now)
         })
         .await?;
     // The row went meanwhile, with its account: nothing is sent.
@@ -317,8 +313,8 @@ async fn sent_message(
         .into_iter()
         .filter(|m| m.label_ids.contains(&sent))
         .collect::<Vec<_>>();
-    if let Some(m) = sent.iter().find(|m| Some(&m.id) == written) {
-        return Ok(Some(m.id.clone()));
+    if let Some(at) = sent.iter().position(|m| Some(&m.id) == written) {
+        return Ok(Some(sent.swap_remove(at).id));
     }
     // The first sent since: this send went out before any later reply,
     // say one sent from a phone meanwhile.

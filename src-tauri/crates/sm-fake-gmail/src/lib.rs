@@ -5,7 +5,7 @@
 //! use sm_fake_gmail::*;
 //! let fake = FakeGmail::start();
 //! let me = fake.add_user("me@example.com");
-//! me.add_message(&NewMessage::inbox("Ann <ann@example.com>", "Hello", "Hi there"));
+//! me.add_message(NewMessage::inbox("Ann <ann@example.com>", "Hello", "Hi there"));
 //! fake.inject(Matcher::new("POST", "*/drafts/send").once(), Fault::NoResponse);
 //! // Point the client at fake.base_url(), fake.token_url(), fake.revoke_url(), fake.auth_url().
 //! # }
@@ -928,13 +928,13 @@ impl FakeUser {
     }
 
     /// Stores a message as if it arrived, recording `messagesAdded`.
-    pub fn add_message(&self, msg: &NewMessage) -> AddedMessage {
+    pub fn add_message(&self, mut msg: NewMessage) -> AddedMessage {
         let now = self.shared.clock_ms();
         self.with(|mb| {
             let date = msg.internal_date.or(now).unwrap_or_else(|| mb.next_date());
-            let (raw, rfc822_message_id) = built(mb, msg, date);
-            let labels = mb.filtered_labels(sender_email(&msg.from), msg.labels.clone());
-            let id = mb.insert_raw(raw, msg.thread_id.clone(), labels, Some(date));
+            let (raw, rfc822_message_id) = built(mb, &mut msg, date);
+            let labels = mb.filtered_labels(sender_email(&msg.from), msg.labels);
+            let id = mb.insert_raw(raw, msg.thread_id, labels, Some(date));
             AddedMessage {
                 thread_id: mb.messages[&id].thread_id.clone(),
                 id,
@@ -944,12 +944,12 @@ impl FakeUser {
     }
 
     /// A draft made by another client (Gmail on the web, a phone). Labels are ignored.
-    pub fn add_draft(&self, msg: &NewMessage) -> AddedDraft {
+    pub fn add_draft(&self, mut msg: NewMessage) -> AddedDraft {
         let now = self.shared.clock_ms();
         self.with(|mb| {
             let date = msg.internal_date.or(now).unwrap_or_else(|| mb.next_date());
-            let (raw, rfc822_message_id) = built(mb, msg, date);
-            let id = mb.create_draft(raw, msg.thread_id.clone(), Some(date));
+            let (raw, rfc822_message_id) = built(mb, &mut msg, date);
+            let id = mb.create_draft(raw, msg.thread_id, Some(date));
             let message = mb.drafts[&id].clone();
             AddedDraft {
                 thread_id: mb.messages[&message].thread_id.clone(),
@@ -961,13 +961,13 @@ impl FakeUser {
     }
 
     /// Replaces a draft's message, as another client editing it. `None` if it is gone.
-    pub fn update_draft(&self, draft_id: &str, msg: &NewMessage) -> Option<AddedDraft> {
+    pub fn update_draft(&self, draft_id: &str, mut msg: NewMessage) -> Option<AddedDraft> {
         let now = self.shared.clock_ms();
         self.with(|mb| {
             let date = msg.internal_date.or(now).unwrap_or_else(|| mb.next_date());
-            let (raw, rfc822_message_id) = built(mb, msg, date);
+            let (raw, rfc822_message_id) = built(mb, &mut msg, date);
             let message = mb
-                .update_draft(draft_id, raw, msg.thread_id.clone(), Some(date))
+                .update_draft(draft_id, raw, msg.thread_id, Some(date))
                 .ok()?;
             Some(AddedDraft {
                 thread_id: mb.messages[&message].thread_id.clone(),
@@ -1100,11 +1100,11 @@ pub struct AddedDraft {
     pub rfc822_message_id: String,
 }
 
-/// RFC 822 bytes for `msg` and its `Message-ID`.
-fn built(mb: &mut Mailbox, msg: &NewMessage, date: u64) -> (Vec<u8>, String) {
+/// RFC 822 bytes for `msg` and its `Message-ID`, taken from `msg`.
+fn built(mb: &mut Mailbox, msg: &mut NewMessage, date: u64) -> (Vec<u8>, String) {
     let rfc822_message_id = msg
         .message_id
-        .clone()
+        .take()
         .unwrap_or_else(|| format!("<{}@fake.example>", mb.new_id()));
     (
         mime::build(msg, date, &rfc822_message_id),

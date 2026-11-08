@@ -130,19 +130,10 @@ async fn body(
     priority: Priority,
 ) -> Result<NewBody, GmailError> {
     let mut images = parsed.cid_images();
-    let fetches: Vec<(String, GmailAttachmentId, String)> = parsed
-        .inline_images_to_fetch()
-        .map(|f| {
-            (
-                f.content_id.to_owned(),
-                GmailAttachmentId::from(f.attachment_id),
-                f.mime_type.to_owned(),
-            )
-        })
-        .collect();
-    for (content_id, attachment, mime_type) in fetches {
+    for fetch in parsed.inline_images_to_fetch() {
+        let attachment = GmailAttachmentId::from(fetch.attachment_id);
         match ctx.gmail.get_attachment(priority, &m.id, &attachment).await {
-            Ok(bytes) => images.insert(&content_id, &mime_type, &bytes),
+            Ok(bytes) => images.insert(fetch.content_id, fetch.mime_type, &bytes),
             Err(e) if *e.outcome() == Outcome::NotFound => {
                 tracing::debug!("an inline image is gone; leaving it out");
             }

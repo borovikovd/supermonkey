@@ -31,7 +31,7 @@ pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), A
             subscriptions::unsubscribe(ctx, sub);
             Ok(())
         }
-        Action::MoreResults { sub } => subscriptions::more_results(ctx, &sub),
+        Action::MoreResults { sub } => subscriptions::more_results(ctx, sub),
         Action::SetSetting(setting) => settings::set_setting(ctx, setting),
         Action::AckNotice { notice } => notices::ack_notice(ctx, notice),
         Action::CloseToast { outbox } => outbox::close_toast(ctx, outbox),
@@ -42,8 +42,8 @@ pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), A
             id,
             name,
             apply,
-        } => labels::create_label(ctx, account, &id, &name, apply),
-        Action::SaveDraft { draft, save } => compose::save_draft(ctx, &draft, save),
+        } => labels::create_label(ctx, account, id, &name, apply),
+        Action::SaveDraft { draft, save } => compose::save_draft(ctx, draft, save),
         Action::CloseComposer { draft } => compose::close_composer(ctx, &draft),
         Action::SendDraft { draft } => compose::send_draft(ctx, &draft),
         Action::DiscardDraft { draft } => compose::discard_draft(ctx, &draft),

@@ -15,7 +15,6 @@ use crate::workers::{AccountWorker, AccountWorkers, open_attachment, safe_name, 
 use crate::{Error, Platform};
 
 /// Links, attachments, unsubscribe, and block.
-#[derive(Clone)]
 pub struct Mail {
     platform: Arc<dyn Platform>,
     workers: Arc<AccountWorkers>,
@@ -97,7 +96,7 @@ impl Mail {
         // The draft went while the file was on its way, and its folder with
         // it (SPEC Drafts): this file goes too.
         if self.workers.draft_files_gone(&draft) {
-            self.workers.delete_draft_files(&draft);
+            self.workers.delete_draft_files(draft);
             return Err(Error::DraftGone);
         }
         Ok(DraftAttachment {
