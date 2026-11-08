@@ -1,7 +1,7 @@
 //! The payloads of queued ops, stored as JSON in the store's op queue.
 
 use serde::{Deserialize, Serialize};
-use ub_domain::{GmailMessageId, LabelId, LabelSet, ThreadChange};
+use ub_domain::{GmailMessageId, LabelId, LabelSet, SystemLabel, ThreadChange};
 
 /// A `messages.batchModify`. Its label ids are local ids: the runner maps
 /// them to Gmail's when it runs, so a label created offline has its Gmail
@@ -21,6 +21,19 @@ pub(crate) struct ModifyOp {
 }
 
 impl ModifyOp {
+    /// What trashing one sent message changes (`messages.trash`), as
+    /// `trash_sent` changes it here: kept on top of reads in flight.
+    pub(crate) fn trash(message: GmailMessageId) -> Self {
+        Self {
+            messages: vec![message],
+            add: [SystemLabel::Trash].into_iter().collect(),
+            remove: [SystemLabel::Inbox, SystemLabel::Spam]
+                .into_iter()
+                .collect(),
+            threads: Vec::new(),
+        }
+    }
+
     /// Whether it names `message`.
     pub(crate) fn names(&self, message: &GmailMessageId) -> bool {
         self.messages.contains(message)

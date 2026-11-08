@@ -233,6 +233,24 @@ impl<'c> OpReads<'c> {
         )
     }
 
+    /// Whether a delete of every Gmail copy of this local draft is queued: it
+    /// was discarded while a `drafts.create` of it had no answer, so Gmail
+    /// may hold a copy the app has no id for.
+    pub fn deletes_copies_of(
+        self,
+        account: AccountId,
+        draft: &DraftId,
+    ) -> Result<bool, StoreError> {
+        self.db.one(
+            "check for a queued delete of a draft's copies",
+            "SELECT EXISTS (SELECT 1 FROM ops
+                            WHERE account_id = ?1 AND kind = 'draft_delete'
+                              AND draft_id = ?2 AND gmail_draft_id IS NULL) AS queued",
+            (account, draft),
+            |r| r.get("queued"),
+        )
+    }
+
     /// Whether an upsert of the local draft is queued: it holds an edit Gmail
     /// has not confirmed, waiting to run or to retry.
     pub fn upserts_draft(self, draft: &DraftId) -> Result<bool, StoreError> {

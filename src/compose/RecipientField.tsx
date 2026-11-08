@@ -181,9 +181,12 @@ export function RecipientField({
   };
 
   const open = suggestions.length > 0;
-  // While the list is open, its keys come before the composer's (src/keyboard/dispatch.ts).
+  // While the list is open and its field has focus, its keys come before the
+  // composer's (src/keyboard/dispatch.ts). A field just left keeps its list a
+  // moment for a click, but not the keys: they belong to where focus went.
+  const [focused, setFocused] = useState(false);
   useEffect(() => {
-    if (!open) return;
+    if (!open || !focused) return;
     return registerKeys("suggestions", (e) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return false;
       if (e.key === "ArrowDown") setActive((a) => Math.min(a + 1, suggestions.length - 1));
@@ -259,10 +262,12 @@ export function RecipientField({
           }
         }}
         onFocus={() => {
+          setFocused(true);
           leaving.current?.();
           leaving.current = null;
         }}
         onBlur={() => {
+          setFocused(false);
           // Leaving the field turns typed text into a chip.
           leaving.current?.();
           leaving.current = later(() => {

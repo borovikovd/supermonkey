@@ -47,6 +47,8 @@ type Commands = {
   placeholder: string;
   /** Snooze: the options on screen are for an earlier query. */
   stale?: boolean;
+  /** Snooze: snoozes what the palette opened on until `at`. */
+  snoozeAt?: (at: number) => void;
 };
 
 function useCommands(mode: PaletteMode, query: string): Commands {
@@ -104,7 +106,11 @@ function useCommands(mode: PaletteMode, query: string): Commands {
       const items: Item[] = userLabels.map((l) => {
         const all =
           opened.rows.length > 0 && opened.rows.every((row) => row?.labels.includes(l.id));
-        return { id: l.id, label: `${all ? "✓ " : ""}${l.name}`, run: () => applyLabel(l.id) };
+        return {
+          id: l.id,
+          label: `${all ? "✓ " : ""}${l.name}`,
+          run: () => applyLabel(l.id, opened.threads),
+        };
       });
       const q = query.trim();
       if (
@@ -151,24 +157,25 @@ function useCommands(mode: PaletteMode, query: string): Commands {
         items: (snoozes?.options ?? []).map((o) => ({
           id: `${o.at}`,
           label: o.label,
-          run: () => snooze(o.at),
+          run: () => snooze(o.at, opened.threads),
         })),
         placeholder: "Snooze until… (try “fri 9am”)",
         stale: snoozes?.query !== query,
+        snoozeAt: (at) => snooze(at, opened.threads),
       };
     case "unsubscribe":
       return {
         items: [
-          { id: "keep", label: "Unsubscribe", run: () => void unsubscribe("keep") },
+          { id: "keep", label: "Unsubscribe", run: () => void unsubscribe("keep", opened.threads) },
           {
             id: "done",
             label: "Unsubscribe, and mark done all",
-            run: () => void unsubscribe("done"),
+            run: () => void unsubscribe("done", opened.threads),
           },
           {
             id: "trash",
             label: "Unsubscribe, and trash all",
-            run: () => void unsubscribe("trash"),
+            run: () => void unsubscribe("trash", opened.threads),
           },
         ],
         placeholder: "Unsubscribe from this sender",
@@ -183,7 +190,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
       const then = asSpam ? "Mark spam, and block" : "Block";
       return {
         items: [
-          ...(asSpam ? [{ id: "spam", label: "Mark spam", run: spam }] : []),
+          ...(asSpam ? [{ id: "spam", label: "Mark spam", run: () => spam(opened.threads) }] : []),
           {
             id: "address",
             label: email ? `${then} ${email}` : `${then} the sender`,
@@ -301,7 +308,7 @@ const itemValue = (it: Item) => `${it.label} ${it.id}`;
 
 function PaletteBody({ mode }: { mode: PaletteMode }) {
   const [query, setQuery] = useState("");
-  const { items, placeholder, stale } = useCommands(mode, query);
+  const { items, placeholder, stale, snoozeAt } = useCommands(mode, query);
   // Snooze options arrive from Rust, already filtered, after each keystroke:
   // keep the first one selected so Enter always picks something.
   const fromRust = mode.kind === "snooze";
@@ -325,14 +332,14 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
           void snoozeOptions(query).then(([first]) => {
             if (!first || useChrome.getState().palette !== mode) return;
             close();
-            snooze(first.at);
+            snoozeAt?.(first.at);
           });
           return true;
         }
         measure("paletteKey", start);
         return false;
       }),
-    [stale, query, mode],
+    [stale, query, mode, snoozeAt],
   );
   const selected = items.some((it) => itemValue(it) === picked) ? picked : firstValue;
   return (

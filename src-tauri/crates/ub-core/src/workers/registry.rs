@@ -361,24 +361,21 @@ impl AccountWorkers {
             if let Some(lane) = lane {
                 lane.stop().await;
             }
-            match workers.load_token(&email).await {
-                Ok(Some(token)) => {
-                    if let Err(e) =
-                        ub_gmail::revoke(&workers.gmail.oauth, &workers.http, &token).await
-                    {
-                        tracing::warn!(account = account.0, outcome = %e.outcome(), "couldn't revoke a removed account's grant");
-                    }
-                }
-                Ok(None) => {}
+            let token = match workers.load_token(&email).await {
+                Ok(token) => token,
                 Err(e) => {
                     tracing::warn!(account = account.0, error = %e, "couldn't read a removed account's token");
+                    None
                 }
-            }
-            workers.scheduler.forget(&email);
+            };
+            // The local clean-up first, on a blocking task that finishes even
+            // if a quit cancels this one: the revoke after it may take a
+            // network round trip, and the token must not outlive the account.
             let tokens = Arc::clone(&workers.tokens);
             let dir = attachments_dir(&workers.deps.data_dir, account);
+            let gone = email.clone();
             let cleaned = tokio::task::spawn_blocking(move || {
-                if let Err(e) = tokens.delete(&email) {
+                if let Err(e) = tokens.delete(&gone) {
                     tracing::warn!(account = account.0, error = %e, "couldn't delete a removed account's token");
                 }
                 match std::fs::remove_dir_all(&dir) {
@@ -392,6 +389,12 @@ impl AccountWorkers {
             if let Err(e) = cleaned {
                 tracing::warn!(account = account.0, error = %e, "the clean-up of a removed account failed");
             }
+            if let Some(token) = token
+                && let Err(e) = ub_gmail::revoke(&workers.gmail.oauth, &workers.http, &token).await
+            {
+                tracing::warn!(account = account.0, outcome = %e.outcome(), "couldn't revoke a removed account's grant");
+            }
+            workers.scheduler.forget(&email);
             tracing::info!(account = account.0, "account forgotten");
         });
     }

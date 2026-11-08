@@ -22,13 +22,13 @@ pub(crate) async fn full_resync(ctx: &AccountCtx) -> Result<(), GmailError> {
         account = ctx.account.0,
         "history expired; running a full resync"
     );
-    // 1. A fresh cursor first, so polling resumes at once.
+    // 1. A fresh cursor, stored once the resync is done: one cut short by an
+    // error or a quit leaves the old cursor, so the next poll runs it again.
     let profile = ctx.gmail.get_profile(Priority::P3).await?;
     let started = ctx.read(|r| r.meta().rev()).await.unwrap_or_else(|e| {
         tracing::warn!(error = %e, "couldn't read the rev; keeping every cached thread");
         Rev(0)
     });
-    store_cursor(ctx, profile.history_id).await;
     // 2. Every thread id with its history id, Inbox first. New and changed
     // Inbox threads are read first.
     let mut listed: HashMap<GmailThreadId, Option<HistoryId>> = HashMap::new();
@@ -69,6 +69,7 @@ pub(crate) async fn full_resync(ctx: &AccountCtx) -> Result<(), GmailError> {
     // 5. Drafts.
     reconcile(ctx, Occasion::Sync).await?;
     // 6. The snooze rule runs as each thread is stored.
+    store_cursor(ctx, profile.history_id).await;
     Ok(())
 }
 

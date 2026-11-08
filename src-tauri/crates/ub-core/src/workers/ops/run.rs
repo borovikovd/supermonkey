@@ -13,7 +13,7 @@ use crate::drafts::{WritingDraft, store_ids};
 use crate::effects::Effect;
 use crate::ops::{LabelCreateOp, ModifyOp, reject, relabel};
 use crate::workers::account::AccountCtx;
-use crate::workers::drafts::{Upserted, WriteFailure, delete_draft, upsert};
+use crate::workers::drafts::{Upserted, WriteFailure, delete_copies, delete_draft, upsert};
 
 /// The most ids one `messages.batchModify` takes.
 const BATCH_MODIFY_MAX: usize = 1000;
@@ -96,8 +96,15 @@ pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure
                     Ok(()) => Answer::Done(Landing::Plain),
                     Err(e) => refused(e)?,
                 }
+            } else if let Some(local) = &op.draft {
+                match delete_copies(ctx, local).await {
+                    Ok(()) => Answer::Done(Landing::Plain),
+                    Err(WriteFailure::Gmail(e)) => refused(e)?,
+                    Err(WriteFailure::Store(e)) => return Err(Failure::Store(e)),
+                    Err(WriteFailure::Local(message)) => Answer::Rejected(message),
+                }
             } else {
-                tracing::error!(op = %op.id, "a draft delete names no Gmail draft; dropping it");
+                tracing::error!(op = %op.id, "a draft delete names no draft; dropping it");
                 Answer::Unreadable
             }
         }
@@ -277,7 +284,10 @@ fn wake_outbox_if_sending(ctx: &AccountCtx, draft: DraftId) {
 /// longer has is gone already.
 async fn trash_message(ctx: &AccountCtx, message: &GmailMessageId) -> Result<Answer, Failure> {
     match ctx.gmail.trash_message(Priority::P1, message).await {
-        Ok(_) => Ok(Answer::Done(Landing::Plain)),
+        // Kept on top of reads that were in flight, as a modify is.
+        Ok(_) => Ok(Answer::Done(Landing::Modify(ModifyOp::trash(
+            message.clone(),
+        )))),
         Err(e) if *e.outcome() == Outcome::NotFound => Ok(Answer::Done(Landing::Plain)),
         Err(e) => refused(e),
     }

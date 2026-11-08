@@ -42,6 +42,20 @@ export function targets(): number[] {
 }
 
 /**
+ * Of threads fixed when the user acted (a palette's, read as it opened), the
+ * ones still on screen: a row that left meanwhile is not acted on, and the
+ * action never falls to the row the highlight moved to.
+ */
+function stillShown(threads: number[]): number[] {
+  const cur = useChrome.getState().current();
+  if (!cur) return [];
+  const { screen } = cur;
+  if (screen.kind === "conversation") return threads.filter((t) => t === screen.thread);
+  const shown = new Set(visibleIds());
+  return threads.filter((t) => shown.has(String(t)));
+}
+
+/**
  * Sends a mail change. `account` and `threads` name an account and its
  * threads taken earlier, before an await; by default they are the account
  * on screen and the targets now. The screen moves on only when its account
@@ -88,9 +102,9 @@ type Acting = { account: number; threads: number[] };
  * resolve the wrong way (SPEC UI state, Actions). With every row in, it runs
  * at once.
  */
-function withRows(resolve: (acting: Acting) => void) {
+function withRows(resolve: (acting: Acting) => void, fixed?: number[]) {
   const { account } = useChrome.getState();
-  const threads = targets();
+  const threads = fixed ? stillShown(fixed) : targets();
   if (account === null || threads.length === 0) return;
   const missing = threads.map(String).filter((k) => !rowOf(k));
   if (missing.length === 0) {
@@ -141,13 +155,18 @@ export const trash = () => {
   modify("trash", ["TRASH"], ["INBOX", "SPAM"]);
 };
 
-export const spam = () => {
+/** `fixed`: the threads a palette opened on (see `stillShown`). */
+export const spam = (fixed?: number[]) => {
   if (currentView()?.kind === "spam") return;
-  modify("spam", ["SPAM"], ["INBOX", "TRASH"]);
+  modify("spam", ["SPAM"], ["INBOX", "TRASH"], fixed ? { threads: stillShown(fixed) } : {});
 };
 
-export const snooze = (at: number) =>
-  modify("snooze", [], ["INBOX"], { snooze: { kind: "set", at } });
+/** `fixed`: the threads a palette opened on (see `stillShown`). */
+export const snooze = (at: number, fixed?: number[]) =>
+  modify("snooze", [], ["INBOX"], {
+    snooze: { kind: "set", at },
+    ...(fixed ? { threads: stillShown(fixed) } : {}),
+  });
 
 const allHave = (threads: number[], field: "starred" | "unread") =>
   threads.every((id) => rowOf(String(id))?.[field]);
@@ -164,13 +183,16 @@ export const toggleRead = () =>
     else modify("unread", ["UNREAD"], [], acting);
   });
 
-/** `l`: if every target has the label it is removed from all, else added to all. */
-export function applyLabel(labelId: string) {
+/**
+ * `l`: if every target has the label it is removed from all, else added to
+ * all. `fixed`: the threads the palette opened on (see `stillShown`).
+ */
+export function applyLabel(labelId: string, fixed?: number[]) {
   withRows((acting) => {
     const all = acting.threads.every((id) => rowOf(String(id))?.labels.includes(labelId));
     if (all) modify("removeLabel", [], [labelId], acting);
     else modify("label", [labelId], [], acting);
-  });
+  }, fixed);
 }
 
 /** `y`: remove the current view's label when it can be removed. */
@@ -206,9 +228,9 @@ export type UnsubscribeThen = "keep" | "done" | "trash";
  * and "trash" first archive or trash every Inbox conversation from that
  * sender, as ordinary undoable actions.
  */
-export async function unsubscribe(then: UnsubscribeThen) {
+export async function unsubscribe(then: UnsubscribeThen, fixed?: number[]) {
   const account = useChrome.getState().account;
-  const [thread] = targets();
+  const [thread] = fixed ? stillShown(fixed) : targets();
   if (account === null || thread === undefined) return;
   if (then !== "keep") {
     const same: number[] = await senderThreads(account, thread).catch((err: unknown) => {

@@ -305,7 +305,7 @@ const DEFS = {
     // The palette offers spam with a block; `!` marks spam at once.
     palette: () => openPalette({ kind: "spam" }),
     when: (c) => acts(c) && !isView(c, "spam"),
-    run: spam,
+    run: () => spam(),
     meter: "!",
   },
   block: {

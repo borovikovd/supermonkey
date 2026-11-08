@@ -191,6 +191,22 @@ async fn recover_create(
             .await?;
         return Ok(Some(found));
     }
+    let mut found = copies_of(ctx, local).await?.into_iter();
+    let keep = found.next();
+    for extra in found {
+        if let Err(e) = ctx.gmail.delete_draft(Priority::P1, &extra.id).await {
+            tracing::warn!(account = ctx.account.0, outcome = %e.outcome(), "couldn't delete an extra copy of a draft");
+        }
+    }
+    Ok(keep)
+}
+
+/// The Gmail drafts the app has no id for whose `X-Ubermensch-Draft` header
+/// names `local`, each read with `format=metadata`.
+pub(super) async fn copies_of(
+    ctx: &AccountCtx,
+    local: &DraftId,
+) -> Result<Vec<ub_gmail::Draft>, WriteFailure> {
     let account = ctx.account;
     let known: HashSet<GmailDraftId> = ctx
         .read(move |r| r.drafts().for_account(account))
@@ -217,14 +233,7 @@ async fn recover_create(
             ours.push(read);
         }
     }
-    let mut found = ours.into_iter();
-    let keep = found.next();
-    for extra in found {
-        if let Err(e) = ctx.gmail.delete_draft(Priority::P1, &extra.id).await {
-            tracing::warn!(account = account.0, outcome = %e.outcome(), "couldn't delete an extra copy of a draft");
-        }
-    }
-    Ok(keep)
+    Ok(ours)
 }
 
 /// The ids of every Gmail draft of the account.

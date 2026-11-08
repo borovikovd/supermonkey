@@ -18,7 +18,7 @@ use ub_store::{Outbox, Priority as WritePriority, StoreError};
 use super::account::{AccountCtx, OFFLINE_RETRY, fetch_thread};
 use super::drafts::{WriteFailure, load, write};
 use crate::Error;
-use crate::drafts::lifecycle::GmailIds;
+use crate::drafts::lifecycle::{self, GmailIds};
 use crate::drafts::store_ids;
 use crate::outbox::{Event, resolve};
 use crate::read::read;
@@ -190,12 +190,17 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
         row.draft.clone(),
         written.clone(),
     );
-    ctx.writer()
+    let applied = ctx
+        .writer()
         .call(WritePriority::Sync, move |tx, state| {
             store_ids(tx, state, &local, GmailIds::of(&stored), None, now)?;
             resolve(tx, state, id, Event::Written(stored.id.clone()), now)
         })
         .await?;
+    // The row went meanwhile, with its account: nothing is sent.
+    if !applied {
+        return Ok(());
+    }
     // 4: drafts.send.
     send_draft(ctx, row, &written.id).await
 }
@@ -260,29 +265,44 @@ async fn settle(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
             let Some(thread) = thread else {
                 return sent(ctx, row, None, None).await;
             };
-            let message = newest_sent(ctx, &thread).await?;
+            let written = load(&ctx.deps.pool, row.draft.clone())
+                .await?
+                .and_then(|d| lifecycle::gmail_message(&d).cloned());
+            let message = sent_message(ctx, &thread, written.as_ref(), row.send_after).await?;
             sent(ctx, row, message, Some(thread)).await
         }
         Err(e) => Err(e.into()),
     }
 }
 
-/// The newest message this account sent on the thread: a send that
-/// resolved as sent with no message id in hand.
-async fn newest_sent(
+/// The message a send that resolved as sent with no message id in hand
+/// became: the one its draft was last written as, which Gmail keeps as it
+/// sends, else the newest this account sent on the thread no earlier than
+/// the send's time. Never an older message of the thread, which an undo
+/// would trash.
+async fn sent_message(
     ctx: &AccountCtx,
     thread: &GmailThreadId,
+    written: Option<&GmailMessageId>,
+    since: Millis,
 ) -> Result<Option<GmailMessageId>, Failure> {
     let read = ctx
         .gmail
         .get_thread(Priority::P1, thread, Format::Minimal, &[])
         .await?;
     let sent = SystemLabel::Sent.label_id();
-    Ok(read
+    let mut sent = read
         .messages
         .into_iter()
         .filter(|m| m.label_ids.contains(&sent))
-        .max_by_key(|m| m.internal_date.unwrap_or(Millis(0)))
+        .collect::<Vec<_>>();
+    if let Some(m) = sent.iter().find(|m| Some(&m.id) == written) {
+        return Ok(Some(m.id.clone()));
+    }
+    sent.retain(|m| m.internal_date.is_some_and(|d| d >= since));
+    Ok(sent
+        .into_iter()
+        .max_by_key(|m| m.internal_date)
         .map(|m| m.id))
 }
 

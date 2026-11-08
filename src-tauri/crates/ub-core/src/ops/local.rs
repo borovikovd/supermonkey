@@ -1,4 +1,4 @@
-//! This app's label changes still on their way to Gmail, applied on top of
+//! This app's label changes, a sent message's trash included, still on their way to Gmail, applied on top of
 //! what Gmail says about the same messages (SPEC Offline: a queued action
 //! wins on the messages it recorded, without hiding newer mail).
 
@@ -24,6 +24,15 @@ impl LocalChanges {
         for op in reads.ops().of_kind(account, OpKind::Modify)? {
             match op.payload::<ModifyOp>() {
                 Ok(payload) => ops.push(payload),
+                Err(e) => {
+                    tracing::warn!(op = %op.id, error = %e, "skipping a queued op that does not parse");
+                }
+            }
+        }
+        // An undone send's trash is a label change too.
+        for op in reads.ops().of_kind(account, OpKind::TrashMessage)? {
+            match op.payload::<GmailMessageId>() {
+                Ok(message) => ops.push(ModifyOp::trash(message)),
                 Err(e) => {
                     tracing::warn!(op = %op.id, error = %e, "skipping a queued op that does not parse");
                 }

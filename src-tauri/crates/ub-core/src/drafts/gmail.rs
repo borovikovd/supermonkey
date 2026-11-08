@@ -200,6 +200,13 @@ pub(crate) fn apply_gmail_draft(
         return Ok(());
     }
     let header = gmail.message.message.ub_draft.clone();
+    // A copy of a draft discarded while its create had no answer: the queued
+    // delete removes it from Gmail.
+    if let Some(local) = &header
+        && reads.ops().deletes_copies_of(account, local)?
+    {
+        return Ok(());
+    }
     // A write of the draft it names is in flight: its answer settles it.
     if header
         .as_ref()

@@ -77,6 +77,16 @@ async fn load_record(pool: &Arc<ReadPool>, id: DraftId) -> Result<Option<bool>, 
         .map(|record| record.in_outbox))
 }
 
+/// Deletes every Gmail copy of a local draft discarded while a
+/// `drafts.create` of it had no answer: Gmail may hold one the app has no
+/// id for, found by its `X-Ubermensch-Draft` header.
+pub(crate) async fn delete_copies(ctx: &AccountCtx, local: &DraftId) -> Result<(), WriteFailure> {
+    for copy in super::write::copies_of(ctx, local).await? {
+        delete_draft(ctx, &copy.id).await?;
+    }
+    Ok(())
+}
+
 /// `drafts.delete`. A draft Gmail no longer has is deleted already.
 pub(crate) async fn delete_draft(ctx: &AccountCtx, id: &GmailDraftId) -> Result<(), GmailError> {
     match ctx.gmail.delete_draft(Priority::P1, id).await {

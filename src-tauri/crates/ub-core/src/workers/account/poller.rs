@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::future::join_all;
-use ub_domain::{GmailMessageId, SystemLabel};
+use ub_domain::{GmailMessageId, GmailThreadId, SystemLabel};
 use ub_gmail::{Format, GmailError, HistoryId, Outcome, PageToken, Priority};
 use ub_store::Priority as WritePriority;
 
@@ -14,7 +14,9 @@ use super::ctx::{AccountCtx, OFFLINE_RETRY};
 use super::history::HistoryBatch;
 use super::ingest::{Polled, apply_history};
 use super::profile::{refresh_labels, refresh_send_as};
-use super::queue::{BACKFILL, INBOX_BODIES, INBOX_META, LATE, Listing, OTHER_META, Work};
+use super::queue::{
+    BACKFILL, INBOX_BODIES, INBOX_META, LATE, Listing, OTHER_META, POLL_BODIES, Work,
+};
 use super::read::read_thread;
 use super::resync::full_resync;
 use crate::Error;
@@ -58,8 +60,11 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
     }
     let mut polls = 0u32;
     let mut last = ctx.clock().now();
+    // A draft reconcile a poll asked for that failed: the next poll runs it,
+    // since its history no longer says drafts changed.
+    let mut drafts_due = false;
     loop {
-        match poll(&ctx).await {
+        match poll(&ctx, &mut drafts_due).await {
             Ok(()) => ctx.health.succeeded(),
             Err(e) if *e.outcome() == Outcome::InvalidGrant => {
                 ctx.health.failed(&e);
@@ -200,7 +205,7 @@ pub(crate) fn queue_starred_and_sent(ctx: &AccountCtx) {
 
 /// One poll from the stored cursor. A cursor Gmail no longer keeps runs the
 /// full resync.
-async fn poll(ctx: &AccountCtx) -> Result<(), GmailError> {
+async fn poll(ctx: &AccountCtx, drafts_due: &mut bool) -> Result<(), GmailError> {
     let account = ctx.account;
     let start = ctx
         .read(move |r| Ok(r.accounts().get(account)?.and_then(|a| a.history_id)))
@@ -221,7 +226,7 @@ async fn poll(ctx: &AccountCtx) -> Result<(), GmailError> {
         if latest != start {
             store_cursor(ctx, latest).await;
         }
-        return Ok(());
+        return reconcile_drafts(ctx, drafts_due, false).await;
     }
     let batch = HistoryBatch::new(records);
     let drafts_changed = batch.drafts_changed;
@@ -250,11 +255,18 @@ async fn poll(ctx: &AccountCtx) -> Result<(), GmailError> {
     )
     .await;
     let mut read = Vec::with_capacity(answers.len());
+    let mut deferred = Vec::new();
     for (thread, answer) in to_read.iter().zip(answers) {
         match answer {
             Ok(answer) => read.push((thread.clone(), Some(answer))),
             Err(e) if *e.outcome() == Outcome::NotFound => read.push((thread.clone(), None)),
-            Err(e) => return Err(e),
+            Err(e) if *e.outcome() == Outcome::InvalidGrant => return Err(e),
+            // One failed read does not hold up the rest of the poll: the
+            // fetch queue reads the thread, retrying as it does.
+            Err(e) => {
+                tracing::info!(account = account.0, outcome = %e.outcome(), "a poll's thread read failed; queueing it");
+                deferred.push(thread.clone());
+            }
         }
     }
     let now = ctx.clock().now();
@@ -276,20 +288,45 @@ async fn poll(ctx: &AccountCtx) -> Result<(), GmailError> {
         })
         .await;
     match applied {
-        Ok(()) => {
-            for thread in to_read {
-                ctx.queue
-                    .push(super::queue::POLL_BODIES, Work::Body { thread });
-            }
-        }
+        Ok(()) => queue_after_poll(ctx, to_read, &deferred),
         Err(e) => {
             tracing::warn!(account = account.0, error = %e, "couldn't apply a poll's history");
         }
     }
-    // A draft was added or an old version deleted: reconcile the drafts.
-    if drafts_changed {
-        reconcile(ctx, Occasion::Poll).await?;
+    reconcile_drafts(ctx, drafts_due, drafts_changed).await
+}
+
+/// After a poll lands: the bodies of the threads it read, and the threads
+/// whose read failed, which the fetch queue reads again.
+fn queue_after_poll(ctx: &AccountCtx, read: BTreeSet<GmailThreadId>, deferred: &[GmailThreadId]) {
+    for thread in read.into_iter().filter(|t| !deferred.contains(t)) {
+        ctx.queue.push(POLL_BODIES, Work::Body { thread });
     }
+    for thread in deferred.iter().cloned() {
+        ctx.queue.push(
+            INBOX_META,
+            Work::Meta {
+                thread,
+                history: None,
+                body: Some(POLL_BODIES),
+            },
+        );
+    }
+}
+
+/// Reconciles the drafts when the poll's history says a draft was added or
+/// an old version deleted, or a poll before asked and failed.
+async fn reconcile_drafts(
+    ctx: &AccountCtx,
+    due: &mut bool,
+    changed: bool,
+) -> Result<(), GmailError> {
+    if !(changed || *due) {
+        return Ok(());
+    }
+    *due = true;
+    reconcile(ctx, Occasion::Poll).await?;
+    *due = false;
     Ok(())
 }
 

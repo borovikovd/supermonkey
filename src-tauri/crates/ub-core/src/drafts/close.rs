@@ -4,7 +4,7 @@
 use ub_domain::{DraftId, Millis};
 use ub_store::{NewOp, OpKind, StoreError, WriteTx};
 
-use super::lifecycle;
+use super::lifecycle::{self, GmailWrite};
 use crate::effects::Effect;
 use crate::writer::WriterState;
 
@@ -58,13 +58,20 @@ pub(crate) fn discard(
     let draft = record.draft;
     tx.ops().delete_draft_upserts(id)?;
     tx.drafts().delete(id)?;
-    if let Some(gmail) = lifecycle::gmail_draft(&draft) {
+    // With no Gmail id but a `drafts.create` that went out unanswered, Gmail
+    // may hold a copy anyway: the delete finds it by its header.
+    let gmail = match lifecycle::gmail_write(&draft) {
+        GmailWrite::Update(gmail) => Some(Some(gmail)),
+        GmailWrite::Recover => Some(None),
+        GmailWrite::Create => None,
+    };
+    if let Some(gmail) = gmail {
         tx.ops().push(&NewOp {
             account: draft.account,
             action: None,
             kind: OpKind::DraftDelete,
             draft: Some(id),
-            gmail_draft: Some(gmail),
+            gmail_draft: gmail,
             payload: &(),
             created_at: now,
         })?;
