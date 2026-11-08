@@ -138,3 +138,5 @@ unwrap_in_result = "warn"
 # An Arc clone reads as `Arc::clone(&x)`, never like a deep copy.
 clone_on_ref_ptr = "warn"
 needless_pass_by_ref_mut = "warn"
+# A clone of a value never used again is a move (AGENTS.md: take by value to keep).
+redundant_clone = "warn"

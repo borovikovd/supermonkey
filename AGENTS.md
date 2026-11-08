@@ -71,6 +71,8 @@ one is in [Project specifics](#project-specifics) at the end.
   exit hooks.
 - Background work is ordered by what the user is looking at. On first sync, what is
   on screen loads before backfills and secondary data.
+- The bundle identifier names the app's data folder. Changing it orphans the
+  user's data unless the app migrates it: decide that before renaming.
 - Every way to run the app (dev, demo, test, release) is one command from a known
   state. Dev, demo, and test never touch the user's real data, and demo data is
   rebuilt at each launch.
@@ -150,7 +152,8 @@ Most bugs in an app that syncs live here. Assume every `await` lets the world ch
   inside. No alias hides an `Arc` or `Box`. Take `&Arc<T>` only to clone the handle
   into a task. Interior mutability only where shared ownership needs it.
   `parking_lot` locks; an async mutex only when held across `.await`, with the
-  reason.
+  reason. Where a lint checks one of these rules (clippy `redundant_clone`), enable
+  it; the rest is what the focused ownership review is for.
 - **Types.** Every kind of id and unit is a newtype, converted to raw types only at
   the edges (SQL, serde, IPC). No trait with a single implementation. Parsers return
   slices or `Cow`. Helpers that only read take a connection, not the app context.

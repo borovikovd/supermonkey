@@ -194,10 +194,11 @@ impl App {
                 },
                 config.debug,
             ),
-            accounts: Accounts::new(writer.clone(), Arc::clone(&workers), Arc::clone(&platform)),
-            mail: Mail::new(platform, workers, pool),
+            // Fields are built in order: the tests' copy first, then the writer moves.
             #[cfg(test)]
-            writer,
+            writer: writer.clone(),
+            accounts: Accounts::new(writer, Arc::clone(&workers), Arc::clone(&platform)),
+            mail: Mail::new(platform, workers, pool),
         })
     }
 
