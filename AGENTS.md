@@ -137,7 +137,8 @@ Most bugs in an app that syncs live here. Assume every `await` lets the world ch
 - **Shutdown** waits, with a deadline, for work the user already did to commit, then
   exits anyway.
 - **Tests.** Every concurrency fix comes with a test that forces the interleaving,
-  for example a fake server that holds a reply until the test releases it.
+  for example a fake server that holds a reply until the test releases it, or a
+  note why it can't be forced.
 
 ## Rust
 
@@ -245,8 +246,14 @@ Tests catch what their author thought of. Close the gap from outside:
 - **Real data before a release.** Use a real account of realistic size. Fakes miss
   slow networks, quotas, and odd data.
 - **Focused reviews.** After large changes, run separate passes for ownership,
-  concurrency, security, and test strength. Every finding is verified before it is
-  fixed, and every fix comes with a test or a note why none is possible.
+  concurrency, security, and test strength; a general code review does not replace
+  them. Every finding is verified before it is fixed, and every fix comes with a
+  test or a note why none is possible.
+- **Review by flow, until clean.** Slice a review along data flows end to end, not
+  by directory: a race spans the UI, the core, a worker, and the remote service. A
+  concurrency pass checks every await point against what can arrive there (the
+  user acts again, quits, or switches; the data changes elsewhere; the network
+  drops). Repeat a pass until a round finds nothing: fixes bring new findings.
 - **Learn from escapes.** When a bug gets past the gate, add the test or rule that
   would have caught it, here if it is general.
 
