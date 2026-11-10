@@ -162,11 +162,22 @@ impl Lifecycle {
     pub async fn quit(&self) {
         let deadline = tokio::time::Instant::now() + QUIT_DEADLINE;
         self.deps.tasks.cancel();
+        self.stop_writer(deadline).await;
+        self.stop_tasks(deadline).await;
+    }
+
+    /// Waits until `deadline` for the writer to commit the UI jobs already
+    /// queued and stop.
+    async fn stop_writer(&self, deadline: tokio::time::Instant) {
         match tokio::time::timeout_at(deadline, self.deps.writer.stop()).await {
             Ok(Ok(())) => {}
             Ok(Err(e)) => tracing::warn!(error = %e, "the writer stopped with an error"),
             Err(_) => tracing::warn!("queued UI actions did not commit before the quit deadline"),
         }
+    }
+
+    /// Waits until `deadline` for every task to end.
+    async fn stop_tasks(&self, deadline: tokio::time::Instant) {
         if tokio::time::timeout_at(deadline, self.deps.tasks.stop())
             .await
             .is_err()

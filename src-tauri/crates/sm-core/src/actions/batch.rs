@@ -1,7 +1,7 @@
 //! A batch of numbered actions, applied in one writer job.
 
-use sm_domain::Millis;
-use sm_ipc::{Submitted, Unreadable};
+use sm_domain::{ActionNo, Millis};
+use sm_ipc::{Action, Submitted, Unreadable};
 use sm_store::{StoreError, WriteTx};
 
 use super::dispatch::{self, ActionCtx};
@@ -37,30 +37,9 @@ pub(crate) fn apply_batch(
             );
             continue;
         }
-        let action = match action {
-            Ok(action) => action,
-            Err(Unreadable { kind }) => {
-                state.note_action(n);
-                tracing::warn!(
-                    n = n.0,
-                    action = kind.as_deref().unwrap_or("(none)"),
-                    "refusing an action the core can't read"
-                );
-                rejected::refuse(tx, state, n, None, &ActionError::Invalid(UNREADABLE))?;
-                last = n;
-                continue;
-            }
-        };
-        let kind = dispatch::kind(&action);
-        let sent = rejected::sent_draft(&action);
-        let mark = state.effects_mark();
-        state.note_action(n);
-        let applied =
-            tx.savepoint(|tx| dispatch::apply(&mut ActionCtx { tx, state, n, now }, action));
-        if let Err(e) = applied {
-            state.drop_effects_from(mark);
-            tracing::warn!(n = n.0, action = kind, error = %e, "action rejected");
-            rejected::refuse(tx, state, n, sent, &e)?;
+        match action {
+            Ok(action) => apply_one(tx, state, n, action, now)?,
+            Err(unreadable) => refuse_unreadable(tx, state, n, &unreadable)?,
         }
         last = n;
     }
@@ -70,4 +49,42 @@ pub(crate) fn apply_batch(
         tx.fail_commit();
     }
     Ok(())
+}
+
+/// Applies action `n` in its own savepoint. A rejected one rolls back alone,
+/// its effects dropped, and is refused under its number.
+fn apply_one(
+    tx: &mut WriteTx<'_>,
+    state: &mut WriterState,
+    n: ActionNo,
+    action: Action,
+    now: Millis,
+) -> Result<(), StoreError> {
+    let kind = dispatch::kind(&action);
+    let sent = rejected::sent_draft(&action);
+    let mark = state.effects_mark();
+    state.note_action(n);
+    let applied = tx.savepoint(|tx| dispatch::apply(&mut ActionCtx { tx, state, n, now }, action));
+    if let Err(e) = applied {
+        state.drop_effects_from(mark);
+        tracing::warn!(n = n.0, action = kind, error = %e, "action rejected");
+        rejected::refuse(tx, state, n, sent, &e)?;
+    }
+    Ok(())
+}
+
+/// Refuses, under its number `n`, an action the core couldn't read.
+fn refuse_unreadable(
+    tx: &mut WriteTx<'_>,
+    state: &mut WriterState,
+    n: ActionNo,
+    unreadable: &Unreadable,
+) -> Result<(), StoreError> {
+    state.note_action(n);
+    tracing::warn!(
+        n = n.0,
+        action = unreadable.kind.as_deref().unwrap_or("(none)"),
+        "refusing an action the core can't read"
+    );
+    rejected::refuse(tx, state, n, None, &ActionError::Invalid(UNREADABLE))
 }

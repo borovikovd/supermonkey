@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use futures_util::future::join_all;
+use serde::de::DeserializeOwned;
 use sm_domain::{DraftId, GmailMessageId, LabelId, LabelSet};
 use sm_gmail::{Format, GmailError, Outcome, Priority};
 use sm_store::{OpId, OpKind, OpRecord, Priority as WritePriority, StoreError};
@@ -66,54 +67,23 @@ pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure
     // A draft write stays in progress until its Gmail ids are stored.
     let mut writing: Option<WritingDraft> = None;
     let answer = match op.kind {
-        OpKind::Modify => match op.payload::<ModifyOp>() {
-            Ok(payload) => modify(ctx, payload).await?,
-            Err(e) => {
-                tracing::error!(op = %op.id, error = %e, "a queued op does not parse; dropping it");
-                Answer::Unreadable
-            }
+        OpKind::Modify => match parsed::<ModifyOp>(&op) {
+            Some(payload) => modify(ctx, payload).await?,
+            None => Answer::Unreadable,
         },
-        OpKind::LabelCreate => match op.payload::<LabelCreateOp>() {
-            Ok(payload) => create_label(ctx, payload).await?,
-            Err(e) => {
-                tracing::error!(op = %op.id, error = %e, "a queued op does not parse; dropping it");
-                Answer::Unreadable
-            }
+        OpKind::LabelCreate => match parsed::<LabelCreateOp>(&op) {
+            Some(payload) => create_label(ctx, payload).await?,
+            None => Answer::Unreadable,
         },
         OpKind::DraftUpsert => {
-            if let Some(draft) = op.draft {
-                let (answer, guard) = draft_upsert(ctx, draft).await?;
-                writing = guard;
-                answer
-            } else {
-                tracing::error!(op = %op.id, "a draft upsert names no draft; dropping it");
-                Answer::Unreadable
-            }
+            let (answer, guard) = draft_upsert(ctx, op.id, op.draft).await?;
+            writing = guard;
+            answer
         }
-        OpKind::DraftDelete => {
-            if let Some(gmail) = &op.gmail_draft {
-                match delete_draft(ctx, gmail).await {
-                    Ok(()) => Answer::Done(Landing::Plain),
-                    Err(e) => refused(e)?,
-                }
-            } else if let Some(local) = &op.draft {
-                match delete_copies(ctx, local).await {
-                    Ok(()) => Answer::Done(Landing::Plain),
-                    Err(WriteFailure::Gmail(e)) => refused(e)?,
-                    Err(WriteFailure::Store(e)) => return Err(Failure::Store(e)),
-                    Err(WriteFailure::Local(message)) => Answer::Rejected(message),
-                }
-            } else {
-                tracing::error!(op = %op.id, "a draft delete names no draft; dropping it");
-                Answer::Unreadable
-            }
-        }
-        OpKind::TrashMessage => match op.payload::<GmailMessageId>() {
-            Ok(message) => trash_message(ctx, message).await?,
-            Err(e) => {
-                tracing::error!(op = %op.id, error = %e, "a queued op does not parse; dropping it");
-                Answer::Unreadable
-            }
+        OpKind::DraftDelete => draft_delete(ctx, &op).await?,
+        OpKind::TrashMessage => match parsed::<GmailMessageId>(&op) {
+            Some(message) => trash_message(ctx, message).await?,
+            None => Answer::Unreadable,
         },
     };
     ctx.health.succeeded();
@@ -125,6 +95,18 @@ pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure
         wake_outbox_if_sending(ctx, draft);
     }
     written
+}
+
+/// The op's payload as `P`, or `None`, logged, when it does not parse: the
+/// op can never run.
+fn parsed<P: DeserializeOwned>(op: &OpRecord) -> Option<P> {
+    match op.payload::<P>() {
+        Ok(payload) => Some(payload),
+        Err(e) => {
+            tracing::error!(op = %op.id, error = %e, "a queued op does not parse; dropping it");
+            None
+        }
+    }
 }
 
 /// `messages.batchModify`, in chunks Gmail takes. A 404 narrows the op to
@@ -225,11 +207,16 @@ async fn create_label(ctx: &AccountCtx, op: LabelCreateOp) -> Result<Answer, Fai
 
 /// A draft upsert (SPEC Drafts), and the write in progress to end once its
 /// answer is stored. Whatever came of it, a send of the draft waiting for
-/// this write to end looks again.
+/// this write to end looks again. An op that names no draft can never run.
 async fn draft_upsert(
     ctx: &AccountCtx,
-    draft: DraftId,
+    op: OpId,
+    draft: Option<DraftId>,
 ) -> Result<(Answer, Option<WritingDraft>), Failure> {
+    let Some(draft) = draft else {
+        tracing::error!(%op, "a draft upsert names no draft; dropping it");
+        return Ok((Answer::Unreadable, None));
+    };
     let upserted = upsert(ctx, &draft).await;
     // A written draft's write ends once its ids are stored (`run_op`).
     if !matches!(upserted, Ok(Upserted::Written { .. })) {
@@ -260,6 +247,27 @@ async fn draft_upsert(
             None,
         )),
         Err(WriteFailure::Store(e)) => Err(Failure::Store(e)),
+    }
+}
+
+/// A draft delete: of the Gmail draft it names, else of every Gmail copy of
+/// its local draft.
+async fn draft_delete(ctx: &AccountCtx, op: &OpRecord) -> Result<Answer, Failure> {
+    if let Some(gmail) = &op.gmail_draft {
+        return match delete_draft(ctx, gmail).await {
+            Ok(()) => Ok(Answer::Done(Landing::Plain)),
+            Err(e) => refused(e),
+        };
+    }
+    let Some(local) = &op.draft else {
+        tracing::error!(op = %op.id, "a draft delete names no draft; dropping it");
+        return Ok(Answer::Unreadable);
+    };
+    match delete_copies(ctx, local).await {
+        Ok(()) => Ok(Answer::Done(Landing::Plain)),
+        Err(WriteFailure::Gmail(e)) => refused(e),
+        Err(WriteFailure::Store(e)) => Err(Failure::Store(e)),
+        Err(WriteFailure::Local(message)) => Ok(Answer::Rejected(message)),
     }
 }
 

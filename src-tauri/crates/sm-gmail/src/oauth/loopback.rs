@@ -83,31 +83,40 @@ impl Loopback {
                 },
                 Some(read) = reading.join_next(), if !reading.is_empty() => {
                     // A connection that failed or sent no request head is dropped.
-                    let Ok(Some((mut stream, target))) = read else {
+                    let Ok(Some((stream, target))) = read else {
                         continue;
                     };
-                    let redirect = match parse(&target, expected_state) {
-                        Request::Redirect(redirect) => redirect,
-                        Request::ForeignState => {
-                            tracing::warn!("a sign-in redirect with another state; ignoring it");
-                            respond(&mut stream, "400 Bad Request", FAILED_PAGE).await;
-                            continue;
-                        }
-                        Request::Other => {
-                            respond(&mut stream, "404 Not Found", "").await;
-                            continue;
-                        }
-                    };
-                    let page = match &redirect {
-                        Redirect::Code(_) => DONE_PAGE,
-                        Redirect::Error(_) => FAILED_PAGE,
-                    };
-                    respond(&mut stream, "200 OK", page).await;
-                    return redirect;
+                    if let Some(redirect) = answer(stream, &target, expected_state).await {
+                        return redirect;
+                    }
                 }
             }
         }
     }
+}
+
+/// Answers one request and closes its connection. Returns what it carried
+/// when it is this sign-in's redirect; any other request gets its error
+/// status and `None`.
+async fn answer(mut stream: TcpStream, target: &str, expected_state: &str) -> Option<Redirect> {
+    let redirect = match parse(target, expected_state) {
+        Request::Redirect(redirect) => redirect,
+        Request::ForeignState => {
+            tracing::warn!("a sign-in redirect with another state; ignoring it");
+            respond(&mut stream, "400 Bad Request", FAILED_PAGE).await;
+            return None;
+        }
+        Request::Other => {
+            respond(&mut stream, "404 Not Found", "").await;
+            return None;
+        }
+    };
+    let page = match &redirect {
+        Redirect::Code(_) => DONE_PAGE,
+        Redirect::Error(_) => FAILED_PAGE,
+    };
+    respond(&mut stream, "200 OK", page).await;
+    Some(redirect)
 }
 
 /// Reads the request target (`/path?query`) of a connection's first request.

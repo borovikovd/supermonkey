@@ -2,11 +2,12 @@
 //! `history.list` every 45 s, on focus, and when asked.
 
 use std::collections::{BTreeSet, HashSet};
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::future::join_all;
-use sm_domain::{GmailMessageId, GmailThreadId, SystemLabel};
+use sm_domain::{GmailMessageId, GmailThreadId, Millis, SystemLabel};
 use sm_gmail::{Format, GmailError, HistoryId, Outcome, PageToken, Priority};
 use sm_store::Priority as WritePriority;
 
@@ -41,48 +42,14 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
     // runs it, as that sync or poll would have, since its history no longer
     // says drafts changed.
     let mut drafts_due: Option<Occasion> = None;
-    match is_connected(&ctx.deps.pool, ctx.account).await {
-        Ok(true) => {
-            queue_inbox(&ctx);
-            queue_owed(&ctx).await;
-            // A draft reconcile the last run owed may have been cut off by
-            // the quit: the first poll runs one.
-            drafts_due = Some(Occasion::Poll);
-        }
-        Ok(false) => loop {
-            match connect(&ctx, &mut drafts_due).await {
-                Ok(()) => break,
-                Err(e) if *e.outcome() == Outcome::InvalidGrant => {
-                    ctx.health.failed(&e);
-                    ctx.signed_out();
-                    return;
-                }
-                Err(e) => {
-                    tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "the connect sync failed; trying again");
-                    ctx.health.failed(&e);
-                    ctx.poll.wait(ctx.clock(), OFFLINE_RETRY).await;
-                }
-            }
-        },
-        Err(e) => {
-            tracing::error!(account = ctx.account.0, error = %e, "couldn't read the account; not syncing it");
-            return;
-        }
+    if resume_or_connect(&ctx, &mut drafts_due).await.is_break() {
+        return;
     }
     let mut polls = 0u32;
     let mut last = ctx.clock().now();
     loop {
-        match poll(&ctx, &mut drafts_due).await {
-            Ok(()) => ctx.health.succeeded(),
-            Err(e) if *e.outcome() == Outcome::InvalidGrant => {
-                ctx.health.failed(&e);
-                ctx.signed_out();
-                return;
-            }
-            Err(e) => {
-                tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "a poll failed");
-                ctx.health.failed(&e);
-            }
+        if poll_once(&ctx, &mut drafts_due).await.is_break() {
+            return;
         }
         polls = polls.wrapping_add(1);
         if polls.is_multiple_of(SEND_AS_EVERY)
@@ -92,15 +59,82 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
         }
         wait_to_poll(&ctx).await;
         let now = ctx.clock().now();
-        let gap = u64::try_from(now.0.saturating_sub(last.0)).unwrap_or(0);
-        if Duration::from_millis(gap) > WOKE_AFTER {
-            // Timers stood still while the Mac slept; the wall clock did not.
-            // Snoozes and sends that came due meanwhile go now.
-            tracing::info!(account = ctx.account.0, "woke from sleep");
-            snooze::wake_due(ctx.writer(), now).await;
-            ctx.outbox.kick();
-        }
+        wake_if_slept(&ctx, last, now).await;
         last = now;
+    }
+}
+
+/// Before the first poll: a connected account resumes, and one that is not
+/// runs the connect sync until it lands. Breaks when the account is not to
+/// be polled: it can't be read, or its grant was refused.
+async fn resume_or_connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> ControlFlow<()> {
+    match is_connected(&ctx.deps.pool, ctx.account).await {
+        Ok(true) => {
+            queue_inbox(ctx);
+            queue_owed(ctx).await;
+            // A draft reconcile the last run owed may have been cut off by
+            // the quit: the first poll runs one.
+            *drafts_due = Some(Occasion::Poll);
+            ControlFlow::Continue(())
+        }
+        Ok(false) => connect_until_done(ctx, drafts_due).await,
+        Err(e) => {
+            tracing::error!(account = ctx.account.0, error = %e, "couldn't read the account; not syncing it");
+            ControlFlow::Break(())
+        }
+    }
+}
+
+/// The connect sync, tried again every `OFFLINE_RETRY` until it lands.
+/// Breaks when the grant is refused: the account signs out.
+async fn connect_until_done(
+    ctx: &AccountCtx,
+    drafts_due: &mut Option<Occasion>,
+) -> ControlFlow<()> {
+    loop {
+        match connect(ctx, drafts_due).await {
+            Ok(()) => return ControlFlow::Continue(()),
+            Err(e) if *e.outcome() == Outcome::InvalidGrant => {
+                ctx.health.failed(&e);
+                ctx.signed_out();
+                return ControlFlow::Break(());
+            }
+            Err(e) => {
+                tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "the connect sync failed; trying again");
+                ctx.health.failed(&e);
+                ctx.poll.wait(ctx.clock(), OFFLINE_RETRY).await;
+            }
+        }
+    }
+}
+
+/// One poll, and what it says of the account's health. Breaks when the
+/// grant is refused: the account signs out.
+async fn poll_once(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> ControlFlow<()> {
+    match poll(ctx, drafts_due).await {
+        Ok(()) => ctx.health.succeeded(),
+        Err(e) if *e.outcome() == Outcome::InvalidGrant => {
+            ctx.health.failed(&e);
+            ctx.signed_out();
+            return ControlFlow::Break(());
+        }
+        Err(e) => {
+            tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "a poll failed");
+            ctx.health.failed(&e);
+        }
+    }
+    ControlFlow::Continue(())
+}
+
+/// After a wait from `last` to `now` long enough that the Mac slept: timers
+/// stood still meanwhile and the wall clock did not, so snoozes and sends
+/// that came due go now.
+async fn wake_if_slept(ctx: &AccountCtx, last: Millis, now: Millis) {
+    let gap = u64::try_from(now.0.saturating_sub(last.0)).unwrap_or(0);
+    if Duration::from_millis(gap) > WOKE_AFTER {
+        tracing::info!(account = ctx.account.0, "woke from sleep");
+        snooze::wake_due(ctx.writer(), now).await;
+        ctx.outbox.kick();
     }
 }
 
@@ -138,26 +172,7 @@ async fn connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<
     let profile = ctx.gmail.get_profile(Priority::P3).await?;
     refresh_send_as(ctx).await?;
     refresh_labels(ctx).await?;
-    let (account, now) = (ctx.account, ctx.clock().now());
-    // A retry after a failed attempt keeps that attempt's cursor: the lists
-    // it read predate a newer one, so polling from the newer one would miss
-    // what changed in between.
-    let cursor = ctx
-        .writer()
-        .call(WritePriority::Sync, move |tx, _| {
-            let Some(record) = tx.read().accounts().get(account)? else {
-                return Ok(());
-            };
-            if record.history_id.is_none() {
-                tx.accounts()
-                    .set_history(account, profile.history_id, now)?;
-            }
-            Ok::<_, sm_store::StoreError>(())
-        })
-        .await;
-    if let Err(e) = cursor {
-        tracing::warn!(account = account.0, error = %e, "couldn't store the connect cursor");
-    }
+    store_connect_cursor(ctx, profile.history_id).await;
     queue_inbox(ctx);
     queue_starred_and_sent(ctx);
     // A draft that fails to read does not hold up the connect sync: the
@@ -166,11 +181,41 @@ async fn connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<
         Ok(()) => {}
         Err(e) if stops_the_account(&e) => return Err(e),
         Err(e) => {
-            tracing::info!(account = account.0, outcome = %e.outcome(), "the connect sync's draft reconcile failed; the first poll runs it");
+            tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "the connect sync's draft reconcile failed; the first poll runs it");
             *drafts_due = Some(Occasion::Sync);
         }
     }
     ctx.queue.push(BACKFILL, Work::Backfill { page: None });
+    mark_connected(ctx).await;
+    Ok(())
+}
+
+/// Stores the connect sync's cursor, unless the account has one. A retry
+/// after a failed attempt keeps that attempt's cursor: the lists it read
+/// predate a newer one, so polling from the newer one would miss what
+/// changed in between.
+async fn store_connect_cursor(ctx: &AccountCtx, cursor: HistoryId) {
+    let (account, now) = (ctx.account, ctx.clock().now());
+    let stored = ctx
+        .writer()
+        .call(WritePriority::Sync, move |tx, _| {
+            let Some(record) = tx.read().accounts().get(account)? else {
+                return Ok(());
+            };
+            if record.history_id.is_none() {
+                tx.accounts().set_history(account, cursor, now)?;
+            }
+            Ok::<_, sm_store::StoreError>(())
+        })
+        .await;
+    if let Err(e) = stored {
+        tracing::warn!(account = account.0, error = %e, "couldn't store the connect cursor");
+    }
+}
+
+/// Marks the connect sync done: a launch from now on resumes.
+async fn mark_connected(ctx: &AccountCtx) {
+    let account = ctx.account;
     let connected = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, _| {
@@ -180,7 +225,6 @@ async fn connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<
     if let Err(e) = connected {
         tracing::warn!(account = account.0, error = %e, "couldn't mark the account connected");
     }
-    Ok(())
 }
 
 /// At launch: the threads a full resync owed a metadata read when the app

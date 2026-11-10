@@ -4,7 +4,7 @@
 //! at once.
 
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
@@ -209,30 +209,8 @@ impl AccountWorkers {
         let tokens = Arc::clone(&self.tokens);
         let dir = self.deps.data_dir.join(ATTACHMENTS_DIR);
         let swept = tokio::task::spawn_blocking(move || {
-            match tokens.entries() {
-                Ok(entries) => {
-                    for (email, _) in entries.iter().filter(|(e, _)| !emails.contains(e)) {
-                        if let Err(e) = tokens.delete(email) {
-                            tracing::warn!(error = %e, "couldn't delete a removed account's token");
-                        } else {
-                            tracing::info!("deleted the token of an account removed before a quit");
-                        }
-                    }
-                }
-                Err(e) => tracing::warn!(error = %e, "couldn't read the stored tokens"),
-            }
-            let Ok(folders) = std::fs::read_dir(&dir) else {
-                return;
-            };
-            for folder in folders.flatten() {
-                let is_dir = folder.file_type().is_ok_and(|t| t.is_dir());
-                if !is_dir || ids.contains(&folder.file_name().to_string_lossy().into_owned()) {
-                    continue;
-                }
-                if let Err(e) = std::fs::remove_dir_all(folder.path()) {
-                    tracing::warn!(error = %e, "couldn't delete a removed account's files");
-                }
-            }
+            sweep_tokens(&*tokens, &emails);
+            sweep_folders(&dir, &ids);
         })
         .await;
         if let Err(e) = swept {
@@ -445,6 +423,44 @@ impl AccountWorkers {
             workers.scheduler.forget(&email);
             tracing::info!(account = account.0, "account forgotten");
         });
+    }
+}
+
+/// Deletes the stored refresh tokens of accounts not among `emails`.
+fn sweep_tokens(tokens: &dyn TokenStore, emails: &HashSet<String>) {
+    match tokens.entries() {
+        Ok(entries) => {
+            for (email, _) in entries.iter().filter(|(e, _)| !emails.contains(e)) {
+                delete_swept_token(tokens, email);
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "couldn't read the stored tokens"),
+    }
+}
+
+/// Deletes the refresh token of an account removed before a quit.
+fn delete_swept_token(tokens: &dyn TokenStore, email: &str) {
+    if let Err(e) = tokens.delete(email) {
+        tracing::warn!(error = %e, "couldn't delete a removed account's token");
+    } else {
+        tracing::info!("deleted the token of an account removed before a quit");
+    }
+}
+
+/// Deletes the attachments folders in `dir` of accounts not among `ids`.
+/// With no `dir` to read, there is nothing to delete.
+fn sweep_folders(dir: &Path, ids: &HashSet<String>) {
+    let Ok(folders) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for folder in folders.flatten() {
+        let is_dir = folder.file_type().is_ok_and(|t| t.is_dir());
+        if !is_dir || ids.contains(&folder.file_name().to_string_lossy().into_owned()) {
+            continue;
+        }
+        if let Err(e) = std::fs::remove_dir_all(folder.path()) {
+            tracing::warn!(error = %e, "couldn't delete a removed account's files");
+        }
     }
 }
 

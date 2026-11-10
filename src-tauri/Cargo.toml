@@ -192,6 +192,8 @@ print_stderr = "warn"
 
 # Plain code.
 branches_sharing_code = "warn"
+# The threshold is clippy's 25 (clippy.toml), not vulcan's 15.
+cognitive_complexity = "warn"
 clear_with_drain = "warn"
 collection_is_never_read = "warn"
 create_dir = "warn"

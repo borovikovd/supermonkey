@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 
-use sm_domain::{GmailThreadId, Rev, SystemLabel};
+use sm_domain::{GmailThreadId, Rev, SystemLabel, ThreadId};
 use sm_gmail::{Backoff, Format, GmailError, HistoryId, Outcome, PageToken, Priority, ThreadQuery};
 use sm_store::{Priority as WritePriority, ThreadSyncState};
 
@@ -62,8 +62,24 @@ pub(crate) async fn full_resync(
         tracing::warn!(error = %e, "couldn't read the rev; keeping every cached thread");
         Rev(0)
     });
-    // 2. Every thread id with its history id, Inbox first. New and changed
-    // Inbox threads are read first.
+    // 2. Every thread id with its history id, Inbox first.
+    let listed = list_threads(ctx).await?;
+    // 3 and 4.
+    reconcile_cached(ctx, &listed, started).await?;
+    // Of the threads not cached, those the connect sync would read.
+    queue_starred_and_sent(ctx);
+    // 5. Drafts.
+    resync_drafts(ctx, drafts_due).await?;
+    // 6. The snooze rule runs as each thread is stored.
+    store_cursor(ctx, profile.history_id).await;
+    Ok(())
+}
+
+/// Step 2: every thread id with its history id, Inbox first. New and changed
+/// Inbox threads are queued to be read first.
+async fn list_threads(
+    ctx: &AccountCtx,
+) -> Result<HashMap<GmailThreadId, Option<HistoryId>>, GmailError> {
     let mut listed: HashMap<GmailThreadId, Option<HistoryId>> = HashMap::new();
     for label in [Some(SystemLabel::Inbox.label_id()), None] {
         let mut page: Option<PageToken> = None;
@@ -95,12 +111,15 @@ pub(crate) async fn full_resync(
             }
         }
     }
-    // 3 and 4.
-    reconcile_cached(ctx, &listed, started).await?;
-    // Of the threads not cached, those the connect sync would read.
-    queue_starred_and_sent(ctx);
-    // 5. Drafts. One that fails does not hold up the resync: the next poll
-    // runs the reconcile again.
+    Ok(listed)
+}
+
+/// Step 5: the drafts. A reconcile that fails does not hold up the resync:
+/// the next poll runs it again. Only a refused grant fails the resync.
+async fn resync_drafts(
+    ctx: &AccountCtx,
+    drafts_due: &mut Option<Occasion>,
+) -> Result<(), GmailError> {
     match reconcile(ctx, Occasion::Sync).await {
         Ok(()) => {}
         Err(e) if *e.outcome() == Outcome::InvalidGrant => return Err(e),
@@ -109,8 +128,6 @@ pub(crate) async fn full_resync(
             *drafts_due = Some(Occasion::Sync);
         }
     }
-    // 6. The snooze rule runs as each thread is stored.
-    store_cursor(ctx, profile.history_id).await;
     Ok(())
 }
 
@@ -134,33 +151,7 @@ async fn reconcile_cached(
     let mut owed = Vec::new();
     for thread in cached {
         match listed.get(&thread.gmail_id) {
-            None if thread.rev <= started => {
-                let check = step(ctx, || {
-                    ctx.gmail
-                        .get_thread(Priority::P4, &thread.gmail_id, Format::Minimal, &[])
-                })
-                .await;
-                match check {
-                    Ok(_) => {}
-                    Err(e) if *e.outcome() == Outcome::NotFound => {
-                        let gone = thread.gmail_id;
-                        let dropped = ctx
-                            .writer()
-                            .call(WritePriority::Sync, move |tx, _| {
-                                drop_thread(tx, account, &gone)
-                            })
-                            .await;
-                        if let Err(e) = dropped {
-                            tracing::warn!(account = account.0, error = %e, "couldn't drop a thread Gmail no longer has");
-                        }
-                    }
-                    Err(e) if *e.outcome() == Outcome::InvalidGrant => return Err(e),
-                    // Gmail refuses to say: the thread stays as it is.
-                    Err(e) => {
-                        tracing::info!(account = account.0, outcome = %e.outcome(), "couldn't check a cached thread in the resync; keeping it");
-                    }
-                }
-            }
+            None if thread.rev <= started => drop_if_gone(ctx, thread.gmail_id).await?,
             Some(history) if thread.history_id != *history => {
                 owed.push(thread.id);
                 ctx.queue.push(
@@ -175,8 +166,51 @@ async fn reconcile_cached(
             _ => {}
         }
     }
-    // Recorded before the cursor moves on: a quit before these reads land
-    // leaves them owed, and the next launch reads them (see `queue_owed`).
+    mark_owed(ctx, owed).await;
+    Ok(())
+}
+
+/// Checks a cached thread missing from the list with `threads.get`
+/// (`format=minimal`), and drops it when Gmail answers 404. One Gmail
+/// refuses to check is kept. Only a refused grant fails the resync.
+async fn drop_if_gone(ctx: &AccountCtx, thread: GmailThreadId) -> Result<(), GmailError> {
+    let check = step(ctx, || {
+        ctx.gmail
+            .get_thread(Priority::P4, &thread, Format::Minimal, &[])
+    })
+    .await;
+    match check {
+        Ok(_) => {}
+        Err(e) if *e.outcome() == Outcome::NotFound => drop_cached(ctx, thread).await,
+        Err(e) if *e.outcome() == Outcome::InvalidGrant => return Err(e),
+        // Gmail refuses to say: the thread stays as it is.
+        Err(e) => {
+            tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "couldn't check a cached thread in the resync; keeping it");
+        }
+    }
+    Ok(())
+}
+
+/// Drops a cached thread Gmail no longer has.
+async fn drop_cached(ctx: &AccountCtx, gone: GmailThreadId) {
+    let account = ctx.account;
+    let dropped = ctx
+        .writer()
+        .call(WritePriority::Sync, move |tx, _| {
+            drop_thread(tx, account, &gone)
+        })
+        .await;
+    if let Err(e) = dropped {
+        tracing::warn!(account = account.0, error = %e, "couldn't drop a thread Gmail no longer has");
+    }
+}
+
+/// Marks the threads whose metadata the resync queued as owed that read
+/// (their history id cleared). Recorded before the cursor moves on: a quit
+/// before these reads land leaves them owed, and the next launch reads them
+/// (see `queue_owed`).
+async fn mark_owed(ctx: &AccountCtx, owed: Vec<ThreadId>) {
+    let account = ctx.account;
     let marked = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, _| {
@@ -186,5 +220,4 @@ async fn reconcile_cached(
     if let Err(e) = marked {
         tracing::warn!(account = account.0, error = %e, "couldn't mark the threads a resync owes a read");
     }
-    Ok(())
 }

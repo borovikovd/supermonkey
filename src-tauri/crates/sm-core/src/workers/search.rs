@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use futures_util::future::join_all;
 use sm_domain::{AccountId, GmailThreadId, SubId, ThreadId};
-use sm_gmail::{Format, Outcome, PageToken, Priority, ThreadQuery};
+use sm_gmail::{Format, GmailError, Outcome, PageToken, Priority, Thread, ThreadPage, ThreadQuery};
 use sm_store::Priority as WritePriority;
 
 use super::account::{
@@ -156,62 +156,16 @@ async fn list_page(
         sleep(ctx.clock(), TYPING_PAUSE).await;
     }
     let request = thread_query(query, page);
-    let network = &ctx.deps.network;
-    let listed = loop {
-        if !network.is_online() {
-            progress.searching(false);
-            network.until_online(ctx.clock(), OFFLINE_RETRY).await;
-            progress.searching(true);
-        }
-        let listed = ctx.gmail.list_threads(Priority::P2, &request).await;
-        ctx.note(&listed);
-        match listed {
-            Err(e) if *e.outcome() == Outcome::Offline => {
-                tracing::info!(
-                    account = ctx.account.0,
-                    "a Gmail listing can't reach Gmail; it runs when it can"
-                );
-                if network.is_online() {
-                    // Another call reached Gmail meanwhile: try again after
-                    // the usual offline wait, not at once.
-                    network.wait(ctx.clock(), OFFLINE_RETRY).await;
-                }
-            }
-            answer => break answer,
-        }
-    };
-    let (threads, next) = match listed {
+    let (threads, next) = match list_when_reachable(ctx, progress, &request).await {
         Ok(listed) => (listed.threads, listed.next_page_token),
         Err(e) => {
             tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "a Gmail listing failed");
             (Vec::new(), None)
         }
     };
-    let current = join_all(
-        threads
-            .iter()
-            .map(|t| is_current(&ctx.deps.pool, ctx.account, &t.id, t.history_id)),
-    )
-    .await;
-    let reads = threads
-        .iter()
-        .zip(current)
-        .filter(|(_, current)| !current)
-        .map(|(t, _)| fetch_thread(ctx, &t.id, Format::Metadata, Priority::P2));
-    for read in join_all(reads).await {
-        ctx.note(&read);
-    }
+    read_uncached(ctx, &threads).await;
     let hits: Vec<GmailThreadId> = threads.into_iter().map(|t| t.id).collect();
-    for hit in &hits {
-        if needs_bodies(&ctx.deps.pool, ctx.account, hit.clone()).await {
-            ctx.queue.push(
-                LATE,
-                Work::Body {
-                    thread: hit.clone(),
-                },
-            );
-        }
-    }
+    queue_bodies(ctx, &hits).await;
     let account = ctx.account;
     let ids = ctx
         .read(move |r| {
@@ -227,6 +181,73 @@ async fn list_page(
             Vec::new()
         });
     (ids, next)
+}
+
+/// `threads.list`, once Gmail can be reached: while it can't, the listing
+/// waits and its subscription shows the local results. Returns the first
+/// answer that is not "no connection".
+async fn list_when_reachable(
+    ctx: &AccountCtx,
+    progress: &Progress,
+    request: &ThreadQuery,
+) -> Result<ThreadPage, GmailError> {
+    let network = &ctx.deps.network;
+    loop {
+        if !network.is_online() {
+            progress.searching(false);
+            network.until_online(ctx.clock(), OFFLINE_RETRY).await;
+            progress.searching(true);
+        }
+        let listed = ctx.gmail.list_threads(Priority::P2, request).await;
+        ctx.note(&listed);
+        match listed {
+            Err(e) if *e.outcome() == Outcome::Offline => {
+                tracing::info!(
+                    account = ctx.account.0,
+                    "a Gmail listing can't reach Gmail; it runs when it can"
+                );
+                if network.is_online() {
+                    // Another call reached Gmail meanwhile: try again after
+                    // the usual offline wait, not at once.
+                    network.wait(ctx.clock(), OFFLINE_RETRY).await;
+                }
+            }
+            answer => return answer,
+        }
+    }
+}
+
+/// Reads the metadata of the listed threads not cached at their history
+/// id, all at once.
+async fn read_uncached(ctx: &AccountCtx, threads: &[Thread]) {
+    let current = join_all(
+        threads
+            .iter()
+            .map(|t| is_current(&ctx.deps.pool, ctx.account, &t.id, t.history_id)),
+    )
+    .await;
+    let reads = threads
+        .iter()
+        .zip(current)
+        .filter(|(_, current)| !current)
+        .map(|(t, _)| fetch_thread(ctx, &t.id, Format::Metadata, Priority::P2));
+    for read in join_all(reads).await {
+        ctx.note(&read);
+    }
+}
+
+/// Queues the bodies of the hits that lack them, behind everything else.
+async fn queue_bodies(ctx: &AccountCtx, hits: &[GmailThreadId]) {
+    for hit in hits {
+        if needs_bodies(&ctx.deps.pool, ctx.account, hit.clone()).await {
+            ctx.queue.push(
+                LATE,
+                Work::Body {
+                    thread: hit.clone(),
+                },
+            );
+        }
+    }
 }
 
 fn thread_query(query: GmailQuery, page: Option<PageToken>) -> ThreadQuery {
