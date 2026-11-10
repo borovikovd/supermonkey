@@ -579,7 +579,7 @@ Changing a setting is an action, as in UI state. It is not an undo entry. Settin
 `Remove account` asks to confirm. If the account's queue or outbox is not empty, the confirmation says how many actions and sends will be lost. Removing an account:
 - drops its queue and outbox, and stops its sync
 - deletes its rows from every table and its downloaded attachments
-- deletes its refresh token and revokes it with Google. The token and files go before the revoke, so a quit while the revoke waits does not keep them, and a launch deletes any token or attachments folder of an account no longer stored, left by a quit or crash right after a removal. The revoke is tried once: offline, or if it fails, the token is only deleted. A sign-in started while a removed account's token is being revoked waits for the revoke before it opens the browser, since the revoke would end the new grant too. Nothing else waits for it
+- deletes its refresh token and revokes it with Google. The token and files go before the revoke, so a quit while the revoke waits does not keep them, and a launch deletes any token or attachments folder of an account no longer stored, left by a quit or crash right after a removal. The revoke is tried once: offline, or if it fails, the token is only deleted. A sign-in started while a removed account's token is being revoked waits for the revoke before it opens the browser, since the revoke would end the new grant too. One already waiting in the browser when the removal starts waits for the revoke before it trades its code for tokens, for the same reason. Nothing else waits for it
 - if it was on screen, switches to the next account on the rail, or to the one before it when it was last, or shows the first-run screen if none are left
 
 ## Search

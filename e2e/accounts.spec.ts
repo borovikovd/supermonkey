@@ -888,14 +888,29 @@ test("ACC-18 an account removed while its Sign in again waits in the browser com
     .poll(async () => (await gmail.requests("oauth.authorize")).some((r) => r.held))
     .toBe(true);
 
-  // A is removed meanwhile, then the person finishes the sign-in.
+  // A is removed meanwhile, and its revoke is slow to reach Google. The
+  // person finishes the sign-in first: its code is not traded for tokens
+  // until the revoke is done, which would end the new grant with the old.
+  const revoke = await gmail.hold("oauth.revoke");
   await settingsBlock(app, A).getByRole("button", { name: "Remove account" }).click();
   await settings.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(app.account(A)).toHaveCount(0);
+  await expect
+    .poll(async () => (await gmail.requests("oauth.revoke")).some((r) => r.held))
+    .toBe(true);
   await app.press("Escape");
+  const exchanges = (await gmail.requests("oauth.token")).length;
   await consent.release();
+  await expect
+    .poll(async () => (await gmail.requests("oauth.authorize")).some((r) => r.held))
+    .toBe(false);
+  await revoke.release();
   await expect(app.account(A)).toBeVisible();
   await app.settle();
+  expect(
+    (await gmail.requests("oauth.token")).length,
+    "one exchange, and no refresh of a grant the revoke ended",
+  ).toBe(exchanges + 1);
 
   // A is back as a new account, and it syncs.
   expect(await avatarOrder(app)).toEqual([B, A]);

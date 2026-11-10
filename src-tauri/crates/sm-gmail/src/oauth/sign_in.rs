@@ -42,7 +42,7 @@ pub enum SignInError {
 /// # async fn demo(config: &sm_gmail::OAuthConfig, http: &sm_gmail::HttpClient) -> Result<(), sm_gmail::SignInError> {
 /// let sign_in = sm_gmail::SignIn::start(config.clone()).await?;
 /// // Open `sign_in.consent_url()` in the system browser, then:
-/// let grant = sign_in.finish(http).await?;
+/// let grant = sign_in.finish(http, std::future::ready(())).await?;
 /// # let _ = grant; Ok(()) }
 /// ```
 ///
@@ -97,13 +97,20 @@ impl SignIn {
     }
 
     /// Waits for the browser's redirect, checks its state, and trades the
-    /// code for tokens. The account's address is not part of the grant: read
-    /// it with `getProfile`.
-    pub async fn finish(self, http: &HttpClient) -> Result<Grant, SignInError> {
+    /// code for tokens once `ready` resolves: a caller still revoking this
+    /// person's older grant holds the trade until that is done, since the
+    /// revoke would end the new grant too. The account's address is not part
+    /// of the grant: read it with `getProfile`.
+    pub async fn finish(
+        self,
+        http: &HttpClient,
+        ready: impl Future<Output = ()>,
+    ) -> Result<Grant, SignInError> {
         let code = match self.loopback.wait(self.state.secret()).await {
             Redirect::Code(code) => code,
             Redirect::Error(error) => return Err(SignInError::Denied(error)),
         };
+        ready.await;
         let form = [
             ("grant_type", "authorization_code"),
             ("code", code.as_str()),

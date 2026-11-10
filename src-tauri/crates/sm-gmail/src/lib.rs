@@ -34,7 +34,7 @@
 //! // First sign-in: open the consent page in the system browser.
 //! let sign_in = SignIn::start(config.clone()).await?;
 //! let _open_in_browser = sign_in.consent_url();
-//! let grant = sign_in.finish(&http).await?;
+//! let grant = sign_in.finish(&http, std::future::ready(())).await?;
 //! let tokens = Arc::new(Tokens::from_grant(config.clone(), http.clone(), grant));
 //! let probe = Gmail::new(GMAIL_BASE_URL, http.clone(), Arc::clone(&tokens), scheduler.account("sign-in"))?;
 //! let email = probe.get_profile(Priority::P1).await?.email_address;

@@ -30,7 +30,8 @@ async fn a_wrong_state_is_refused_and_the_sign_in_goes_on() {
     let sign_in = SignIn::start(oauth_config(&fake)).await.unwrap();
     let consent = sign_in.consent_url().to_owned();
     let redirect = redirect_uri(&consent);
-    let finishing = tokio::spawn(async move { sign_in.finish(&http).await });
+    let finishing =
+        tokio::spawn(async move { sign_in.finish(&http, std::future::ready(())).await });
 
     // A page that knows the port sends a forged redirect first.
     let forged = reqwest::get(format!("{redirect}?code=stolen&state=forged"))
@@ -75,10 +76,13 @@ async fn sign_in_finishes_past_a_connection_that_sends_nothing() {
     // The fake's consent page redirects straight back with a code.
     let browser = tokio::spawn(async move { reqwest::get(consent).await.map(|r| r.status()) });
 
-    let grant = tokio::time::timeout(Duration::from_secs(5), sign_in.finish(&http))
-        .await
-        .expect("the idle connection held up the redirect")
-        .unwrap();
+    let grant = tokio::time::timeout(
+        Duration::from_secs(5),
+        sign_in.finish(&http, std::future::ready(())),
+    )
+    .await
+    .expect("the idle connection held up the redirect")
+    .unwrap();
     assert_ne!(grant.refresh_token.secret(), "");
     assert!(browser.await.unwrap().unwrap().is_success());
     assert_eq!(fake.count("POST", "/token"), 1);
@@ -95,7 +99,7 @@ async fn a_denied_sign_in_says_why() {
     let sign_in = SignIn::start(oauth_config(&fake)).await.unwrap();
     let consent = sign_in.consent_url().to_owned();
     tokio::spawn(async move { reqwest::get(consent).await.map(drop) });
-    let result = sign_in.finish(&http).await;
+    let result = sign_in.finish(&http, std::future::ready(())).await;
     assert!(
         matches!(&result, Err(SignInError::Denied(code)) if code == "access_denied"),
         "{result:?}"

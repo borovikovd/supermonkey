@@ -187,7 +187,9 @@ impl Accounts {
         let http = self.workers.http();
         let sign_in = SignIn::start(config.oauth.clone()).await?;
         self.platform.open_sign_in(sign_in.consent_url())?;
-        let grant = sign_in.finish(http).await?;
+        // A removal begun while the browser was open is still revoking: the
+        // code is traded only after it (SPEC Accounts).
+        let grant = sign_in.finish(http, self.workers.removals_done()).await?;
         let tokens = Arc::new(Tokens::from_grant(
             config.oauth.clone(),
             http.clone(),
