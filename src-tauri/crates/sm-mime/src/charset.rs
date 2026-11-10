@@ -30,7 +30,7 @@ pub(crate) fn decode_base64(data: &str) -> Option<Vec<u8>> {
         .map(|c| match c {
             '+' => '-',
             '/' => '_',
-            c => c,
+            other => other,
         })
         .collect();
     URL_SAFE.decode(normalized).ok()
@@ -52,11 +52,10 @@ pub(crate) fn decode_charset(bytes: Vec<u8>, charset: Option<&str>) -> String {
     if let Some(encoding) = charset
         .and_then(|c| Encoding::for_label(label(c).as_bytes()))
         .filter(|&e| e != REPLACEMENT)
-    {
         // Borrowed means the bytes already are this text in UTF-8.
-        if let Cow::Owned(decoded) = encoding.decode_without_bom_handling(&bytes).0 {
-            return decoded;
-        }
+        && let Cow::Owned(decoded) = encoding.decode_without_bom_handling(&bytes).0
+    {
+        return decoded;
     }
     String::from_utf8(bytes).unwrap_or_else(|err| {
         WINDOWS_1252

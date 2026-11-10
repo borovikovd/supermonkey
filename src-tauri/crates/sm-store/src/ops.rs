@@ -55,6 +55,7 @@ pub enum OpKind {
 
 impl OpKind {
     /// The stored text.
+    #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Modify => "modify",
@@ -161,13 +162,13 @@ fn op_row(r: &Row<'_>) -> rusqlite::Result<OpRecord> {
 }
 
 /// Reads of the op queue.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct OpReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> OpReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -278,12 +279,13 @@ impl<'c> OpReads<'c> {
 }
 
 /// Writes to the op queue.
+#[derive(Debug)]
 pub struct OpWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> OpWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 

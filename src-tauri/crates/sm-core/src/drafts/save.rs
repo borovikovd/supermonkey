@@ -9,6 +9,14 @@ use super::text::snippet;
 use crate::effects::Effect;
 use crate::writer::WriterState;
 
+/// A composer's save after an edit.
+pub(crate) struct Edit {
+    /// The composer's fields, as edited.
+    pub(crate) fields: DraftFields,
+    /// The `rev` of the draft state the composer saved from.
+    pub(crate) seen: Rev,
+}
+
 /// Stores the composer's fields after an edit, and queues the upsert that
 /// writes them to Gmail unless the draft is untouched. A draft gone or
 /// being sent drops the save: it arrived after the send or discard.
@@ -16,10 +24,10 @@ pub(crate) fn update(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
     id: &DraftId,
-    fields: DraftFields,
-    seen: Rev,
+    edit: Edit,
     now: Millis,
 ) -> Result<(), StoreError> {
+    let Edit { fields, seen } = edit;
     let Some(record) = tx.read().drafts().get(id)? else {
         return Ok(());
     };

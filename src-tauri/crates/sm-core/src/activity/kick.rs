@@ -17,6 +17,7 @@ pub const DEFERRED_KICK: &str = "kick-deferred";
 /// kick with no waiter is kept for the next wait. Busy until a waiter takes
 /// it: as `kick` when a task was waiting, or as [`DEFERRED_KICK`] when its
 /// task was busy elsewhere and takes it at its next wait.
+#[derive(Debug)]
 pub struct Kick {
     activity: Arc<Activity>,
     notify: Notify,

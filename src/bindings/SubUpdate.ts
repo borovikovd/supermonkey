@@ -7,7 +7,38 @@ import type { ListEntry } from "./ListEntry";
 import type { ListMove } from "./ListMove";
 import type { ListRow } from "./ListRow";
 
-export type SubUpdate = { "type": "list", sub: string, first: boolean, ids: Array<ListEntry> | null, removed: Array<string>, moved: Array<ListMove>, rows: Array<ListRow>, 
+/**
+ * One subscription's first load or patch.
+ */
+export type SubUpdate = { "type": "list", 
+/**
+ * The subscription it is for.
+ */
+sub: string, 
+/**
+ * The subscription's first load. The mirror ignores patches until
+ * it arrives.
+ */
+first: boolean, 
+/**
+ * The whole list in order, on a first load. `None` on a patch.
+ */
+ids: Array<ListEntry> | null, 
+/**
+ * Keys that left the list. Empty on a first load.
+ */
+removed: Array<string>, 
+/**
+ * Keys inserted or moved, in the new order, each after the key it
+ * now follows. Empty on a first load.
+ */
+moved: Array<ListMove>, 
+/**
+ * On a first load, the rows of the window at the top of the list.
+ * On a patch, the row of every key whose row changed, inside the
+ * window or not.
+ */
+rows: Array<ListRow>, 
 /**
  * Search only: a Gmail query is still running.
  */
@@ -33,4 +64,53 @@ more: boolean,
  * Search), since that page may hold mail newer than the local rows
  * below it.
  */
-oldestHit: string | null, } | { "type": "conversation", sub: string, first: boolean, data: ConversationData, } | { "type": "composer", sub: string, first: boolean, draft: DraftState, } | { "type": "account", sub: string, first: boolean, summary: AccountSummary, } | { "type": "app", sub: string, first: boolean, state: AppState, };
+oldestHit: string | null, } | { "type": "conversation", 
+/**
+ * The subscription it is for.
+ */
+sub: string, 
+/**
+ * The subscription's first load, as opposed to a later change.
+ */
+first: boolean, 
+/**
+ * The conversation as it is now.
+ */
+data: ConversationData, } | { "type": "composer", 
+/**
+ * The subscription it is for.
+ */
+sub: string, 
+/**
+ * The subscription's first load, as opposed to a later change.
+ */
+first: boolean, 
+/**
+ * The draft as it is now. It never overwrites what the editor
+ * holds.
+ */
+draft: DraftState, } | { "type": "account", 
+/**
+ * The subscription it is for.
+ */
+sub: string, 
+/**
+ * The subscription's first load, as opposed to a later change.
+ */
+first: boolean, 
+/**
+ * The summary as it is now.
+ */
+summary: AccountSummary, } | { "type": "app", 
+/**
+ * The subscription it is for.
+ */
+sub: string, 
+/**
+ * The subscription's first load, as opposed to a later change.
+ */
+first: boolean, 
+/**
+ * The app state as it is now.
+ */
+state: AppState, };

@@ -70,6 +70,7 @@ macro_rules! str_id {
         pub struct $name(pub String);
 
         impl $name {
+            /// The id's text.
             pub fn as_str(&self) -> &str {
                 &self.0
             }
@@ -165,7 +166,8 @@ impl AccountId {
 
 impl SplitId {
     /// The Split Inbox sheet numbers splits it has not saved yet below 1.
-    pub fn is_saved(self) -> bool {
+    #[must_use]
+    pub const fn is_saved(self) -> bool {
         self.0 > 0
     }
 }

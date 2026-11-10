@@ -136,12 +136,11 @@ async fn create(
     ctx: &AccountCtx,
     local: &DraftId,
     raw: &[u8],
-    thread: Option<&GmailThreadId>,
+    mut thread: Option<&GmailThreadId>,
 ) -> Result<Option<sm_gmail::Draft>, WriteFailure> {
     if !mark_create_sent(ctx, local.clone()).await? {
         return Ok(None);
     }
-    let mut thread = thread;
     for _ in 0..CREATE_TRIES {
         match ctx.gmail.create_draft(Priority::P1, raw, thread).await {
             Ok(created) => return Ok(Some(created)),

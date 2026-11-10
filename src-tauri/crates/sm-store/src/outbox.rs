@@ -101,13 +101,13 @@ fn outbox_row(r: &Row<'_>) -> rusqlite::Result<OutboxRecord> {
 }
 
 /// Reads of the outbox.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct OutboxReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> OutboxReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -215,12 +215,13 @@ impl<'c> OutboxReads<'c> {
 }
 
 /// Writes to the outbox. Each stamps the row and its thread.
+#[derive(Debug)]
 pub struct OutboxWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> OutboxWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 

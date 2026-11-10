@@ -24,7 +24,8 @@ fn redirect_uri(consent_url: &str) -> String {
 #[tokio::test]
 async fn a_wrong_state_is_refused_and_the_sign_in_goes_on() {
     let fake = FakeGmail::start();
-    fake.add_user(ME);
+    // The user only has to exist: nothing here uses its handle.
+    _ = fake.add_user(ME);
     let http = HttpClient::new().unwrap();
     let sign_in = SignIn::start(oauth_config(&fake)).await.unwrap();
     let consent = sign_in.consent_url().to_owned();
@@ -56,7 +57,8 @@ async fn a_wrong_state_is_refused_and_the_sign_in_goes_on() {
 #[tokio::test]
 async fn sign_in_finishes_past_a_connection_that_sends_nothing() {
     let fake = FakeGmail::start();
-    fake.add_user(ME);
+    // The user only has to exist: nothing here uses its handle.
+    _ = fake.add_user(ME);
     let http = HttpClient::new().unwrap();
     let sign_in = SignIn::start(oauth_config(&fake)).await.unwrap();
     let consent = sign_in.consent_url().to_owned();
@@ -86,7 +88,8 @@ async fn sign_in_finishes_past_a_connection_that_sends_nothing() {
 #[tokio::test]
 async fn a_denied_sign_in_says_why() {
     let fake = FakeGmail::start();
-    fake.add_user(ME);
+    // The user only has to exist: nothing here uses its handle.
+    _ = fake.add_user(ME);
     fake.deny_next_sign_in();
     let http = HttpClient::new().unwrap();
     let sign_in = SignIn::start(oauth_config(&fake)).await.unwrap();

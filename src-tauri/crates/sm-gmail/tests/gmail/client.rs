@@ -40,9 +40,10 @@ async fn answering(
             let (mut socket, _) = listener.accept().await.unwrap();
             counted.fetch_add(1, Ordering::SeqCst);
             let mut request = [0u8; 4096];
-            let _ = socket.read(&mut request).await;
-            let _ = socket.write_all(response.as_bytes()).await;
-            let _ = socket.shutdown().await;
+            // A client that has hung up is the test's to notice, not this stub's.
+            _ = socket.read(&mut request).await;
+            _ = socket.write_all(response.as_bytes()).await;
+            _ = socket.shutdown().await;
         }
     });
     (url, hits)

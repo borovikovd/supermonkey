@@ -3,8 +3,80 @@
 /**
  * One row of a list. Threads use their id as `key`; the Drafts list uses draft ids.
  */
-export type ListRow = { key: string, thread: number | null, draft: string | null, sender: string, senderEmail: string, subject: string, snippet: string, time: number, unread: boolean, starred: boolean, hasAttachments: boolean, messageCount: number, 
+export type ListRow = { 
+/**
+ * Its key in the list: the thread id as text, or in Drafts the draft
+ * id.
+ */
+key: string, 
+/**
+ * The thread. In Drafts, the thread the draft is on: `None` for a new
+ * message.
+ */
+thread: number | null, 
+/**
+ * The draft, in Drafts. `None` in every other list.
+ */
+draft: string | null, 
+/**
+ * The latest message's sender, by name or else address. In Drafts, the
+ * draft's recipients, or `(no recipients)`.
+ */
+sender: string, 
+/**
+ * The latest message's sender address. In Drafts, the first
+ * recipient's, or empty with none.
+ */
+senderEmail: string, 
+/**
+ * The first non-draft message's subject that is not empty. In Drafts,
+ * the draft's. An empty one reads `(no subject)`.
+ */
+subject: string, 
+/**
+ * The latest message's snippet. In Drafts, the draft's body as plain
+ * text.
+ */
+snippet: string, 
+/**
+ * The latest message's date, by the rule in SPEC Views. In Drafts, the
+ * draft's last edit.
+ */
+time: number, 
+/**
+ * A message outside trash and spam is unread: the row has a dot.
+ * Always false in Drafts.
+ */
+unread: boolean, 
+/**
+ * The thread is in Starred, by the rule in SPEC Views.
+ */
+starred: boolean, 
+/**
+ * A non-draft message has an attachment, not counting inline images:
+ * the row has a paperclip. In Drafts, the draft has one.
+ */
+hasAttachments: boolean, 
+/**
+ * The messages the row counts: those that are not drafts and not in
+ * trash or spam, or with none of those every non-draft. At least 1.
+ */
+messageCount: number, 
 /**
  * Label ids the thread is in, by the rule in SPEC Views (system and user).
  */
-labels: Array<string>, snoozeUntil: number | null, split: number | null, rev: number, };
+labels: Array<string>, 
+/**
+ * When its snooze ends, shown in place of the time. `None` when the
+ * thread is not snoozed.
+ */
+snoozeUntil: number | null, 
+/**
+ * The Split Inbox split the row is in. `None` outside the Inbox.
+ */
+split: number | null, 
+/**
+ * The `rev` of the row's last change: the mirror keeps its own copy
+ * when that one is newer.
+ */
+rev: number, };

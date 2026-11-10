@@ -62,12 +62,12 @@ impl HttpClient {
     }
 
     /// The client for Google's endpoints.
-    pub(crate) fn inner(&self) -> &reqwest::Client {
+    pub(crate) const fn inner(&self) -> &reqwest::Client {
         &self.google
     }
 
     /// The client for a mailing list's one-click unsubscribe URL.
-    pub(crate) fn lists(&self) -> &reqwest::Client {
+    pub(crate) const fn lists(&self) -> &reqwest::Client {
         &self.lists
     }
 }

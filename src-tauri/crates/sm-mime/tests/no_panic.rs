@@ -75,14 +75,15 @@ fn parsers_never_panic() {
     let mut images = CidImages::new();
     images.insert("a", "image/png", &[0]);
     for input in random_inputs() {
-        let _ = parse_address_list(&input);
-        let _ = decode_encoded_words(&input);
-        let _ = html_to_text(&input);
-        let _ = text_to_html(&input);
-        let _ = split_gmail_quote(&input);
-        let _ = split_quoted_history(&input);
-        let _ = sanitize_html(&input, &images);
-        let _ = list_unsubscribe(&input, Some(&input));
+        // Only that each returns: what it returns is not checked here.
+        _ = parse_address_list(&input);
+        _ = decode_encoded_words(&input);
+        _ = html_to_text(&input);
+        _ = text_to_html(&input);
+        _ = split_gmail_quote(&input);
+        _ = split_quoted_history(&input);
+        _ = sanitize_html(&input, &images);
+        _ = list_unsubscribe(&input, Some(&input));
 
         let header = |name: &str| json!({ "name": name, "value": input });
         let payload = json!({
@@ -98,10 +99,10 @@ fn parsers_never_panic() {
             ],
         });
         let parsed = parse_message(&payload).unwrap();
-        let _ = parsed.inline_images_to_fetch().count();
-        let _ = parsed.body.clone().render(&parsed.cid_images());
-        let _ = parsed.body.into_draft();
-        let _ = RawBody {
+        _ = parsed.inline_images_to_fetch().count();
+        _ = parsed.body.clone().render(&parsed.cid_images());
+        _ = parsed.body.into_draft();
+        _ = RawBody {
             html: None,
             text: Some(input),
         }

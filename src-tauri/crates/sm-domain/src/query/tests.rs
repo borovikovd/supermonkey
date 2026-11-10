@@ -233,9 +233,10 @@ fn garbage_never_panics() {
     ];
     for input in inputs {
         let q = Query::parse(input);
-        let _ = q.to_fts5();
-        let _ = Query::parse_rule(input);
-        let _ = gmail_query(input);
+        // Only that each returns: what it returns is not checked here.
+        _ = q.to_fts5();
+        _ = Query::parse_rule(input);
+        _ = gmail_query(input);
     }
 }
 

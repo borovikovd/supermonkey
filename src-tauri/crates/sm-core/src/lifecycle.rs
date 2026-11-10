@@ -1,6 +1,7 @@
 //! The `Lifecycle` handle: connecting a page, launch, focus, the online
 //! flag, and quitting (ARCHITECTURE.md, sections 4 and 8.1).
 
+use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -24,6 +25,16 @@ pub struct Lifecycle {
     deps: Arc<LifecycleDeps>,
     launched: AtomicBool,
     debug: bool,
+}
+
+/// Its flags; the rest is the core's handles.
+impl fmt::Debug for Lifecycle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Lifecycle")
+            .field("launched", &self.launched)
+            .field("debug", &self.debug)
+            .finish_non_exhaustive()
+    }
 }
 
 /// What the lifecycle handle starts and stops.

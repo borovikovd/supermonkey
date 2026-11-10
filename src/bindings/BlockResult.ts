@@ -3,4 +3,8 @@
 /**
  * What Block did (SPEC: Unsubscribe and block).
  */
-export type BlockResult = { "kind": "blocked", from: string, } | { "kind": "needsPermission" };
+export type BlockResult = { "kind": "blocked", 
+/**
+ * What the filter matches: the sender's address, or `@domain`.
+ */
+from: string, } | { "kind": "needsPermission" };

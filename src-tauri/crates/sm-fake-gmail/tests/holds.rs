@@ -45,7 +45,9 @@ async fn a_release_racing_a_hold_never_strands_the_request() {
             );
             std::hint::spin_loop();
         }
-        fake.release(&Release::Hold(id), None);
+        // Either the hold goes before the request finds it, or the request is
+        // let go: both counts are right, and the answer below is what is checked.
+        _ = fake.release(&Release::Hold(id), None);
         if timeout(ANSWER_LIMIT, request).await.is_err() {
             stranded = Some(round);
             break;

@@ -1,7 +1,6 @@
 //! Spawned tasks: each belongs to a cancellation token, and each counts as
 //! busy unless it is parked on a wait whose wake-up carries its own activity.
 
-use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -58,7 +57,7 @@ tokio::task_local! {
 /// an account worker's. Cancelling it ends every task in it at its next
 /// `.await`; [`Tasks::stop`] also waits for them to end, and for the tasks
 /// of every group inside it.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Tasks {
     runtime: Handle,
     activity: Arc<Activity>,
@@ -98,12 +97,14 @@ impl Tasks {
     }
 
     /// The activity tracker the group counts its tasks in.
-    pub fn activity(&self) -> &Arc<Activity> {
+    #[must_use]
+    pub const fn activity(&self) -> &Arc<Activity> {
         &self.activity
     }
 
     /// The group's token: cancelled once the group stops.
-    pub fn token(&self) -> &CancellationToken {
+    #[must_use]
+    pub const fn token(&self) -> &CancellationToken {
         &self.cancel
     }
 

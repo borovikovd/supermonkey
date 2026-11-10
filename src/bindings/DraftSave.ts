@@ -2,11 +2,39 @@
 import type { DraftFields } from "./DraftFields";
 import type { DraftKind } from "./DraftKind";
 
-export type DraftSave = { "type": "create", account: number, kind: DraftKind, replyAll: boolean, thread: number | null, target: number | null, 
+/**
+ * One save of a draft: its creation, or new fields.
+ */
+export type DraftSave = { "type": "create", 
+/**
+ * The account on screen when the composer opened: the draft sends
+ * from it.
+ */
+account: number, 
+/**
+ * New, reply, or forward, by the key that opened the composer.
+ */
+kind: DraftKind, 
+/**
+ * A reply to everyone on the target message, as `Enter` starts.
+ */
+replyAll: boolean, 
+/**
+ * The target message's thread. `None` for a new message.
+ */
+thread: number | null, 
+/**
+ * The message the composer was aimed at. `None` for a new message.
+ */
+target: number | null, 
 /**
  * The composer was aimed at the thread's latest message.
  */
-startedOnLatest: boolean, } | { "type": "update", fields: DraftFields, 
+startedOnLatest: boolean, } | { "type": "update", 
+/**
+ * The composer's full state, which replaces the draft's.
+ */
+fields: DraftFields, 
 /**
  * The `rev` of the draft state the fields were based on: an
  * attachment Rust added after it stays, though the fields lack it.

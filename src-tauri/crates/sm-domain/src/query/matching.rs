@@ -21,7 +21,8 @@ impl<'a> MatchTarget<'a> {
     /// For a split rule: bare words match the sender's name or address, or
     /// the subject. `thread_label_names` are the names of the thread's user
     /// labels, since Gmail does not copy them onto later messages.
-    pub fn rule(message: &'a MessageFacts, thread_label_names: &'a [&'a str]) -> Self {
+    #[must_use]
+    pub const fn rule(message: &'a MessageFacts, thread_label_names: &'a [&'a str]) -> Self {
         Self {
             message,
             thread_label_names,
@@ -34,7 +35,8 @@ impl<'a> MatchTarget<'a> {
     /// For local search: bare words also match the plain `body`. Only
     /// queries that [`Query::reads_body`] look at it. `from:me` and the like
     /// match `me`'s addresses, and `in:snoozed` matches when `snoozed`.
-    pub fn search(
+    #[must_use]
+    pub const fn search(
         message: &'a MessageFacts,
         thread_label_names: &'a [&'a str],
         body: &'a str,
@@ -53,6 +55,7 @@ impl<'a> MatchTarget<'a> {
 
 impl Query {
     /// Whether the message matches. Substrings, ignoring case.
+    #[must_use]
     pub fn matches(&self, target: &MatchTarget<'_>) -> bool {
         expr_matches(self.expr(), target)
     }

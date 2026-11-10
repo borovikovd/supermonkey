@@ -54,7 +54,7 @@ pub(crate) fn start_fresh(draft: &mut Draft) {
 }
 
 /// Whether its first composer is still open.
-pub(crate) fn is_fresh(draft: &Draft) -> bool {
+pub(crate) const fn is_fresh(draft: &Draft) -> bool {
     matches!(draft.lifecycle.stage, DraftStage::Fresh { .. })
 }
 
@@ -97,7 +97,7 @@ pub(crate) fn keep(draft: &mut Draft) {
 
 /// It quotes its target's snippet, since the target's body was not stored:
 /// it waits for that body before it is written to Gmail.
-pub(crate) fn await_target_body(draft: &mut Draft) {
+pub(crate) const fn await_target_body(draft: &mut Draft) {
     draft.lifecycle.waits_for = Some(DraftWait::TargetBody);
 }
 
@@ -148,23 +148,23 @@ pub(crate) fn parts_downloaded(draft: &mut Draft) -> bool {
 // Gmail's copy.
 
 /// Its Gmail draft, from the last write.
-pub(crate) fn gmail_draft(draft: &Draft) -> Option<&GmailDraftId> {
+pub(crate) const fn gmail_draft(draft: &Draft) -> Option<&GmailDraftId> {
     draft.lifecycle.gmail_draft_id.as_ref()
 }
 
 /// Its Gmail draft's message, from the last write.
-pub(crate) fn gmail_message(draft: &Draft) -> Option<&GmailMessageId> {
+pub(crate) const fn gmail_message(draft: &Draft) -> Option<&GmailMessageId> {
     draft.lifecycle.gmail_message_id.as_ref()
 }
 
 /// Its Gmail draft's thread, from the last write. Kept when Gmail's draft
 /// goes, so the next one stays on that thread.
-pub(crate) fn gmail_thread(draft: &Draft) -> Option<&GmailThreadId> {
+pub(crate) const fn gmail_thread(draft: &Draft) -> Option<&GmailThreadId> {
     draft.lifecycle.gmail_thread_id.as_ref()
 }
 
 /// How its next write reaches Gmail.
-pub(crate) fn gmail_write(draft: &Draft) -> GmailWrite<'_> {
+pub(crate) const fn gmail_write(draft: &Draft) -> GmailWrite<'_> {
     match gmail_draft(draft) {
         Some(id) => GmailWrite::Update(id),
         None if draft.lifecycle.create_sent => GmailWrite::Recover,
@@ -175,7 +175,7 @@ pub(crate) fn gmail_write(draft: &Draft) -> GmailWrite<'_> {
 /// A `drafts.create` is about to go out for it, recorded first so an
 /// answer lost to a quit is looked for on the next write. Returns whether
 /// that changed it.
-pub(crate) fn begin_create(draft: &mut Draft) -> bool {
+pub(crate) const fn begin_create(draft: &mut Draft) -> bool {
     let changed = !draft.lifecycle.create_sent;
     draft.lifecycle.create_sent = true;
     changed
@@ -201,20 +201,20 @@ pub(crate) fn gmail_gone(draft: &mut Draft) {
 
 /// Gmail changed it while a composer has it open: the change is read when
 /// the composer closes. Returns whether that changed it.
-pub(crate) fn gmail_changed(draft: &mut Draft) -> bool {
+pub(crate) const fn gmail_changed(draft: &mut Draft) -> bool {
     let changed = !draft.lifecycle.gmail_change_skipped;
     draft.lifecycle.gmail_change_skipped = true;
     changed
 }
 
 /// Whether a Gmail change was skipped while a composer had it open.
-pub(crate) fn has_skipped_gmail_change(draft: &Draft) -> bool {
+pub(crate) const fn has_skipped_gmail_change(draft: &Draft) -> bool {
     draft.lifecycle.gmail_change_skipped
 }
 
 /// An edit was saved: it wins over a Gmail change skipped meanwhile, which
 /// is not read on close (last writer wins).
-pub(crate) fn edited(draft: &mut Draft) {
+pub(crate) const fn edited(draft: &mut Draft) {
     draft.lifecycle.gmail_change_skipped = false;
 }
 

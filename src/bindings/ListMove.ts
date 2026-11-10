@@ -3,4 +3,16 @@
 /**
  * Insert or move `key` so it follows `after` (None = first).
  */
-export type ListMove = { key: string, split: number | null, after: string | null, };
+export type ListMove = { 
+/**
+ * The key to insert or move.
+ */
+key: string, 
+/**
+ * The split it is in now, in Inbox. `None` in every other list.
+ */
+split: number | null, 
+/**
+ * The key it follows in the new order. `None` puts it first.
+ */
+after: string | null, };

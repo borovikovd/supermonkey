@@ -207,6 +207,7 @@ pub struct Draft {
 
 impl Draft {
     /// An empty draft, kept, with no Gmail copy.
+    #[must_use]
     pub fn new(id: DraftId, account: AccountId, kind: DraftKind, now: Millis) -> Self {
         Self {
             id,
@@ -233,6 +234,7 @@ impl Draft {
     }
 
     /// The fields the untouched rule compares, as they are now.
+    #[must_use]
     pub fn content(&self) -> DraftContentRef<'_, impl Iterator<Item = &str>> {
         DraftContentRef {
             from: self.from.as_ref(),
@@ -297,13 +299,13 @@ fn draft_row(r: &Row<'_>) -> rusqlite::Result<DraftRecord> {
 }
 
 /// Reads of drafts.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct DraftReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> DraftReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -406,13 +408,45 @@ impl<'c> DraftReads<'c> {
     }
 }
 
+/// Adds a draft, or replaces every column of the one with its id but the
+/// account.
+const PUT_DRAFT: &str =
+    "INSERT INTO drafts (id, account_id, kind, reply_all, thread_id, target_message_id,
+         started_on_latest, from_addr, to_addrs, cc_addrs, bcc_addrs, subject,
+         body_html, snippet, quote_html, attachments, in_reply_to, references_hdr,
+         updated_at, stage, defaults, waits_for, gmail_draft_id, gmail_message_id,
+         gmail_thread_id, gmail_create_sent, gmail_change_skipped, rev)
+     VALUES (:id, :account, :kind, :reply_all, :thread, :target, :on_latest, :from,
+         :to, :cc, :bcc, :subject, :body, :snippet, :quote, :attachments,
+         :in_reply_to, :references, :updated_at, :stage, :defaults, :waits_for,
+         :gmail_draft, :gmail_message, :gmail_thread, :create_sent, :change_skipped,
+         :rev)
+     ON CONFLICT (id) DO UPDATE SET
+         kind = excluded.kind, reply_all = excluded.reply_all,
+         thread_id = excluded.thread_id, target_message_id = excluded.target_message_id,
+         started_on_latest = excluded.started_on_latest, from_addr = excluded.from_addr,
+         to_addrs = excluded.to_addrs, cc_addrs = excluded.cc_addrs,
+         bcc_addrs = excluded.bcc_addrs, subject = excluded.subject,
+         body_html = excluded.body_html, snippet = excluded.snippet,
+         quote_html = excluded.quote_html, attachments = excluded.attachments,
+         in_reply_to = excluded.in_reply_to, references_hdr = excluded.references_hdr,
+         updated_at = excluded.updated_at, stage = excluded.stage,
+         defaults = excluded.defaults, waits_for = excluded.waits_for,
+         gmail_draft_id = excluded.gmail_draft_id,
+         gmail_message_id = excluded.gmail_message_id,
+         gmail_thread_id = excluded.gmail_thread_id,
+         gmail_create_sent = excluded.gmail_create_sent,
+         gmail_change_skipped = excluded.gmail_change_skipped,
+         rev = excluded.rev";
+
 /// Writes to drafts. Each stamps the draft and the threads it is on.
+#[derive(Debug)]
 pub struct DraftWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> DraftWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 
@@ -437,33 +471,7 @@ impl<'t, 'c> DraftWrites<'t, 'c> {
             .transpose()?;
         self.tx.db().execute(
             "store a draft",
-            "INSERT INTO drafts (id, account_id, kind, reply_all, thread_id, target_message_id,
-                 started_on_latest, from_addr, to_addrs, cc_addrs, bcc_addrs, subject,
-                 body_html, snippet, quote_html, attachments, in_reply_to, references_hdr,
-                 updated_at, stage, defaults, waits_for, gmail_draft_id, gmail_message_id,
-                 gmail_thread_id, gmail_create_sent, gmail_change_skipped, rev)
-             VALUES (:id, :account, :kind, :reply_all, :thread, :target, :on_latest, :from,
-                 :to, :cc, :bcc, :subject, :body, :snippet, :quote, :attachments,
-                 :in_reply_to, :references, :updated_at, :stage, :defaults, :waits_for,
-                 :gmail_draft, :gmail_message, :gmail_thread, :create_sent, :change_skipped,
-                 :rev)
-             ON CONFLICT (id) DO UPDATE SET
-                 kind = excluded.kind, reply_all = excluded.reply_all,
-                 thread_id = excluded.thread_id, target_message_id = excluded.target_message_id,
-                 started_on_latest = excluded.started_on_latest, from_addr = excluded.from_addr,
-                 to_addrs = excluded.to_addrs, cc_addrs = excluded.cc_addrs,
-                 bcc_addrs = excluded.bcc_addrs, subject = excluded.subject,
-                 body_html = excluded.body_html, snippet = excluded.snippet,
-                 quote_html = excluded.quote_html, attachments = excluded.attachments,
-                 in_reply_to = excluded.in_reply_to, references_hdr = excluded.references_hdr,
-                 updated_at = excluded.updated_at, stage = excluded.stage,
-                 defaults = excluded.defaults, waits_for = excluded.waits_for,
-                 gmail_draft_id = excluded.gmail_draft_id,
-                 gmail_message_id = excluded.gmail_message_id,
-                 gmail_thread_id = excluded.gmail_thread_id,
-                 gmail_create_sent = excluded.gmail_create_sent,
-                 gmail_change_skipped = excluded.gmail_change_skipped,
-                 rev = excluded.rev",
+            PUT_DRAFT,
             named_params! {
                 ":id": draft.id,
                 ":account": draft.account,

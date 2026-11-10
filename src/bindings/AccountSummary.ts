@@ -7,8 +7,43 @@ import type { PinInfo } from "./PinInfo";
 import type { SplitInfo } from "./SplitInfo";
 import type { UndoEntryInfo } from "./UndoEntryInfo";
 
-export type AccountSummary = { account: AccountInfo, labels: Array<LabelInfo>, splits: Array<SplitInfo>, pins: Array<PinInfo>, outbox: Array<OutboxRow>, 
 /**
- * Newest last.
+ * An account subscription's data.
  */
-undo: Array<UndoEntryInfo>, notices: Array<Notice>, queuedOps: number, };
+export type AccountSummary = { 
+/**
+ * The account, as the app state lists it. An account that does not
+ * exist yet has its id and nothing else.
+ */
+account: AccountInfo, 
+/**
+ * Its labels: system ones first, then user ones by name.
+ */
+labels: Array<LabelInfo>, 
+/**
+ * Its Split Inbox splits in split order: custom ones, then Important,
+ * then Other.
+ */
+splits: Array<SplitInfo>, 
+/**
+ * Its pins, of every split, turned off or not.
+ */
+pins: Array<PinInfo>, 
+/**
+ * Its sends still in the outbox, oldest first: what the send toasts
+ * show.
+ */
+outbox: Array<OutboxRow>, 
+/**
+ * The undo history. Newest last.
+ */
+undo: Array<UndoEntryInfo>, 
+/**
+ * Notices the UI has not acked yet, oldest first.
+ */
+notices: Array<Notice>, 
+/**
+ * How many actions wait in its queue for Gmail. Remove account says how
+ * many would be lost.
+ */
+queuedOps: number, };

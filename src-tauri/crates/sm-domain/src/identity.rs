@@ -17,6 +17,7 @@ pub struct SendAsAddress {
 
 impl SendAsAddress {
     /// The address as a mailbox, with no display name when it has none.
+    #[must_use]
     pub fn addr(&self) -> Addr {
         Addr {
             name: (!self.name.is_empty()).then(|| self.name.clone()),
@@ -38,6 +39,7 @@ pub struct Identity {
 
 impl Identity {
     /// The identity of an account signed in as `email`, shown as `name`.
+    #[must_use]
     pub fn new(email: String, name: String, send_as: Vec<SendAsAddress>) -> Self {
         let mut keys: Vec<String> = send_as.iter().map(|s| s.email.to_lowercase()).collect();
         keys.push(email.to_lowercase());
@@ -52,22 +54,26 @@ impl Identity {
     }
 
     /// The sign-in address.
+    #[must_use]
     pub fn email(&self) -> &str {
         &self.email
     }
 
     /// The `sendAs` addresses, as Gmail lists them.
+    #[must_use]
     pub fn send_as(&self) -> &[SendAsAddress] {
         &self.send_as
     }
 
     /// Whether `email` is one of this account's addresses, ignoring case.
+    #[must_use]
     pub fn is_mine(&self, email: &str) -> bool {
         let key = email.to_lowercase();
         self.keys.binary_search(&key).is_ok()
     }
 
     /// The `sendAs` entry for `email`, ignoring case.
+    #[must_use]
     pub fn send_as_for(&self, email: &str) -> Option<&SendAsAddress> {
         self.send_as
             .iter()

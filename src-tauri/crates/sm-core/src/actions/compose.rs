@@ -47,9 +47,10 @@ pub(super) fn save_draft(
             },
             ctx.now,
         ),
-        DraftSave::Update { fields, rev } => Ok(drafts::update(
-            ctx.tx, ctx.state, &draft, fields, rev, ctx.now,
-        )?),
+        DraftSave::Update { fields, rev } => {
+            let edit = drafts::Edit { fields, seen: rev };
+            Ok(drafts::update(ctx.tx, ctx.state, &draft, edit, ctx.now)?)
+        }
     }
 }
 

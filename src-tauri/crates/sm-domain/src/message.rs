@@ -36,23 +36,27 @@ pub struct MessageFacts {
 
 impl MessageFacts {
     /// Whether the message carries this system label.
+    #[must_use]
     pub fn has(&self, label: SystemLabel) -> bool {
         self.labels.has(label)
     }
 
     /// In Trash or Spam.
+    #[must_use]
     pub fn is_trashed_or_spam(&self) -> bool {
         self.has(SystemLabel::Trash) || self.has(SystemLabel::Spam)
     }
 
     /// Not a draft and not in Trash or Spam (SPEC Views). Only live messages
     /// put a thread in Inbox, Starred, Sent, and label views.
+    #[must_use]
     pub fn is_live(&self) -> bool {
         !self.is_draft && !self.is_trashed_or_spam()
     }
 
     /// The sender as a list row shows it: the display name, or the address
     /// when there is none.
+    #[must_use]
     pub fn sender_display(&self) -> &str {
         self.from
             .name

@@ -33,7 +33,7 @@ pub(crate) fn escape_text(text: &str) -> String {
             '<' => out.push_str("&lt;"),
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
-            c => out.push(c),
+            _ => out.push(c),
         }
     }
     out

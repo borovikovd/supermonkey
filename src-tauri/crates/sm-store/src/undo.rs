@@ -44,7 +44,8 @@ pub enum UndoAction {
 
 impl UndoAction {
     /// The entry's kind.
-    pub fn kind(&self) -> UndoKind {
+    #[must_use]
+    pub const fn kind(&self) -> UndoKind {
         match self {
             Self::Mail { .. } => UndoKind::Mail,
             Self::Send { .. } => UndoKind::Send,
@@ -53,6 +54,7 @@ impl UndoAction {
     }
 
     /// The threads a mail entry changed.
+    #[must_use]
     pub fn threads(&self) -> Vec<ThreadId> {
         match self {
             Self::Mail { threads } => threads.iter().map(|t| t.thread).collect(),
@@ -61,7 +63,8 @@ impl UndoAction {
     }
 
     /// A send entry's outbox row.
-    pub fn outbox(&self) -> Option<OutboxId> {
+    #[must_use]
+    pub const fn outbox(&self) -> Option<OutboxId> {
         match self {
             Self::Send { outbox } => Some(*outbox),
             Self::Mail { .. } | Self::Pin { .. } => None,
@@ -92,13 +95,13 @@ fn undo_row(r: &Row<'_>) -> rusqlite::Result<UndoRecord> {
 }
 
 /// Reads of the undo history.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct UndoReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> UndoReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -143,12 +146,13 @@ impl<'c> UndoReads<'c> {
 }
 
 /// Writes to the undo history.
+#[derive(Debug)]
 pub struct UndoWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> UndoWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 

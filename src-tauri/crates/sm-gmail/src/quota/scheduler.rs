@@ -1,7 +1,6 @@
 //! Admitting requests per account: slots, budget, and priority order.
 
 use std::collections::{BTreeMap, HashMap};
-use std::future::Future;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -12,7 +11,7 @@ use super::bucket::{BackgroundWindow, Bucket, Spend};
 use super::{Priority, QuotaConfig, Units};
 
 /// The schedulers of every account. A cheap handle: clones share the accounts.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Scheduler {
     config: QuotaConfig,
     accounts: Arc<Mutex<HashMap<String, AccountScheduler>>>,
@@ -20,6 +19,7 @@ pub struct Scheduler {
 
 impl Scheduler {
     /// A scheduler that gives every account `config`'s limits.
+    #[must_use]
     pub fn new(config: QuotaConfig) -> Self {
         Self {
             config,
@@ -29,6 +29,7 @@ impl Scheduler {
 
     /// The scheduler of the account `email`, made on first use. Gmail's quota
     /// is per user, so every client of one address shares one scheduler.
+    #[must_use]
     pub fn account(&self, email: &str) -> AccountScheduler {
         // Read before locking: no clock calls under a lock.
         let now = Instant::now();
@@ -49,17 +50,19 @@ impl Scheduler {
 }
 
 /// One account's slots and budget. A cheap handle: clones share the account.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct AccountScheduler {
     shared: Arc<Shared>,
 }
 
+#[derive(Debug)]
 struct Shared {
     config: QuotaConfig,
     state: Mutex<State>,
 }
 
 /// Everything that must agree, under one lock.
+#[derive(Debug)]
 struct State {
     bucket: Bucket,
     background: BackgroundWindow,
@@ -72,12 +75,14 @@ struct State {
 /// A waiter's place in line: priority first, then arrival.
 type WaiterKey = (Priority, u64);
 
+#[derive(Debug)]
 struct Waiter {
     cost: Units,
     notify: Arc<Notify>,
     stage: Stage,
 }
 
+#[derive(Debug)]
 enum Stage {
     /// In line. `wake_at` is set when this waiter is first in line and must
     /// look again at that time, as budget refills or background spends expire.
@@ -137,7 +142,7 @@ impl AccountScheduler {
                     stage: Stage::Waiting { wake_at: None },
                 },
             );
-            let woken = state.pump(&self.shared.config, now);
+            let woken = state.pump(self.shared.config, now);
             drop(state);
             wake(woken);
             key
@@ -175,17 +180,20 @@ impl AccountScheduler {
     }
 
     /// Units in the bucket now.
+    #[must_use]
     pub fn bucket_level(&self) -> f64 {
         let now = Instant::now();
         self.shared.state.lock().bucket.level(now)
     }
 
     /// Requests running now.
+    #[must_use]
     pub fn in_flight(&self) -> usize {
         self.shared.state.lock().in_flight
     }
 
     /// Requests waiting for a slot or budget.
+    #[must_use]
     pub fn queued(&self) -> usize {
         self.shared
             .state
@@ -200,13 +208,13 @@ impl AccountScheduler {
 impl Shared {
     /// Starts what may start at `now`, then wakes those waiters outside the lock.
     fn pump(&self, now: Instant) {
-        let woken = self.state.lock().pump(&self.config, now);
+        let woken = self.state.lock().pump(self.config, now);
         wake(woken);
     }
 }
 
 impl State {
-    fn ticket(&mut self) -> u64 {
+    const fn ticket(&mut self) -> u64 {
         let ticket = self.next_ticket;
         self.next_ticket += 1;
         ticket
@@ -215,7 +223,7 @@ impl State {
     /// Whether a request may start at `now`.
     fn admit(
         &mut self,
-        config: &QuotaConfig,
+        config: QuotaConfig,
         priority: Priority,
         cost: Units,
         now: Instant,
@@ -246,7 +254,7 @@ impl State {
     /// waiter still in line is blocked, everyone behind it waits too, so a
     /// cheap request never overtakes an earlier one waiting for budget.
     /// Returns the waiters to wake, for the caller to wake after unlocking.
-    fn pump(&mut self, config: &QuotaConfig, now: Instant) -> Vec<Arc<Notify>> {
+    fn pump(&mut self, config: QuotaConfig, now: Instant) -> Vec<Arc<Notify>> {
         let mut woken = Vec::new();
         let keys: Vec<WaiterKey> = self
             .waiters
@@ -340,7 +348,7 @@ impl Drop for InLine<'_> {
                 state.background.cancel(ticket);
             }
         }
-        let woken = state.pump(&self.shared.config, now);
+        let woken = state.pump(self.shared.config, now);
         drop(state);
         wake(woken);
     }
@@ -348,6 +356,7 @@ impl Drop for InLine<'_> {
 
 /// A running request's slot. Dropping it lets the next request start.
 #[must_use = "the slot frees as soon as the permit drops"]
+#[derive(Debug)]
 pub struct Permit {
     shared: Arc<Shared>,
 }
@@ -357,7 +366,7 @@ impl Drop for Permit {
         let now = Instant::now();
         let mut state = self.shared.state.lock();
         state.in_flight -= 1;
-        let woken = state.pump(&self.shared.config, now);
+        let woken = state.pump(self.shared.config, now);
         drop(state);
         wake(woken);
     }

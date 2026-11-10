@@ -99,7 +99,7 @@ pub(crate) struct Run<K: Eq + Hash> {
 
 impl<K: Eq + Hash> Run<K> {
     /// Cancelled once the run is stopped or replaced.
-    pub(crate) fn stopped(&self) -> &CancellationToken {
+    pub(crate) const fn stopped(&self) -> &CancellationToken {
         &self.stop
     }
 

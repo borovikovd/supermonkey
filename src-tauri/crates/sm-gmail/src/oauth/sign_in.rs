@@ -91,6 +91,7 @@ impl SignIn {
     }
 
     /// The page to open in the system browser.
+    #[must_use]
     pub fn consent_url(&self) -> &str {
         &self.consent_url
     }

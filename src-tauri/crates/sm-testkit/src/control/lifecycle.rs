@@ -49,7 +49,7 @@ pub(crate) async fn stop(State(s): State<Arc<Server>>, Json(req): Json<StopReq>)
     let mut core = s.core.lock().await;
     let app = match std::mem::replace(&mut *core, Core::Down) {
         Core::Running(app) => app,
-        other => {
+        other @ (Core::Ready { .. } | Core::Down) => {
             *core = other;
             return Err(Fail("the core is not running".into()));
         }

@@ -143,7 +143,7 @@ async fn in_message(
     parsed
         .parts
         .into_iter()
-        .find(|part| part.part_id == part_id)
+        .find(|part| part.id == part_id)
         .and_then(|part| part.data)
         .ok_or(DownloadError::Gone)
 }

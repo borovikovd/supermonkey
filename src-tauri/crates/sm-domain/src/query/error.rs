@@ -69,7 +69,8 @@ pub enum RuleError {
 
 impl RuleError {
     /// Byte offset in the rule where the problem is.
-    pub fn offset(&self) -> usize {
+    #[must_use]
+    pub const fn offset(&self) -> usize {
         match self {
             Self::Empty => 0,
             Self::MissingParen { offset }

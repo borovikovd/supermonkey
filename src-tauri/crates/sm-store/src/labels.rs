@@ -45,13 +45,13 @@ fn label_row(r: &Row<'_>) -> rusqlite::Result<LabelRecord> {
 }
 
 /// Reads of labels.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct LabelReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> LabelReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -147,12 +147,13 @@ impl<'c> LabelReads<'c> {
 /// Writes to labels. Each records the account's labels as changed, and one
 /// that changes a user label's name re-routes the Inbox, since label pins and
 /// rules match names.
+#[derive(Debug)]
 pub struct LabelWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> LabelWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 

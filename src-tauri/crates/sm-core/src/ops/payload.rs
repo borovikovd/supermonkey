@@ -26,7 +26,7 @@ impl ModifyOp {
     pub(crate) fn trash(message: GmailMessageId) -> Self {
         Self {
             messages: vec![message],
-            add: [SystemLabel::Trash].into_iter().collect(),
+            add: std::iter::once(SystemLabel::Trash).collect(),
             remove: [SystemLabel::Inbox, SystemLabel::Spam]
                 .into_iter()
                 .collect(),

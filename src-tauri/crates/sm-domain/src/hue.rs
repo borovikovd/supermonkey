@@ -7,6 +7,7 @@ pub const AVATAR_HUES: [&str; 6] = [
 
 /// The hue for an account's stored hue slot. A new account takes the slot
 /// after the highest one in use, so slots wrap round the palette.
+#[must_use]
 pub fn avatar_hue(slot: i64) -> &'static str {
     let len = i64::try_from(AVATAR_HUES.len()).unwrap_or(1);
     usize::try_from(slot.rem_euclid(len))

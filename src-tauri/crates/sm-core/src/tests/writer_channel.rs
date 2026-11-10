@@ -91,7 +91,15 @@ fn delta(kind: ModifyKind) -> (LabelDelta, Option<SnoozeEdit>) {
             LabelDelta::preset(kind).unwrap(),
             Some(SnoozeEdit::Set(Millis(4_000_000_000_000))),
         ),
-        _ => (LabelDelta::preset(kind).unwrap(), None),
+        ModifyKind::Done
+        | ModifyKind::Trash
+        | ModifyKind::Spam
+        | ModifyKind::Star
+        | ModifyKind::Unstar
+        | ModifyKind::Read
+        | ModifyKind::Unread
+        | ModifyKind::Label
+        | ModifyKind::RemoveLabel => (LabelDelta::preset(kind).unwrap(), None),
     }
 }
 
@@ -518,7 +526,11 @@ async fn a_first_load_lost_to_a_failed_commit_is_sent_again() {
             SubUpdate::App {
                 sub, first: true, ..
             } => Some(sub),
-            _ => None,
+            SubUpdate::List { .. }
+            | SubUpdate::Conversation { .. }
+            | SubUpdate::Composer { .. }
+            | SubUpdate::Account { .. }
+            | SubUpdate::App { .. } => None,
         })
         .collect();
     assert_eq!(firsts, [sub("app")], "one first load, after the failure");

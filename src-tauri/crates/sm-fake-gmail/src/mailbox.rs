@@ -86,14 +86,19 @@ pub(crate) struct Mailbox {
 /// A Gmail filter: mail from `from` gets `add` and loses `remove`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Filter {
+    /// Gmail's id of the filter.
     pub id: String,
     /// An address, or `@domain`.
     pub from: String,
+    /// The label ids matching mail gets.
     pub add: Vec<String>,
+    /// The label ids matching mail loses.
     pub remove: Vec<String>,
 }
 
 impl Filter {
+    /// The filter as `settings.filters` serves it.
+    #[must_use]
     pub fn json(&self) -> Value {
         json!({
             "id": self.id,
@@ -120,7 +125,7 @@ impl Filter {
 pub(crate) struct Missing;
 
 impl Label {
-    pub fn json(&self) -> Value {
+    pub(crate) fn json(&self) -> Value {
         if self.system {
             json!({ "id": self.id, "name": self.name, "type": "system" })
         } else {
@@ -137,7 +142,7 @@ impl Label {
 
 impl Msg {
     /// The message in the shape `format` asks for.
-    pub fn json(&self, format: &str, metadata_headers: &[&str]) -> Value {
+    pub(crate) fn json(&self, format: &str, metadata_headers: &[&str]) -> Value {
         let mut out = json!({
             "id": self.id,
             "threadId": self.thread_id,
@@ -177,8 +182,8 @@ impl Msg {
 }
 
 impl Mailbox {
-    pub fn new(email: &str) -> Self {
-        Mailbox {
+    pub(crate) fn new(email: &str) -> Self {
+        Self {
             email: email.to_owned(),
             send_as: vec![SendAsEntry {
                 email: email.to_owned(),
@@ -205,7 +210,7 @@ impl Mailbox {
     }
 
     /// Labels for incoming mail from `sender` after the mailbox's filters.
-    pub fn filtered_labels(&self, sender: &str, mut labels: Vec<String>) -> Vec<String> {
+    pub(crate) fn filtered_labels(&self, sender: &str, mut labels: Vec<String>) -> Vec<String> {
         for f in self.filters.iter().filter(|f| f.matches(sender)) {
             labels.retain(|l| !f.remove.contains(l));
             for l in &f.add {
@@ -218,23 +223,23 @@ impl Mailbox {
     }
 
     /// A fresh Gmail-looking hex id, never one another mailbox hands out.
-    pub fn new_id(&mut self) -> String {
+    pub(crate) fn new_id(&mut self) -> String {
         self.next_id += 1;
         format!("{:x}", self.next_id)
     }
 
     /// A strictly increasing `internalDate`, a minute apart.
-    pub fn next_date(&mut self) -> u64 {
+    pub(crate) const fn next_date(&mut self) -> u64 {
         self.clock_ms += 60_000;
         self.clock_ms
     }
 
-    pub fn label(&self, id: &str) -> Option<&Label> {
+    pub(crate) fn label(&self, id: &str) -> Option<&Label> {
         self.labels.iter().find(|l| l.id == id)
     }
 
     /// Creates a user label, or `None` if the name is taken.
-    pub fn create_label(&mut self, name: &str) -> Option<String> {
+    pub(crate) fn create_label(&mut self, name: &str) -> Option<String> {
         if self
             .labels
             .iter()
@@ -270,7 +275,7 @@ impl Mailbox {
 
     /// Stores RFC 822 bytes as a new message and records `messagesAdded`.
     /// Without a thread id the message starts its own thread.
-    pub fn insert_raw(
+    pub(crate) fn insert_raw(
         &mut self,
         raw: Vec<u8>,
         thread_id: Option<String>,
@@ -302,7 +307,7 @@ impl Mailbox {
     }
 
     /// Removes a message and records `messagesDeleted`.
-    pub fn delete(&mut self, id: &str) -> Result<(), Missing> {
+    pub(crate) fn delete(&mut self, id: &str) -> Result<(), Missing> {
         if !self.messages.contains_key(id) {
             return Err(Missing);
         }
@@ -313,7 +318,7 @@ impl Mailbox {
 
     /// Stores `raw` as a new draft's message (`DRAFT`), in `thread_id` or a new thread.
     /// Returns the draft id.
-    pub fn create_draft(
+    pub(crate) fn create_draft(
         &mut self,
         raw: Vec<u8>,
         thread_id: Option<String>,
@@ -327,7 +332,7 @@ impl Mailbox {
 
     /// Replaces a draft's message, keeping its thread unless `thread_id` names another.
     /// Returns the new message id.
-    pub fn update_draft(
+    pub(crate) fn update_draft(
         &mut self,
         draft_id: &str,
         raw: Vec<u8>,
@@ -344,7 +349,7 @@ impl Mailbox {
 
     /// Sends a draft: the draft and its message go, and a `SENT` message with `raw` (or the
     /// draft's own bytes) joins the thread. Returns the sent message id.
-    pub fn send_draft(
+    pub(crate) fn send_draft(
         &mut self,
         draft_id: &str,
         raw: Option<Vec<u8>>,
@@ -358,13 +363,13 @@ impl Mailbox {
     }
 
     /// Deletes a draft and its message.
-    pub fn delete_draft(&mut self, draft_id: &str) -> Result<(), Missing> {
+    pub(crate) fn delete_draft(&mut self, draft_id: &str) -> Result<(), Missing> {
         let message = self.drafts.remove(draft_id).ok_or(Missing)?;
         self.delete(&message)
     }
 
     /// Adds and removes labels, recording only real changes.
-    pub fn modify<L: AsRef<str>>(
+    pub(crate) fn modify<L: AsRef<str>>(
         &mut self,
         id: &str,
         add: &[L],
@@ -395,7 +400,7 @@ impl Mailbox {
         Ok(())
     }
 
-    pub fn profile_json(&self) -> Value {
+    pub(crate) fn profile_json(&self) -> Value {
         let threads: HashSet<&str> = self
             .messages
             .values()
@@ -409,11 +414,11 @@ impl Mailbox {
         })
     }
 
-    pub fn labels_json(&self) -> Value {
+    pub(crate) fn labels_json(&self) -> Value {
         json!({ "labels": self.labels.iter().map(Label::json).collect::<Vec<_>>() })
     }
 
-    pub fn send_as_json(&self) -> Value {
+    pub(crate) fn send_as_json(&self) -> Value {
         let entries: Vec<Value> = self
             .send_as
             .iter()
@@ -437,7 +442,7 @@ impl Mailbox {
     }
 
     /// A thread's messages, oldest first.
-    pub fn thread_messages(&self, thread_id: &str) -> Vec<&Msg> {
+    pub(crate) fn thread_messages(&self, thread_id: &str) -> Vec<&Msg> {
         let mut messages: Vec<&Msg> = self
             .messages
             .values()
@@ -447,7 +452,12 @@ impl Mailbox {
         messages
     }
 
-    pub fn thread_json(&self, thread_id: &str, format: &str, headers: &[&str]) -> Option<Value> {
+    pub(crate) fn thread_json(
+        &self,
+        thread_id: &str,
+        format: &str,
+        headers: &[&str],
+    ) -> Option<Value> {
         let messages = self.thread_messages(thread_id);
         if messages.is_empty() {
             return None;
@@ -459,7 +469,7 @@ impl Mailbox {
 
     /// Thread ids matching `q` and `label_ids`, newest first. `now_ms` is what
     /// `newer_than:` and `older_than:` count back from.
-    pub fn search_threads(
+    pub(crate) fn search_threads(
         &self,
         q: &str,
         label_ids: &[&str],
@@ -494,12 +504,12 @@ impl Mailbox {
         hits
     }
 
-    pub fn thread_summary_json(&self, thread_id: &str) -> Value {
+    pub(crate) fn thread_summary_json(&self, thread_id: &str) -> Value {
         thread_summary_json(thread_id, &self.thread_messages(thread_id))
     }
 
     /// History records after `start`, or `Missing` if `start` is older than the floor.
-    pub fn history_after(&self, start: u64) -> Result<Vec<&HistoryRecord>, Missing> {
+    pub(crate) fn history_after(&self, start: u64) -> Result<Vec<&HistoryRecord>, Missing> {
         if start < self.history_floor {
             return Err(Missing);
         }
@@ -517,7 +527,7 @@ fn thread_summary_json(thread_id: &str, messages: &[&Msg]) -> Value {
 }
 
 impl HistoryRecord {
-    pub fn json(&self) -> Value {
+    pub(crate) fn json(&self) -> Value {
         let message = json!({ "id": self.message_id, "threadId": self.thread_id, "labelIds": self.label_ids });
         let mut out = json!({
             "id": self.id.to_string(),
@@ -569,8 +579,8 @@ fn age_ms(text: &str) -> Option<u64> {
 }
 
 impl Query {
-    fn parse(q: &str, mailbox: &Mailbox, now_ms: u64) -> Query {
-        let mut query = Query {
+    fn parse(q: &str, mailbox: &Mailbox, now_ms: u64) -> Self {
+        let mut query = Self {
             terms: Vec::new(),
             wants_spam_trash: false,
         };

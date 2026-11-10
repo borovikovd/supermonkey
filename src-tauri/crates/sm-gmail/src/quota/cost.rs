@@ -23,7 +23,7 @@ pub(crate) const FILTERS_CREATE: Units = Units(5);
 pub(crate) const FILTERS_DELETE: Units = Units(5);
 
 /// `threads.get`: 40, or 120 with `format=full`.
-pub(crate) fn threads_get(format: Format) -> Units {
+pub(crate) const fn threads_get(format: Format) -> Units {
     if format.is_full() {
         Units(120)
     } else {
@@ -32,7 +32,7 @@ pub(crate) fn threads_get(format: Format) -> Units {
 }
 
 /// `messages.get` and `drafts.get`: 20, or 60 with `format=full` or `raw`.
-pub(crate) fn messages_get(format: Format) -> Units {
+pub(crate) const fn messages_get(format: Format) -> Units {
     if format.is_full() {
         Units(60)
     } else {

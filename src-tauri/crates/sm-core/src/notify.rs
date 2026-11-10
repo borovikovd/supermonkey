@@ -17,19 +17,27 @@ use crate::writer::WriterState;
 /// summary.
 const SUMMARY_OVER: usize = 3;
 
+/// What a poll brought.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Arrivals<'a> {
+    /// The messages the poll stored.
+    pub(crate) stored: &'a [MessageId],
+    /// The messages history reported added.
+    pub(crate) reported: &'a BTreeSet<GmailMessageId>,
+}
+
 /// Records a notification for each message a poll stored that history
-/// reported added (`reported`), in the Inbox and unread, for any account.
-/// Not for a muted account, mail from any connected account's address, or
-/// a thread the focused window shows open. More than three become one
-/// summary.
+/// reported added, in the Inbox and unread, for any account. Not for a
+/// muted account, mail from any connected account's address, or a thread
+/// the focused window shows open. More than three become one summary.
 pub(crate) fn new_mail(
     reads: Reads<'_>,
     state: &mut WriterState,
     account: AccountId,
-    stored: &[MessageId],
-    reported: &BTreeSet<GmailMessageId>,
+    arrivals: Arrivals<'_>,
     focused: bool,
 ) -> Result<(), StoreError> {
+    let Arrivals { stored, reported } = arrivals;
     if stored.is_empty() {
         return Ok(());
     }

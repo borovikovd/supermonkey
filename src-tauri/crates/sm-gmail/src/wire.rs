@@ -26,7 +26,8 @@ pub struct Profile {
 #[serde(rename_all = "camelCase")]
 pub struct SendAs {
     /// The address mail is sent from.
-    pub send_as_email: String,
+    #[serde(rename = "sendAsEmail")]
+    pub email: String,
     /// The display name, empty when unset.
     #[serde(default)]
     pub display_name: String,
@@ -58,12 +59,12 @@ pub struct Label {
     pub name: String,
     /// Gmail's or the user's.
     #[serde(rename = "type", default)]
-    pub label_type: Option<LabelType>,
+    pub kind: Option<LabelType>,
 }
 
 /// A Gmail message. Which fields are set depends on the [`Format`] asked for
 /// and where the message appears: history records carry only ids and labels.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
     /// Gmail's id of the message.
@@ -92,6 +93,7 @@ pub struct Message {
 
 impl Message {
     /// The first value of a top-level header, by case-insensitive name.
+    #[must_use]
     pub fn header(&self, name: &str) -> Option<&str> {
         self.payload.as_ref()?["headers"]
             .as_array()?
@@ -107,7 +109,7 @@ impl Message {
 
 /// A Gmail thread. In `threads.list` only `id`, `snippet`, and `history_id`
 /// are set.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Thread {
     /// Gmail's id of the thread.
@@ -124,7 +126,7 @@ pub struct Thread {
 }
 
 /// One page of `threads.list`.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadPage {
     /// The threads, newest first.
@@ -139,14 +141,14 @@ pub struct ThreadPage {
 }
 
 /// A message named in a history record.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct HistoryMessage {
     /// Ids and labels only.
     pub message: Message,
 }
 
 /// A label change in a history record.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryLabelChange {
     /// The message, ids and labels only.
@@ -157,7 +159,7 @@ pub struct HistoryLabelChange {
 }
 
 /// One record of `history.list`.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryRecord {
     /// The record's cursor.
@@ -180,7 +182,7 @@ pub struct HistoryRecord {
 }
 
 /// One page of `history.list`.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryPage {
     /// The records, oldest first.
@@ -194,7 +196,7 @@ pub struct HistoryPage {
 }
 
 /// A Gmail draft and its current message.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Draft {
     /// Gmail's id of the draft, stable across updates.
     pub id: GmailDraftId,
@@ -204,7 +206,7 @@ pub struct Draft {
 }
 
 /// One page of `drafts.list`.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DraftPage {
     /// The drafts, newest first.
@@ -216,7 +218,7 @@ pub struct DraftPage {
 }
 
 /// A Gmail settings filter.
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Filter {
     /// Gmail's id of the filter.
     pub id: FilterId,
@@ -230,7 +232,7 @@ pub struct Filter {
 
 /// What a filter matches. Criteria other than `from` stay in `other`, so a
 /// filter that matches more than a sender can be told apart.
-#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 pub struct FilterCriteria {
     /// An address, `@domain`, or any Gmail `from:` term.
     #[serde(default)]
@@ -241,7 +243,7 @@ pub struct FilterCriteria {
 }
 
 /// What a filter does. Actions other than label changes stay in `other`.
-#[derive(Debug, Clone, PartialEq, Default, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FilterAction {
     /// Labels it adds.
@@ -270,7 +272,8 @@ pub enum Format {
 
 impl Format {
     /// The `format` query value.
-    pub fn as_str(self) -> &'static str {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Minimal => "minimal",
             Self::Metadata => "metadata",
@@ -280,7 +283,7 @@ impl Format {
     }
 
     /// Whether Gmail charges this format as a full read.
-    pub(crate) fn is_full(self) -> bool {
+    pub(crate) const fn is_full(self) -> bool {
         matches!(self, Self::Full | Self::Raw)
     }
 }

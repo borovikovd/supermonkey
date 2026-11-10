@@ -107,7 +107,7 @@ pub(crate) struct DeliverReq {
     poll: bool,
 }
 
-fn yes() -> bool {
+const fn yes() -> bool {
     true
 }
 

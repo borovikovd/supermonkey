@@ -12,13 +12,13 @@ use crate::StoreError;
 use crate::db::{Db, id_list};
 
 /// Reads of messages.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct MessageReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> MessageReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 

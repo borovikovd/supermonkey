@@ -12,6 +12,7 @@ use crate::encoded_word::decode_encoded_words;
 /// groups (`team: a@x, b@y;`, `undisclosed-recipients:;`), unquoted names with a
 /// comma (`Doe, John <j@x.com>`), and `mailto:` inside the brackets. Entries
 /// without an `@` in the address are dropped. Never panics.
+#[must_use]
 pub fn parse_address_list(header: &str) -> Vec<Addr> {
     let mut out = Vec::new();
     // A segment without an `@` is usually the first half of a name that held a
@@ -77,7 +78,7 @@ struct Lexer {
 }
 
 impl Lexer {
-    fn place(&self) -> Place {
+    const fn place(&self) -> Place {
         if self.comment_depth > 0 {
             Place::Comment
         } else if self.in_angle {
@@ -89,7 +90,7 @@ impl Lexer {
         }
     }
 
-    fn next(&mut self, c: char) -> Token {
+    const fn next(&mut self, c: char) -> Token {
         if self.escaped {
             self.escaped = false;
             return Token::Char(self.place(), c);
@@ -150,7 +151,11 @@ fn split_segments(header: &str) -> Vec<&str> {
             {
                 start = i + 1;
             }
-            _ => {}
+            Token::Char(..)
+            | Token::NestedParen(_)
+            | Token::CommentEnd
+            | Token::AngleStart
+            | Token::Syntax => {}
         }
     }
     segments.push(header.get(start..).unwrap_or_default());
@@ -213,6 +218,7 @@ fn clean_name(s: &str) -> Option<String> {
 /// most 64 bytes with no spaces, specials, or stray dots; and a dotted domain
 /// whose labels are letters (any script), digits, or inner hyphens, with a
 /// top-level label of at least two characters that is not all digits.
+#[must_use]
 pub fn is_valid_email(s: &str) -> bool {
     let Some((local, domain)) = s.rsplit_once('@') else {
         return false;

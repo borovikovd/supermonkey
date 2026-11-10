@@ -16,12 +16,13 @@ use crate::tx::{WriteTx, require};
 
 /// Writes to messages. Each re-derives, stamps, and records the threads it
 /// touches, once per call.
+#[derive(Debug)]
 pub struct MessageWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> MessageWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 

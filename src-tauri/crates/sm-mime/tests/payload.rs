@@ -137,7 +137,7 @@ fn an_attached_message_lists_the_attachments_inside_it() {
         .iter()
         .map(|p| {
             (
-                p.part_id.as_str(),
+                p.id.as_str(),
                 p.filename.as_str(),
                 p.attachment_id.as_deref(),
             )

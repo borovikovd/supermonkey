@@ -54,6 +54,8 @@ impl GmailDraft {
 /// next reconcile.
 #[derive(Debug, Clone)]
 pub(crate) struct Reconcile {
+    /// The account whose drafts are reconciled.
+    pub(crate) account: AccountId,
     /// The account's Gmail draft ids, as `drafts.list` gave them.
     pub(crate) live: Arc<HashSet<GmailDraftId>>,
     /// The last `rev` committed before the first request.
@@ -69,30 +71,24 @@ impl Reconcile {
     }
 }
 
-/// Stores the Gmail ids a write returned. With `orphan`, a draft discarded
-/// while its upsert was in flight has the Gmail draft that upsert made
-/// deleted too, or sync would bring it back.
+/// Stores the Gmail ids a write returned on its draft. Returns false when
+/// the draft is gone, and the ids with it.
 pub(crate) fn store_ids(
     tx: &mut WriteTx<'_>,
-    state: &mut WriterState,
     local: &DraftId,
     ids: GmailIds,
-    orphan: Option<AccountId>,
-    now: Millis,
-) -> Result<(), StoreError> {
+) -> Result<bool, StoreError> {
     let Some(record) = tx.read().drafts().get(local)? else {
-        if let Some(account) = orphan {
-            delete_gmail_draft(tx, state, account, &ids.draft, now)?;
-        }
-        return Ok(());
+        return Ok(false);
     };
     let mut d = record.draft;
     lifecycle::written(&mut d, ids);
-    tx.drafts().put(&d)
+    tx.drafts().put(&d)?;
+    Ok(true)
 }
 
 /// Queues the delete of a Gmail draft no local draft owns, once.
-fn delete_gmail_draft(
+pub(crate) fn delete_gmail_draft(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
     account: AccountId,
@@ -189,28 +185,16 @@ pub(crate) fn defer_if_open(
 pub(crate) fn apply_gmail_draft(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
-    account: AccountId,
     gmail: GmailDraft,
     reconcile: &Reconcile,
     now: Millis,
 ) -> Result<(), StoreError> {
+    let account = reconcile.account;
     let reads = tx.read();
-    // Discarded here, and its delete has not reached Gmail yet.
-    if reads.ops().deletes_gmail_draft(account, &gmail.id)? {
+    if is_settled_elsewhere(reads, &gmail, reconcile)? {
         return Ok(());
     }
     let header = gmail.message.message.sm_draft.as_ref();
-    // A copy of a draft discarded while its create had no answer: the queued
-    // delete removes it from Gmail.
-    if let Some(local) = header
-        && reads.ops().deletes_copies_of(account, local)?
-    {
-        return Ok(());
-    }
-    // A write of the draft it names is in flight: its answer settles it.
-    if header.is_some_and(|d| reconcile.writing.is_busy(d)) {
-        return Ok(());
-    }
     let existing = local_for(reads, account, &gmail.id, header)?;
     // A copy of a draft discarded or sent this run, read before its delete
     // landed or missed by it: deleted, never brought back.
@@ -282,6 +266,31 @@ pub(crate) fn apply_gmail_draft(
     draft.attachments = attachments;
     draft.updated_at = message.date;
     tx.drafts().put(&draft)
+}
+
+/// Whether a Gmail draft is not read at all, because something already
+/// queued or in flight settles it: its delete, the delete of its draft's
+/// copies, or a write of the draft it names.
+fn is_settled_elsewhere(
+    reads: Reads<'_>,
+    gmail: &GmailDraft,
+    reconcile: &Reconcile,
+) -> Result<bool, StoreError> {
+    let account = reconcile.account;
+    // Discarded here, and its delete has not reached Gmail yet.
+    if reads.ops().deletes_gmail_draft(account, &gmail.id)? {
+        return Ok(true);
+    }
+    let header = gmail.message.message.sm_draft.as_ref();
+    // A copy of a draft discarded while its create had no answer: the queued
+    // delete removes it from Gmail.
+    if let Some(local) = header
+        && reads.ops().deletes_copies_of(account, local)?
+    {
+        return Ok(true);
+    }
+    // A write of the draft it names is in flight: its answer settles it.
+    Ok(header.is_some_and(|d| reconcile.writing.is_busy(d)))
 }
 
 /// The local draft of a Gmail draft: by its Gmail id, else by the local id

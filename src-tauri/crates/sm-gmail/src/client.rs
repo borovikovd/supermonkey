@@ -66,7 +66,7 @@ pub enum InvalidBaseUrl {
 /// [`crate::retry`]. Errors carry an [`Outcome`].
 ///
 /// Cheap to clone: clones share the tokens and the scheduler.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Gmail {
     /// `{base}/gmail/v1/users/me`.
     api: Arc<str>,
@@ -154,7 +154,8 @@ impl Gmail {
     }
 
     /// The account's scheduler, for work that should share its slots.
-    pub fn scheduler(&self) -> &AccountScheduler {
+    #[must_use]
+    pub const fn scheduler(&self) -> &AccountScheduler {
         &self.scheduler
     }
 
@@ -651,7 +652,12 @@ impl Gmail {
 fn not_sent(err: GmailError) -> GmailError {
     match err.outcome() {
         Outcome::Offline | Outcome::InvalidGrant | Outcome::Rejected { .. } => err,
-        outcome => {
+        outcome @ (Outcome::NoResponse
+        | Outcome::Unauthorized
+        | Outcome::RateLimited { .. }
+        | Outcome::ServerError { .. }
+        | Outcome::NotFound
+        | Outcome::Conflict) => {
             let detail = format!("token refresh: {outcome}");
             GmailError::with_detail(Outcome::Offline, detail)
         }

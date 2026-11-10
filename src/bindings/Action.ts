@@ -6,8 +6,110 @@ import type { Setting } from "./Setting";
 import type { SplitInfo } from "./SplitInfo";
 import type { SubKey } from "./SubKey";
 
-export type Action = { "type": "reset" } | { "type": "subscribe", sub: string, key: SubKey, } | { "type": "unsubscribe", sub: string, } | { "type": "modify" } & ModifyAction | { "type": "undo", account: number, entry: number, } | { "type": "createLabel", account: number, id: string, name: string, apply: ModifyAction | null, } | { "type": "saveDraft", draft: string, save: DraftSave, } | { "type": "closeComposer", draft: string, } | { "type": "sendDraft", draft: string, } | { "type": "discardDraft", draft: string, } | { "type": "closeToast", outbox: number, } | { "type": "ackNotice", notice: number, } | { "type": "setSetting" } & Setting | { "type": "pin", account: number, kind: PinKind, value: string, split: number, } | { "type": "saveSplits", account: number, splits: Array<SplitInfo>, 
+/**
+ * Something the user did.
+ */
+export type Action = { "type": "reset" } | { "type": "subscribe", 
+/**
+ * The id the page made for it. Its updates and its `unsubscribe`
+ * name it.
+ */
+sub: string, 
+/**
+ * What it watches.
+ */
+key: SubKey, } | { "type": "unsubscribe", 
+/**
+ * The subscription to close.
+ */
+sub: string, } | { "type": "modify" } & ModifyAction | { "type": "undo", 
+/**
+ * The account whose undo history holds the entry.
+ */
+account: number, 
+/**
+ * The entry to undo. The action is refused if it is gone.
+ */
+entry: number, } | { "type": "createLabel", 
+/**
+ * The account the label is made in.
+ */
+account: number, 
+/**
+ * The id the page made for it, kept as its local id.
+ */
+id: string, 
+/**
+ * The label's name, as the user typed it.
+ */
+name: string, 
+/**
+ * The label change to make with it. `None` only creates the label.
+ */
+apply: ModifyAction | null, } | { "type": "saveDraft", 
+/**
+ * The draft's id, made by the page when its composer opened.
+ */
+draft: string, 
+/**
+ * The draft's creation, or its fields after an edit.
+ */
+save: DraftSave, } | { "type": "closeComposer", 
+/**
+ * The draft whose composer closed. An untouched fresh one is
+ * discarded.
+ */
+draft: string, } | { "type": "sendDraft", 
+/**
+ * The draft to send.
+ */
+draft: string, } | { "type": "discardDraft", 
+/**
+ * The draft to delete, here and on Gmail.
+ */
+draft: string, } | { "type": "closeToast", 
+/**
+ * The send whose toast closed.
+ */
+outbox: number, } | { "type": "ackNotice", 
+/**
+ * The notice shown, which the core then drops.
+ */
+notice: number, } | { "type": "setSetting" } & Setting | { "type": "pin", 
+/**
+ * The account whose Inbox the pin routes.
+ */
+account: number, 
+/**
+ * What `value` names: a sender, a domain, or a label.
+ */
+kind: PinKind, 
+/**
+ * The sender's address, the domain, or the label's name.
+ */
+value: string, 
+/**
+ * The split to pin it to.
+ */
+split: number, } | { "type": "saveSplits", 
+/**
+ * The account whose splits the sheet edited.
+ */
+account: number, 
+/**
+ * The splits to keep, in their new order; `position` is not read.
+ * One with an id below 1 is a new custom split.
+ */
+splits: Array<SplitInfo>, 
 /**
  * Ids of custom splits to delete.
  */
-deleted: number[], } | { "type": "removeAccount", account: number, } | { "type": "moreResults", sub: string, };
+deleted: number[], } | { "type": "removeAccount", 
+/**
+ * The account to remove.
+ */
+account: number, } | { "type": "moreResults", 
+/**
+ * The search or view list that neared its oldest Gmail hit.
+ */
+sub: string, };

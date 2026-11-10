@@ -15,6 +15,7 @@ use crate::{StoreError, open};
 /// Read-only connections, handed out round-robin: a read takes the free
 /// connection that has waited longest and gives it back after. Calls block,
 /// so run them off the async runtime's threads (`spawn_blocking`).
+#[derive(Debug)]
 pub struct ReadPool {
     free: Mutex<VecDeque<Connection>>,
     returned: Condvar,

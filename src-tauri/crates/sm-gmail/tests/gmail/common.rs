@@ -5,10 +5,10 @@ use std::sync::Arc;
 use sm_fake_gmail::{FakeGmail, FakeUser};
 use sm_gmail::{Gmail, HttpClient, OAuthConfig, QuotaConfig, RefreshToken, Scheduler, Tokens};
 
-pub const ME: &str = "me@example.com";
+pub(crate) const ME: &str = "me@example.com";
 
 /// An OAuth config pointing at the fake, with dummy client credentials.
-pub fn oauth_config(fake: &FakeGmail) -> OAuthConfig {
+pub(crate) fn oauth_config(fake: &FakeGmail) -> OAuthConfig {
     OAuthConfig {
         client_id: "test-client".into(),
         client_secret: "test-secret".into(),
@@ -19,7 +19,7 @@ pub fn oauth_config(fake: &FakeGmail) -> OAuthConfig {
 }
 
 /// A fake with one user, and a client for that user.
-pub fn setup() -> (FakeGmail, FakeUser, Gmail) {
+pub(crate) fn setup() -> (FakeGmail, FakeUser, Gmail) {
     let fake = FakeGmail::start();
     let user = fake.add_user(ME);
     let gmail = client_for(&fake, &user);
@@ -27,7 +27,7 @@ pub fn setup() -> (FakeGmail, FakeUser, Gmail) {
 }
 
 /// A client for `user` with production limits.
-pub fn client_for(fake: &FakeGmail, user: &FakeUser) -> Gmail {
+pub(crate) fn client_for(fake: &FakeGmail, user: &FakeUser) -> Gmail {
     let http = HttpClient::new().unwrap();
     let tokens = Arc::new(Tokens::new(
         oauth_config(fake),

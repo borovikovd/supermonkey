@@ -20,7 +20,7 @@ pub(crate) async fn refresh_send_as(ctx: &AccountCtx) -> Result<(), GmailError> 
     let send_as: Vec<SendAsAddress> = listed
         .into_iter()
         .map(|s| SendAsAddress {
-            email: s.send_as_email,
+            email: s.email,
             name: s.display_name,
             is_default: s.is_default,
             is_primary: s.is_primary,
@@ -42,7 +42,7 @@ pub(crate) async fn refresh_send_as(ctx: &AccountCtx) -> Result<(), GmailError> 
             let Some(record) = tx.read().accounts().get(account)? else {
                 return Ok(());
             };
-            let name = name.unwrap_or(record.display_name.clone());
+            let name = name.unwrap_or_else(|| record.display_name.clone());
             if record.send_as != send_as || record.display_name != name {
                 tx.accounts().set_profile(account, &name, &send_as)?;
             }
@@ -66,7 +66,7 @@ pub(crate) async fn refresh_labels(ctx: &AccountCtx) -> Result<(), GmailError> {
     let mut labels: Vec<GmailLabel> = listed
         .into_iter()
         .map(|l| GmailLabel {
-            system: l.label_type == Some(LabelType::System),
+            system: l.kind == Some(LabelType::System),
             gmail_id: l.id,
             name: l.name,
         })

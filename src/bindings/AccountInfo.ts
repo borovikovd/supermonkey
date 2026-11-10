@@ -2,4 +2,51 @@
 import type { SendAs } from "./SendAs";
 import type { SyncStatus } from "./SyncStatus";
 
-export type AccountInfo = { id: number, email: string, name: string, hue: string, position: number, inboxUnread: number, needsSignin: boolean, muted: boolean, syncStatus: SyncStatus, sendAs: Array<SendAs>, };
+/**
+ * One account, as the rail shows it.
+ */
+export type AccountInfo = { 
+/**
+ * Its id. An account removed and added again gets a new one.
+ */
+id: number, 
+/**
+ * The address it signed in with.
+ */
+email: string, 
+/**
+ * The display name, from the primary `sendAs` entry; empty until it is
+ * known.
+ */
+name: string, 
+/**
+ * The avatar's color as a hex value, such as `#714CB6`.
+ */
+hue: string, 
+/**
+ * Its place on the rail, lowest first.
+ */
+position: number, 
+/**
+ * Unread Inbox threads that are not snoozed, for the avatar's count.
+ */
+inboxUnread: number, 
+/**
+ * Google refused its refresh token, or none is stored: the account
+ * shows Sign in again.
+ */
+needsSignin: boolean, 
+/**
+ * Its notifications are off, and its unread mail is out of the Dock
+ * badge.
+ */
+muted: boolean, 
+/**
+ * The sync state the rail shows. Sign in again overrides the rest.
+ */
+syncStatus: SyncStatus, 
+/**
+ * Gmail's `sendAs` addresses: the From picker's choices, and "this
+ * account's addresses" wherever the spec says so.
+ */
+sendAs: Array<SendAs>, };

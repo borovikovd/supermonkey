@@ -32,7 +32,7 @@ pub enum Field {
 
 impl Field {
     /// The operator as written, `""` for [`Field::Any`].
-    fn operator(self) -> &'static str {
+    const fn operator(self) -> &'static str {
         match self {
             Self::Any => "",
             Self::From => "from:",
@@ -61,15 +61,15 @@ pub struct Term {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
     /// Every child must match. `And(vec![])` is the empty query and matches everything.
-    And(Vec<Expr>),
+    And(Vec<Self>),
     /// At least one child must match.
-    Or(Vec<Expr>),
+    Or(Vec<Self>),
     /// One test.
     Term(Term),
     /// `is:list`: the message has a `List-Id` or `List-Unsubscribe` header.
     IsList,
     /// `-term`: the child does not match. Search only.
-    Not(Box<Expr>),
+    Not(Box<Self>),
     /// `has:attachment`: the message has an attachment that is not inline.
     /// Search only.
     HasAttachment,
@@ -98,7 +98,13 @@ impl Expr {
         match self {
             Self::And(xs) | Self::Or(xs) => xs.iter().any(|x| x.any(pred)),
             Self::Not(x) => x.any(pred),
-            leaf => pred(leaf),
+            leaf @ (Self::Term(_)
+            | Self::IsList
+            | Self::HasAttachment
+            | Self::Snoozed
+            | Self::Anywhere
+            | Self::Date { .. }
+            | Self::Unsupported(_)) => pred(leaf),
         }
     }
 
@@ -108,7 +114,13 @@ impl Expr {
         match self {
             Self::And(xs) | Self::Or(xs) => xs.iter().all(Self::index_decides),
             Self::Term(t) => t.in_index(),
-            _ => false,
+            Self::IsList
+            | Self::Not(_)
+            | Self::HasAttachment
+            | Self::Snoozed
+            | Self::Anywhere
+            | Self::Date { .. }
+            | Self::Unsupported(_) => false,
         }
     }
 }
@@ -145,11 +157,13 @@ pub struct Scope {
 
 impl Scope {
     /// Only live messages: not drafts, not in Trash or Spam.
+    #[must_use]
     pub fn live_only(self) -> bool {
         self == Self::default()
     }
 
     /// Whether search looks at `message` at all.
+    #[must_use]
     pub fn admits(self, message: &MessageFacts) -> bool {
         (self.drafts || !message.is_draft)
             && (self.trash || !message.has(SystemLabel::Trash))
@@ -164,13 +178,14 @@ pub struct Query {
 }
 
 impl Query {
-    pub(super) fn from_expr(expr: Expr) -> Self {
+    pub(super) const fn from_expr(expr: Expr) -> Self {
         Self { expr }
     }
 
     /// Parses leniently. Never fails. With no clock to place them in time,
     /// date operators are [`Expr::Unsupported`]: search uses
     /// [`Query::parse_search`].
+    #[must_use]
     pub fn parse(input: &str) -> Self {
         parser::parse(input, &|_| None).0
     }
@@ -212,24 +227,28 @@ impl Query {
     }
 
     /// The expression tree.
-    pub fn expr(&self) -> &Expr {
+    #[must_use]
+    pub const fn expr(&self) -> &Expr {
         &self.expr
     }
 
     /// The empty query, which matches everything.
-    pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         matches!(&self.expr, Expr::And(xs) if xs.is_empty())
     }
 
     /// True when [`Query::to_fts5`] can't express the whole query (`bcc:`,
     /// `label:`, `is:list`, `-term`, dates, ...) or it looks past live
     /// messages, so its candidates need [`Query::matches`].
+    #[must_use]
     pub fn needs_post_filter(&self) -> bool {
         !self.expr.index_decides() || !self.scope().live_only()
     }
 
     /// True when a bare word or phrase is present: only those read the body
     /// in search, so a caller can skip loading it otherwise.
+    #[must_use]
     pub fn reads_body(&self) -> bool {
         self.expr
             .any(&|e| matches!(e, Expr::Term(t) if t.field == Field::Any))
@@ -237,12 +256,14 @@ impl Query {
 
     /// True when a term is [`Expr::Unsupported`], so only Gmail can answer
     /// the query: local search lists nothing for it.
+    #[must_use]
     pub fn needs_gmail(&self) -> bool {
         self.expr.any(&|e| matches!(e, Expr::Unsupported(_)))
     }
 
     /// False when the query is empty or [`Query::needs_gmail`], so local
     /// search has nothing to go on and leaves results to Gmail.
+    #[must_use]
     pub fn searches_locally(&self) -> bool {
         !self.is_empty() && !self.needs_gmail()
     }
@@ -250,6 +271,7 @@ impl Query {
     /// The messages a search looks at: Trash, Spam, and drafts only when a
     /// term names them, as in Gmail, even negated (`-in:trash` looks in
     /// Trash and finds nothing there).
+    #[must_use]
     pub fn scope(&self) -> Scope {
         let names = |label: SystemLabel| {
             self.expr.any(&|e| {

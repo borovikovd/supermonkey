@@ -25,7 +25,7 @@ pub(super) struct Tok<'a> {
 
 impl Tok<'_> {
     /// Whether this is the bare word `keyword` (`AND`, `OR`), ignoring case.
-    pub(super) fn is_keyword(&self, keyword: &str) -> bool {
+    pub(super) const fn is_keyword(&self, keyword: &str) -> bool {
         matches!(self.kind, TokKind::Word(w) if w.eq_ignore_ascii_case(keyword))
     }
 }
@@ -37,7 +37,7 @@ pub(super) fn lex(s: &str) -> Vec<Tok<'_>> {
     while let Some(c) = s[i..].chars().next() {
         let start = i;
         let kind = match c {
-            c if c.is_whitespace() => {
+            _ if c.is_whitespace() => {
                 i += c.len_utf8();
                 continue;
             }
@@ -116,8 +116,8 @@ fn scan_word(s: &str, start: usize) -> usize {
         match c {
             '"' if attached => i = scan_quote(s, i).0,
             '(' if attached => i = scan_group(s, i),
-            c if c.is_whitespace() || c == '(' || c == ')' => break,
-            c => i += c.len_utf8(),
+            _ if c.is_whitespace() || c == '(' || c == ')' => break,
+            _ => i += c.len_utf8(),
         }
     }
     i

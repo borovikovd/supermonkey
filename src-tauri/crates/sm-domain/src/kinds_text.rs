@@ -107,6 +107,7 @@ text_enum! {
 
 impl ModifyKind {
     /// What the undo toast and history call the action.
+    #[must_use]
     pub const fn undo_label(self) -> &'static str {
         match self {
             Self::Done => "Marked done",

@@ -84,11 +84,12 @@ impl AccountWorkers {
         });
         let (sign_outs, reports) = mpsc::unbounded_channel();
         tasks.spawn("sign outs", sign_out_reports(Arc::clone(&live), reports));
+        let scheduler = Scheduler::new(gmail.quota);
         Arc::new(Self {
-            scheduler: Scheduler::new(gmail.quota),
             deps,
             gmail,
             http,
+            scheduler,
             tokens,
             tasks,
             live,
@@ -102,12 +103,12 @@ impl AccountWorkers {
     }
 
     /// The Gmail endpoints and OAuth client.
-    pub(crate) fn gmail_config(&self) -> &GmailConfig {
+    pub(crate) const fn gmail_config(&self) -> &GmailConfig {
         &self.gmail
     }
 
     /// The shared HTTP client.
-    pub(crate) fn http(&self) -> &HttpClient {
+    pub(crate) const fn http(&self) -> &HttpClient {
         &self.http
     }
 

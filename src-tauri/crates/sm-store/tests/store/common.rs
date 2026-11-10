@@ -13,7 +13,7 @@ use tempfile::TempDir;
 
 /// The writer-side state the tests' jobs and hooks see.
 #[derive(Default)]
-pub struct State {
+pub(crate) struct State {
     /// Tags jobs pushed, in the order they ran.
     pub order: Vec<String>,
     /// Bumped by jobs; `on_rollback` checks it was rolled back with them.
@@ -21,7 +21,7 @@ pub struct State {
 }
 
 /// A started writer, with what its hooks saw.
-pub struct Harness {
+pub(crate) struct Harness {
     pub dir: TempDir,
     pub writer: Writer<State>,
     pub commits: Arc<Mutex<Vec<Commit>>>,
@@ -29,7 +29,7 @@ pub struct Harness {
 }
 
 impl Harness {
-    pub fn start() -> Self {
+    pub(crate) fn start() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let (writer, commits, rollbacks) = start_at(&dir.path().join("mail.db"));
         Self {
@@ -40,12 +40,12 @@ impl Harness {
         }
     }
 
-    pub fn path(&self) -> PathBuf {
+    pub(crate) fn path(&self) -> PathBuf {
         self.dir.path().join("mail.db")
     }
 
     /// Stops the writer and starts a new one on the same file.
-    pub fn restart(&mut self) {
+    pub(crate) fn restart(&mut self) {
         self.writer.stop().wait().unwrap();
         let (writer, commits, rollbacks) = start_at(&self.path());
         self.writer = writer;
@@ -54,7 +54,7 @@ impl Harness {
     }
 
     /// Runs a UI job and waits for it.
-    pub fn write<T: Send + 'static>(
+    pub(crate) fn write<T: Send + 'static>(
         &self,
         job: impl FnOnce(&mut WriteTx<'_>) -> Result<T, StoreError> + Send + 'static,
     ) -> T {
@@ -64,16 +64,16 @@ impl Harness {
     }
 
     /// Reads on a fresh pool connection.
-    pub fn read<T>(&self, read: impl FnOnce(Reads<'_>) -> Result<T, StoreError>) -> T {
+    pub(crate) fn read<T>(&self, read: impl FnOnce(Reads<'_>) -> Result<T, StoreError>) -> T {
         let pool = ReadPool::open(&self.path(), std::num::NonZeroUsize::MIN).unwrap();
         pool.with(|r| read(**r)).unwrap()
     }
 
-    pub fn last_commit(&self) -> Commit {
+    pub(crate) fn last_commit(&self) -> Commit {
         self.commits.lock().last().cloned().unwrap()
     }
 
-    pub fn account(&self, email: &'static str) -> AccountId {
+    pub(crate) fn account(&self, email: &'static str) -> AccountId {
         self.write(move |tx| tx.accounts().create(email, "Me"))
     }
 }
@@ -110,7 +110,7 @@ fn start_at(path: &std::path::Path) -> (Writer<State>, Arc<Mutex<Vec<Commit>>>, 
 }
 
 /// A message from `from` at `date` with these labels.
-pub fn msg(gmail_id: &str, date: i64, from: &str, labels: &[&str]) -> NewMessage {
+pub(crate) fn msg(gmail_id: &str, date: i64, from: &str, labels: &[&str]) -> NewMessage {
     NewMessage {
         gmail_id: GmailMessageId::from(gmail_id),
         date: Millis(date),
@@ -133,7 +133,11 @@ pub fn msg(gmail_id: &str, date: i64, from: &str, labels: &[&str]) -> NewMessage
 }
 
 /// A complete fetch of a thread.
-pub fn fetched(account: AccountId, gmail_id: &str, messages: Vec<NewMessage>) -> FetchedThread {
+pub(crate) fn fetched(
+    account: AccountId,
+    gmail_id: &str,
+    messages: Vec<NewMessage>,
+) -> FetchedThread {
     FetchedThread {
         account,
         gmail_id: GmailThreadId::from(gmail_id),

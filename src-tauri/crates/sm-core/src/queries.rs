@@ -2,6 +2,7 @@
 //! (SPEC UI state, Ordering). Each returns rows with their `rev` and never
 //! changes pending actions.
 
+use std::fmt;
 use std::sync::Arc;
 
 use chrono::{DateTime, Local};
@@ -22,6 +23,13 @@ const SUGGESTIONS: usize = 6;
 pub struct Queries {
     pool: Arc<ReadPool>,
     clock: Arc<dyn Clock>,
+}
+
+/// Its name only: it holds the read pool and the clock.
+impl fmt::Debug for Queries {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Queries").finish_non_exhaustive()
+    }
 }
 
 impl Queries {

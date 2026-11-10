@@ -219,7 +219,7 @@ mod tests {
             )
             .unwrap();
             // Keep the WAL file: closing the last connection would checkpoint it.
-            std::mem::forget(conn);
+            let _never_closed = std::mem::ManuallyDrop::new(conn);
         }
         assert!(sibling(&path, "-wal").exists());
         // An earlier move-aside is kept, not overwritten.
@@ -285,7 +285,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // Something SQLite can't open, though it is no corrupt database.
         let path = dir.path().join("mail.db");
-        std::fs::create_dir(&path).unwrap();
+        std::fs::create_dir_all(&path).unwrap();
 
         assert!(open_writer(&path).is_err(), "startup fails loudly");
         assert!(path.is_dir(), "left where it was");

@@ -147,17 +147,23 @@ impl AccountCtx {
                 self.deps.network.wait(self.clock(), OFFLINE_RETRY).await;
                 AfterError::Retry
             }
-            outcome if outcome.is_transient() => {
-                let wait = backoff.next_delay(err);
-                tracing::debug!(account = self.account.0, %outcome, ?wait, "backing off");
-                self.deps.network.wait(self.clock(), wait).await;
-                AfterError::Retry
-            }
             Outcome::NotFound => AfterError::Drop,
-            outcome => {
-                // Nothing retries it before the next launch, so say so.
-                tracing::info!(account = self.account.0, %outcome, "Gmail refused a background read; dropping it");
-                AfterError::Drop
+            outcome @ (Outcome::NoResponse
+            | Outcome::Unauthorized
+            | Outcome::RateLimited { .. }
+            | Outcome::ServerError { .. }
+            | Outcome::Conflict
+            | Outcome::Rejected { .. }) => {
+                if outcome.is_transient() {
+                    let wait = backoff.next_delay(err);
+                    tracing::debug!(account = self.account.0, %outcome, ?wait, "backing off");
+                    self.deps.network.wait(self.clock(), wait).await;
+                    AfterError::Retry
+                } else {
+                    // Nothing retries it before the next launch, so say so.
+                    tracing::info!(account = self.account.0, %outcome, "Gmail refused a background read; dropping it");
+                    AfterError::Drop
+                }
             }
         }
     }
@@ -174,6 +180,6 @@ impl AccountCtx {
             .activity()
             .track("sign out", (self.account, self.id));
         // The registry is gone only while the core shuts down.
-        let _ = self.sign_out.send(report);
+        _ = self.sign_out.send(report);
     }
 }

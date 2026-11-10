@@ -20,7 +20,8 @@ pub enum Priority {
 
 impl Priority {
     /// The level, 1 to 6.
-    pub fn level(self) -> u8 {
+    #[must_use]
+    pub const fn level(self) -> u8 {
         match self {
             Self::P1 => 1,
             Self::P2 => 2,
@@ -32,6 +33,7 @@ impl Priority {
     }
 
     /// Priorities 4 to 6, which leave the bucket's reserve to 1 to 3.
+    #[must_use]
     pub fn is_background(self) -> bool {
         self >= Self::P4
     }

@@ -3,12 +3,50 @@ import type { DraftSummary } from "./DraftSummary";
 import type { MessageSummary } from "./MessageSummary";
 import type { OutboxRow } from "./OutboxRow";
 
-export type ConversationData = { thread: number, account: number, subject: string, labels: Array<string>, snoozeUntil: number | null, 
+/**
+ * A conversation subscription's data.
+ */
+export type ConversationData = { 
+/**
+ * The thread the subscription named, also when it is gone.
+ */
+thread: number, 
+/**
+ * The account the thread is in.
+ */
+account: number, 
+/**
+ * The first non-draft message's subject that is not empty.
+ */
+subject: string, 
+/**
+ * Label ids the thread is in, by the rule in SPEC Views.
+ */
+labels: Array<string>, 
+/**
+ * When its snooze ends. `None` when it is not snoozed.
+ */
+snoozeUntil: number | null, 
 /**
  * Oldest first, already filtered for the view (trash mode or not), no drafts.
  */
-messages: Array<MessageSummary>, drafts: Array<DraftSummary>, outbox: Array<OutboxRow>, 
+messages: Array<MessageSummary>, 
 /**
- * The thread no longer exists locally.
+ * Its reply and forward drafts, oldest edit first, shown collapsed
+ * under the last message. A draft in the outbox is left out.
  */
-gone: boolean, rev: number, };
+drafts: Array<DraftSummary>, 
+/**
+ * Its sends in the outbox, shown as Sending or Sent rows. A sent one
+ * leaves once the thread holds its message.
+ */
+outbox: Array<OutboxRow>, 
+/**
+ * The thread no longer exists locally. The other fields are then empty.
+ */
+gone: boolean, 
+/**
+ * The `rev` of the thread's last change. A change to its messages,
+ * labels, drafts, or outbox rows stamps it too.
+ */
+rev: number, };

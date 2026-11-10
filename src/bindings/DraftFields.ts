@@ -5,4 +5,34 @@ import type { DraftAttachment } from "./DraftAttachment";
 /**
  * The composer's full state, sent with saves.
  */
-export type DraftFields = { from: Addr | null, to: Array<Addr>, cc: Array<Addr>, bcc: Array<Addr>, subject: string, bodyHtml: string, attachments: Array<DraftAttachment>, };
+export type DraftFields = { 
+/**
+ * The `sendAs` address chosen in the From picker, or the one the draft
+ * loaded with.
+ */
+from: Addr | null, 
+/**
+ * The To chips. Text still being typed is not among them.
+ */
+to: Array<Addr>, 
+/**
+ * The Cc chips.
+ */
+cc: Array<Addr>, 
+/**
+ * The Bcc chips.
+ */
+bcc: Array<Addr>, 
+/**
+ * The subject.
+ */
+subject: string, 
+/**
+ * The editor's HTML. The quote is not in it: Rust keeps that.
+ */
+bodyHtml: string, 
+/**
+ * Every attachment the composer shows. One left out is removed from
+ * the draft, unless Rust added it after the `rev` the save names.
+ */
+attachments: Array<DraftAttachment>, };

@@ -28,6 +28,14 @@ const PAGE: u32 = 15;
 /// A typed search goes to Gmail once typing pauses this long.
 const TYPING_PAUSE: Duration = Duration::from_millis(300);
 
+/// A page of a Gmail listing to fetch.
+pub(crate) struct GmailPage {
+    /// What is listed.
+    pub(crate) query: GmailQuery,
+    /// The page after the ones already listed; `None` for the first.
+    pub(crate) token: Option<PageToken>,
+}
+
 /// The listings running, by subscription.
 #[derive(Default)]
 pub(crate) struct Searches {
@@ -43,9 +51,9 @@ impl Searches {
         workers: &AccountWorkers,
         sub: SubId,
         account: AccountId,
-        query: GmailQuery,
-        page: Option<PageToken>,
+        request: GmailPage,
     ) {
+        let GmailPage { query, token: page } = request;
         self.cancel(&sub);
         let Some(worker) = workers.get(account) else {
             settle(workers.writer(), sub, Vec::new(), None);
@@ -169,7 +177,7 @@ async fn list_page(
                     network.wait(ctx.clock(), OFFLINE_RETRY).await;
                 }
             }
-            listed => break listed,
+            answer => break answer,
         }
     };
     let (threads, next) = match listed {

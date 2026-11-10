@@ -78,6 +78,7 @@ impl SystemLabel {
     ];
 
     /// Gmail's id for the label, which is also its local id.
+    #[must_use]
     pub const fn id(self) -> &'static str {
         match self {
             Self::Inbox => "INBOX",
@@ -98,11 +99,13 @@ impl SystemLabel {
     }
 
     /// The label as a [`LabelId`].
+    #[must_use]
     pub fn label_id(self) -> LabelId {
         LabelId::from(self.id())
     }
 
     /// The system label with exactly this id, if any.
+    #[must_use]
     pub fn from_id(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|l| l.id() == id)
     }
@@ -139,16 +142,19 @@ pub struct LabelSet(BTreeSet<LabelId>);
 
 impl LabelSet {
     /// The empty set.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Whether the set holds the label with this id.
+    #[must_use]
     pub fn contains(&self, id: &str) -> bool {
         self.0.contains(id)
     }
 
     /// Whether the set holds this system label.
+    #[must_use]
     pub fn has(&self, label: SystemLabel) -> bool {
         self.contains(label.id())
     }
@@ -169,11 +175,13 @@ impl LabelSet {
     }
 
     /// How many labels the set holds.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
     /// Whether the set is empty.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

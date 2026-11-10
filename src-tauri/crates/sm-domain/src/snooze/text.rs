@@ -83,17 +83,8 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: &DateTime<Tz>) -> Option
             i += used;
             match span {
                 Span::Minutes(minutes) => {
-                    let rest_is_filler = toks
-                        .get(i..)
-                        .unwrap_or_default()
-                        .iter()
-                        .all(|t| matches!(*t, "at" | "on"));
-                    if parsed.date.is_some() || parsed.time.is_some() || !rest_is_filler {
-                        return None;
-                    }
-                    return now
-                        .clone()
-                        .checked_add_signed(TimeDelta::try_minutes(minutes)?);
+                    let rest = toks.get(i..).unwrap_or_default();
+                    return after_minutes(now, minutes, parsed, rest);
                 }
                 Span::Days(days) => {
                     parsed.set_date(today.checked_add_days(Days::new(days))?)?;
@@ -102,12 +93,7 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: &DateTime<Tz>) -> Option
             }
             continue;
         }
-        let relative_day = match t {
-            "today" => Some(0),
-            "tomorrow" | "tmrw" | "tmr" | "tom" => Some(1),
-            _ => None,
-        };
-        if let Some(days) = relative_day {
+        if let Some(days) = relative_day(t) {
             parsed.set_date(today.checked_add_days(Days::new(days))?)?;
             continue;
         }
@@ -145,6 +131,32 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: &DateTime<Tz>) -> Option
         return None;
     }
     resolve(now, parsed, default_time, roll)
+}
+
+/// `in 30m` or `in 2 hours`: exactly that long after `now`. `None` when the
+/// text also set a date or a time, or more than `at` and `on` follows in
+/// `rest`.
+fn after_minutes<Tz: TimeZone>(
+    now: &DateTime<Tz>,
+    minutes: i64,
+    parsed: Parsed,
+    rest: &[&str],
+) -> Option<DateTime<Tz>> {
+    let rest_is_filler = rest.iter().all(|t| matches!(*t, "at" | "on"));
+    if parsed.date.is_some() || parsed.time.is_some() || !rest_is_filler {
+        return None;
+    }
+    now.clone()
+        .checked_add_signed(TimeDelta::try_minutes(minutes)?)
+}
+
+/// How many days ahead `today` or `tomorrow` (in any spelling) is.
+fn relative_day(t: &str) -> Option<u64> {
+    match t {
+        "today" => Some(0),
+        "tomorrow" | "tmrw" | "tmr" | "tom" => Some(1),
+        _ => None,
+    }
 }
 
 /// The next instant after `now` that the parsed date and time name, rolling
@@ -234,9 +246,15 @@ fn parse_time(token: &str, meridiem: Option<&str>) -> Option<NaiveTime> {
     let (body, pm) = match meridiem {
         Some(m) => (token, Some(m.starts_with('p'))),
         None => {
-            if let Some(b) = token.strip_suffix("am").or(token.strip_suffix("a.m.")) {
+            if let Some(b) = token
+                .strip_suffix("am")
+                .or_else(|| token.strip_suffix("a.m."))
+            {
                 (b, Some(false))
-            } else if let Some(b) = token.strip_suffix("pm").or(token.strip_suffix("p.m.")) {
+            } else if let Some(b) = token
+                .strip_suffix("pm")
+                .or_else(|| token.strip_suffix("p.m."))
+            {
                 (b, Some(true))
             } else {
                 (token, None)

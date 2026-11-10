@@ -185,23 +185,43 @@ pub fn generate(path: &Path, size: Size, accounts: &[&str], now: Millis) -> Resu
     for (n, email) in accounts.iter().enumerate() {
         let email = (*email).to_owned();
         let seed: u64 = rng.random();
+        let plan = Plan { n, size, now };
         writer.call_blocking(Priority::Background, move |tx, ()| {
             let mut rng = StdRng::seed_from_u64(seed);
-            write_account(tx, &mut rng, n, &email, size, now)
+            write_account(tx, &mut rng, plan, &email)
         })?;
     }
     writer.stop().wait()
+}
+
+/// What one account of the fixture is written to.
+#[derive(Debug, Clone, Copy)]
+struct Plan {
+    /// Its number among the fixture's accounts, which its Gmail ids carry.
+    n: usize,
+    /// How much data it gets.
+    size: Size,
+    /// The time its mail counts back from.
+    now: Millis,
+}
+
+/// The account a fixture thread is written for.
+struct Owner {
+    account: AccountId,
+    /// The account's own address.
+    me: Addr,
+    /// Its user labels.
+    labels: Vec<LabelId>,
 }
 
 /// One account and its mail, in one transaction.
 fn write_account(
     tx: &mut WriteTx<'_>,
     rng: &mut StdRng,
-    n: usize,
+    plan: Plan,
     email: &str,
-    size: Size,
-    now: Millis,
 ) -> Result<(), StoreError> {
+    let Plan { n, size, now } = plan;
     let name = email.split('@').next().unwrap_or(email).to_owned();
     let account = tx.accounts().create(email, &name)?;
     let me = Addr::named(name.clone(), email.to_owned());
@@ -237,8 +257,13 @@ fn write_account(
             user_labels.push(label);
         }
     }
+    let owner = Owner {
+        account,
+        me,
+        labels: user_labels,
+    };
     for t in 0..size.threads {
-        let (fetched, bodies) = thread(rng, account, n, t, &me, size, now, &user_labels);
+        let (fetched, bodies) = thread(rng, plan, &owner, t);
         let stored = tx.threads().store(&fetched)?;
         for (id, body) in stored.added.into_iter().zip(bodies) {
             tx.messages().store_body(id, &body)?;
@@ -265,23 +290,73 @@ fn write_account(
     Ok(())
 }
 
-/// Thread `t` of account number `n`, as a full fetch would bring it, with
-/// each message's body. Thread [`LONG_THREAD`] is the long one; the first
-/// `size.inbox` are in the Inbox.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one thread's inputs, from the account loop"
-)]
-fn thread(
-    rng: &mut StdRng,
-    account: AccountId,
-    n: usize,
-    t: usize,
-    me: &Addr,
-    size: Size,
-    now: Millis,
-    user_labels: &[LabelId],
-) -> (FetchedThread, Vec<NewBody>) {
+/// What the messages of one fixture thread share.
+struct Traits<'a> {
+    in_inbox: bool,
+    category: Option<&'static str>,
+    is_list: bool,
+    starred: bool,
+    user_label: Option<&'a LabelId>,
+}
+
+impl<'a> Traits<'a> {
+    /// Draws a thread's traits: its category, whether it is list mail or
+    /// starred, and a user label for one thread in twenty.
+    fn draw(rng: &mut StdRng, in_inbox: bool, user_labels: &'a [LabelId]) -> Self {
+        let category = match rng.random_range(0..10) {
+            0..=4 => None,
+            5 | 6 => Some("CATEGORY_UPDATES"),
+            7 => Some("CATEGORY_PROMOTIONS"),
+            8 => Some("CATEGORY_SOCIAL"),
+            _ => Some("CATEGORY_PERSONAL"),
+        };
+        let is_list = matches!(category, Some("CATEGORY_PROMOTIONS" | "CATEGORY_UPDATES"))
+            && rng.random_bool(0.6);
+        let starred = rng.random_bool(0.03);
+        let user_label = if rng.random_bool(0.05) {
+            user_labels.get(rng.random_range(0..user_labels.len().max(1)))
+        } else {
+            None
+        };
+        Self {
+            in_inbox,
+            category,
+            is_list,
+            starred,
+            user_label,
+        }
+    }
+
+    /// One message's labels: `SENT` for one the account sent, else the
+    /// thread's Inbox and category, unread at times for the newest; the
+    /// star on the newest; and the thread's user label.
+    fn labels(&self, rng: &mut StdRng, from_me: bool, newest: bool) -> LabelSet {
+        let mut labels: Vec<&str> = Vec::new();
+        if from_me {
+            labels.push("SENT");
+        } else {
+            if self.in_inbox {
+                labels.push("INBOX");
+            }
+            labels.extend(self.category);
+            if newest && self.in_inbox && rng.random_bool(0.35) {
+                labels.push("UNREAD");
+            }
+        }
+        if self.starred && newest {
+            labels.push("STARRED");
+        }
+        labels.extend(self.user_label.map(LabelId::as_str));
+        labels.into_iter().collect()
+    }
+}
+
+/// Thread `t` of the account `plan` and `owner` describe, as a full fetch
+/// would bring it, with each message's body. Thread [`LONG_THREAD`] is the
+/// long one; the first `size.inbox` are in the Inbox.
+fn thread(rng: &mut StdRng, plan: Plan, owner: &Owner, t: usize) -> (FetchedThread, Vec<NewBody>) {
+    let Plan { n, size, now } = plan;
+    let me = &owner.me;
     let in_inbox = t < size.inbox;
     let count = if t == LONG_THREAD {
         size.long_thread
@@ -294,23 +369,7 @@ fn thread(
         .unwrap_or(i64::MAX)
         .saturating_mul(MINUTES_APART * 60_000);
     let latest = now.plus(-age.saturating_add(rng.random_range(0..600_000)));
-    let category = match rng.random_range(0..10) {
-        0..=4 => None,
-        5 | 6 => Some("CATEGORY_UPDATES"),
-        7 => Some("CATEGORY_PROMOTIONS"),
-        8 => Some("CATEGORY_SOCIAL"),
-        _ => Some("CATEGORY_PERSONAL"),
-    };
-    let is_list = matches!(category, Some("CATEGORY_PROMOTIONS" | "CATEGORY_UPDATES"))
-        && rng.random_bool(0.6);
-    let starred = rng.random_bool(0.03);
-    let user_label = if rng.random_bool(0.05) {
-        user_labels
-            .get(rng.random_range(0..user_labels.len().max(1)))
-            .cloned()
-    } else {
-        None
-    };
+    let traits = Traits::draw(rng, in_inbox, &owner.labels);
     let mut messages = Vec::with_capacity(count);
     let mut bodies = Vec::with_capacity(count);
     for m in 0..count {
@@ -321,22 +380,7 @@ fn thread(
         } else {
             (sender.clone(), me.clone())
         };
-        let mut labels: Vec<&str> = Vec::new();
-        if from_me {
-            labels.push("SENT");
-        } else {
-            if in_inbox {
-                labels.push("INBOX");
-            }
-            labels.extend(category);
-            if newest && in_inbox && rng.random_bool(0.35) {
-                labels.push("UNREAD");
-            }
-        }
-        if starred && newest {
-            labels.push("STARRED");
-        }
-        labels.extend(user_label.as_ref().map(LabelId::as_str));
+        let labels = traits.labels(rng, from_me, newest);
         let (html, text) = body(rng);
         let back = i64::try_from(count - 1 - m)
             .unwrap_or(0)
@@ -358,10 +402,10 @@ fn thread(
             message_id_header: Some(format!("<m{n}.{t}.{m}@fixture>")),
             in_reply_to: None,
             references: String::new(),
-            is_list,
+            is_list: traits.is_list,
             is_draft: false,
             sm_draft: None,
-            labels: labels.into_iter().collect::<LabelSet>(),
+            labels,
             has_attachments: false,
         });
         bodies.push(NewBody {
@@ -373,7 +417,7 @@ fn thread(
         });
     }
     let fetched = FetchedThread {
-        account,
+        account: owner.account,
         gmail_id: GmailThreadId::from(format!("t{n}_{t:06}")),
         history_id: Some(sm_domain::HistoryId(1)),
         messages,

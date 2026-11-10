@@ -6,7 +6,6 @@
 //! not simply be repeated after no clear answer. The waits take a `sleep`
 //! function, so the core sleeps on its own clock.
 
-use std::future::Future;
 use std::time::Duration;
 
 use rand::Rng as _;
@@ -18,6 +17,7 @@ const MAX: Duration = Duration::from_secs(60);
 
 /// The wait before retry number `attempt` (0 for the first): 1 s doubling to
 /// 60 s, each with ±20% jitter and never above 60 s. A `Retry-After` wins.
+#[must_use]
 pub fn backoff(attempt: u32, retry_after: Option<Duration>) -> Duration {
     if let Some(wait) = retry_after {
         return wait;
@@ -34,6 +34,7 @@ pub struct Backoff {
 
 impl Backoff {
     /// No failures yet.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -46,12 +47,13 @@ impl Backoff {
     }
 
     /// Failures in a row so far.
-    pub fn failures(self) -> u32 {
+    #[must_use]
+    pub const fn failures(self) -> u32 {
         self.failures
     }
 
     /// Starts over after a success.
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.failures = 0;
     }
 }

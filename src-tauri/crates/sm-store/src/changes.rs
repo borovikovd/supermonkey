@@ -82,16 +82,19 @@ pub struct Changes {
 
 impl Changes {
     /// Whether nothing was recorded.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         *self == Self::default()
     }
 
     /// Whether `account`'s `table` was written.
+    #[must_use]
     pub fn touched(&self, account: AccountId, table: Table) -> bool {
         self.tables.contains(&(account, table))
     }
 
     /// Whether any account's `table` was written.
+    #[must_use]
     pub fn touched_any(&self, table: Table) -> bool {
         self.tables.iter().any(|&(_, t)| t == table)
     }

@@ -16,6 +16,7 @@ impl RefreshToken {
     }
 
     /// The token itself, for the token store and Google. Never log it.
+    #[must_use]
     pub fn secret(&self) -> &str {
         &self.0
     }
@@ -56,12 +57,14 @@ impl AccessToken {
     }
 
     /// The bearer token. Never log it.
+    #[must_use]
     pub fn secret(&self) -> &str {
         &self.secret
     }
 
     /// When Google stops accepting it.
-    pub fn expires_at(&self) -> Instant {
+    #[must_use]
+    pub const fn expires_at(&self) -> Instant {
         self.expires_at
     }
 

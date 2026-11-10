@@ -8,7 +8,7 @@ use sm_gmail::PageToken;
 use sm_ipc::{ListEntry, SubKey, SubUpdate};
 use sm_store::{Changes, Reads};
 
-use super::build;
+use super::build::{self, Source};
 
 /// One open subscription.
 #[derive(Debug)]
@@ -113,9 +113,12 @@ impl Registry {
         let mut open: Vec<(&Sub, &DraftId)> = self
             .subs
             .values()
-            .filter_map(|s| match &s.key {
-                SubKey::Composer { draft } => Some((s, draft)),
-                _ => None,
+            .filter_map(|s| {
+                if let SubKey::Composer { draft } = &s.key {
+                    Some((s, draft))
+                } else {
+                    None
+                }
             })
             .collect();
         open.sort_by_key(|(s, _)| s.opened);
@@ -138,7 +141,7 @@ impl Registry {
     }
 
     /// Gives the app subscription a patch with the next commit.
-    pub(crate) fn force_app(&mut self) {
+    pub(crate) const fn force_app(&mut self) {
         self.app_forced = true;
     }
 
@@ -191,6 +194,7 @@ impl Registry {
         online: bool,
         now: Millis,
     ) -> Updates {
+        let source = Source { reads, online, now };
         let app_forced = std::mem::take(&mut self.app_forced);
         let mut subs: Vec<(&SubId, &mut Sub)> = self.subs.iter_mut().collect();
         subs.sort_by_key(|(_, sub)| sub.opened);
@@ -198,7 +202,7 @@ impl Registry {
         for (id, sub) in subs {
             let forced = std::mem::take(&mut sub.forced) || (app_forced && sub.key == SubKey::App);
             if sub.first_sent {
-                match build::patch(reads, id, sub, changes, forced, online, now) {
+                match build::patch(source, id, sub, changes, forced) {
                     Ok(Some(update)) => out.patches.push(update),
                     Ok(None) => {}
                     Err(e) => {
@@ -207,7 +211,7 @@ impl Registry {
                     }
                 }
             } else {
-                match build::first_load(reads, id, sub, online, now) {
+                match build::first_load(source, id, sub) {
                     Ok(update) => {
                         sub.first_sent = true;
                         out.first_loads.push(update);

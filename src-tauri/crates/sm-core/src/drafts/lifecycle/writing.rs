@@ -39,7 +39,7 @@ pub(crate) struct WritingDraft {
 
 impl WritingDraft {
     /// The draft being written.
-    pub(crate) fn draft(&self) -> &DraftId {
+    pub(crate) const fn draft(&self) -> &DraftId {
         &self.draft
     }
 }

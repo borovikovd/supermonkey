@@ -61,13 +61,13 @@ fn split_row(r: &Row<'_>) -> rusqlite::Result<SplitRecord> {
 }
 
 /// Reads of splits and pins.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct SplitReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> SplitReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -136,12 +136,13 @@ impl<'c> SplitReads<'c> {
 }
 
 /// Writes to splits and pins.
+#[derive(Debug)]
 pub struct SplitWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> SplitWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 

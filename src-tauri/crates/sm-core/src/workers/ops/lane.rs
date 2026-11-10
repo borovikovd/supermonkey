@@ -60,7 +60,7 @@ impl OpsLane {
     }
 
     /// The group op runs belong to.
-    pub(crate) fn tasks(&self) -> &Tasks {
+    pub(crate) const fn tasks(&self) -> &Tasks {
         &self.tasks
     }
 

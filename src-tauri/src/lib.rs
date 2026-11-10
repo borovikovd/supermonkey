@@ -134,22 +134,32 @@ pub fn run() {
             show_if_never_connected(app.handle());
             Ok(())
         })
-        .on_window_event(|window, event| match event {
-            // Closing the window hides it; the app keeps syncing in the Dock.
-            WindowEvent::CloseRequested { api, .. } if window.label() == MAIN_WINDOW => {
-                api.prevent_close();
-                if let Err(e) = window.hide() {
-                    tracing::warn!(error = %e, "couldn't hide the main window");
+        .on_window_event(|window, event| {
+            #[expect(
+                clippy::wildcard_enum_match_arm,
+                reason = "Tauri's enum is non-exhaustive, and the app acts on these two events only"
+            )]
+            match event {
+                // Closing the window hides it; the app keeps syncing in the Dock.
+                WindowEvent::CloseRequested { api, .. } if window.label() == MAIN_WINDOW => {
+                    api.prevent_close();
+                    if let Err(e) = window.hide() {
+                        tracing::warn!(error = %e, "couldn't hide the main window");
+                    }
                 }
+                WindowEvent::Focused(focused) => on_focus(window.app_handle(), *focused),
+                _ => {}
             }
-            WindowEvent::Focused(focused) => on_focus(window.app_handle(), *focused),
-            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             commands::connect,
             commands::dispatch
         ])
         .build(tauri::generate_context!());
+    #[expect(
+        clippy::exit,
+        reason = "the app was never built: there is no core to quit and no run loop to leave, and whoever launched it needs the failure status"
+    )]
     let app = match built {
         Ok(app) => app,
         Err(e) => {
@@ -157,19 +167,25 @@ pub fn run() {
             std::process::exit(1);
         }
     };
-    app.run(|app, event| match event {
-        // Clicking the Dock icon shows the window again.
-        RunEvent::Reopen { .. } => show_main(app),
-        // Tauri asks this when the last window is gone, which hiding on
-        // close never lets happen; quit as Cmd+Q does all the same.
-        RunEvent::ExitRequested {
-            code: None, api, ..
-        } => {
-            api.prevent_exit();
-            request_quit(app);
+    app.run(|app, event| {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "Tauri's enum is non-exhaustive, and the app acts on these three events only"
+        )]
+        match event {
+            // Clicking the Dock icon shows the window again.
+            RunEvent::Reopen { .. } => show_main(app),
+            // Tauri asks this when the last window is gone, which hiding on
+            // close never lets happen; quit as Cmd+Q does all the same.
+            RunEvent::ExitRequested {
+                code: None, api, ..
+            } => {
+                api.prevent_exit();
+                request_quit(app);
+            }
+            RunEvent::Exit => finish_quit(app),
+            _ => {}
         }
-        RunEvent::Exit => finish_quit(app),
-        _ => {}
     });
 }
 
@@ -211,7 +227,7 @@ fn start_core(app: &AppHandle) -> anyhow::Result<Shell> {
 /// mode, the demo's.
 fn setup(app: &AppHandle) -> anyhow::Result<Setup> {
     #[cfg(feature = "fake")]
-    if cfg!(debug_assertions) && std::env::var("SUPERMONKEY_FAKE").as_deref() == Ok("1") {
+    if cfg!(debug_assertions) && std::env::var_os("SUPERMONKEY_FAKE").is_some_and(|v| v == "1") {
         let demo = sm_testkit::Demo::start()?;
         return Ok(Setup {
             config: Config::in_data_dir(demo.data_dir(), true, demo.gmail_config()),
@@ -257,10 +273,14 @@ fn gmail_config() -> GmailConfig {
     let mut gmail = GmailConfig::google(oauth, QuotaConfig::for_budget(Units(per_minute)));
     #[cfg(debug_assertions)]
     {
-        let set = |name: &str, field: &mut String| {
-            if let Ok(value) = std::env::var(name) {
-                *field = value;
+        let set = |name: &str, field: &mut String| match std::env::var_os(name)
+            .map(std::ffi::OsString::into_string)
+        {
+            Some(Ok(value)) => *field = value,
+            Some(Err(_)) => {
+                tracing::warn!(name, "an endpoint override is not UTF-8; ignoring it");
             }
+            None => {}
         };
         let [base, auth, token, revoke] = ENDPOINT_OVERRIDES;
         set(base, &mut gmail.base_url);
@@ -287,7 +307,7 @@ fn token_store(data_dir: &Path) -> Arc<dyn TokenStore> {
 
 /// Whether `SUPERMONKEY_WEB_BRIDGE=1` asks for the debug web bridge.
 fn wants_web_bridge() -> bool {
-    std::env::var("SUPERMONKEY_WEB_BRIDGE").as_deref() == Ok("1")
+    std::env::var_os("SUPERMONKEY_WEB_BRIDGE").is_some_and(|v| v == "1")
 }
 
 /// Serves the debug web bridge when asked for, in debug builds with the

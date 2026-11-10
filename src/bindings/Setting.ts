@@ -3,4 +3,16 @@
 /**
  * A setting the user changes, with its new value (SPEC Settings).
  */
-export type Setting = { "setting": "remoteImages", on: boolean, } | { "setting": "muted", account: number, on: boolean, };
+export type Setting = { "setting": "remoteImages", 
+/**
+ * Whether they load.
+ */
+on: boolean, } | { "setting": "muted", 
+/**
+ * The account to mute or unmute.
+ */
+account: number, 
+/**
+ * Whether it is muted.
+ */
+on: boolean, };

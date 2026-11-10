@@ -34,7 +34,7 @@ impl Occasion {
     /// drafts' bodies. A sync reads drafts behind the Inbox's metadata and
     /// their bodies later still, so a first sign-in shows the Inbox first; a
     /// poll's draft change is read at once (SPEC Sync).
-    fn priorities(self) -> (Priority, Priority) {
+    const fn priorities(self) -> (Priority, Priority) {
         match self {
             Self::Sync => (Priority::P4, Priority::P5),
             Self::Poll => (Priority::P2, Priority::P2),
@@ -44,7 +44,7 @@ impl Occasion {
 
 /// Whether a failed call says the account can't reach Gmail now, rather
 /// than that one item can't be read: then the whole reconcile stops.
-pub(crate) fn stops_the_account(e: &GmailError) -> bool {
+pub(crate) const fn stops_the_account(e: &GmailError) -> bool {
     matches!(
         e.outcome(),
         Outcome::Offline
@@ -62,18 +62,10 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
     let started = started(&ctx.deps.pool, ctx.account).await;
     let listed = list_drafts(ctx, meta).await?;
     if occasion == Occasion::Sync {
-        for draft in &listed {
-            ctx.queue.push(
-                OTHER_META,
-                Work::Meta {
-                    thread: draft.message.thread_id.clone(),
-                    history: None,
-                    body: Some(LATE),
-                },
-            );
-        }
+        queue_threads(ctx, &listed);
     }
     let reconcile = Reconcile {
+        account: ctx.account,
         live: Arc::new(listed.iter().map(|d| d.id.clone()).collect()),
         started,
         writing: Arc::clone(&ctx.lane.writing),
@@ -119,15 +111,13 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
             listed.message.thread_id.clone(),
         )
         .await
-        {
             // A draft new to the app gets its kind and target from its
             // thread's messages, once: they must be stored first.
-            if let Err(e) =
+            && let Err(e) =
                 fetch_thread(ctx, &listed.message.thread_id, Format::Metadata, meta).await
-            {
-                skip(e)?;
-                continue;
-            }
+        {
+            skip(e)?;
+            continue;
         }
         match ctx.gmail.get_draft(body, &listed.id, Format::Full).await {
             Ok(full) => store(ctx, full, reconcile.clone()).await,
@@ -136,6 +126,21 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
         }
     }
     failed.map_or(Ok(()), Err)
+}
+
+/// Queues a metadata read of each listed draft's thread, and its bodies
+/// late, as the connect sync asks.
+fn queue_threads(ctx: &AccountCtx, listed: &[sm_gmail::Draft]) {
+    for draft in listed {
+        ctx.queue.push(
+            OTHER_META,
+            Work::Meta {
+                thread: draft.message.thread_id.clone(),
+                history: None,
+                body: Some(LATE),
+            },
+        );
+    }
 }
 
 /// Reads a Gmail change to the draft that was skipped while a composer had
@@ -156,6 +161,7 @@ pub(crate) async fn read_skipped(ctx: &AccountCtx, id: &DraftId) {
     };
     // Its own Gmail draft: no other copy is in question.
     let reconcile = Reconcile {
+        account: ctx.account,
         live: Arc::default(),
         started: started(&ctx.deps.pool, ctx.account).await,
         writing: Arc::clone(&ctx.lane.writing),
@@ -245,7 +251,7 @@ async fn store(ctx: &AccountCtx, full: sm_gmail::Draft, reconcile: Reconcile) {
     let stored: Result<(), Error> = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
-            apply_gmail_draft(tx, state, account, gmail, &reconcile, now)
+            apply_gmail_draft(tx, state, gmail, &reconcile, now)
         })
         .await
         .map_err(|e: StoreError| Error::Store(e));

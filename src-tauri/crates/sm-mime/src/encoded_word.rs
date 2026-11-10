@@ -106,7 +106,7 @@ fn decode_q(text: &str) -> Vec<u8> {
                 }
                 None => out.push(b'='),
             },
-            b => out.push(b),
+            _ => out.push(b),
         }
     }
     out

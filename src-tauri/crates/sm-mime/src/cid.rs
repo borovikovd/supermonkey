@@ -21,6 +21,7 @@ pub struct CidImages {
 
 impl CidImages {
     /// No images.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -34,6 +35,7 @@ impl CidImages {
     }
 
     /// Whether there are no images.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.by_content_id.is_empty()
     }

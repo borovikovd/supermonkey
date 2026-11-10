@@ -50,6 +50,7 @@ impl RawBody {
 
     /// Sanitizes a received body for storage. `images` are its inline images,
     /// which replace their `cid:` references (SPEC Reading).
+    #[must_use]
     pub fn render(self, images: &CidImages) -> Body {
         let (html, text, is_plain) = self.into_html();
         let (visible, quote) = split_quoted_history(&html);
@@ -63,6 +64,7 @@ impl RawBody {
 
     /// Splits and sanitizes the body of a draft read from Gmail. Its inline
     /// images stay `cid:` references, which the sanitizer drops.
+    #[must_use]
     pub fn into_draft(self) -> DraftBody {
         let (html, _, _) = self.into_html();
         let (editor, quote) = split_gmail_quote(&html);

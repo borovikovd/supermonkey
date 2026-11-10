@@ -5,4 +5,34 @@ import type { DraftKind } from "./DraftKind";
 /**
  * A collapsed draft shown under a thread.
  */
-export type DraftSummary = { id: string, kind: DraftKind, target: number | null, startedOnLatest: boolean, to: Array<Addr>, snippet: string, updatedAt: number, };
+export type DraftSummary = { 
+/**
+ * The draft: clicking its line resumes it in the reply composer.
+ */
+id: string, 
+/**
+ * Reply or forward: `r` and `Enter` resume a reply draft, `f` a
+ * forward draft.
+ */
+kind: DraftKind, 
+/**
+ * The message it is aimed at, when it names one.
+ */
+target: number | null, 
+/**
+ * It was started on what was then the thread's latest message, so it
+ * resumes from the latest message after new replies too.
+ */
+startedOnLatest: boolean, 
+/**
+ * Its To recipients.
+ */
+to: Array<Addr>, 
+/**
+ * Its body as plain text.
+ */
+snippet: string, 
+/**
+ * Its last edit: the newest draft of a kind is the one resumed.
+ */
+updatedAt: number, };

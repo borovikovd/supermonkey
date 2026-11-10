@@ -9,13 +9,13 @@ use crate::db::Db;
 use crate::tx::WriteTx;
 
 /// Reads of the `meta` row.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct MetaReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> MetaReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -41,19 +41,20 @@ impl<'c> MetaReads<'c> {
 }
 
 /// Writes to the `meta` row.
+#[derive(Debug)]
 pub struct MetaWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> MetaWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 
     /// Records that actions up to `n` are applied. It never goes back: a
     /// lower number is ignored. Not a row change, so on its own it does not
     /// move `rev`.
-    pub fn set_last_action(&mut self, n: ActionNo) -> Result<(), StoreError> {
+    pub fn set_last_action(&self, n: ActionNo) -> Result<(), StoreError> {
         self.tx.db().execute(
             "store the last action number",
             "UPDATE meta SET last_action = max(last_action, ?1) WHERE id = 1",

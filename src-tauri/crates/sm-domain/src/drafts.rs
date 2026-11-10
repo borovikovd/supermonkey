@@ -88,6 +88,7 @@ impl<'a, A: IntoIterator<Item = &'a str>> DraftContentRef<'a, A> {
 /// The kind a draft gets when it first appears from Gmail, kept from then
 /// on: new when it is alone in its thread with no `In-Reply-To`, forward when
 /// its subject starts with `Fwd:` (any case), reply otherwise.
+#[must_use]
 pub fn gmail_draft_kind(alone_in_thread: bool, has_in_reply_to: bool, subject: &str) -> DraftKind {
     let is_forward = subject
         .trim_start()
@@ -116,6 +117,7 @@ pub struct DraftAim {
 /// `In-Reply-To` names (`by_in_reply_to`, resolved by the caller), else the
 /// thread's latest message. It counts as started on the latest message when
 /// its target is the newest non-draft message no newer than the draft.
+#[must_use]
 pub fn gmail_draft_aim(
     thread: &Thread,
     by_in_reply_to: Option<MessageId>,

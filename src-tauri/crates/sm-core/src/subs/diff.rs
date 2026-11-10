@@ -24,7 +24,7 @@ pub(crate) struct ListDiff {
 
 impl ListDiff {
     /// Whether the patch would change nothing in the mirror.
-    pub(crate) fn is_empty(&self) -> bool {
+    pub(crate) const fn is_empty(&self) -> bool {
         self.removed.is_empty() && self.moved.is_empty() && self.changed.is_empty()
     }
 }

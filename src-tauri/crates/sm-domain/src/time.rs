@@ -14,12 +14,13 @@ pub struct Millis(pub i64);
 impl Millis {
     /// `ms` milliseconds later.
     #[must_use]
-    pub fn plus(self, ms: i64) -> Self {
+    pub const fn plus(self, ms: i64) -> Self {
         Self(self.0.saturating_add(ms))
     }
 
     /// Milliseconds from `earlier` to `self`, negative if `earlier` is later.
-    pub fn since(self, earlier: Self) -> i64 {
+    #[must_use]
+    pub const fn since(self, earlier: Self) -> i64 {
         self.0.saturating_sub(earlier.0)
     }
 }

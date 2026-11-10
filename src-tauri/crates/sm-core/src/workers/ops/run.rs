@@ -9,7 +9,7 @@ use sm_store::{OpId, OpKind, OpRecord, Priority as WritePriority, StoreError};
 
 use crate::Error;
 use crate::drafts::lifecycle::GmailIds;
-use crate::drafts::{WritingDraft, store_ids};
+use crate::drafts::{WritingDraft, delete_gmail_draft, store_ids};
 use crate::effects::Effect;
 use crate::ops::{LabelCreateOp, ModifyOp, reject, relabel};
 use crate::workers::account::AccountCtx;
@@ -326,7 +326,13 @@ async fn write(ctx: &AccountCtx, id: OpId, answer: Answer) -> Result<(), Error> 
             Answer::Done(Landing::Draft { draft, written }) => {
                 if let Some(written) = &written {
                     let ids = GmailIds::of(written);
-                    store_ids(tx, state, &draft, ids, Some(account), now)?;
+                    let made = ids.draft.clone();
+                    // Discarded while its upsert was in flight: the Gmail
+                    // draft the upsert made goes too, or sync would bring
+                    // it back.
+                    if !store_ids(tx, &draft, ids)? {
+                        delete_gmail_draft(tx, state, account, &made, now)?;
+                    }
                 }
                 tx.ops().delete(id)
             }

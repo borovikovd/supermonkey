@@ -192,7 +192,7 @@ pub(crate) fn draft_message(m: &Message) -> (ReadMessage, DraftBody) {
 
 fn new_attachment(part: &Part) -> NewAttachment {
     NewAttachment {
-        part_id: part.part_id.clone(),
+        part_id: part.id.clone(),
         filename: part.filename.clone(),
         mime_type: part.mime_type.clone(),
         size: i64::try_from(part.size).unwrap_or(i64::MAX),

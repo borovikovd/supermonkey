@@ -27,7 +27,7 @@ const ACCOUNT: AccountId = AccountId(1);
 /// running app's database: reading a cold disk is part of a cold launch
 /// (its own budget), not of a keystroke.
 async fn on_fixture() -> Harness {
-    let fixture = std::env::var("SUPERMONKEY_PERF_DB")
+    let fixture = std::env::var_os("SUPERMONKEY_PERF_DB")
         .expect("set SUPERMONKEY_PERF_DB to a database written by the perf-fixture binary");
     let dir = tempfile::tempdir().unwrap();
     let copy = dir.path().join(Config::DB_FILE);
@@ -81,7 +81,11 @@ async fn perf_local_search_per_keystroke() {
             .flat_map(|m| &m.updates)
             .find_map(|u| match u {
                 SubUpdate::List { sub: s, ids, .. } if *s == sub => ids.as_ref().map(Vec::len),
-                _ => None,
+                SubUpdate::List { .. }
+                | SubUpdate::Conversation { .. }
+                | SubUpdate::Composer { .. }
+                | SubUpdate::Account { .. }
+                | SubUpdate::App { .. } => None,
             })
             .expect("the search's first load");
         println!(

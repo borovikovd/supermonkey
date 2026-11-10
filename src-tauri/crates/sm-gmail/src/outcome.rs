@@ -48,6 +48,7 @@ impl Outcome {
     /// A 403 `insufficientPermissions`: the grant lacks a scope the method
     /// needs, as for filters on an account signed in before the app asked for
     /// `gmail.settings.basic`. Signing in again fixes it.
+    #[must_use]
     pub fn is_missing_scope(&self) -> bool {
         matches!(
             self,
@@ -57,7 +58,8 @@ impl Outcome {
 
     /// The outcomes SPEC retries with back-off: rate limits, 5xx, and no
     /// response. Whether a given call may be repeated is the caller's call.
-    pub fn is_transient(&self) -> bool {
+    #[must_use]
+    pub const fn is_transient(&self) -> bool {
         matches!(
             self,
             Self::RateLimited { .. } | Self::ServerError { .. } | Self::NoResponse
@@ -65,10 +67,18 @@ impl Outcome {
     }
 
     /// The server's `Retry-After`, if it gave one.
-    pub fn retry_after(&self) -> Option<Duration> {
+    #[must_use]
+    pub const fn retry_after(&self) -> Option<Duration> {
         match self {
             Self::RateLimited { retry_after } => *retry_after,
-            _ => None,
+            Self::Offline
+            | Self::NoResponse
+            | Self::Unauthorized
+            | Self::InvalidGrant
+            | Self::ServerError { .. }
+            | Self::NotFound
+            | Self::Conflict
+            | Self::Rejected { .. } => None,
         }
     }
 }
@@ -102,7 +112,8 @@ pub struct GmailError {
 
 impl GmailError {
     /// An error with no further detail.
-    pub fn new(outcome: Outcome) -> Self {
+    #[must_use]
+    pub const fn new(outcome: Outcome) -> Self {
         Self {
             outcome,
             detail: None,
@@ -118,22 +129,26 @@ impl GmailError {
     }
 
     /// What happened.
-    pub fn outcome(&self) -> &Outcome {
+    #[must_use]
+    pub const fn outcome(&self) -> &Outcome {
         &self.outcome
     }
 
     /// The cause underneath, for logs.
+    #[must_use]
     pub fn detail(&self) -> Option<&str> {
         self.detail.as_deref()
     }
 
     /// See [`Outcome::is_transient`].
-    pub fn is_transient(&self) -> bool {
+    #[must_use]
+    pub const fn is_transient(&self) -> bool {
         self.outcome.is_transient()
     }
 
     /// See [`Outcome::retry_after`].
-    pub fn retry_after(&self) -> Option<Duration> {
+    #[must_use]
+    pub const fn retry_after(&self) -> Option<Duration> {
         self.outcome.retry_after()
     }
 }

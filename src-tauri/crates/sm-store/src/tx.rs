@@ -5,6 +5,7 @@
 //! connection, which [`WriteTx::read`], [`Snapshot`], and [`ReadTx`] all give.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::ops::Deref;
 
 use rusqlite::Connection;
@@ -44,6 +45,18 @@ pub struct WriteTx<'c> {
     fail_commit: bool,
 }
 
+/// The transaction's `rev` and what it changed so far, not the routing it
+/// caches, which holds label names.
+impl fmt::Debug for WriteTx<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WriteTx")
+            .field("rev", &self.rev)
+            .field("wrote", &self.wrote)
+            .field("changes", &self.changes)
+            .finish_non_exhaustive()
+    }
+}
+
 impl<'c> WriteTx<'c> {
     pub(crate) fn new(conn: &'c Connection, rev: Rev) -> Self {
         Self {
@@ -58,82 +71,85 @@ impl<'c> WriteTx<'c> {
     }
 
     /// The `rev` this transaction stamps on the rows it writes.
-    pub fn rev(&self) -> Rev {
+    #[must_use]
+    pub const fn rev(&self) -> Rev {
         self.rev
     }
 
     /// What the transaction has changed so far.
-    pub fn changes(&self) -> &Changes {
+    #[must_use]
+    pub const fn changes(&self) -> &Changes {
         &self.changes
     }
 
     /// Reads inside the transaction, seeing its own writes.
-    pub fn read(&self) -> Reads<'c> {
+    #[must_use]
+    pub const fn read(&self) -> Reads<'c> {
         Reads { db: self.db }
     }
 
     /// The last action number and `rev`.
-    pub fn meta(&mut self) -> MetaWrites<'_, 'c> {
+    pub const fn meta(&mut self) -> MetaWrites<'_, 'c> {
         MetaWrites::new(self)
     }
 
     /// Accounts.
-    pub fn accounts(&mut self) -> AccountWrites<'_, 'c> {
+    pub const fn accounts(&mut self) -> AccountWrites<'_, 'c> {
         AccountWrites::new(self)
     }
 
     /// Labels.
-    pub fn labels(&mut self) -> LabelWrites<'_, 'c> {
+    pub const fn labels(&mut self) -> LabelWrites<'_, 'c> {
         LabelWrites::new(self)
     }
 
     /// Threads: storing fetched threads, snooze, deletion.
-    pub fn threads(&mut self) -> ThreadWrites<'_, 'c> {
+    pub const fn threads(&mut self) -> ThreadWrites<'_, 'c> {
         ThreadWrites::new(self)
     }
 
     /// Messages: labels, bodies, attachments.
-    pub fn messages(&mut self) -> MessageWrites<'_, 'c> {
+    pub const fn messages(&mut self) -> MessageWrites<'_, 'c> {
         MessageWrites::new(self)
     }
 
     /// Drafts.
-    pub fn drafts(&mut self) -> DraftWrites<'_, 'c> {
+    pub const fn drafts(&mut self) -> DraftWrites<'_, 'c> {
         DraftWrites::new(self)
     }
 
     /// The outbox.
-    pub fn outbox(&mut self) -> OutboxWrites<'_, 'c> {
+    pub const fn outbox(&mut self) -> OutboxWrites<'_, 'c> {
         OutboxWrites::new(self)
     }
 
     /// The Gmail op queue.
-    pub fn ops(&mut self) -> OpWrites<'_, 'c> {
+    pub const fn ops(&mut self) -> OpWrites<'_, 'c> {
         OpWrites::new(self)
     }
 
     /// The undo history.
-    pub fn undo(&mut self) -> UndoWrites<'_, 'c> {
+    pub const fn undo(&mut self) -> UndoWrites<'_, 'c> {
         UndoWrites::new(self)
     }
 
     /// Notices.
-    pub fn notices(&mut self) -> NoticeWrites<'_, 'c> {
+    pub const fn notices(&mut self) -> NoticeWrites<'_, 'c> {
         NoticeWrites::new(self)
     }
 
     /// Splits and pins.
-    pub fn splits(&mut self) -> SplitWrites<'_, 'c> {
+    pub const fn splits(&mut self) -> SplitWrites<'_, 'c> {
         SplitWrites::new(self)
     }
 
     /// Contacts for autocomplete.
-    pub fn contacts(&mut self) -> ContactWrites<'_, 'c> {
+    pub const fn contacts(&mut self) -> ContactWrites<'_, 'c> {
         ContactWrites::new(self)
     }
 
     /// Settings.
-    pub fn settings(&mut self) -> SettingWrites<'_, 'c> {
+    pub const fn settings(&mut self) -> SettingWrites<'_, 'c> {
         SettingWrites::new(self)
     }
 
@@ -173,21 +189,21 @@ impl<'c> WriteTx<'c> {
     /// Makes this transaction's commit fail, as a full disk or a broken
     /// deferred constraint would, for tests of what follows a failed commit.
     #[cfg(any(test, feature = "test-hooks"))]
-    pub fn fail_commit(&mut self) {
+    pub const fn fail_commit(&mut self) {
         self.fail_commit = true;
     }
 
-    pub(crate) fn db(&self) -> Db<'c> {
+    pub(crate) const fn db(&self) -> Db<'c> {
         self.db
     }
 
     /// Marks the transaction as writing and returns the `rev` to stamp.
-    pub(crate) fn stamp(&mut self) -> Rev {
+    pub(crate) const fn stamp(&mut self) -> Rev {
         self.wrote = true;
         self.rev
     }
 
-    pub(crate) fn record(&mut self) -> &mut Changes {
+    pub(crate) const fn record(&mut self) -> &mut Changes {
         self.wrote = true;
         &mut self.changes
     }
@@ -197,7 +213,7 @@ impl<'c> WriteTx<'c> {
         self.record().touch(account, table);
     }
 
-    pub(crate) fn routing_cache(&mut self) -> &mut HashMap<AccountId, Routing> {
+    pub(crate) const fn routing_cache(&mut self) -> &mut HashMap<AccountId, Routing> {
         &mut self.routing
     }
 
@@ -228,95 +244,110 @@ pub(crate) struct Finished {
 
 /// The read-only repositories, over one connection. [`WriteTx::read`],
 /// [`Snapshot`], and [`ReadTx`] all give one.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct Reads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> Reads<'c> {
-    pub(crate) fn new(conn: &'c Connection) -> Self {
+    pub(crate) const fn new(conn: &'c Connection) -> Self {
         Self { db: Db::new(conn) }
     }
 
     /// The last action number and `rev`.
-    pub fn meta(self) -> MetaReads<'c> {
+    #[must_use]
+    pub const fn meta(self) -> MetaReads<'c> {
         MetaReads::new(self.db)
     }
 
     /// Accounts.
-    pub fn accounts(self) -> AccountReads<'c> {
+    #[must_use]
+    pub const fn accounts(self) -> AccountReads<'c> {
         AccountReads::new(self.db)
     }
 
     /// Labels.
-    pub fn labels(self) -> LabelReads<'c> {
+    #[must_use]
+    pub const fn labels(self) -> LabelReads<'c> {
         LabelReads::new(self.db)
     }
 
     /// Thread rows and view lists.
-    pub fn threads(self) -> ThreadReads<'c> {
+    #[must_use]
+    pub const fn threads(self) -> ThreadReads<'c> {
         ThreadReads::new(self.db)
     }
 
     /// Messages, bodies, and attachments.
-    pub fn messages(self) -> MessageReads<'c> {
+    #[must_use]
+    pub const fn messages(self) -> MessageReads<'c> {
         MessageReads::new(self.db)
     }
 
     /// Drafts.
-    pub fn drafts(self) -> DraftReads<'c> {
+    #[must_use]
+    pub const fn drafts(self) -> DraftReads<'c> {
         DraftReads::new(self.db)
     }
 
     /// The outbox.
-    pub fn outbox(self) -> OutboxReads<'c> {
+    #[must_use]
+    pub const fn outbox(self) -> OutboxReads<'c> {
         OutboxReads::new(self.db)
     }
 
     /// The Gmail op queue.
-    pub fn ops(self) -> OpReads<'c> {
+    #[must_use]
+    pub const fn ops(self) -> OpReads<'c> {
         OpReads::new(self.db)
     }
 
     /// The undo history.
-    pub fn undo(self) -> UndoReads<'c> {
+    #[must_use]
+    pub const fn undo(self) -> UndoReads<'c> {
         UndoReads::new(self.db)
     }
 
     /// Notices.
-    pub fn notices(self) -> NoticeReads<'c> {
+    #[must_use]
+    pub const fn notices(self) -> NoticeReads<'c> {
         NoticeReads::new(self.db)
     }
 
     /// Splits and pins.
-    pub fn splits(self) -> SplitReads<'c> {
+    #[must_use]
+    pub const fn splits(self) -> SplitReads<'c> {
         SplitReads::new(self.db)
     }
 
     /// Contacts for autocomplete.
-    pub fn contacts(self) -> ContactReads<'c> {
+    #[must_use]
+    pub const fn contacts(self) -> ContactReads<'c> {
         ContactReads::new(self.db)
     }
 
     /// Settings.
-    pub fn settings(self) -> SettingReads<'c> {
+    #[must_use]
+    pub const fn settings(self) -> SettingReads<'c> {
         SettingReads::new(self.db)
     }
 
     /// Local search.
-    pub fn search(self) -> SearchReads<'c> {
+    #[must_use]
+    pub const fn search(self) -> SearchReads<'c> {
         SearchReads::new(self.db)
     }
 }
 
 /// The database as the writer just committed it, read on the write
 /// connection: what `on_commit` builds first loads and patches from.
+#[derive(Debug)]
 pub struct Snapshot<'c> {
     reads: Reads<'c>,
 }
 
 impl<'c> Snapshot<'c> {
-    pub(crate) fn new(conn: &'c Connection) -> Self {
+    pub(crate) const fn new(conn: &'c Connection) -> Self {
         Self {
             reads: Reads::new(conn),
         }
@@ -333,12 +364,13 @@ impl<'c> Deref for Snapshot<'c> {
 
 /// A read transaction on a read pool connection: every read in it sees the
 /// same committed state.
+#[derive(Debug)]
 pub struct ReadTx<'c> {
     reads: Reads<'c>,
 }
 
 impl<'c> ReadTx<'c> {
-    pub(crate) fn new(conn: &'c Connection) -> Self {
+    pub(crate) const fn new(conn: &'c Connection) -> Self {
         Self {
             reads: Reads::new(conn),
         }
@@ -357,7 +389,7 @@ impl<'c> Deref for ReadTx<'c> {
 pub(crate) fn require<T>(
     value: Option<T>,
     what: &'static str,
-    id: &dyn std::fmt::Display,
+    id: &dyn fmt::Display,
 ) -> Result<T, StoreError> {
     value.ok_or_else(|| StoreError::not_found(what, id))
 }

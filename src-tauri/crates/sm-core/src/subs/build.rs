@@ -12,25 +12,36 @@ use super::lists::{FIRST_WINDOW, SearchTraits, search_ids, view_ids};
 use super::registry::Sub;
 use crate::views;
 
+/// What updates are built from.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Source<'c> {
+    /// The committed snapshot.
+    pub(super) reads: Reads<'c>,
+    /// Whether Gmail is reachable, for the app subscription.
+    pub(super) online: bool,
+    /// App time, for searches that name relative dates.
+    pub(super) now: Millis,
+}
+
 /// A subscription's first load: the whole of what it shows, and for a list
 /// its ids and the rows of the top of the window. Records the ids sent.
 pub(super) fn first_load(
-    reads: Reads<'_>,
+    source: Source<'_>,
     id: &SubId,
     sub: &mut Sub,
-    online: bool,
-    now: Millis,
 ) -> Result<SubUpdate, StoreError> {
+    let Source { reads, online, now } = source;
     let sub_id = id.clone();
     Ok(match &sub.key {
         SubKey::List { account, view } => {
             let ids = view_ids(reads, *account, view)?;
             let kind = ListKind::of(view);
-            list_first(reads, sub_id, sub, ids, kind)?
+            ListUpdate::new(reads, sub_id, sub, ids, kind).first()?
         }
         SubKey::Search { account, query } => {
             let (ids, traits) = search_ids(reads, *account, query, &sub.gmail_hits, now)?;
-            list_first(reads, sub_id, sub, ids, ListKind::Search(traits))?
+            let kind = ListKind::Search(traits);
+            ListUpdate::new(reads, sub_id, sub, ids, kind).first()?
         }
         SubKey::App => SubUpdate::App {
             sub: sub_id,
@@ -63,28 +74,27 @@ pub(super) fn first_load(
 /// nothing, so the app's `online` and a list's `searching` and `more` reach
 /// the mirror. Records the ids sent.
 pub(super) fn patch(
-    reads: Reads<'_>,
+    source: Source<'_>,
     id: &SubId,
     sub: &mut Sub,
     changes: &Changes,
     forced: bool,
-    online: bool,
-    now: Millis,
 ) -> Result<Option<SubUpdate>, StoreError> {
     if !forced && !affects(&sub.key, changes) {
         return Ok(None);
     }
+    let Source { reads, online, now } = source;
     let sub_id = id.clone();
     Ok(match &sub.key {
         SubKey::List { account, view } => {
             let ids = view_ids(reads, *account, view)?;
             let kind = ListKind::of(view);
-            list_patch(reads, sub_id, sub, ids, kind, changes, forced)?
+            ListUpdate::new(reads, sub_id, sub, ids, kind).patch(changes, forced)?
         }
         SubKey::Search { account, query } => {
             let (ids, traits) = search_ids(reads, *account, query, &sub.gmail_hits, now)?;
             let kind = ListKind::Search(traits);
-            list_patch(reads, sub_id, sub, ids, kind, changes, forced)?
+            ListUpdate::new(reads, sub_id, sub, ids, kind).patch(changes, forced)?
         }
         SubKey::App => Some(SubUpdate::App {
             sub: sub_id,
@@ -134,84 +144,115 @@ impl ListKind {
         }
     }
 
-    fn needs_gmail(self) -> bool {
+    const fn needs_gmail(self) -> bool {
         matches!(self, Self::Search(t) if t.needs_gmail)
     }
 
-    fn looks_in_trash(self) -> bool {
+    const fn looks_in_trash(self) -> bool {
         matches!(self, Self::Search(t) if t.looks_in_trash)
     }
 }
 
-fn list_first(
-    reads: Reads<'_>,
+/// A list subscription's update in the making: the list as the snapshot
+/// has it now, against what the subscription last sent.
+struct ListUpdate<'a, 'c> {
+    reads: Reads<'c>,
     sub_id: SubId,
-    sub: &mut Sub,
+    sub: &'a mut Sub,
+    /// The list's entries now.
     ids: Vec<ListEntry>,
     kind: ListKind,
-) -> Result<SubUpdate, StoreError> {
-    let drafts = kind == ListKind::Drafts;
-    let window: Vec<&str> = ids
-        .iter()
-        .take(FIRST_WINDOW)
-        .map(|e| e.key.as_str())
-        .collect();
-    let rows = views::rows_for_keys(reads, drafts, &window)?;
-    let oldest_hit = oldest_hit(&ids, &sub.gmail_hits);
-    sub.ids.clone_from(&ids);
-    Ok(SubUpdate::List {
-        sub: sub_id,
-        first: true,
-        ids: Some(ids),
-        removed: Vec::new(),
-        moved: Vec::new(),
-        rows,
-        searching: sub.searching,
-        needs_gmail: kind.needs_gmail(),
-        looks_in_trash: kind.looks_in_trash(),
-        more: sub.next_page.is_some(),
-        oldest_hit,
-    })
 }
 
-/// Old ids plus new ids give removals and moves; changed rows go along
-/// whether or not they are in the window.
-fn list_patch(
-    reads: Reads<'_>,
-    sub_id: SubId,
-    sub: &mut Sub,
-    ids: Vec<ListEntry>,
-    kind: ListKind,
-    changes: &Changes,
-    forced: bool,
-) -> Result<Option<SubUpdate>, StoreError> {
-    let drafts = kind == ListKind::Drafts;
-    let d = diff(&sub.ids, &ids, |key| {
-        if drafts {
-            changes.drafts.contains(key)
-        } else {
-            key.parse().is_ok_and(|t| changes.threads.contains(&t))
+impl<'a, 'c> ListUpdate<'a, 'c> {
+    const fn new(
+        reads: Reads<'c>,
+        sub_id: SubId,
+        sub: &'a mut Sub,
+        ids: Vec<ListEntry>,
+        kind: ListKind,
+    ) -> Self {
+        Self {
+            reads,
+            sub_id,
+            sub,
+            ids,
+            kind,
         }
-    });
-    if !forced && d.is_empty() {
-        return Ok(None);
     }
-    let rows = views::rows_for_keys(reads, drafts, &d.changed)?;
-    let oldest_hit = oldest_hit(&ids, &sub.gmail_hits);
-    sub.ids = ids;
-    Ok(Some(SubUpdate::List {
-        sub: sub_id,
-        first: false,
-        ids: None,
-        removed: d.removed,
-        moved: d.moved,
-        rows,
-        searching: sub.searching,
-        needs_gmail: kind.needs_gmail(),
-        looks_in_trash: kind.looks_in_trash(),
-        more: sub.next_page.is_some(),
-        oldest_hit,
-    }))
+
+    /// The first load: every id, and the rows of the top of the window.
+    fn first(self) -> Result<SubUpdate, StoreError> {
+        let Self {
+            reads,
+            sub_id,
+            sub,
+            ids,
+            kind,
+        } = self;
+        let drafts = kind == ListKind::Drafts;
+        let window: Vec<&str> = ids
+            .iter()
+            .take(FIRST_WINDOW)
+            .map(|e| e.key.as_str())
+            .collect();
+        let rows = views::rows_for_keys(reads, drafts, &window)?;
+        let oldest_hit = oldest_hit(&ids, &sub.gmail_hits);
+        sub.ids.clone_from(&ids);
+        Ok(SubUpdate::List {
+            sub: sub_id,
+            first: true,
+            ids: Some(ids),
+            removed: Vec::new(),
+            moved: Vec::new(),
+            rows,
+            searching: sub.searching,
+            needs_gmail: kind.needs_gmail(),
+            looks_in_trash: kind.looks_in_trash(),
+            more: sub.next_page.is_some(),
+            oldest_hit,
+        })
+    }
+
+    /// The patch: old ids plus new ids give removals and moves; changed rows
+    /// go along whether or not they are in the window. `None` when nothing
+    /// changed and the patch is not forced.
+    fn patch(self, changes: &Changes, forced: bool) -> Result<Option<SubUpdate>, StoreError> {
+        let Self {
+            reads,
+            sub_id,
+            sub,
+            ids,
+            kind,
+        } = self;
+        let drafts = kind == ListKind::Drafts;
+        let d = diff(&sub.ids, &ids, |key| {
+            if drafts {
+                changes.drafts.contains(key)
+            } else {
+                key.parse().is_ok_and(|t| changes.threads.contains(&t))
+            }
+        });
+        if !forced && d.is_empty() {
+            return Ok(None);
+        }
+        let rows = views::rows_for_keys(reads, drafts, &d.changed)?;
+        let oldest_hit = oldest_hit(&ids, &sub.gmail_hits);
+        sub.ids = ids;
+        Ok(Some(SubUpdate::List {
+            sub: sub_id,
+            first: false,
+            ids: None,
+            removed: d.removed,
+            moved: d.moved,
+            rows,
+            searching: sub.searching,
+            needs_gmail: kind.needs_gmail(),
+            looks_in_trash: kind.looks_in_trash(),
+            more: sub.next_page.is_some(),
+            oldest_hit,
+        }))
+    }
 }
 
 /// The key of the last entry that is one of the list's Gmail hits.

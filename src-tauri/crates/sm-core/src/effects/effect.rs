@@ -83,7 +83,8 @@ pub enum Effect {
 
 impl Effect {
     /// The variant's name, for logs.
-    pub fn name(&self) -> &'static str {
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
         match self {
             Self::FetchThread { .. } => "fetch thread",
             Self::ThreadUnneeded(_) => "thread unneeded",

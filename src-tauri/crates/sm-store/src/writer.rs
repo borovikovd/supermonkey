@@ -11,6 +11,7 @@
 
 use std::any::Any;
 use std::collections::VecDeque;
+use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::Arc;
@@ -116,6 +117,16 @@ impl<S> Drop for Handle<S> {
 /// reach it without a lock.
 pub struct Writer<S> {
     handle: Arc<Handle<S>>,
+}
+
+/// The writer thread's id only: the queue holds closures, and `S` need not be
+/// `Debug`.
+impl<S> fmt::Debug for Writer<S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Writer")
+            .field("thread", &self.handle.thread)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<S> Clone for Writer<S> {

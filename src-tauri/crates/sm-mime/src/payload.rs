@@ -64,7 +64,7 @@ pub struct MessageHeaders {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Part {
     /// Gmail's `partId`, such as `1.2`.
-    pub part_id: String,
+    pub id: String,
     /// The decoded filename. A nameless calendar part is `invite.ics`, an
     /// attached message `message.eml`, anything else empty.
     pub filename: String,
@@ -114,6 +114,7 @@ impl ParsedMessage {
     }
 
     /// The inline parts whose bytes came in the payload, by Content-ID.
+    #[must_use]
     pub fn cid_images(&self) -> CidImages {
         let mut images = CidImages::new();
         for part in &self.parts {
@@ -191,7 +192,7 @@ struct WirePart<'a> {
     #[serde(default, borrow)]
     body: WireBody<'a>,
     #[serde(default, borrow)]
-    parts: Vec<WirePart<'a>>,
+    parts: Vec<Self>,
 }
 
 #[derive(Deserialize)]
@@ -352,7 +353,7 @@ impl Walk {
         self.found.push((
             message,
             Part {
-                part_id: part.part_id.to_owned(),
+                id: part.part_id.to_owned(),
                 filename,
                 mime_type,
                 size: part.body.size,

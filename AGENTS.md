@@ -146,6 +146,8 @@ Most bugs in an app that syncs live here. Assume every `await` lets the world ch
 
 - Production lints: `clippy::pedantic` plus strict extras, rustdoc lints denied.
   Never loosen them. Use `#[expect(lint, reason = "...")]`, never a bare `#[allow]`.
+  A lint or threshold is left off only on evidence that its hits are false
+  positives: the count and what a sample showed, written beside it in the config.
 - No `unwrap` or `expect` outside tests, no `unsafe`, no silent `as` casts
   (`try_from`).
 - **Ownership.** Borrow to read, take by value to keep. Never take `&T` and clone

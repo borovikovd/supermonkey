@@ -73,13 +73,12 @@ impl Health {
 
     /// A Gmail call failed with `err`.
     pub(crate) fn failed(&self, err: &GmailError) {
-        match err.outcome() {
-            Outcome::Offline => {
-                self.network.set_online(false);
-                self.show(SyncStatus::Offline);
-            }
-            outcome if outcome.is_transient() => self.retrying(),
-            _ => {}
+        let outcome = err.outcome();
+        if matches!(outcome, Outcome::Offline) {
+            self.network.set_online(false);
+            self.show(SyncStatus::Offline);
+        } else if outcome.is_transient() {
+            self.retrying();
         }
     }
 

@@ -31,6 +31,7 @@ pub struct Addressing {
 /// The addressing a fresh composer of `kind` starts with. New mail and
 /// forwards send from the default with no recipients; replies follow
 /// `reply_addressing`. A reply with no target starts like new mail.
+#[must_use]
 pub fn addressing(
     kind: DraftKind,
     target: Option<ReplyTarget<'_>>,

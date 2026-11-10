@@ -2,6 +2,7 @@
 //! entry in the request log. Also the requests a hold has parked.
 
 use axum::http::HeaderMap;
+use axum::http::request::Parts;
 use serde_json::Value;
 use tokio::sync::oneshot;
 
@@ -9,6 +10,7 @@ use crate::{Fault, World};
 
 /// The Gmail API method a request calls, e.g. `messages.batchModify`, or the
 /// OAuth endpoint it reaches (`oauth.authorize`, `oauth.token`, `oauth.revoke`).
+#[must_use]
 pub fn api_name(method: &str, path: &str) -> &'static str {
     let Some(rest) = path.strip_prefix("/gmail/v1/users/") else {
         return match path {
@@ -51,7 +53,9 @@ pub fn api_name(method: &str, path: &str) -> &'static str {
 pub struct RequestInfo {
     /// See [`api_name`].
     pub api: &'static str,
+    /// The HTTP method, in capitals.
     pub method: String,
+    /// The URL's path, without the query.
     pub path: String,
     /// The raw query string, without `?`.
     pub query: String,
@@ -61,14 +65,11 @@ pub struct RequestInfo {
 }
 
 impl RequestInfo {
-    pub(crate) fn new(
-        world: &World,
-        method: &str,
-        path: &str,
-        query: &str,
-        headers: &HeaderMap,
-        body: &[u8],
-    ) -> RequestInfo {
+    pub(crate) fn new(world: &World, request: &Parts, body: &[u8]) -> Self {
+        let method = request.method.as_str();
+        let path = request.uri.path();
+        let query = request.uri.query().unwrap_or_default();
+        let headers = &request.headers;
         let api = api_name(method, path);
         let form = |name: &str| {
             url::form_urlencoded::parse(body)
@@ -94,7 +95,7 @@ impl RequestInfo {
                 .and_then(|t| world.access_tokens.get(t))
                 .map(|(email, _)| email.clone()),
         };
-        RequestInfo {
+        Self {
             api,
             method: method.to_owned(),
             path: path.to_owned(),
@@ -104,6 +105,7 @@ impl RequestInfo {
     }
 
     /// The query parameters, keeping repeated keys.
+    #[must_use]
     pub fn query_pairs(&self) -> Vec<(String, String)> {
         url::form_urlencoded::parse(self.query.as_bytes())
             .into_owned()
@@ -123,7 +125,7 @@ pub enum Answer {
 }
 
 /// A request the fake received, in arrival order.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoggedRequest {
     /// 0-based position in the log.
     pub seq: usize,
@@ -133,8 +135,9 @@ pub struct LoggedRequest {
     pub body: Option<Value>,
     /// App time when it arrived (see [`crate::FakeGmail::set_clock`]), Unix ms.
     pub at_ms: u64,
-    /// The `Origin` and `User-Agent` headers, if sent.
+    /// The `Origin` header, if sent.
     pub origin: Option<String>,
+    /// The `User-Agent` header, if sent.
     pub user_agent: Option<String>,
     /// Parked by a hold right now.
     pub held: bool,
@@ -149,14 +152,14 @@ impl LoggedRequest {
         headers: &HeaderMap,
         body: &[u8],
         at_ms: u64,
-    ) -> LoggedRequest {
+    ) -> Self {
         let header = |name: axum::http::header::HeaderName| {
             headers
                 .get(name)
                 .and_then(|v| v.to_str().ok())
                 .map(str::to_owned)
         };
-        LoggedRequest {
+        Self {
             seq,
             info,
             body: serde_json::from_slice(body).ok(),
@@ -197,9 +200,9 @@ impl Release {
     /// Whether this names hold `id` (or a hold on Gmail method `api`).
     pub(crate) fn covers(&self, id: u64, api: Option<&str>) -> bool {
         match self {
-            Release::All => true,
-            Release::Hold(h) => *h == id,
-            Release::Api(name) => api == Some(name.as_str()),
+            Self::All => true,
+            Self::Hold(h) => *h == id,
+            Self::Api(name) => api == Some(name.as_str()),
         }
     }
 }

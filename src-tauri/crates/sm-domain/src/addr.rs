@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 /// values is `sm-mime`'s job; this is only the value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Addr {
+    /// The display name. `None` when the header gives only an address.
     pub name: Option<String>,
+    /// The address. [`Addr::key`] compares two, ignoring case.
     pub email: String,
 }
 
@@ -28,6 +30,7 @@ impl Addr {
     }
 
     /// The address lowercased, for comparing two mailboxes.
+    #[must_use]
     pub fn key(&self) -> String {
         self.email.to_lowercase()
     }

@@ -19,6 +19,7 @@
 //! stream would take the channel from the app's page.
 
 use std::convert::Infallible;
+use std::fmt;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -62,6 +63,14 @@ const BODY_LIMIT: usize = MAX_ATTACHMENT_BYTES.div_ceil(3) * 4 + 1024 * 1024;
 #[derive(Clone)]
 pub struct WebBridge(Arc<Shared>);
 
+/// Its name only: its state is the core and the pages' streams, which carry
+/// mail.
+impl fmt::Debug for WebBridge {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("WebBridge").finish_non_exhaustive()
+    }
+}
+
 struct Shared {
     app: RwLock<Option<Arc<App>>>,
     /// The core's activity: a command counts as busy while it runs.
@@ -97,6 +106,7 @@ impl WebBridge {
     }
 
     /// The core served now.
+    #[must_use]
     pub fn app(&self) -> Option<Arc<App>> {
         self.0.app.read().clone()
     }
@@ -132,11 +142,13 @@ impl WebBridge {
     }
 
     /// Sign-ins running now.
+    #[must_use]
     pub fn sign_ins(&self) -> usize {
         self.0.sign_ins.load(Ordering::Acquire)
     }
 
     /// `rev` and `ack` of the newest channel message sent to a page.
+    #[must_use]
     pub fn last_sent(&self) -> (Rev, ActionNo) {
         *self.0.sent.lock()
     }
@@ -252,7 +264,7 @@ async fn events(State(bridge): State<WebBridge>) -> Response {
     let sink = Box::new(move |message: ChannelMessage| {
         *shared.sent.lock() = (message.rev, message.ack);
         // The page has gone; the next stream takes the channel.
-        let _ = to_page.send(Push::Message(message));
+        _ = to_page.send(Push::Message(message));
     });
     if let Err(e) = app.lifecycle().connect(sink).await {
         tracing::warn!(error = %e, "couldn't connect a page's event stream");

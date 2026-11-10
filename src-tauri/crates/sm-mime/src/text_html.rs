@@ -10,6 +10,7 @@ use regex::Regex;
 /// `>`-quoted lines, with the `… wrote:` line before it, is wrapped in
 /// `<blockquote type="cite">` so [`split_quoted_history`](crate::split_quoted_history)
 /// can fold it. Sanitize the result like any other body.
+#[must_use]
 pub fn text_to_html(text: &str) -> String {
     let text = text.replace("\r\n", "\n");
     let lines: Vec<&str> = text.trim_end().split('\n').collect();
@@ -83,7 +84,7 @@ fn write_linked(out: &mut String, line: &str) {
             line.get(last..found.start()).unwrap_or_default(),
         ));
         // Writing to a String cannot fail.
-        let _ = write!(
+        _ = write!(
             out,
             r#"<a href="{}">{}</a>"#,
             html_escape::encode_double_quoted_attribute(url),

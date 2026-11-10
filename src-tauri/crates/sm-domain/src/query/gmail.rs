@@ -31,8 +31,8 @@ pub fn gmail_query(raw: &str) -> String {
                 TokKind::LParen => Kind::Open,
                 TokKind::RParen => Kind::Close,
                 TokKind::Minus => Kind::Minus,
-                _ if t.is_keyword("OR") || t.is_keyword("AND") => Kind::Op,
-                _ => Kind::Other,
+                TokKind::Word(_) if t.is_keyword("OR") || t.is_keyword("AND") => Kind::Op,
+                TokKind::Phrase { .. } | TokKind::Word(_) => Kind::Other,
             };
             (kind, t)
         })
@@ -58,7 +58,7 @@ pub fn gmail_query(raw: &str) -> String {
     out
 }
 
-fn is_list(t: &Tok<'_>) -> bool {
+const fn is_list(t: &Tok<'_>) -> bool {
     matches!(t.kind, TokKind::Word(w) if w.eq_ignore_ascii_case("is:list"))
 }
 
@@ -75,7 +75,7 @@ fn dangling(kept: &[(Kind, Tok<'_>)]) -> Option<(usize, usize)> {
                 Some((i - 1, 3))
             }
             Kind::Open if next == Some(Kind::Close) => Some((i, 2)),
-            _ => None,
+            Kind::Open | Kind::Close | Kind::Op | Kind::Minus | Kind::Other => None,
         }
     })
 }

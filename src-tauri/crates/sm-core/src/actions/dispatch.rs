@@ -63,7 +63,7 @@ pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), A
 }
 
 /// The action's type, as the UI names it, for logs.
-pub(super) fn kind(action: &Action) -> &'static str {
+pub(super) const fn kind(action: &Action) -> &'static str {
     match action {
         Action::Reset => "reset",
         Action::Subscribe { .. } => "subscribe",

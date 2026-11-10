@@ -43,12 +43,14 @@ pub struct AccountRecord {
 
 impl AccountRecord {
     /// Who the account is, for "mail from me" and From defaults.
+    #[must_use]
     pub fn into_identity(self) -> Identity {
         Identity::new(self.email, self.display_name, self.send_as)
     }
 
     /// The sync state the rail shows: Sign in again overrides the rest.
-    pub fn status(&self) -> SyncStatus {
+    #[must_use]
+    pub const fn status(&self) -> SyncStatus {
         if self.needs_signin {
             SyncStatus::NeedsSignin
         } else {
@@ -57,6 +59,7 @@ impl AccountRecord {
     }
 
     /// The avatar color.
+    #[must_use]
     pub fn hue(&self) -> &'static str {
         avatar_hue(self.hue_slot)
     }
@@ -112,13 +115,13 @@ fn account_row(r: &Row<'_>) -> rusqlite::Result<AccountRecord> {
 }
 
 /// Reads of accounts.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct AccountReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> AccountReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -181,12 +184,13 @@ impl<'c> AccountReads<'c> {
 }
 
 /// Writes to accounts.
+#[derive(Debug)]
 pub struct AccountWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> AccountWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 

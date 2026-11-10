@@ -13,13 +13,13 @@ use serde::de::DeserializeOwned;
 use crate::StoreError;
 
 /// A connection, with helpers that run one cached statement each.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Db<'c> {
     conn: &'c Connection,
 }
 
 impl<'c> Db<'c> {
-    pub(crate) fn new(conn: &'c Connection) -> Self {
+    pub(crate) const fn new(conn: &'c Connection) -> Self {
         Self { conn }
     }
 

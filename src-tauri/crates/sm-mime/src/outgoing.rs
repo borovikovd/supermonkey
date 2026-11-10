@@ -153,6 +153,7 @@ pub struct PlainMessage<'a> {
 
 /// Builds the RFC 5322 bytes of a [`PlainMessage`], for `messages.send`. Its
 /// `Message-ID` is `ub.unsubscribe.<date ms>@<sender's domain>`.
+#[must_use]
 pub fn build_plain(message: &PlainMessage<'_>) -> Vec<u8> {
     let mut out = Vec::new();
     MessageBuilder::new()

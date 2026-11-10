@@ -1,8 +1,56 @@
+# Thresholds and bans, following github.com/deltartificial/vulcan and merged with
+# what was here (see the lints in Cargo.toml). A vulcan setting left out says why,
+# with its count on this workspace when it was tried (2026-11-10).
+
+# Tests may panic and print.
+allow-dbg-in-tests = true
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
+allow-panic-in-tests = true
 allow-print-in-tests = true
-# parking_lot locks don't poison, so a panic elsewhere can't wedge every caller.
+
+# Nothing here is a published API, so lints may ask to change `pub` items.
+avoid-breaking-exported-api = false
+
+# Sizes: what is too big for the stack or to pass by value, and what is small
+# enough that a reference to it is the slower choice.
+too-large-for-stack = 128
+pass-by-value-size-limit = 128
+trivial-copy-size-limit = 32
+array-size-threshold = 8192
+
+# Simpler functions.
+too-many-arguments-threshold = 5
+too-many-lines-threshold = 75
+# type-complexity-threshold stays at clippy's 250, not vulcan's 100: 74 hits, 10
+# sampled, all ordinary signatures (`Result<Vec<(ThreadId, Option<SplitId>)>, E>`,
+# `Box<dyn FnMut(ChannelMessage) + Send>`). Aliases for them would hide a `Box` or
+# an `Arc`, which AGENTS.md forbids.
+
+check-inconsistent-struct-field-initializers = true
+lint-commented-code = true
+
 disallowed-types = [
+  # parking_lot locks don't poison, so a panic elsewhere can't wedge every caller.
   { path = "std::sync::Mutex", reason = "use parking_lot::Mutex" },
   { path = "std::sync::RwLock", reason = "use parking_lot::RwLock" },
+  { path = "std::collections::LinkedList", reason = "use `Vec` or `VecDeque`" },
 ]
+# vulcan also bans std's HashMap and HashSet in favor of FxHash. Not here (124
+# uses): these maps are keyed by ids, addresses, and label names taken from mail,
+# which is hostile input, and FxHash has no defense against chosen keys. std's
+# seeded SipHash does, and no map here is hot enough to measure the difference.
+
+disallowed-methods = [
+  { path = "std::env::var", reason = "use `std::env::var_os`: a value that is not UTF-8 is not the same as no value" },
+]
+# vulcan also bans:
+# - std::mem::drop: 66 hits, 13 sampled, all deliberate: a lock guard ended before
+#   an `.await` (AGENTS.md: never hold a lock across one) or a value discarded by
+#   name. `drop(guard)` says so at the point it happens; a scope block says less.
+# - Option::unwrap_or and Result::unwrap_or: 68 hits, 13 sampled, all a plain
+#   default (`i64::try_from(ms).unwrap_or(i64::MAX)`, `.unwrap_or("utf-8")`). The
+#   `map_or(default, |v| v)` it asks for is the same thing, longer.
+# - the print macros (disallowed-macros): 12 hits. Seven are build.rs talking to
+#   cargo, which is how a build script must; the rest are already held by
+#   clippy::print_stdout and print_stderr, each with its reason.

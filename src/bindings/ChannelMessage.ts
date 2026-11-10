@@ -5,7 +5,12 @@ import type { SubUpdate } from "./SubUpdate";
 /**
  * One message per writer commit.
  */
-export type ChannelMessage = { rev: number, 
+export type ChannelMessage = { 
+/**
+ * The commit's `rev`, or the current one on a first load's own
+ * message.
+ */
+rev: number, 
 /**
  * Highest UI action number applied in this snapshot.
  */
@@ -15,4 +20,9 @@ ack: number,
  * message whose `ack` covers it; an action `ack` covers that no message
  * listed was applied.
  */
-rejected: Array<Rejection>, updates: Array<SubUpdate>, };
+rejected: Array<Rejection>, 
+/**
+ * The first load or patch of each open subscription the commit
+ * affects, possibly none.
+ */
+updates: Array<SubUpdate>, };

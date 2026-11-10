@@ -33,6 +33,7 @@ pub struct Mailto {
 /// Reads the `<uri>, <uri>` list of a `List-Unsubscribe` header, and its
 /// `List-Unsubscribe-Post` companion. URIs outside angle brackets and schemes
 /// other than mailto and http(s) are ignored.
+#[must_use]
 pub fn list_unsubscribe(header: &str, post: Option<&str>) -> ListUnsubscribe {
     let mut out = ListUnsubscribe::default();
     let uris = header

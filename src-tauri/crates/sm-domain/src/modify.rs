@@ -37,6 +37,7 @@ impl LabelDelta {
     /// The fixed delta of an action kind, as the UI sends it; `None` for the
     /// label actions, which name their label. Return to inbox from Trash or
     /// Spam also removes `TRASH` or `SPAM`; that is the caller's to add.
+    #[must_use]
     pub fn preset(kind: ModifyKind) -> Option<Self> {
         use SystemLabel::{Inbox, Spam, Starred, Trash, Unread};
         let (add, remove): (&[SystemLabel], &[SystemLabel]) = match kind {
@@ -58,21 +59,25 @@ impl LabelDelta {
     }
 
     /// The labels added.
-    pub fn add(&self) -> &LabelSet {
+    #[must_use]
+    pub const fn add(&self) -> &LabelSet {
         &self.add
     }
 
     /// The labels removed.
-    pub fn remove(&self) -> &LabelSet {
+    #[must_use]
+    pub const fn remove(&self) -> &LabelSet {
         &self.remove
     }
 
     /// The labels added and the labels removed, taken.
+    #[must_use]
     pub fn into_parts(self) -> (LabelSet, LabelSet) {
         (self.add, self.remove)
     }
 
     /// Mark unread: adds `UNREAD` to the latest live message only, as Gmail does.
+    #[must_use]
     pub fn marks_unread(&self) -> bool {
         self.add.has(SystemLabel::Unread)
     }
@@ -91,6 +96,7 @@ pub struct MessageChange {
 
 impl MessageChange {
     /// `labels` with this change applied.
+    #[must_use]
     pub fn apply(&self, labels: &LabelSet) -> LabelSet {
         let mut out = labels.without(&self.removed);
         out.extend(self.added.iter().cloned());
@@ -101,6 +107,7 @@ impl MessageChange {
     /// `current`: remove what was added and is still there, add back what
     /// was removed and is still missing. Later changes made elsewhere stay.
     /// `None` when nothing is left to revert.
+    #[must_use]
     pub fn reverted(&self, current: &LabelSet) -> Option<Self> {
         let added = self.removed.without(current);
         let removed = self.added.and(current);
@@ -129,6 +136,7 @@ pub struct ThreadChange {
 impl ThreadChange {
     /// Whether reverting puts `snooze_before` back: the action changed the
     /// snooze and nothing has changed it since (`now` is still its value).
+    #[must_use]
     pub fn restores_snooze(&self, now: Option<Millis>) -> bool {
         self.snooze_after != self.snooze_before && now == self.snooze_after
     }
@@ -145,7 +153,8 @@ pub enum SnoozeEdit {
 
 /// A thread's `snooze_until` after an action: what the action sets, else
 /// cleared by archive, trash, and spam, else unchanged.
-pub fn snooze_after(
+#[must_use]
+pub const fn snooze_after(
     edit: Option<SnoozeEdit>,
     kind: ModifyKind,
     before: Option<Millis>,
@@ -177,6 +186,7 @@ pub struct ThreadModify<'a> {
 
 /// What an action with `delta` does to a thread. Drafts are never labeled:
 /// Gmail does not label them, and their ids change on every update.
+#[must_use]
 pub fn plan_modify<'a>(thread: &'a Thread, delta: &LabelDelta) -> ThreadModify<'a> {
     let latest_live = thread.latest_live().map(|m| m.id);
     // With no live message, mark unread falls back to every message.

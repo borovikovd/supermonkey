@@ -3,7 +3,6 @@
 //! core goes through a [`Clock`].
 
 use std::collections::BTreeMap;
-use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -58,11 +57,13 @@ impl Clock for SystemClock {
 /// time (the wall clock) and the time timers count against move together,
 /// except in [`ManualClock::jump`], which is the Mac asleep: the wall clock
 /// moves and no timer notices.
+#[derive(Debug)]
 pub struct ManualClock {
     activity: Arc<Activity>,
     state: Mutex<ManualState>,
 }
 
+#[derive(Debug)]
 struct ManualState {
     /// App time.
     wall: Millis,
@@ -73,7 +74,7 @@ struct ManualState {
     sleepers: BTreeMap<(u64, u64), Arc<Sleeper>>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Sleeper {
     /// Set when the timer fires; taken by the sleeping task.
     fired: Mutex<Option<Busy>>,
@@ -82,7 +83,7 @@ struct Sleeper {
 
 impl ManualClock {
     /// A clock standing at `wall`, whose fired timers count in `activity`.
-    pub fn new(activity: Arc<Activity>, wall: Millis) -> Self {
+    pub const fn new(activity: Arc<Activity>, wall: Millis) -> Self {
         Self {
             activity,
             state: Mutex::new(ManualState {

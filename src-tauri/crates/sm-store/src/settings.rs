@@ -16,13 +16,13 @@ const ON: &str = "on";
 const OFF: &str = "off";
 
 /// Reads of settings.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct SettingReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> SettingReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -55,12 +55,13 @@ impl<'c> SettingReads<'c> {
 }
 
 /// Writes to settings.
+#[derive(Debug)]
 pub struct SettingWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> SettingWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 

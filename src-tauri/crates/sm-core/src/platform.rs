@@ -52,6 +52,7 @@ pub struct Notification {
 
 impl Notification {
     /// The text under the title: the account, then the body.
+    #[must_use]
     pub fn text(&self) -> String {
         format!("{} · {}", self.account_email, self.body)
     }

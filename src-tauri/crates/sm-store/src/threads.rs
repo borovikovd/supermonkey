@@ -64,16 +64,19 @@ pub struct ThreadRow {
 
 impl ThreadRow {
     /// Starred.
+    #[must_use]
     pub fn starred(&self) -> bool {
         self.labels.has(SystemLabel::Starred)
     }
 
     /// In Trash.
+    #[must_use]
     pub fn in_trash(&self) -> bool {
         self.labels.has(SystemLabel::Trash)
     }
 
     /// In Spam.
+    #[must_use]
     pub fn in_spam(&self) -> bool {
         self.labels.has(SystemLabel::Spam)
     }
@@ -156,13 +159,13 @@ fn listed(r: &Row<'_>) -> rusqlite::Result<ListedThread> {
 }
 
 /// Reads of threads.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct ThreadReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> ThreadReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -424,12 +427,13 @@ pub struct StoredThread {
 
 /// Writes to threads. A thread's derived columns are written only by its
 /// message writes; these change what is not derived.
+#[derive(Debug)]
 pub struct ThreadWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> ThreadWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 
@@ -506,9 +510,8 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
         Ok(())
     }
 
-    /// Stores Gmail's `historyId` for the thread, as a history batch moves it.
     /// Marks threads as owed a metadata read (see [`ThreadReads::owed_reads`]).
-    pub fn clear_history_ids(&mut self, ids: &[ThreadId]) -> Result<(), StoreError> {
+    pub fn clear_history_ids(&self, ids: &[ThreadId]) -> Result<(), StoreError> {
         for &id in ids {
             self.tx.db().execute(
                 "mark a thread owed a read",
@@ -519,6 +522,7 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
         Ok(())
     }
 
+    /// Stores Gmail's `historyId` for the thread, as a history batch moves it.
     pub fn set_history_id(
         &mut self,
         id: ThreadId,

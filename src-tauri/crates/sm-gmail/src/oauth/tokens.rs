@@ -11,6 +11,7 @@ use crate::outcome::GmailError;
 /// Hands an account's Gmail client its bearer tokens. The access token is
 /// cached in memory and refreshed with the refresh token shortly before it
 /// expires, or after a 401. Concurrent callers share one refresh.
+#[derive(Debug)]
 pub struct Tokens {
     config: OAuthConfig,
     http: HttpClient,
@@ -24,6 +25,7 @@ pub struct Tokens {
 
 impl Tokens {
     /// Tokens for a stored refresh token, with no access token yet.
+    #[must_use]
     pub fn new(config: OAuthConfig, http: HttpClient, refresh_token: RefreshToken) -> Self {
         Self {
             config,
@@ -35,6 +37,7 @@ impl Tokens {
     }
 
     /// Tokens for a sign-in that just finished, seeded with its access token.
+    #[must_use]
     pub fn from_grant(config: OAuthConfig, http: HttpClient, grant: Grant) -> Self {
         let tokens = Self::new(config, http, grant.refresh_token);
         *tokens.cached.lock() = Some(grant.access_token);
@@ -42,7 +45,7 @@ impl Tokens {
     }
 
     /// The account's refresh token, to store or revoke.
-    pub fn refresh_token(&self) -> &RefreshToken {
+    pub const fn refresh_token(&self) -> &RefreshToken {
         &self.refresh_token
     }
 

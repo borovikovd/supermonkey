@@ -4,4 +4,8 @@ import type { BlockedSender } from "./BlockedSender";
 /**
  * The account's blocked senders.
  */
-export type BlockedSenders = { "kind": "list", senders: Array<BlockedSender>, } | { "kind": "needsPermission" };
+export type BlockedSenders = { "kind": "list", 
+/**
+ * One per filter that matches only a sender and sends it to Trash.
+ */
+senders: Array<BlockedSender>, } | { "kind": "needsPermission" };

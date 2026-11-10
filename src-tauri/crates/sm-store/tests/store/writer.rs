@@ -1,6 +1,5 @@
 //! The writer actor: ordering, transactions, rev, hooks, panics, stopping.
 
-use std::future::Future;
 use std::pin::pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;

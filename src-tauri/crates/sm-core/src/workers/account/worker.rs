@@ -47,7 +47,7 @@ pub(crate) struct AccountWorker {
     /// The worker it replaced, until that one has stopped: stopping this
     /// one waits for it too, so no two of an account's workers ever run at
     /// once, however quickly they replace each other.
-    replaced: Arc<Mutex<Option<AccountWorker>>>,
+    replaced: Arc<Mutex<Option<Self>>>,
 }
 
 impl AccountWorker {
@@ -91,7 +91,7 @@ impl AccountWorker {
 
     /// The state its tasks share, for work started from outside: an opened
     /// thread, a Gmail listing, an attachment download.
-    pub(crate) fn ctx(&self) -> &Arc<AccountCtx> {
+    pub(crate) const fn ctx(&self) -> &Arc<AccountCtx> {
         &self.ctx
     }
 
@@ -101,7 +101,7 @@ impl AccountWorker {
     }
 
     /// The sign-in whose grant it runs on.
-    pub(crate) fn grant(&self) -> Grant {
+    pub(crate) const fn grant(&self) -> Grant {
         self.grant
     }
 

@@ -47,7 +47,7 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
             // Busy until the runner has taken it, so the core never looks
             // idle between this run and the next. The worker that asked may
             // have been replaced meanwhile.
-            let _ = done.send(runner.tasks.activity().track("op result", result));
+            _ = done.send(runner.tasks.activity().track("op result", result));
         });
         // Parked: the run counts as busy, and its result carries its own
         // activity. A held Gmail request then counts once (`settle`).
@@ -91,7 +91,13 @@ async fn wait_after(ctx: &AccountCtx, failure: &Failure, backoff: &mut Backoff) 
                     return false;
                 }
                 Outcome::Offline => draining(ctx, network.wait(ctx.clock(), OFFLINE_RETRY)).await,
-                outcome => {
+                outcome @ (Outcome::NoResponse
+                | Outcome::Unauthorized
+                | Outcome::RateLimited { .. }
+                | Outcome::ServerError { .. }
+                | Outcome::NotFound
+                | Outcome::Conflict
+                | Outcome::Rejected { .. }) => {
                     let wait = backoff.next_delay(err);
                     tracing::debug!(account = ctx.account.0, %outcome, ?wait, "an op backs off");
                     draining(ctx, network.wait(ctx.clock(), wait)).await;

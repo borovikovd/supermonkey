@@ -5,7 +5,32 @@ import type { SnoozeChange } from "./SnoozeChange";
 /**
  * A resolved mail change, never a toggle.
  */
-export type ModifyAction = { account: number, kind: ModifyKind, threads: number[], add: Array<string>, remove: Array<string>, snooze: SnoozeChange | null, 
+export type ModifyAction = { 
+/**
+ * The account the threads are in, fixed when the user acted.
+ */
+account: number, 
+/**
+ * What the user did: it names the undo entry, and done, trash, and spam
+ * clear a snooze.
+ */
+kind: ModifyKind, 
+/**
+ * The threads to change. One that is gone by now is skipped.
+ */
+threads: number[], 
+/**
+ * Label ids to add to the threads' messages.
+ */
+add: Array<string>, 
+/**
+ * Label ids to remove from the threads' messages.
+ */
+remove: Array<string>, 
+/**
+ * The snooze time to set or clear. `None` leaves it to `kind`.
+ */
+snooze: SnoozeChange | null, 
 /**
  * Read-on-open is not an undo entry.
  */

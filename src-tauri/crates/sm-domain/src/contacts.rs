@@ -33,6 +33,7 @@ pub struct MatchSpan {
 /// of the name, the start of the address, or the start of its domain, checked
 /// in that order. The query may run across words (`john sm` matches `John
 /// Smith`). A blank query matches nothing.
+#[must_use]
 pub fn contact_matches(query: &str, name: &str, email: &str) -> Option<MatchSpan> {
     let query = query.trim();
     if query.is_empty() {
@@ -82,6 +83,7 @@ fn prefix_len(haystack: &str, needle: &str) -> Option<usize> {
 }
 
 /// Whether the local part of `email` contains `noreply` or `no-reply`, ignoring case.
+#[must_use]
 pub fn is_noreply(email: &str) -> bool {
     let local = email
         .rsplit_once('@')
@@ -117,13 +119,15 @@ impl ContactStats {
     /// Whether the address may be suggested at all. Never: the account's own
     /// addresses (`is_own`), `noreply` addresses, and addresses never sent to
     /// that appeared only on list mail.
-    pub fn is_suggestible(&self, email: &str, is_own: bool) -> bool {
+    #[must_use]
+    pub fn is_suggestible(self, email: &str, is_own: bool) -> bool {
         !is_own && !is_noreply(email) && (self.sent != 0 || !self.list_only)
     }
 
     /// The suggestion's rank at `now`. Ten messages sent last week outrank
     /// fifty sent a year ago.
-    pub fn rank(&self, now: Millis) -> ContactRank {
+    #[must_use]
+    pub fn rank(self, now: Millis) -> ContactRank {
         let recency = recency_factor(self.last_contact, now);
         if self.sent > 0 {
             ContactRank {
@@ -146,6 +150,7 @@ impl ContactStats {
 
 /// `0.5 ^ (age / 90 days)`: 1.0 for contact now, 0.5 at 90 days, 0.25 at
 /// 180. A last contact in the future counts as now.
+#[must_use]
 pub fn recency_factor(last_contact: Millis, now: Millis) -> f64 {
     let age_ms = now.since(last_contact).max(0);
     // Whole seconds fit in f64 exactly for any span this ranking sees.

@@ -4,4 +4,13 @@
  * What the shell tells the page outside the channel: Tauri's `emit` in the
  * app, a named server-sent event on the web bridge.
  */
-export type AppEvent = { "event": "notification-open", "payload": { account: number, thread: number | null, } } | { "event": "quit-requested" };
+export type AppEvent = { "event": "notification-open", "payload": { 
+/**
+ * The account the notification was for.
+ */
+account: number, 
+/**
+ * The thread to highlight. `None` for a summary of several
+ * messages.
+ */
+thread: number | null, } } | { "event": "quit-requested" };

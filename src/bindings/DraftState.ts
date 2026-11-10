@@ -3,8 +3,81 @@ import type { Addr } from "./Addr";
 import type { DraftAttachment } from "./DraftAttachment";
 import type { DraftKind } from "./DraftKind";
 
-export type DraftState = { id: string, account: number, kind: DraftKind, replyAll: boolean, thread: number | null, target: number | null, from: Addr | null, to: Array<Addr>, cc: Array<Addr>, bcc: Array<Addr>, subject: string, bodyHtml: string, 
 /**
- * Read-only quote block shown collapsed under the editor.
+ * A composer subscription's data: one draft.
  */
-quoteHtml: string | null, attachments: Array<DraftAttachment>, resumed: boolean, gone: boolean, rev: number, };
+export type DraftState = { 
+/**
+ * The draft's local id, made by the page.
+ */
+id: string, 
+/**
+ * The account it sends from; it never changes.
+ */
+account: number, 
+/**
+ * New, reply, or forward, kept from when the draft was started.
+ */
+kind: DraftKind, 
+/**
+ * A reply to everyone on the target message, not only to its sender.
+ */
+replyAll: boolean, 
+/**
+ * The thread it replies on or forwards from. `None` for a new message.
+ */
+thread: number | null, 
+/**
+ * The message it answers and quotes. `None` for a new message.
+ */
+target: number | null, 
+/**
+ * The `sendAs` address it sends from; Rust fills it at a fresh
+ * composer's first save. `None` when the draft has no From.
+ */
+from: Addr | null, 
+/**
+ * The To recipients.
+ */
+to: Array<Addr>, 
+/**
+ * The Cc recipients.
+ */
+cc: Array<Addr>, 
+/**
+ * The Bcc recipients.
+ */
+bcc: Array<Addr>, 
+/**
+ * The subject. Rust fills a reply's and a forward's at the first save.
+ */
+subject: string, 
+/**
+ * The editor's HTML, without the quote.
+ */
+bodyHtml: string, 
+/**
+ * Read-only quote block shown collapsed under the editor. `None` for a
+ * draft that quotes nothing.
+ */
+quoteHtml: string | null, 
+/**
+ * Its files: those the user added, and those carried from a forwarded
+ * message or a Gmail draft.
+ */
+attachments: Array<DraftAttachment>, 
+/**
+ * Reopened from a saved draft, as opposed to started fresh: closing it
+ * never discards it as untouched.
+ */
+resumed: boolean, 
+/**
+ * Sent or deleted: the composer closes. The other fields are then
+ * empty.
+ */
+gone: boolean, 
+/**
+ * The `rev` of its last change: what an `update` save names as the
+ * state its fields were based on.
+ */
+rev: number, };

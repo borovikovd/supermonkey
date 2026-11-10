@@ -49,7 +49,13 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
                         return;
                     }
                     Outcome::Offline => OFFLINE_RETRY,
-                    _ => backoff.next_delay(&e),
+                    Outcome::NoResponse
+                    | Outcome::Unauthorized
+                    | Outcome::RateLimited { .. }
+                    | Outcome::ServerError { .. }
+                    | Outcome::NotFound
+                    | Outcome::Conflict
+                    | Outcome::Rejected { .. } => backoff.next_delay(&e),
                 }
             }
             Err(Failure::Store(e)) => {
@@ -177,7 +183,14 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
             let retry = match failure {
                 WriteFailure::Gmail(e) => match e.outcome() {
                     Outcome::Rejected { message, .. } => Err(message.clone()),
-                    _ => Ok(Failure::Gmail(e)),
+                    Outcome::Offline
+                    | Outcome::NoResponse
+                    | Outcome::Unauthorized
+                    | Outcome::InvalidGrant
+                    | Outcome::RateLimited { .. }
+                    | Outcome::ServerError { .. }
+                    | Outcome::NotFound
+                    | Outcome::Conflict => Ok(Failure::Gmail(e)),
                 },
                 WriteFailure::Local(message) => Err(message),
                 WriteFailure::Store(e) => Ok(Failure::Store(e)),
@@ -203,7 +216,8 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
     let applied = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
-            store_ids(tx, state, &local, ids, None, now)?;
+            // A draft gone meanwhile went with its row, which `resolve` finds.
+            store_ids(tx, &local, ids)?;
             resolve(tx, state, id, Event::Written(gmail), now)
         })
         .await?;
@@ -247,7 +261,11 @@ async fn send_draft(ctx: &AccountCtx, row: &Outbox, gmail: &GmailDraftId) -> Res
                 Ok(())
             }
             // No clear answer: it stays sending, and `drafts.get` settles it.
-            _ => Err(e.into()),
+            Outcome::NoResponse
+            | Outcome::Unauthorized
+            | Outcome::RateLimited { .. }
+            | Outcome::ServerError { .. }
+            | Outcome::Conflict => Err(e.into()),
         },
     }
 }

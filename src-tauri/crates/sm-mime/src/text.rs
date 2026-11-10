@@ -11,12 +11,14 @@ use crate::collapse_whitespace;
 /// Plain text of an HTML body for full-text search and snippets: no `<head>`,
 /// `<style>`, `<script>` or comments, entities decoded, and every run of
 /// whitespace one space.
+#[must_use]
 pub fn html_to_text(html: &str) -> String {
     collapse_whitespace(&render(html, Style::Search))
 }
 
 /// A Gmail `snippet` as text: Gmail sends it with HTML entities (`&#39;`,
 /// `&amp;`) escaped, though it holds no markup.
+#[must_use]
 pub fn snippet_text(snippet: &str) -> Cow<'_, str> {
     html_escape::decode_html_entities(snippet)
 }
@@ -181,7 +183,7 @@ struct TextWriter {
 }
 
 impl TextWriter {
-    fn new(style: Style) -> Self {
+    const fn new(style: Style) -> Self {
         Self {
             out: String::new(),
             quote_depth: 0,

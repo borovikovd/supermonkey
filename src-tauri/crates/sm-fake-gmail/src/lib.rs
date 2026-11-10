@@ -42,6 +42,7 @@ mod traffic;
 
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
+use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -49,6 +50,7 @@ use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::Body;
+use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Response};
 use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
@@ -74,6 +76,15 @@ pub struct FakeGmail {
     offline: watch::Sender<bool>,
     listening: watch::Receiver<bool>,
     server: JoinHandle<()>,
+}
+
+/// Where it listens only: its state holds every mailbox and token.
+impl fmt::Debug for FakeGmail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FakeGmail")
+            .field("addr", &self.addr)
+            .finish_non_exhaustive()
+    }
 }
 
 pub(crate) struct Shared {
@@ -121,6 +132,7 @@ pub(crate) struct World {
 pub struct Revocation {
     /// The token the client sent.
     pub token: String,
+    /// The user the token was issued to.
     pub email: String,
 }
 
@@ -134,7 +146,7 @@ pub(crate) struct AuthCode {
 
 impl Default for World {
     fn default() -> Self {
-        World {
+        Self {
             users: Vec::new(),
             mailboxes: HashMap::new(),
             refresh_tokens: HashMap::new(),
@@ -152,12 +164,12 @@ impl Default for World {
 }
 
 impl World {
-    pub fn next(&mut self) -> u64 {
+    pub(crate) const fn next(&mut self) -> u64 {
         self.counter += 1;
         self.counter
     }
 
-    pub fn issue_access_token(&mut self, email: &str) -> String {
+    pub(crate) fn issue_access_token(&mut self, email: &str) -> String {
         let token = format!("ya29.fake-{}", self.next());
         let expires = Instant::now() + self.token_lifetime;
         self.access_tokens
@@ -165,14 +177,14 @@ impl World {
         token
     }
 
-    pub fn issue_refresh_token(&mut self, email: &str) -> String {
+    pub(crate) fn issue_refresh_token(&mut self, email: &str) -> String {
         let token = format!("1//fake-refresh-{}", self.next());
         self.refresh_tokens.insert(token.clone(), email.to_owned());
         token
     }
 
     /// Whose refresh or access token this is.
-    pub fn token_owner(&self, token: &str) -> Option<String> {
+    pub(crate) fn token_owner(&self, token: &str) -> Option<String> {
         self.refresh_tokens
             .get(token)
             .or_else(|| self.access_tokens.get(token).map(|(email, _)| email))
@@ -181,12 +193,12 @@ impl World {
 }
 
 impl Shared {
-    pub fn world(&self) -> MutexGuard<'_, World> {
+    pub(crate) fn world(&self) -> MutexGuard<'_, World> {
         self.world.lock()
     }
 
     /// App time, if a clock was set; otherwise mailboxes keep their own dates.
-    pub fn clock_ms(&self) -> Option<u64> {
+    pub(crate) fn clock_ms(&self) -> Option<u64> {
         let clock = self.clock.lock().clone();
         clock.map(|now| now())
     }
@@ -197,6 +209,16 @@ impl Shared {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
         })
+    }
+
+    /// Adds a request to the log as it arrives. Returns its place there.
+    fn log_request(&self, info: &RequestInfo, headers: &HeaderMap, body: &[u8]) -> usize {
+        // The clock is the caller's code: never run it under the log lock.
+        let at_ms = self.now_ms();
+        let mut log = self.log.lock();
+        let seq = log.len();
+        log.push(LoggedRequest::new(seq, info.clone(), headers, body, at_ms));
+        seq
     }
 
     /// What the first fault that applies to this request does to it. Every matching entry
@@ -223,7 +245,12 @@ impl Shared {
         let parked = match fault {
             Fault::Hold => true,
             Fault::HoldAnswer => false,
-            fault => return Some(Plan::Fault(fault)),
+            other @ (Fault::Drop
+            | Fault::NoResponse
+            | Fault::Status { .. }
+            | Fault::Delay(_)
+            | Fault::StatusAfterApply { .. }
+            | Fault::OmitThreads(_)) => return Some(Plan::Fault(other)),
         };
         let (release, released) = oneshot::channel();
         traffic.held.push(Held {
@@ -347,8 +374,9 @@ pub struct Matcher {
 impl Matcher {
     /// Requests with `method` (`"*"` for any) whose path matches `path_glob`, where `*`
     /// matches any run of characters, e.g. `"*/drafts/send"` or `"/token"`.
+    #[must_use]
     pub fn new(method: &str, path_glob: &str) -> Self {
-        Matcher {
+        Self {
             method: (method != "*").then(|| method.to_ascii_uppercase()),
             path: path_glob.to_owned(),
             api: None,
@@ -360,8 +388,9 @@ impl Matcher {
     }
 
     /// Requests to a Gmail method by name (see [`api_name`]), e.g. `messages.batchModify`.
+    #[must_use]
     pub fn api(name: &str) -> Self {
-        Matcher::new("*", "*").for_api(name)
+        Self::new("*", "*").for_api(name)
     }
 
     /// Only requests to this Gmail method (see [`api_name`]).
@@ -387,25 +416,26 @@ impl Matcher {
 
     /// Only the `n`th matching request (1-based, counted from injection).
     #[must_use]
-    pub fn nth(mut self, n: usize) -> Self {
+    pub const fn nth(mut self, n: usize) -> Self {
         self.nth = Some(n);
         self
     }
 
     /// Only the first `n` matching requests.
     #[must_use]
-    pub fn times(mut self, n: usize) -> Self {
+    pub const fn times(mut self, n: usize) -> Self {
         self.times = Some(n);
         self
     }
 
     /// Only the next matching request.
     #[must_use]
-    pub fn once(self) -> Self {
+    pub const fn once(self) -> Self {
         self.times(1)
     }
 
     /// Whether this picks `request` (ignoring `nth` and `times`).
+    #[must_use]
     pub fn matches(&self, request: &RequestInfo) -> bool {
         self.method.as_deref().is_none_or(|m| m == request.method)
             && glob(&self.path, &request.path)
@@ -446,9 +476,11 @@ pub enum Fault {
     NoResponse,
     /// Answer with this status and a Google-shaped error body, without doing anything.
     Status {
+        /// The HTTP status.
         status: u16,
         /// The `errors[0].reason`, e.g. `rateLimitExceeded`.
         reason: String,
+        /// The `Retry-After` header, in seconds. `None` sends no such header.
         retry_after_secs: Option<u64>,
     },
     /// Wait, then handle the request normally.
@@ -460,15 +492,21 @@ pub enum Fault {
     /// that comes during the work lets the answer go as soon as it is ready.
     HoldAnswer,
     /// Do the request's work, then answer with this error: done, but the client hears otherwise.
-    StatusAfterApply { status: u16, reason: String },
+    StatusAfterApply {
+        /// The HTTP status.
+        status: u16,
+        /// The `errors[0].reason`.
+        reason: String,
+    },
     /// Handle the request, then leave these thread ids out of a `threads.list` page.
     OmitThreads(Vec<String>),
 }
 
 impl Fault {
     /// A [`Fault::Status`] without `Retry-After`.
-    pub fn status(status: u16, reason: &str) -> Fault {
-        Fault::Status {
+    #[must_use]
+    pub fn status(status: u16, reason: &str) -> Self {
+        Self::Status {
             status,
             reason: reason.to_owned(),
             retry_after_secs: None,
@@ -485,7 +523,7 @@ struct FaultEntry {
 }
 
 impl FaultEntry {
-    fn applies(&self) -> bool {
+    const fn applies(&self) -> bool {
         match (self.matcher.nth, self.matcher.times) {
             (Some(n), _) => self.seen == n,
             (None, Some(t)) => self.seen <= t,
@@ -497,11 +535,19 @@ impl FaultEntry {
 /// Simple fields for a message added with [`FakeUser::add_message`].
 #[derive(Debug, Clone, Default)]
 pub struct NewMessage {
+    /// The `From` header, as written: `Ann <ann@example.com>`.
     pub from: String,
+    /// The `To` mailboxes, each written as `from` is. Empty leaves the
+    /// header out.
     pub to: Vec<String>,
+    /// The `Cc` mailboxes. Empty leaves the header out.
     pub cc: Vec<String>,
+    /// The subject as text; the fake encodes it for the header.
     pub subject: String,
+    /// The `text/plain` body. With `html` too, the body is
+    /// `multipart/alternative`; with neither, an empty text part.
     pub text: Option<String>,
+    /// The `text/html` body.
     pub html: Option<String>,
     /// The charset the text parts' `Content-Type` names; default `utf-8`. Their
     /// bytes stay UTF-8, as Gmail's `format=full` can serve a `koi8-r` part.
@@ -512,10 +558,16 @@ pub struct NewMessage {
     pub thread_id: Option<String>,
     /// Defaults to a generated `<...@fake.example>`.
     pub message_id: Option<String>,
+    /// The `In-Reply-To` header. `None` leaves it out.
     pub in_reply_to: Option<String>,
+    /// The `References` header. `None` leaves it out.
     pub references: Option<String>,
+    /// The `List-Id` header, which makes the message list mail. `None`
+    /// leaves it out.
     pub list_id: Option<String>,
+    /// More headers, as name and value, written after the ones above.
     pub extra_headers: Vec<(String, String)>,
+    /// Its files, each a part beside the body.
     pub attachments: Vec<NewAttachment>,
     /// Milliseconds since the epoch. Defaults to a clock a minute past the previous message.
     pub internal_date: Option<u64>,
@@ -523,8 +575,9 @@ pub struct NewMessage {
 
 impl NewMessage {
     /// An unread inbox message to `me@example.com` with a text body.
+    #[must_use]
     pub fn inbox(from: &str, subject: &str, text: &str) -> Self {
-        NewMessage {
+        Self {
             from: from.to_owned(),
             to: vec!["me@example.com".to_owned()],
             subject: subject.to_owned(),
@@ -538,9 +591,15 @@ impl NewMessage {
 /// An attachment for [`NewMessage`]. With a content id it is an inline part.
 #[derive(Debug, Clone, Default)]
 pub struct NewAttachment {
+    /// The file name, in the part's `Content-Disposition` and
+    /// `Content-Type`.
     pub filename: String,
+    /// The part's MIME type.
     pub mime_type: String,
+    /// The file's bytes.
     pub data: Vec<u8>,
+    /// The `Content-ID`, without angle brackets. Set, the part is inline, in
+    /// `multipart/related` with the body.
     pub content_id: Option<String>,
     /// `Content-Disposition: inline` with no content id, beside the body, as
     /// Apple Mail sends every file.
@@ -553,7 +612,9 @@ pub struct NewAttachment {
 /// Ids of a message the fake stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddedMessage {
+    /// Gmail's id of the message.
     pub id: String,
+    /// Gmail's id of the thread it joined or started.
     pub thread_id: String,
     /// The `Message-ID` header.
     pub rfc822_message_id: String,
@@ -562,17 +623,25 @@ pub struct AddedMessage {
 /// A snapshot of a stored message.
 #[derive(Debug, Clone)]
 pub struct FakeMessage {
+    /// Gmail's id of the message.
     pub id: String,
+    /// Gmail's id of its thread.
     pub thread_id: String,
+    /// Its label ids when the snapshot was taken.
     pub label_ids: Vec<String>,
+    /// Gmail's `internalDate`: milliseconds since the epoch.
     pub internal_date: u64,
+    /// The snippet the fake made from its text.
     pub snippet: String,
+    /// Its top-level headers in order, as name and value.
     pub headers: Vec<(String, String)>,
+    /// Its RFC 822 bytes, as `format=raw` serves them.
     pub raw: Vec<u8>,
 }
 
 impl FakeMessage {
     /// The first header named `name`, case-insensitively.
+    #[must_use]
     pub fn header(&self, name: &str) -> Option<&str> {
         mime::header(&self.headers, name)
     }
@@ -581,13 +650,16 @@ impl FakeMessage {
 /// A snapshot of a stored draft.
 #[derive(Debug, Clone)]
 pub struct FakeDraft {
+    /// Gmail's id of the draft, which an update keeps.
     pub id: String,
+    /// The draft's message. Every update replaces it with one under a new
+    /// id.
     pub message: FakeMessage,
 }
 
 impl From<&Msg> for FakeMessage {
     fn from(msg: &Msg) -> Self {
-        FakeMessage {
+        Self {
             id: msg.id.clone(),
             thread_id: msg.thread_id.clone(),
             label_ids: msg.label_ids.clone(),
@@ -602,7 +674,8 @@ impl From<&Msg> for FakeMessage {
 impl FakeGmail {
     /// Starts the fake on `127.0.0.1` on a free port.
     /// Must be called inside a Tokio runtime: the server task is spawned on it.
-    pub fn start() -> FakeGmail {
+    #[must_use]
+    pub fn start() -> Self {
         let listener = bind(SocketAddr::from(([127, 0, 0, 1], 0))).expect("bind the fake");
         let addr = listener
             .local_addr()
@@ -616,16 +689,12 @@ impl FakeGmail {
         });
         let (offline, offline_rx) = watch::channel(false);
         let (listening_tx, listening) = watch::channel(true);
-        let router = routes::router(Arc::clone(&shared));
-        let server = tokio::spawn(serve(
-            listener,
-            addr,
-            Arc::clone(&shared),
-            router,
-            offline_rx,
-            listening_tx,
-        ));
-        FakeGmail {
+        let backend = Backend {
+            shared: Arc::clone(&shared),
+            router: routes::router(Arc::clone(&shared)),
+        };
+        let server = tokio::spawn(serve(listener, addr, backend, offline_rx, listening_tx));
+        Self {
             addr,
             shared,
             offline,
@@ -635,27 +704,32 @@ impl FakeGmail {
     }
 
     /// The Gmail API base URL, e.g. `http://127.0.0.1:PORT`.
+    #[must_use]
     pub fn base_url(&self) -> String {
         format!("http://{}", self.addr)
     }
 
     /// The OAuth token endpoint.
+    #[must_use]
     pub fn token_url(&self) -> String {
         format!("http://{}/token", self.addr)
     }
 
     /// The OAuth revoke endpoint.
+    #[must_use]
     pub fn revoke_url(&self) -> String {
         format!("http://{}/revoke", self.addr)
     }
 
     /// The consent page. A GET redirects straight to `redirect_uri` with a code for the user
     /// named by `login_hint`, or the first user added.
+    #[must_use]
     pub fn auth_url(&self) -> String {
         format!("http://{}/auth", self.addr)
     }
 
     /// Adds a user with an empty mailbox (system labels only) and a refresh token.
+    #[must_use]
     pub fn add_user(&self, email: &str) -> FakeUser {
         let mut world = self.shared.world();
         world.users.push(email.to_owned());
@@ -685,12 +759,14 @@ impl FakeGmail {
     }
 
     /// The query parameters of the last consent-page request.
+    #[must_use]
     pub fn last_auth_request(&self) -> Option<Vec<(String, String)>> {
         self.shared.world().last_auth_request.clone()
     }
 
     /// Adds a fault for matching requests. The first applicable fault wins. Returns its id,
     /// which [`Release::Hold`] names.
+    #[must_use]
     pub fn inject(&self, matcher: Matcher, fault: Fault) -> u64 {
         let mut traffic = self.shared.traffic.lock();
         traffic.next_fault += 1;
@@ -712,6 +788,7 @@ impl FakeGmail {
     /// Ends holds and lets the requests they parked go on: handled normally, or suffering
     /// `then`. Returns how many requests it released, answers of [`Fault::HoldAnswer`]
     /// still being worked on included.
+    #[must_use]
     pub fn release(&self, which: &Release, then: Option<&Fault>) -> usize {
         let mut traffic = self.shared.traffic.lock();
         traffic.faults.retain(|e| {
@@ -727,13 +804,14 @@ impl FakeGmail {
         for h in released {
             self.shared.set_held(h.seq, false);
             // The handler may be gone already (its connection closed).
-            let _ = h.release.send(then.cloned());
+            _ = h.release.send(then.cloned());
         }
         n
     }
 
     /// Requests parked by a hold now. A [`Fault::HoldAnswer`] request counts once its work
     /// is done and its answer waits.
+    #[must_use]
     pub fn held(&self) -> usize {
         self.shared
             .traffic
@@ -745,6 +823,7 @@ impl FakeGmail {
     }
 
     /// Requests parked now by the holds `which` names.
+    #[must_use]
     pub fn held_by(&self, which: &Release) -> usize {
         self.shared
             .traffic
@@ -756,16 +835,19 @@ impl FakeGmail {
     }
 
     /// Requests being handled now, held ones included.
+    #[must_use]
     pub fn in_flight(&self) -> usize {
         self.shared.in_flight.load(Ordering::Acquire)
     }
 
     /// Every request received so far.
+    #[must_use]
     pub fn requests(&self) -> Vec<LoggedRequest> {
         self.shared.log.lock().clone()
     }
 
     /// How many requests matched `method` (`"*"` for any) and `path_glob`.
+    #[must_use]
     pub fn count(&self, method: &str, path_glob: &str) -> usize {
         let matcher = Matcher::new(method, path_glob);
         self.shared
@@ -789,6 +871,7 @@ impl FakeGmail {
     }
 
     /// Tokens revoked at Google so far, oldest first.
+    #[must_use]
     pub fn revocations(&self) -> Vec<Revocation> {
         self.shared.world().revocations.clone()
     }
@@ -827,6 +910,15 @@ pub struct FakeUser {
     refresh_token: String,
 }
 
+/// The user's address only, never the refresh token.
+impl fmt::Debug for FakeUser {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FakeUser")
+            .field("email", &self.email)
+            .finish_non_exhaustive()
+    }
+}
+
 impl FakeUser {
     fn with<T>(&self, f: impl FnOnce(&mut Mailbox) -> T) -> T {
         let mut world = self.shared.world();
@@ -834,16 +926,19 @@ impl FakeUser {
     }
 
     /// The user's address.
+    #[must_use]
     pub fn email(&self) -> &str {
         &self.email
     }
 
     /// The refresh token issued when the user was added.
+    #[must_use]
     pub fn refresh_token(&self) -> &str {
         &self.refresh_token
     }
 
     /// Issues a fresh access token.
+    #[must_use]
     pub fn access_token(&self) -> String {
         self.shared.world().issue_access_token(&self.email)
     }
@@ -859,8 +954,8 @@ impl FakeUser {
         }
     }
 
-    /// While set, refreshing any of this user's tokens answers `invalid_grant`.
     /// The user's Gmail filters, oldest first.
+    #[must_use]
     pub fn filters(&self) -> Vec<Filter> {
         self.with(|mb| mb.filters.clone())
     }
@@ -877,6 +972,7 @@ impl FakeUser {
         }
     }
 
+    /// While set, refreshing any of this user's tokens answers `invalid_grant`.
     pub fn set_invalid_grant(&self, invalid: bool) {
         let mut world = self.shared.world();
         if invalid {
@@ -892,6 +988,7 @@ impl FakeUser {
     }
 
     /// Every send-as address: email, display name, and whether it is the primary one.
+    #[must_use]
     pub fn send_as(&self) -> Vec<(String, String, bool)> {
         self.with(|mb| {
             mb.send_as
@@ -913,11 +1010,13 @@ impl FakeUser {
     }
 
     /// Creates a user label and returns its id. Panics if the name exists.
+    #[must_use]
     pub fn add_label(&self, name: &str) -> String {
         self.with(|mb| mb.create_label(name).expect("label name is free"))
     }
 
     /// Label ids and names.
+    #[must_use]
     pub fn labels(&self) -> Vec<(String, String)> {
         self.with(|mb| {
             mb.labels
@@ -928,6 +1027,7 @@ impl FakeUser {
     }
 
     /// Stores a message as if it arrived, recording `messagesAdded`.
+    #[must_use]
     pub fn add_message(&self, mut msg: NewMessage) -> AddedMessage {
         let now = self.shared.clock_ms();
         self.with(|mb| {
@@ -935,15 +1035,17 @@ impl FakeUser {
             let (raw, rfc822_message_id) = built(mb, &mut msg, date);
             let labels = mb.filtered_labels(sender_email(&msg.from), msg.labels);
             let id = mb.insert_raw(raw, msg.thread_id, labels, Some(date));
+            let thread_id = mb.messages[&id].thread_id.clone();
             AddedMessage {
-                thread_id: mb.messages[&id].thread_id.clone(),
                 id,
+                thread_id,
                 rfc822_message_id,
             }
         })
     }
 
     /// A draft made by another client (Gmail on the web, a phone). Labels are ignored.
+    #[must_use]
     pub fn add_draft(&self, mut msg: NewMessage) -> AddedDraft {
         let now = self.shared.clock_ms();
         self.with(|mb| {
@@ -951,16 +1053,18 @@ impl FakeUser {
             let (raw, rfc822_message_id) = built(mb, &mut msg, date);
             let id = mb.create_draft(raw, msg.thread_id, Some(date));
             let message = mb.drafts[&id].clone();
+            let thread_id = mb.messages[&message].thread_id.clone();
             AddedDraft {
-                thread_id: mb.messages[&message].thread_id.clone(),
                 id,
                 message_id: message,
+                thread_id,
                 rfc822_message_id,
             }
         })
     }
 
     /// Replaces a draft's message, as another client editing it. `None` if it is gone.
+    #[must_use]
     pub fn update_draft(&self, draft_id: &str, mut msg: NewMessage) -> Option<AddedDraft> {
         let now = self.shared.clock_ms();
         self.with(|mb| {
@@ -969,33 +1073,38 @@ impl FakeUser {
             let message = mb
                 .update_draft(draft_id, raw, msg.thread_id, Some(date))
                 .ok()?;
+            let thread_id = mb.messages[&message].thread_id.clone();
             Some(AddedDraft {
-                thread_id: mb.messages[&message].thread_id.clone(),
                 id: draft_id.to_owned(),
                 message_id: message,
+                thread_id,
                 rfc822_message_id,
             })
         })
     }
 
     /// Deletes a draft, as another client. Returns false if it was gone.
+    #[must_use]
     pub fn delete_draft(&self, draft_id: &str) -> bool {
         self.with(|mb| mb.delete_draft(draft_id).is_ok())
     }
 
     /// Sends a draft from another client (a phone). Returns the sent message, or `None` if
     /// the draft was gone.
+    #[must_use]
     pub fn send_draft(&self, draft_id: &str) -> Option<AddedMessage> {
         let now = self.shared.clock_ms();
         self.with(|mb| {
             let id = mb.send_draft(draft_id, None, now).ok()?;
             let msg = &mb.messages[&id];
+            let thread_id = msg.thread_id.clone();
+            let rfc822_message_id = mime::header(&msg.headers, "Message-ID")
+                .unwrap_or_default()
+                .to_owned();
             Some(AddedMessage {
-                thread_id: msg.thread_id.clone(),
-                rfc822_message_id: mime::header(&msg.headers, "Message-ID")
-                    .unwrap_or_default()
-                    .to_owned(),
                 id,
+                thread_id,
+                rfc822_message_id,
             })
         })
     }
@@ -1016,6 +1125,7 @@ impl FakeUser {
     }
 
     /// Stores raw RFC 822 bytes as a message.
+    #[must_use]
     pub fn add_raw_message(&self, raw: &[u8], thread_id: Option<&str>, labels: &[&str]) -> String {
         self.with(|mb| {
             let thread_id = thread_id.map(str::to_owned);
@@ -1038,16 +1148,19 @@ impl FakeUser {
     }
 
     /// A stored message.
+    #[must_use]
     pub fn message(&self, id: &str) -> Option<FakeMessage> {
         self.with(|mb| mb.messages.get(id).map(FakeMessage::from))
     }
 
     /// Every stored message, in id order.
+    #[must_use]
     pub fn messages(&self) -> Vec<FakeMessage> {
         self.with(|mb| mb.messages.values().map(FakeMessage::from).collect())
     }
 
     /// A thread's messages, oldest first.
+    #[must_use]
     pub fn thread(&self, thread_id: &str) -> Vec<FakeMessage> {
         self.with(|mb| {
             mb.thread_messages(thread_id)
@@ -1058,6 +1171,7 @@ impl FakeUser {
     }
 
     /// Every draft.
+    #[must_use]
     pub fn drafts(&self) -> Vec<FakeDraft> {
         self.with(|mb| {
             mb.drafts
@@ -1071,6 +1185,7 @@ impl FakeUser {
     }
 
     /// The mailbox's current history id.
+    #[must_use]
     pub fn history_id(&self) -> u64 {
         self.with(|mb| mb.history_id)
     }
@@ -1093,8 +1208,11 @@ impl FakeUser {
 /// Ids of a draft the fake stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddedDraft {
+    /// Gmail's id of the draft.
     pub id: String,
+    /// Gmail's id of the draft's message.
     pub message_id: String,
+    /// Gmail's id of the thread the draft is on.
     pub thread_id: String,
     /// The `Message-ID` header.
     pub rfc822_message_id: String,
@@ -1123,12 +1241,18 @@ fn bind(addr: SocketAddr) -> std::io::Result<TcpListener> {
     socket.listen(1024)
 }
 
+/// What answers a request: the fake's state and the routes over it. Cheap to clone.
+#[derive(Clone)]
+struct Backend {
+    shared: Arc<Shared>,
+    router: Router,
+}
+
 /// Accepts connections until the fake goes offline, then waits and rebinds the same port.
 async fn serve(
     listener: TcpListener,
     addr: SocketAddr,
-    shared: Arc<Shared>,
-    router: Router,
+    backend: Backend,
     mut offline: watch::Receiver<bool>,
     listening: watch::Sender<bool>,
 ) {
@@ -1139,7 +1263,7 @@ async fn serve(
             tokio::select! {
                 accepted = l.accept() => {
                     if let Ok((stream, _)) = accepted {
-                        tokio::spawn(connection(stream, Arc::clone(&shared), router.clone(), offline_for_connections.clone()));
+                        tokio::spawn(connection(stream, backend.clone(), offline_for_connections.clone()));
                     }
                 }
                 _ = offline.wait_for(|&o| o) => {
@@ -1160,19 +1284,13 @@ async fn serve(
 /// Serves one connection until the client closes it, a fault kills it, or the fake goes offline.
 async fn connection(
     stream: tokio::net::TcpStream,
-    shared: Arc<Shared>,
-    router: Router,
+    backend: Backend,
     mut offline: watch::Receiver<bool>,
 ) {
     let kill = Arc::new(Notify::new());
     let service_kill = Arc::clone(&kill);
     let service = hyper::service::service_fn(move |req| {
-        handle(
-            Arc::clone(&shared),
-            router.clone(),
-            Arc::clone(&service_kill),
-            req,
-        )
+        handle(backend.clone(), Arc::clone(&service_kill), req)
     });
     let conn =
         hyper::server::conn::http1::Builder::new().serve_connection(TokioIo::new(stream), service);
@@ -1183,39 +1301,19 @@ async fn connection(
     }
 }
 
+/// Answers one request: logs it, applies the fault or hold that matches it, and routes it.
 async fn handle(
-    shared: Arc<Shared>,
-    router: Router,
+    backend: Backend,
     kill: Arc<Notify>,
     req: hyper::Request<Incoming>,
 ) -> Result<Response, Infallible> {
+    let Backend { shared, router } = backend;
     let (parts, body) = req.into_parts();
     let body = axum::body::to_bytes(Body::new(body), usize::MAX)
         .await
         .unwrap_or_default();
-    let query = parts.uri.query().unwrap_or_default();
-    let info = RequestInfo::new(
-        &shared.world(),
-        parts.method.as_str(),
-        parts.uri.path(),
-        query,
-        &parts.headers,
-        &body,
-    );
-    // The clock is the caller's code: never run it under the log lock.
-    let at_ms = shared.now_ms();
-    let seq = {
-        let mut log = shared.log.lock();
-        let seq = log.len();
-        log.push(LoggedRequest::new(
-            seq,
-            info.clone(),
-            &parts.headers,
-            &body,
-            at_ms,
-        ));
-        seq
-    };
+    let info = RequestInfo::new(&shared.world(), &parts, &body);
+    let seq = shared.log_request(&info, &parts.headers, &body);
     let _in_flight = InFlight::new(&shared.in_flight);
     let mut hold_answer = None;
     let fault = match shared.fault_for(seq, &info) {
@@ -1292,5 +1390,5 @@ async fn omit_threads(response: Response, ids: &[String]) -> Response {
 fn sender_email(from: &str) -> &str {
     from.rsplit_once('<')
         .and_then(|(_, rest)| rest.split_once('>'))
-        .map_or(from.trim(), |(addr, _)| addr.trim())
+        .map_or_else(|| from.trim(), |(addr, _)| addr.trim())
 }

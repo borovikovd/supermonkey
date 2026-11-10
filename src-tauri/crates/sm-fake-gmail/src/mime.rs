@@ -332,7 +332,8 @@ pub(crate) fn build(msg: &NewMessage, date_ms: u64, message_id: &str) -> Vec<u8>
     let mut out = String::new();
     let mut push = |name: &str, value: &str| {
         if !value.is_empty() {
-            let _ = write!(out, "{name}: {value}\r\n");
+            // Writing to a String cannot fail.
+            _ = write!(out, "{name}: {value}\r\n");
         }
     };
     push("From", &msg.from);
@@ -412,7 +413,8 @@ fn attachment(a: &NewAttachment) -> String {
 fn leaf(content_type: &str, data: &[u8], extra: &[(String, String)]) -> String {
     let mut out = format!("Content-Type: {content_type}\r\nContent-Transfer-Encoding: base64\r\n");
     for (name, value) in extra {
-        let _ = write!(out, "{name}: {value}\r\n");
+        // Writing to a String cannot fail.
+        _ = write!(out, "{name}: {value}\r\n");
     }
     out.push_str("\r\n");
     let encoded = STANDARD.encode(data);
@@ -425,10 +427,11 @@ fn leaf(content_type: &str, data: &[u8], extra: &[(String, String)]) -> String {
 
 fn multipart(subtype: &str, boundary: &str, parts: &[String]) -> String {
     let mut out = format!("Content-Type: multipart/{subtype}; boundary=\"{boundary}\"\r\n\r\n");
+    // Writing to a String cannot fail.
     for part in parts {
-        let _ = write!(out, "--{boundary}\r\n{part}\r\n");
+        _ = write!(out, "--{boundary}\r\n{part}\r\n");
     }
-    let _ = write!(out, "--{boundary}--\r\n");
+    _ = write!(out, "--{boundary}--\r\n");
     out
 }
 

@@ -92,10 +92,25 @@ resolver = "3"
 [workspace.lints.rust]
 unsafe_code = "forbid"
 unused_must_use = "deny"
-rust_2018_idioms = { level = "warn", priority = -1 }
+rust_2018_idioms = { level = "deny", priority = -1 }
 unused_qualifications = "warn"
+# Every type can be printed while debugging, and every item says what it is.
+missing_debug_implementations = "warn"
+missing_docs = "warn"
+# `pub` means exported: an item only the crate uses is `pub(crate)`.
+unreachable_pub = "warn"
+unnameable_types = "warn"
+redundant_imports = "warn"
+redundant_lifetimes = "warn"
+rust_2024_incompatible_pat = "warn"
+elided_lifetimes_in_paths = "warn"
+explicit_outlives_requirements = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_extern_crates = "warn"
+unused_lifetimes = "warn"
 
 [workspace.lints.rustdoc]
+all = { level = "warn", priority = -1 }
 # Doc warnings fail `cargo doc` (the `lint:rust` task).
 broken_intra_doc_links = "deny"
 private_intra_doc_links = "deny"
@@ -105,38 +120,119 @@ invalid_rust_codeblocks = "deny"
 bare_urls = "deny"
 redundant_explicit_links = "deny"
 
+# The groups, then single lints on top. The single lints and the thresholds in
+# clippy.toml follow github.com/deltartificial/vulcan, merged with what was here:
+# nothing that was on is off. A vulcan lint left off says why, with its count on
+# this workspace when it was tried (2026-11-10).
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 # Pedantic lints that do not fit an application crate:
-# - `#[must_use]` on every getter adds noise; real must-use types are marked;
-must_use_candidate = "allow"
 # - errors are typed per crate and documented on the enum, and nothing here is a published API;
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 # - every hash map and set uses the default hasher; generic hashers would only add type noise.
 implicit_hasher = "allow"
-# Restriction lints worth having in production code.
+
+# No panics outside tests (clippy.toml allows them there).
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unwrap_in_result = "warn"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
-unwrap_used = "warn"
-print_stdout = "warn"
-print_stderr = "warn"
+# The process ends through the app's quit path, and nothing is leaked on purpose.
+exit = "warn"
+mem_forget = "warn"
+
+# Nothing is dropped silently.
+let_underscore_must_use = "warn"
+must_use_candidate = "warn"
+# Keep the cause when mapping errors.
+map_err_ignore = "warn"
+# A match on an enum names its variants, so a new one is a compile error, not a
+# silent fall into `_`.
+wildcard_enum_match_arm = "warn"
+rest_pat_in_fully_bound_structs = "warn"
+
 # Exceptions are `#[expect(lint, reason = "...")]`, so a stale one is reported.
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
-# A guard held through a `match` or `if let` body is a deadlock waiting to happen.
-significant_drop_in_scrutinee = "warn"
-# Keep the cause when mapping errors.
-map_err_ignore = "warn"
-# Numeric conversions are explicit (`From` / `try_from`), never `as`.
-as_conversions = "warn"
-# Panics only in tests (clippy.toml allows them there).
-expect_used = "warn"
-unwrap_in_result = "warn"
+missing_assert_message = "warn"
+
+# Ownership (AGENTS.md).
 # An Arc clone reads as `Arc::clone(&x)`, never like a deep copy.
 clone_on_ref_ptr = "warn"
-needless_pass_by_ref_mut = "warn"
-# A clone of a value never used again is a move (AGENTS.md: take by value to keep).
+# A clone of a value never used again is a move.
 redundant_clone = "warn"
+needless_pass_by_ref_mut = "warn"
+rc_buffer = "warn"
+str_to_string = "warn"
+unnecessary_struct_initialization = "warn"
+
+# Locks.
+# A guard held through a `match` or `if let` body is a deadlock waiting to happen.
+significant_drop_in_scrutinee = "warn"
+await_holding_lock = "warn"
+mutex_integer = "warn"
+
+# Numbers.
+# Numeric conversions are explicit (`From` / `try_from`), never `as`.
+as_conversions = "warn"
+lossy_float_literal = "warn"
+imprecise_flops = "warn"
+suboptimal_flops = "warn"
+unused_rounding = "warn"
+while_float = "warn"
+
+# Output goes through `tracing`.
+print_stdout = "warn"
+print_stderr = "warn"
+
+# Plain code.
+branches_sharing_code = "warn"
+clear_with_drain = "warn"
+collection_is_never_read = "warn"
+create_dir = "warn"
+deref_by_slicing = "warn"
+derive_partial_eq_without_eq = "warn"
+empty_drop = "warn"
+equatable_if_let = "warn"
+if_then_some_else_none = "warn"
+iter_on_empty_collections = "warn"
+iter_on_single_items = "warn"
+iter_with_drain = "warn"
+large_stack_frames = "warn"
+missing_const_for_fn = "warn"
+nonstandard_macro_braces = "warn"
+or_fun_call = "warn"
+path_buf_push_overwrite = "warn"
+read_zero_byte_vec = "warn"
+shadow_same = "warn"
+string_lit_as_bytes = "warn"
+string_lit_chars_any = "warn"
+suspicious_operation_groupings = "warn"
+trailing_empty_array = "warn"
+trait_duplication_in_bounds = "warn"
+transmute_undefined_repr = "warn"
+trivial_regex = "warn"
+tuple_array_conversions = "warn"
+type_repetition_in_bounds = "warn"
+uninhabited_references = "warn"
+unnecessary_self_imports = "warn"
+unused_peekable = "warn"
+use_self = "warn"
+useless_let_if_seq = "warn"
+verbose_file_reads = "warn"
+
+# vulcan lints left off:
+# - shadow_reuse: 188 hits, 12 sampled, all a value refined under its own name
+#   (`let subject = subject.trim()`, `let Some(row) = row else`). A second name
+#   would leave the stale value in scope to be used by mistake.
+# - tests_outside_test_module: 53 hits, all in integration test crates
+#   (`crates/*/tests`, `tests/`), which only ever build as tests.
+# - the lints vulcan allows (len_without_is_empty, wrong_self_convention,
+#   result_large_err, needless_collect, manual_unwrap_or, and so on) stay on:
+#   this workspace passes them.
+

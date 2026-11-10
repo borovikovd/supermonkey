@@ -2,6 +2,7 @@
 //! new account or again for one that signed out, and waking the account
 //! workers. Removing an account is the `removeAccount` action.
 
+use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -23,6 +24,13 @@ pub struct Accounts {
     /// The sign-in waiting in the browser, if any, by its number.
     waiting: Mutex<Option<(u64, CancellationToken)>>,
     next: AtomicU64,
+}
+
+/// Its name only: it holds the core's handles and the platform, none of them a value to print.
+impl fmt::Debug for Accounts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Accounts").finish_non_exhaustive()
+    }
 }
 
 /// A sign-in that finished: whose grant it is.

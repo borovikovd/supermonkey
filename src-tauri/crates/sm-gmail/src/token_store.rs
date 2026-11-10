@@ -68,7 +68,8 @@ pub struct TokenFile {
 
 impl TokenFile {
     /// The store at `path`. The file is made on the first save.
-    pub fn new(path: PathBuf) -> Self {
+    #[must_use]
+    pub const fn new(path: PathBuf) -> Self {
         Self {
             path,
             file: Mutex::new(()),

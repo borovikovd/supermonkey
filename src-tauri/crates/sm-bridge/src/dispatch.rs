@@ -11,7 +11,7 @@ use sm_ipc::{Command, Reply};
 use crate::commands::{self, CmdResult};
 
 /// What a command asks of the host that runs it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Answer {
     /// The command ran; this is its reply.
     Reply(Reply),

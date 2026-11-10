@@ -20,13 +20,13 @@ pub const SEARCH_LIMIT: usize = 500;
 const CANDIDATE_LIMIT: i64 = 5_000;
 
 /// Local search.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct SearchReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> SearchReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -101,26 +101,7 @@ impl<'c> SearchReads<'c> {
         // The index narrows, or can't help; the query language decides.
         let scope = query.scope();
         let past_live = !scope.live_only();
-        let candidates: Vec<(ThreadId, bool)> = match &fts {
-            Some(fts) => self.db.all(
-                "narrow a search with the index",
-                "SELECT t.id, t.snooze_until IS NOT NULL AS snoozed FROM threads t
-                 WHERE t.account_id = ?2 AND (t.has_live = 1 OR ?4) AND t.id IN (
-                   SELECT m.thread_id FROM messages_fts f JOIN messages m ON m.id = f.rowid
-                   WHERE messages_fts MATCH ?1 AND m.account_id = ?2 AND (m.is_live = 1 OR ?4))
-                 LIMIT ?3",
-                (fts, account, CANDIDATE_LIMIT, past_live),
-                |r| Ok((r.get("id")?, r.get("snoozed")?)),
-            )?,
-            None => self.db.all(
-                "read search candidates",
-                "SELECT id, snooze_until IS NOT NULL AS snoozed FROM threads
-                 WHERE account_id = ?1 AND (has_live = 1 OR ?3)
-                 ORDER BY sort_time DESC, id DESC LIMIT ?2",
-                (account, CANDIDATE_LIMIT, past_live),
-                |r| Ok((r.get("id")?, r.get("snoozed")?)),
-            )?,
-        };
+        let candidates = self.candidates(account, fts.as_deref(), past_live)?;
         let Some(me) = AccountReads::new(self.db).identity(account)? else {
             return Ok(Vec::new());
         };
@@ -158,5 +139,36 @@ impl<'c> SearchReads<'c> {
             }
         }
         Ok(matched)
+    }
+
+    /// The threads a search checks one by one, each with whether it is
+    /// snoozed: those the index narrows the search to, or the newest when the
+    /// index can't help.
+    fn candidates(
+        self,
+        account: AccountId,
+        fts: Option<&str>,
+        past_live: bool,
+    ) -> Result<Vec<(ThreadId, bool)>, StoreError> {
+        match fts {
+            Some(fts) => self.db.all(
+                "narrow a search with the index",
+                "SELECT t.id, t.snooze_until IS NOT NULL AS snoozed FROM threads t
+                 WHERE t.account_id = ?2 AND (t.has_live = 1 OR ?4) AND t.id IN (
+                   SELECT m.thread_id FROM messages_fts f JOIN messages m ON m.id = f.rowid
+                   WHERE messages_fts MATCH ?1 AND m.account_id = ?2 AND (m.is_live = 1 OR ?4))
+                 LIMIT ?3",
+                (fts, account, CANDIDATE_LIMIT, past_live),
+                |r| Ok((r.get("id")?, r.get("snoozed")?)),
+            ),
+            None => self.db.all(
+                "read search candidates",
+                "SELECT id, snooze_until IS NOT NULL AS snoozed FROM threads
+                 WHERE account_id = ?1 AND (has_live = 1 OR ?3)
+                 ORDER BY sort_time DESC, id DESC LIMIT ?2",
+                (account, CANDIDATE_LIMIT, past_live),
+                |r| Ok((r.get("id")?, r.get("snoozed")?)),
+            ),
+        }
     }
 }

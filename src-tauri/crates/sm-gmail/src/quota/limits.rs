@@ -32,6 +32,7 @@ impl QuotaConfig {
     /// SPEC's limits for a project allowed `per_minute` units a minute per
     /// user: the bucket's 1,000 plus a refill of the rest (at least 1,000 a
     /// minute), so no minute spends more than `per_minute`.
+    #[must_use]
     pub fn for_budget(per_minute: Units) -> Self {
         let defaults = Self::default();
         Self {

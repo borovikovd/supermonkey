@@ -9,16 +9,31 @@ use super::{LabelCreateOp, ModifyOp};
 use crate::effects::Effect;
 use crate::writer::WriterState;
 
-/// Queues `op`, made by action `action`, and wakes the account's runner
-/// once the commit lands.
+/// Where an op comes from.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct OpOrigin {
+    /// The account it changes.
+    pub(crate) account: AccountId,
+    /// The action that made it; `None` for the core's own, such as a snooze
+    /// waking.
+    pub(crate) action: Option<ActionNo>,
+    /// When it was made.
+    pub(crate) now: Millis,
+}
+
+/// Queues `op`, made as `origin` says, and wakes the account's runner once
+/// the commit lands.
 pub(crate) fn queue_modify(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
-    account: AccountId,
-    action: Option<ActionNo>,
+    origin: OpOrigin,
     op: &ModifyOp,
-    now: Millis,
 ) -> Result<(), StoreError> {
+    let OpOrigin {
+        account,
+        action,
+        now,
+    } = origin;
     tx.ops().push(&NewOp {
         account,
         action,
@@ -72,16 +87,14 @@ pub(crate) fn revert(
     Ok(reverted)
 }
 
-/// Queues the Gmail side of a revert made by action `action`: one
+/// Queues the Gmail side of a revert made as `origin` says: one
 /// `batchModify` per distinct label change, naming the messages that made
 /// it. A thread's snooze change rides with its first op, for a rollback.
 pub(crate) fn queue_revert(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
-    account: AccountId,
-    action: ActionNo,
+    origin: OpOrigin,
     reverted: Vec<ThreadChange>,
-    now: Millis,
 ) -> Result<(), StoreError> {
     let mut ops: Vec<ModifyOp> = Vec::new();
     for thread in reverted {
@@ -125,7 +138,7 @@ pub(crate) fn queue_revert(
         }
     }
     for op in &ops {
-        queue_modify(tx, state, account, Some(action), op, now)?;
+        queue_modify(tx, state, origin, op)?;
     }
     Ok(())
 }

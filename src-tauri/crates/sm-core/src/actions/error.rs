@@ -67,10 +67,10 @@ impl ActionError {
     }
 
     /// The custom split whose rule was refused, if that is why.
-    pub(crate) fn split(&self) -> Option<SplitId> {
+    pub(crate) const fn split(&self) -> Option<SplitId> {
         match self {
             Self::Rule { split, .. } => Some(*split),
-            _ => None,
+            Self::Store(_) | Self::Invalid(_) | Self::Modify(_) | Self::Unsendable(_) => None,
         }
     }
 }

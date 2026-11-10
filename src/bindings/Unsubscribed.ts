@@ -3,4 +3,20 @@
 /**
  * What an unsubscribe did (SPEC: Unsubscribe and block).
  */
-export type Unsubscribed = { "kind": "oneClick", sender: string, } | { "kind": "emailed", sender: string, } | { "kind": "openedPage", sender: string, } | { "kind": "noLink", sender: string, };
+export type Unsubscribed = { "kind": "oneClick", 
+/**
+ * The list's sender, by name or else address, for the toast.
+ */
+sender: string, } | { "kind": "emailed", 
+/**
+ * The list's sender, by name or else address, for the toast.
+ */
+sender: string, } | { "kind": "openedPage", 
+/**
+ * The list's sender, by name or else address, for the toast.
+ */
+sender: string, } | { "kind": "noLink", 
+/**
+ * The message's sender, by name or else address, for the toast.
+ */
+sender: string, };

@@ -36,7 +36,8 @@ pub enum SnoozeKind {
 
 impl SnoozeKind {
     /// The name the picker shows.
-    pub fn name(self) -> &'static str {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
         match self {
             Self::LaterToday => "Later today",
             Self::TomorrowMorning => "Tomorrow morning",

@@ -15,18 +15,19 @@ use crate::clock::Clock;
 /// [`Kick`](super::Kick), it keeps nothing for later. Each task it wakes counts as
 /// busy until it has resumed, so the core never looks idle between the
 /// firing and the work it starts.
+#[derive(Debug)]
 pub struct Signal {
     activity: Arc<Activity>,
     state: Mutex<Waiters>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Waiters {
     next_id: u64,
     waiting: BTreeMap<u64, Arc<Waiter>>,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Waiter {
     /// Set when the signal fires; taken by the waiting task.
     fired: Mutex<Option<Busy>>,

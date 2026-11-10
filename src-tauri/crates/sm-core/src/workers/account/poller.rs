@@ -17,9 +17,10 @@ use super::profile::{refresh_labels, refresh_send_as};
 use super::queue::{
     BACKFILL, INBOX_BODIES, INBOX_META, LATE, Listing, OTHER_META, POLL_BODIES, POLL_META, Work,
 };
-use super::read::read_thread;
+use super::read::{ReadThread, read_thread};
 use super::resync::full_resync;
 use crate::Error;
+use crate::notify::Arrivals;
 use crate::read::read;
 use crate::workers::drafts::{Occasion, reconcile, stops_the_account};
 use crate::workers::snooze;
@@ -270,45 +271,9 @@ async fn poll(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(),
     }
     let batch = HistoryBatch::new(records);
     let drafts_changed = batch.drafts_changed;
-    let named: Vec<GmailMessageId> = batch.labels.keys().cloned().collect();
-    let known: BTreeSet<GmailMessageId> = ctx
-        .read(move |r| {
-            let mut known = BTreeSet::new();
-            for id in named {
-                if r.messages().by_gmail_id(account, &id)?.is_some() {
-                    known.insert(id);
-                }
-            }
-            Ok(known)
-        })
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(account = account.0, error = %e, "couldn't read which messages are known");
-            BTreeSet::new()
-        });
+    let known = known_messages(ctx, batch.labels.keys().cloned().collect()).await;
     let to_read = batch.threads_to_read(|id| known.contains(id));
-    let none = HashSet::new();
-    let answers = join_all(
-        to_read
-            .iter()
-            .map(|t| read_thread(ctx, t, Format::Metadata, Priority::P3, &none)),
-    )
-    .await;
-    let mut read = Vec::with_capacity(answers.len());
-    let mut deferred = Vec::new();
-    for (thread, answer) in to_read.iter().zip(answers) {
-        match answer {
-            Ok(answer) => read.push((thread.clone(), Some(answer))),
-            Err(e) if *e.outcome() == Outcome::NotFound => read.push((thread.clone(), None)),
-            Err(e) if *e.outcome() == Outcome::InvalidGrant => return Err(e),
-            // One failed read does not hold up the rest of the poll: the
-            // fetch queue reads the thread, retrying as it does.
-            Err(e) => {
-                tracing::info!(account = account.0, outcome = %e.outcome(), "a poll's thread read failed; queueing it");
-                deferred.push(thread.clone());
-            }
-        }
-    }
+    let (read, deferred) = read_threads(ctx, &to_read).await?;
     let now = ctx.clock().now();
     let notifier = Arc::clone(&ctx.deps.notifier);
     let kept = deferred.clone();
@@ -326,7 +291,11 @@ async fn poll(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(),
             };
             let added = apply_history(tx, state, polled)?;
             let focused = notifier.is_focused();
-            crate::notify::new_mail(tx.read(), state, account, &added, &batch.added, focused)
+            let arrivals = Arrivals {
+                stored: &added,
+                reported: &batch.added,
+            };
+            crate::notify::new_mail(tx.read(), state, account, arrivals, focused)
         })
         .await;
     match applied {
@@ -336,6 +305,58 @@ async fn poll(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(),
         }
     }
     reconcile_drafts(ctx, drafts_due, drafts_changed).await
+}
+
+/// Which of the messages a poll's history names are stored. None, when they
+/// can't be read: the poll then reads every thread its history names.
+async fn known_messages(ctx: &AccountCtx, named: Vec<GmailMessageId>) -> BTreeSet<GmailMessageId> {
+    let account = ctx.account;
+    ctx.read(move |r| {
+        let mut known = BTreeSet::new();
+        for id in named {
+            if r.messages().by_gmail_id(account, &id)?.is_some() {
+                known.insert(id);
+            }
+        }
+        Ok(known)
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!(account = account.0, error = %e, "couldn't read which messages are known");
+        BTreeSet::new()
+    })
+}
+
+/// Reads the metadata of a poll's threads, all at once. Returns each thread
+/// read with its answer, `None` for one Gmail no longer has, and the threads
+/// whose read failed. Only a refused grant fails the poll.
+async fn read_threads(
+    ctx: &AccountCtx,
+    to_read: &BTreeSet<GmailThreadId>,
+) -> Result<(Vec<(GmailThreadId, Option<ReadThread>)>, Vec<GmailThreadId>), GmailError> {
+    let none = HashSet::new();
+    let answers = join_all(
+        to_read
+            .iter()
+            .map(|t| read_thread(ctx, t, Format::Metadata, Priority::P3, &none)),
+    )
+    .await;
+    let mut read = Vec::with_capacity(answers.len());
+    let mut deferred = Vec::new();
+    for (thread, answer) in to_read.iter().zip(answers) {
+        match answer {
+            Ok(answer) => read.push((thread.clone(), Some(answer))),
+            Err(e) if *e.outcome() == Outcome::NotFound => read.push((thread.clone(), None)),
+            Err(e) if *e.outcome() == Outcome::InvalidGrant => return Err(e),
+            // One failed read does not hold up the rest of the poll: the
+            // fetch queue reads the thread, retrying as it does.
+            Err(e) => {
+                tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "a poll's thread read failed; queueing it");
+                deferred.push(thread.clone());
+            }
+        }
+    }
+    Ok((read, deferred))
 }
 
 /// After a poll lands: the bodies of the threads it read, and the threads

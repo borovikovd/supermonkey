@@ -70,7 +70,6 @@ impl WriterState {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
-            clock,
             subs: Registry::default(),
             effects: Vec::new(),
             held: Vec::new(),
@@ -79,6 +78,7 @@ impl WriterState {
             router,
             sink: None,
             online: true,
+            clock,
             sent_ack: ActionNo(0),
             batch: Vec::new(),
             rejected: Vec::new(),
@@ -125,7 +125,7 @@ impl WriterState {
     }
 
     /// Where the effects recorded so far end, for [`WriterState::drop_effects_from`].
-    pub(crate) fn effects_mark(&self) -> usize {
+    pub(crate) const fn effects_mark(&self) -> usize {
         self.effects.len()
     }
 
@@ -142,12 +142,12 @@ impl WriterState {
     }
 
     /// Whether Gmail is reachable.
-    pub(crate) fn online(&self) -> bool {
+    pub(crate) const fn online(&self) -> bool {
         self.online
     }
 
     /// Records whether Gmail is reachable; the app subscription shows it.
-    pub(crate) fn set_online(&mut self, online: bool) {
+    pub(crate) const fn set_online(&mut self, online: bool) {
         if self.online != online {
             self.online = online;
             self.subs.force_app();
@@ -255,7 +255,7 @@ impl WriterState {
         for effect in last.into_iter().rev() {
             // The router is gone only while the core shuts down; the effect
             // has nowhere to go then.
-            let _ = self.router.send(effect);
+            _ = self.router.send(effect);
         }
     }
 }

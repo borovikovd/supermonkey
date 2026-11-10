@@ -14,9 +14,10 @@ use crate::writer::WriterState;
 /// The draft `action` sends, taken before the action runs, since running it
 /// consumes it.
 pub(super) fn sent_draft(action: &Action) -> Option<DraftId> {
-    match action {
-        Action::SendDraft { draft } => Some(draft.clone()),
-        _ => None,
+    if let Action::SendDraft { draft } = action {
+        Some(draft.clone())
+    } else {
+        None
     }
 }
 

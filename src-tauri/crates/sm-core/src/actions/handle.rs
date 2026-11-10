@@ -1,5 +1,6 @@
 //! The `Actions` handle: numbered UI actions into writer jobs.
 
+use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
@@ -34,6 +35,15 @@ pub struct Actions {
     received: Arc<Received>,
     clock: Arc<dyn Clock>,
     tasks: Tasks,
+}
+
+/// The last action number received; the rest is the core's handles.
+impl fmt::Debug for Actions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Actions")
+            .field("received", &self.received)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Actions {
@@ -87,6 +97,7 @@ impl Actions {
 
     /// The last action number received, applied or still queued: where a
     /// reloaded page continues, so it never reuses a number still queued.
+    #[must_use]
     pub fn last_received(&self) -> ActionNo {
         self.received.last()
     }

@@ -36,6 +36,7 @@ pub struct UtcOffset(pub i32);
 /// Alice &lt;<a href="mailto:a@x.com">a@x.com</a>&gt; wrote:<br></div><blockquote
 /// class="gmail_quote" style="…">original html</blockquote></div>
 /// ```
+#[must_use]
 pub fn reply_quote_html(source: &QuoteSource<'_>, offset: UtcOffset) -> String {
     format!(
         "<div class=\"gmail_quote\"><div dir=\"ltr\" class=\"gmail_attr\">On {} {} wrote:<br></div>\
@@ -50,6 +51,7 @@ pub fn reply_quote_html(source: &QuoteSource<'_>, offset: UtcOffset) -> String {
 /// Gmail's forward block: `---------- Forwarded message ---------`, the
 /// original From, Date, Subject, To (and Cc when there is one), then the
 /// original HTML, all inside `<div class="gmail_quote">`.
+#[must_use]
 pub fn forward_quote_html(source: &QuoteSource<'_>, offset: UtcOffset) -> String {
     let email = mailto_html(&source.from.email);
     let from = match display_name(source.from) {
@@ -68,7 +70,7 @@ pub fn forward_quote_html(source: &QuoteSource<'_>, offset: UtcOffset) -> String
     );
     if !source.cc.is_empty() {
         // Writing to a String cannot fail.
-        let _ = write!(out, "Cc: {}<br>", addr_list_html(source.cc));
+        _ = write!(out, "Cc: {}<br>", addr_list_html(source.cc));
     }
     out.push_str("</div><br><br>");
     out.push_str(source.html);
@@ -117,11 +119,13 @@ fn addr_list_html(list: &[Addr]) -> String {
 }
 
 /// `Re: subject`, unless it already starts with `Re:` in any case.
+#[must_use]
 pub fn reply_subject(subject: &str) -> String {
     prefixed(subject, "Re:", &["re:"])
 }
 
 /// `Fwd: subject`, unless it already starts with `Fwd:` or `Fw:` in any case.
+#[must_use]
 pub fn forward_subject(subject: &str) -> String {
     prefixed(subject, "Fwd:", &["fwd:", "fw:"])
 }

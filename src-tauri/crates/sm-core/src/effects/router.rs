@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 use super::Effect;
 use crate::activity::{Kick, Tracked, parked};
-use crate::workers::{AccountWorkers, Notifier, Searches};
+use crate::workers::{AccountWorkers, GmailPage, Notifier, Searches};
 
 /// Where the writer sends committed effects.
 pub(crate) type EffectSender = mpsc::UnboundedSender<Tracked<Effect>>;
@@ -49,9 +49,10 @@ impl Router {
                 account,
                 query,
                 page,
-            } => self
-                .searches
-                .start(&self.workers, sub, account, query, page),
+            } => {
+                let page = GmailPage { query, token: page };
+                self.searches.start(&self.workers, sub, account, page);
+            }
             Effect::CancelSub(sub) => self.searches.cancel(&sub),
             Effect::Ops(account) => {
                 if let Some(worker) = self.workers.get(account) {

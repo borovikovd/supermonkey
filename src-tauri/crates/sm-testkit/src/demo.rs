@@ -18,6 +18,7 @@ const DATA_DIR: &str = "supermonkey-demo";
 
 /// A running demo: the fake Gmail with its seeded users. Keep it for as long
 /// as the app runs; dropping it stops the fake.
+#[derive(Debug)]
 pub struct Demo {
     fake: FakeGmail,
     tokens: Arc<MemoryTokenStore>,
@@ -47,11 +48,13 @@ impl Demo {
     }
 
     /// The demo's data folder, empty at start.
+    #[must_use]
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
     }
 
     /// The fake's endpoints, with Google's request budget.
+    #[must_use]
     pub fn gmail_config(&self) -> GmailConfig {
         GmailConfig {
             base_url: self.fake.base_url(),
@@ -67,6 +70,7 @@ impl Demo {
     }
 
     /// The demo accounts' refresh tokens, in memory.
+    #[must_use]
     pub fn tokens(&self) -> Arc<dyn TokenStore> {
         let tokens: Arc<dyn TokenStore> = Arc::<MemoryTokenStore>::clone(&self.tokens);
         tokens
@@ -173,7 +177,8 @@ fn seed_people(user: &FakeUser, me: &str) {
         let cc = PEOPLE
             .get((i + 1) % PEOPLE.len())
             .map(|(_, e)| (*e).to_owned());
-        user.add_message(NewMessage {
+        // The last of the thread: nothing replies to it, so its ids go unused.
+        _ = user.add_message(NewMessage {
             from,
             to: vec![me.to_owned()],
             cc: cc.into_iter().collect(),
@@ -216,8 +221,9 @@ fn seed_people(user: &FakeUser, me: &str) {
 fn seed_the_rest(user: &FakeUser, me: &str) {
     let receipts = user.add_label("Receipts");
     let travel = user.add_label("Travel");
+    // Nothing replies to these messages, so their ids go unused.
     for issue in 100..106 {
-        user.add_message(NewMessage {
+        _ = user.add_message(NewMessage {
             from: "Weekly Digest <digest@news.example>".into(),
             to: vec![me.to_owned()],
             subject: format!("This week in tech #{issue}"),
@@ -233,7 +239,7 @@ fn seed_the_rest(user: &FakeUser, me: &str) {
             ..Default::default()
         });
     }
-    user.add_message(NewMessage {
+    _ = user.add_message(NewMessage {
         from: "Acme Store <orders@acme.shop>".into(),
         to: vec![me.to_owned()],
         subject: "Your receipt #4821".into(),
@@ -241,7 +247,7 @@ fn seed_the_rest(user: &FakeUser, me: &str) {
         labels: vec!["INBOX".into(), "CATEGORY_PROMOTIONS".into(), receipts],
         ..Default::default()
     });
-    user.add_message(NewMessage {
+    _ = user.add_message(NewMessage {
         from: "Airline <trips@fly.example>".into(),
         to: vec![me.to_owned()],
         subject: "Your trip to Lisbon".into(),
@@ -249,7 +255,7 @@ fn seed_the_rest(user: &FakeUser, me: &str) {
         labels: vec!["STARRED".into(), travel],
         ..Default::default()
     });
-    user.add_message(NewMessage {
+    _ = user.add_message(NewMessage {
         from: "Mallory <mallory@evil.example>".into(),
         to: vec![me.to_owned()],
         subject: "Totally safe message".into(),

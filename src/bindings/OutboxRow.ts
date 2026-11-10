@@ -2,11 +2,68 @@
 import type { Addr } from "./Addr";
 import type { OutboxState } from "./OutboxState";
 
-export type OutboxRow = { id: number, account: number, draft: string, thread: number | null, sendAfter: number, state: OutboxState, sentMessageGmailId: string | null, undoRequested: boolean, toastClosed: boolean, delayed: boolean, 
 /**
- * For the pending message shown in the thread.
+ * One send in the outbox: in its undo window, at Gmail, or sent.
  */
-to: Array<Addr>, snippet: string, subject: string, 
+export type OutboxRow = { 
+/**
+ * Its id: what the `closeToast` action names.
+ */
+id: number, 
+/**
+ * The account it sends from.
+ */
+account: number, 
+/**
+ * The draft it sends: the one a composer reopens when the send is
+ * undone or not sent.
+ */
+draft: string, 
+/**
+ * The thread it replies on or, once sent, the thread its message
+ * landed on. `None` for a new message not stored yet.
+ */
+thread: number | null, 
+/**
+ * When the undo window ends and the send starts.
+ */
+sendAfter: number, 
+/**
+ * Waiting out its undo window, sending, or sent.
+ */
+state: OutboxState, 
+/**
+ * Gmail's id of the sent message. `None` until Gmail accepts the send,
+ * and for one settled as sent whose message was not found.
+ */
+sentMessageGmailId: string | null, 
+/**
+ * An undo is held on it until the send resolves: the toast reads
+ * `Undoing…`.
+ */
+undoRequested: boolean, 
+/**
+ * Its toast was closed, so none shows for it again.
+ */
+toastClosed: boolean, 
+/**
+ * It missed its time: the toast and the thread read `Email delayed`
+ * until Gmail accepts it.
+ */
+delayed: boolean, 
+/**
+ * The draft's To, for the pending message shown in the thread. Empty
+ * when the draft is gone.
+ */
+to: Array<Addr>, 
+/**
+ * The draft's body as plain text, for that pending message.
+ */
+snippet: string, 
+/**
+ * The draft's subject, which the send toast shows.
+ */
+subject: string, 
 /**
  * The undo entry for this send, if it is still in the history.
  */

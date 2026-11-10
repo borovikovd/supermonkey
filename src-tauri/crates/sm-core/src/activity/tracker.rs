@@ -22,6 +22,7 @@ pub struct Activity {
 
 impl Activity {
     /// A tracker with nothing busy.
+    #[must_use]
     pub fn new() -> Arc<Self> {
         Arc::default()
     }
@@ -101,7 +102,7 @@ pub struct Tracked<T> {
 
 impl<T> Tracked<T> {
     /// The value.
-    pub fn get(&self) -> &T {
+    pub const fn get(&self) -> &T {
         &self.value
     }
 

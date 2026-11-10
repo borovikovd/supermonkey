@@ -11,17 +11,20 @@ pub struct Thread {
 
 impl Thread {
     /// The thread holding these messages, in any order.
+    #[must_use]
     pub fn new(mut messages: Vec<MessageFacts>) -> Self {
         messages.sort_by_key(|m| (m.date, m.id));
         Self { messages }
     }
 
     /// Every message, drafts included, oldest first.
+    #[must_use]
     pub fn messages(&self) -> &[MessageFacts] {
         &self.messages
     }
 
     /// The message with this row id.
+    #[must_use]
     pub fn message(&self, id: MessageId) -> Option<&MessageFacts> {
         self.messages.iter().find(|m| m.id == id)
     }
@@ -32,6 +35,7 @@ impl Thread {
     }
 
     /// The newest live message (not a draft, not in Trash or Spam).
+    #[must_use]
     pub fn latest_live(&self) -> Option<&MessageFacts> {
         self.messages.iter().rev().find(|m| m.is_live())
     }
@@ -39,6 +43,7 @@ impl Thread {
     /// The thread's latest message (SPEC Views): the newest live message,
     /// else the newest non-draft, else the newest draft. `None` only for a
     /// thread with no messages.
+    #[must_use]
     pub fn latest(&self) -> Option<&MessageFacts> {
         self.latest_live()
             .or_else(|| self.non_drafts().next_back())
@@ -49,6 +54,7 @@ impl Thread {
     /// lands): the newest live message not sent from this account, or the
     /// latest message when every one is from this account. So your own
     /// reply never moves a thread.
+    #[must_use]
     pub fn latest_from_someone_else(&self, me: &Identity) -> Option<&MessageFacts> {
         self.messages
             .iter()
@@ -65,6 +71,7 @@ impl Thread {
 
     /// The labels the thread is in (SPEC Views): every label of a live
     /// message, plus `TRASH` or `SPAM` when any message has it. `DRAFT` never.
+    #[must_use]
     pub fn labels(&self) -> LabelSet {
         let mut set = LabelSet::new();
         for m in &self.messages {
@@ -87,6 +94,7 @@ impl Thread {
 
     /// The thread's derived row, or `None` when it has no messages left and
     /// its row should go.
+    #[must_use]
     pub fn digest(&self) -> Option<ThreadDigest> {
         let latest = self.latest()?;
         let live = self.messages.iter().filter(|m| m.is_live()).count();
@@ -159,21 +167,25 @@ pub struct ThreadDigest {
 
 impl ThreadDigest {
     /// In the Inbox (snoozed or not).
+    #[must_use]
     pub fn in_inbox(&self) -> bool {
         self.labels.has(SystemLabel::Inbox)
     }
 
     /// In Trash.
+    #[must_use]
     pub fn in_trash(&self) -> bool {
         self.labels.has(SystemLabel::Trash)
     }
 
     /// In Spam.
+    #[must_use]
     pub fn in_spam(&self) -> bool {
         self.labels.has(SystemLabel::Spam)
     }
 
     /// Starred.
+    #[must_use]
     pub fn starred(&self) -> bool {
         self.labels.has(SystemLabel::Starred)
     }

@@ -51,6 +51,10 @@ fn main() {
     let name = &app.handle().package_info().name;
     let standard = Menu::default(app.handle()).map(|m| listed(&m));
     let ours = app_menu(app.handle()).map(|m| listed(&m));
+    #[expect(
+        clippy::panic,
+        reason = "a test without the harness fails by panicking"
+    )]
     let (Ok(standard), Ok(ours)) = (standard, ours) else {
         panic!("couldn't build the menus");
     };

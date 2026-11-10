@@ -18,6 +18,7 @@ impl Query {
     /// out of an AND; an OR holding one can't narrow anything and drops out
     /// whole.
     /// This is the one SQL string built at runtime; bind it as a parameter.
+    #[must_use]
     pub fn to_fts5(&self) -> Option<String> {
         fts(self.expr()).map(|(s, _)| s)
     }
@@ -76,8 +77,8 @@ fn fts_string(value: &str) -> Option<String> {
     for c in value.chars() {
         match c {
             '"' => out.push_str("\"\""),
-            c if c.is_control() => out.push(' '),
-            c => out.push(c),
+            _ if c.is_control() => out.push(' '),
+            _ => out.push(c),
         }
     }
     out.push('"');

@@ -14,7 +14,7 @@ use sm_store::{UndoAction, WriteTx};
 
 use super::{ActionCtx, ActionError, splits};
 use crate::effects::Effect;
-use crate::ops::{ModifyOp, queue_modify, queue_revert, revert};
+use crate::ops::{ModifyOp, OpOrigin, queue_modify, queue_revert, revert};
 use crate::writer::WriterState;
 
 /// A label and snooze change to make to some of an account's threads.
@@ -136,7 +136,12 @@ pub(crate) fn change_threads(
             remove,
             threads: entry.clone(),
         };
-        queue_modify(tx, state, account, action, &op, now)?;
+        let origin = OpOrigin {
+            account,
+            action,
+            now,
+        };
+        queue_modify(tx, state, origin, &op)?;
     }
     Ok(entry)
 }
@@ -164,7 +169,12 @@ pub(super) fn undo(
             {
                 ctx.state.effect(Effect::Snoozes);
             }
-            queue_revert(ctx.tx, ctx.state, account, ctx.n, reverted, ctx.now)?;
+            let origin = OpOrigin {
+                account,
+                action: Some(ctx.n),
+                now: ctx.now,
+            };
+            queue_revert(ctx.tx, ctx.state, origin, reverted)?;
             Ok(())
         }
         UndoAction::Pin {

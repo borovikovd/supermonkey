@@ -113,23 +113,23 @@ enum ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         match self {
-            ApiError::Unauthenticated => google_error(
+            Self::Unauthenticated => google_error(
                 401,
                 "authError",
                 "Request had invalid authentication credentials.",
                 None,
             ),
-            ApiError::InsufficientScope => google_error(
+            Self::InsufficientScope => google_error(
                 403,
                 "insufficientPermissions",
                 "Request had insufficient authentication scopes.",
                 None,
             ),
-            ApiError::NotFound => {
+            Self::NotFound => {
                 google_error(404, "notFound", "Requested entity was not found.", None)
             }
-            ApiError::BadRequest(message) => google_error(400, "invalidArgument", &message, None),
-            ApiError::DuplicateLabel => {
+            Self::BadRequest(message) => google_error(400, "invalidArgument", &message, None),
+            Self::DuplicateLabel => {
                 google_error(409, "duplicate", "Label name exists or conflicts", None)
             }
         }
@@ -138,7 +138,7 @@ impl IntoResponse for ApiError {
 
 impl From<Missing> for ApiError {
     fn from(_: Missing) -> Self {
-        ApiError::NotFound
+        Self::NotFound
     }
 }
 
@@ -168,7 +168,7 @@ impl FromRequestParts<Arc<Shared>> for Caller {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
             .unwrap_or_default();
-        Ok(Caller {
+        Ok(Self {
             state: Arc::clone(state),
             user: params.remove("user").unwrap_or_default(),
             token: token.to_owned(),
@@ -218,14 +218,14 @@ impl<S: Send + Sync> FromRequestParts<S> for Params {
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let RawQuery(query) = RawQuery::from_request_parts(parts, state).await?;
-        Ok(Params::parse(query.unwrap_or_default().as_bytes()))
+        Ok(Self::parse(query.unwrap_or_default().as_bytes()))
     }
 }
 
 impl Params {
     /// Parses `application/x-www-form-urlencoded` pairs.
-    fn parse(input: &[u8]) -> Params {
-        Params(url::form_urlencoded::parse(input).into_owned().collect())
+    fn parse(input: &[u8]) -> Self {
+        Self(url::form_urlencoded::parse(input).into_owned().collect())
     }
 
     fn get(&self, name: &str) -> Option<&str> {
@@ -637,7 +637,7 @@ async fn auth(
             .users
             .first()
             .cloned()
-            .ok_or(bad_request("no users"))?,
+            .ok_or_else(|| bad_request("no users"))?,
     };
     let mut location = url::Url::parse(redirect_uri).expect("valid redirect_uri");
     if std::mem::take(&mut world.deny_next_auth) {

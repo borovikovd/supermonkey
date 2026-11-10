@@ -1,6 +1,7 @@
 //! The `Mail` handle (ARCHITECTURE.md, section 8.1): links, attachments,
 //! unsubscribe, and block (SPEC Reading, Unsubscribe and block, Compose).
 
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -19,6 +20,13 @@ pub struct Mail {
     platform: Arc<dyn Platform>,
     workers: Arc<AccountWorkers>,
     pool: Arc<ReadPool>,
+}
+
+/// Its name only: it holds the core's handles and the platform, none of them a value to print.
+impl fmt::Debug for Mail {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Mail").finish_non_exhaustive()
+    }
 }
 
 /// The largest file a draft takes: Gmail's own limit for attachments
@@ -158,6 +166,7 @@ impl Mail {
 }
 
 /// Why a file over [`MAX_ATTACHMENT_BYTES`] is refused.
+#[must_use]
 pub fn attachment_too_large() -> Error {
     Error::Invalid("The file is too large: attachments can be at most 25 MB".to_owned())
 }
@@ -173,6 +182,10 @@ fn keep_file(dir: &Path, name: &str, data: &[u8]) -> Result<(String, PathBuf), s
     std::fs::create_dir_all(dir)?;
     for n in 1u32.. {
         let slot = dir.join(n.to_string());
+        #[expect(
+            clippy::create_dir,
+            reason = "the folder must be new: making it reserves its number, and `create_dir_all` would take one that is there"
+        )]
         match std::fs::create_dir(&slot) {
             Ok(()) => {
                 let path = slot.join(name);

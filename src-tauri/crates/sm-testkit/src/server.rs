@@ -234,6 +234,6 @@ impl<E: std::error::Error + 'static> From<E> for Fail {
 pub(crate) type Ctl<T = Value> = Result<Json<T>, Fail>;
 
 /// The answer of a control call that returns nothing.
-pub(crate) fn done() -> Json<Value> {
+pub(crate) const fn done() -> Json<Value> {
     Json(Value::Null)
 }

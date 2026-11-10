@@ -56,13 +56,13 @@ fn notice_row(r: &Row<'_>) -> rusqlite::Result<NoticeRecord> {
 }
 
 /// Reads of notices.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct NoticeReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> NoticeReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -90,12 +90,13 @@ impl<'c> NoticeReads<'c> {
 }
 
 /// Writes to notices.
+#[derive(Debug)]
 pub struct NoticeWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> NoticeWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 

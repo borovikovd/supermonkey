@@ -28,7 +28,7 @@ pub struct Sighting {
 }
 
 /// A stored contact.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContactRecord {
     /// The address, lowercased.
     pub email: String,
@@ -39,13 +39,13 @@ pub struct ContactRecord {
 }
 
 /// Reads of contacts.
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct ContactReads<'c> {
     db: Db<'c>,
 }
 
 impl<'c> ContactReads<'c> {
-    pub(crate) fn new(db: Db<'c>) -> Self {
+    pub(crate) const fn new(db: Db<'c>) -> Self {
         Self { db }
     }
 
@@ -112,12 +112,13 @@ impl<'c> ContactReads<'c> {
 }
 
 /// Writes to contacts.
+#[derive(Debug)]
 pub struct ContactWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
 }
 
 impl<'t, 'c> ContactWrites<'t, 'c> {
-    pub(crate) fn new(tx: &'t mut WriteTx<'c>) -> Self {
+    pub(crate) const fn new(tx: &'t mut WriteTx<'c>) -> Self {
         Self { tx }
     }
 

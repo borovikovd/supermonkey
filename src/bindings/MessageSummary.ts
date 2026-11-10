@@ -2,8 +2,74 @@
 import type { Addr } from "./Addr";
 import type { AttachmentInfo } from "./AttachmentInfo";
 
-export type MessageSummary = { id: number, from: Addr, to: Array<Addr>, cc: Array<Addr>, bcc: Array<Addr>, subject: string, snippet: string, date: number, unread: boolean, starred: boolean, inTrash: boolean, inSpam: boolean, hasBody: boolean, 
+/**
+ * A message's headers and flags; the body comes separately (`MessageBody`).
+ */
+export type MessageSummary = { 
+/**
+ * Its id: what `get_bodies` takes.
+ */
+id: number, 
+/**
+ * The From mailbox.
+ */
+from: Addr, 
+/**
+ * The To mailboxes.
+ */
+to: Array<Addr>, 
+/**
+ * The Cc mailboxes.
+ */
+cc: Array<Addr>, 
+/**
+ * The Bcc mailboxes.
+ */
+bcc: Array<Addr>, 
+/**
+ * The decoded Subject.
+ */
+subject: string, 
+/**
+ * Gmail's snippet: a collapsed message's one line, and an expanded
+ * one's text until its body loads.
+ */
+snippet: string, 
+/**
+ * Gmail's `internalDate`.
+ */
+date: number, 
+/**
+ * It has `UNREAD`.
+ */
+unread: boolean, 
+/**
+ * It has `STARRED`.
+ */
+starred: boolean, 
+/**
+ * It has `TRASH`. Such a message is listed only in trash mode.
+ */
+inTrash: boolean, 
+/**
+ * It has `SPAM`. Such a message is listed only in trash mode.
+ */
+inSpam: boolean, 
+/**
+ * Its body is stored, so `get_bodies` returns it. False until a full
+ * fetch of its thread lands.
+ */
+hasBody: boolean, 
 /**
  * Plain-text mail; render with the app's own type.
  */
-plain: boolean, attachments: Array<AttachmentInfo>, rev: number, };
+plain: boolean, 
+/**
+ * Its parts that are files, inline images included. Empty until its
+ * body is stored.
+ */
+attachments: Array<AttachmentInfo>, 
+/**
+ * The `rev` of its last change.
+ */
+rev: number, };

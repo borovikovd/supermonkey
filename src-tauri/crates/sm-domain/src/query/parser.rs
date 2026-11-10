@@ -98,7 +98,9 @@ impl<'a> Parser<'a, '_> {
                     self.errors
                         .push(RuleError::UnmatchedParen { offset: tok.start });
                 }
-                _ => items.extend(self.unary(depth)),
+                TokKind::LParen | TokKind::Minus | TokKind::Phrase { .. } | TokKind::Word(_) => {
+                    items.extend(self.unary(depth));
+                }
             }
         }
         combine(items, true)
@@ -317,6 +319,10 @@ fn combine(items: Vec<Expr>, is_and: bool) -> Option<Expr> {
     }
     let mut flat = Vec::with_capacity(items.len());
     for item in items {
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "whatever is not a list of the same kind is kept as it is"
+        )]
         match item {
             Expr::And(xs) if is_and => flat.extend(xs),
             Expr::Or(xs) if !is_and => flat.extend(xs),

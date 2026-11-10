@@ -28,6 +28,7 @@ pub fn check_split_rule(query: &str) -> Result<(), RuleError> {
 /// The position the settings sheet's save gives a split: custom splits by
 /// their place among custom splits (`custom_rank`, from 0), then Important,
 /// then Other.
+#[must_use]
 pub fn split_position(kind: SplitKind, custom_rank: u32) -> i32 {
     match kind {
         SplitKind::Custom => i32::try_from(custom_rank.saturating_add(1).saturating_mul(10))
@@ -120,23 +121,27 @@ pub struct Pin {
 impl Pin {
     /// A pin, with its value trimmed and lowercased as pins are stored and
     /// matched. `None` when the value is blank.
+    #[must_use]
     pub fn new(kind: PinKind, value: &str, split: SplitId) -> Option<Self> {
         let value = value.trim().to_lowercase();
         (!value.is_empty()).then_some(Self { kind, value, split })
     }
 
     /// The sender address, domain, or label name, lowercased.
+    #[must_use]
     pub fn value(&self) -> &str {
         &self.value
     }
 
     /// Its value, taken.
+    #[must_use]
     pub fn into_value(self) -> String {
         self.value
     }
 }
 
 /// The domain of an address: what follows its last `@`, lowercased.
+#[must_use]
 pub fn email_domain(email: &str) -> Option<String> {
     email
         .rsplit_once('@')
@@ -197,6 +202,7 @@ impl Router {
     /// 2. enabled custom splits, top to bottom;
     /// 3. Important, when enabled and the message is person-to-person;
     /// 4. Other.
+    #[must_use]
     pub fn route(&self, message: &MessageFacts, thread_label_names: &[&str]) -> Option<SplitId> {
         self.pinned(message, thread_label_names)
             .or_else(|| {
@@ -224,6 +230,7 @@ impl Router {
 
     /// The split a thread lands in: `None` unless it is in the Inbox. Routes
     /// its latest message from someone else.
+    #[must_use]
     pub fn place(
         &self,
         thread: &Thread,

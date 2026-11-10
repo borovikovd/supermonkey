@@ -5,7 +5,7 @@
 //! must not depend on tokio, `futures-channel` has no blocking receive, and
 //! this is a mutex, a condvar, and a waker.
 
-use std::future::Future;
+use std::fmt;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -119,6 +119,13 @@ pub struct Pending<T, E> {
     _error: PhantomData<fn() -> E>,
 }
 
+/// Its name only: the result may not be `Debug`, and may not be there yet.
+impl<T, E> fmt::Debug for Pending<T, E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Pending").finish_non_exhaustive()
+    }
+}
+
 impl<T, E: From<StoreError>> Pending<T, E> {
     pub(crate) fn new(rx: Receiver<Result<T, E>>) -> Self {
         Self {
@@ -190,7 +197,7 @@ mod tests {
         assert_eq!(counter.0.load(Ordering::SeqCst), 1);
         match Pin::new(&mut pending).poll(&mut cx) {
             Poll::Ready(Ok(3)) => {}
-            other => panic!("expected the value, got {other:?}"),
+            other @ (Poll::Ready(_) | Poll::Pending) => panic!("expected the value, got {other:?}"),
         }
     }
 }

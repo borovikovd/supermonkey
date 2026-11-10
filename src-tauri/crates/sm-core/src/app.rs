@@ -1,6 +1,7 @@
 //! The core's root (ARCHITECTURE.md, section 8.1): starts the writer, the
 //! read pool, and the effect router, and hands out narrow handles.
 
+use std::fmt;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -45,6 +46,7 @@ impl Config {
     pub const TOKEN_FILE: &str = "tokens.json";
 
     /// The app's database in `data_dir`, with four read connections.
+    #[must_use]
     pub fn in_data_dir(data_dir: &Path, debug: bool, gmail: GmailConfig) -> Self {
         Self {
             data_dir: data_dir.to_path_buf(),
@@ -70,6 +72,7 @@ pub struct GmailConfig {
 
 impl GmailConfig {
     /// Google's Gmail with this OAuth client and budget.
+    #[must_use]
     pub fn google(oauth: OAuthConfig, quota: QuotaConfig) -> Self {
         Self {
             base_url: GMAIL_BASE_URL.to_owned(),
@@ -94,6 +97,15 @@ pub struct Deps {
     pub activity: Arc<Activity>,
 }
 
+/// The activity only: the other ports are trait objects.
+impl fmt::Debug for Deps {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Deps")
+            .field("activity", &self.activity)
+            .finish_non_exhaustive()
+    }
+}
+
 /// A running core.
 pub struct App {
     actions: Actions,
@@ -103,6 +115,13 @@ pub struct App {
     mail: Mail,
     #[cfg(test)]
     writer: CoreWriter,
+}
+
+/// Its name only: it is the core's handles.
+impl fmt::Debug for App {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("App").finish_non_exhaustive()
+    }
 }
 
 impl App {
@@ -127,14 +146,7 @@ impl App {
             Arc::clone(&clock),
         )?;
         let pool = Arc::new(ReadPool::open(&config.db_path, config.read_connections)?);
-        let last = pool.with(|r| r.meta().last_action())?;
-        let received = Arc::new(Received::default());
-        received.note(last);
-        // The first job: the writer's `ack` starts where the database is.
-        drop(writer.call(Priority::Ui, move |_, state| {
-            state.sent_ack = last;
-            Ok::<_, StoreError>(())
-        }));
+        let received = resume_numbering(&pool, &writer)?;
         let network = Arc::new(Network::new(writer.clone(), Arc::clone(&activity)));
         let notifier = Arc::new(Notifier::new(Arc::clone(&platform), Arc::clone(&clock)));
         let snoozes = Arc::new(Kick::new(Arc::clone(&activity)));
@@ -161,17 +173,10 @@ impl App {
             badge: Arc::clone(&badge),
         };
         tasks.spawn("effects", router.run(from_writers));
-        // The Dock badge as the database has it at launch.
-        badge.kick();
-        tasks.spawn(
-            "badge",
-            badge::run(
-                badge,
-                Arc::clone(&pool),
-                Arc::clone(&platform),
-                Arc::clone(&clock),
-            ),
-        );
+        show_badge(&tasks, badge, &pool, &platform, &clock);
+        // The tests' copy, taken before the writer moves into the handles.
+        #[cfg(test)]
+        let tests_writer = writer.clone();
         Ok(Self {
             actions: Actions::new(
                 writer.clone(),
@@ -194,42 +199,76 @@ impl App {
                 },
                 config.debug,
             ),
-            // Fields are built in order: the tests' copy first, then the writer moves.
-            #[cfg(test)]
-            writer: writer.clone(),
             accounts: Accounts::new(writer, Arc::clone(&workers), Arc::clone(&platform)),
             mail: Mail::new(platform, workers, pool),
+            #[cfg(test)]
+            writer: tests_writer,
         })
     }
 
     /// UI actions.
-    pub fn actions(&self) -> &Actions {
+    pub const fn actions(&self) -> &Actions {
         &self.actions
     }
 
     /// The UI's lookups.
-    pub fn queries(&self) -> &Queries {
+    pub const fn queries(&self) -> &Queries {
         &self.queries
     }
 
     /// Connecting pages, launch, focus, the online flag, and quitting.
-    pub fn lifecycle(&self) -> &Lifecycle {
+    pub const fn lifecycle(&self) -> &Lifecycle {
         &self.lifecycle
     }
 
     /// Signing accounts in, and waking their workers.
-    pub fn accounts(&self) -> &Accounts {
+    pub const fn accounts(&self) -> &Accounts {
         &self.accounts
     }
 
     /// Links, attachments, unsubscribe, and block.
-    pub fn mail(&self) -> &Mail {
+    pub const fn mail(&self) -> &Mail {
         &self.mail
     }
 
     /// The writer, for tests that write as sync would.
     #[cfg(test)]
-    pub(crate) fn writer(&self) -> &CoreWriter {
+    pub(crate) const fn writer(&self) -> &CoreWriter {
         &self.writer
     }
+}
+
+/// Picks action numbers up where the database left them: the last one the
+/// core has received, and, as the writer's first job, the `ack` it sends.
+fn resume_numbering(pool: &ReadPool, writer: &CoreWriter) -> Result<Arc<Received>, Error> {
+    let last = pool.with(|r| r.meta().last_action())?;
+    let received = Arc::new(Received::default());
+    received.note(last);
+    // The first job: the writer's `ack` starts where the database is.
+    drop(writer.call(Priority::Ui, move |_, state| {
+        state.sent_ack = last;
+        Ok::<_, StoreError>(())
+    }));
+    Ok(received)
+}
+
+/// Shows the Dock badge as the database has it at launch, and starts the
+/// task that keeps it so.
+fn show_badge(
+    tasks: &Tasks,
+    badge: Arc<Kick>,
+    pool: &Arc<ReadPool>,
+    platform: &Arc<dyn Platform>,
+    clock: &Arc<dyn Clock>,
+) {
+    badge.kick();
+    tasks.spawn(
+        "badge",
+        badge::run(
+            badge,
+            Arc::clone(pool),
+            Arc::clone(platform),
+            Arc::clone(clock),
+        ),
+    );
 }

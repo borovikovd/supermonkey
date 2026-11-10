@@ -130,30 +130,8 @@ pub(crate) fn account_summary(
             value: p.into_value(),
         })
         .collect();
-    let undo = reads
-        .undo()
-        .entries(account)?
-        .into_iter()
-        .map(|e| UndoEntryInfo {
-            id: e.id,
-            kind: e.action.kind(),
-            threads: e.action.threads(),
-            outbox: e.action.outbox(),
-            label: e.label,
-        })
-        .collect();
-    let notices = reads
-        .notices()
-        .for_account(account)?
-        .into_iter()
-        .map(|n| Notice {
-            id: n.id,
-            kind: n.kind,
-            message: n.message,
-            draft: n.draft,
-            thread: n.thread,
-        })
-        .collect();
+    let undo = undo_entries(reads, account)?;
+    let notices = notices(reads, account)?;
     Ok(Some(AccountSummary {
         account: account_info(record, is_muted(reads, account)?),
         labels,
@@ -169,6 +147,36 @@ pub(crate) fn account_summary(
         notices,
         queued_ops: reads.ops().count(account)?,
     }))
+}
+
+/// The account's undo history, as the page lists it.
+fn undo_entries(reads: Reads<'_>, account: AccountId) -> Result<Vec<UndoEntryInfo>, StoreError> {
+    let entries = reads.undo().entries(account)?;
+    Ok(entries
+        .into_iter()
+        .map(|e| UndoEntryInfo {
+            id: e.id,
+            kind: e.action.kind(),
+            threads: e.action.threads(),
+            outbox: e.action.outbox(),
+            label: e.label,
+        })
+        .collect())
+}
+
+/// The account's notices, as the page shows them.
+fn notices(reads: Reads<'_>, account: AccountId) -> Result<Vec<Notice>, StoreError> {
+    let notices = reads.notices().for_account(account)?;
+    Ok(notices
+        .into_iter()
+        .map(|n| Notice {
+            id: n.id,
+            kind: n.kind,
+            message: n.message,
+            draft: n.draft,
+            thread: n.thread,
+        })
+        .collect())
 }
 
 /// The first load of a summary for an account that does not exist (yet):
