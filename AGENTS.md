@@ -150,12 +150,28 @@ Most bugs in an app that syncs live here. Assume every `await` lets the world ch
   positives: the count and what a sample showed, written beside it in the config.
 - No `unwrap` or `expect` outside tests, no `unsafe`, no silent `as` casts
   (`try_from`).
-- **Ownership.** Borrow to read, take by value to keep. Never take `&T` and clone
-  inside. No alias hides an `Arc` or `Box`. Take `&Arc<T>` only to clone the handle
+- **Ownership.** Borrow to read (`&T`), `&mut T` to change, take by value to keep,
+  store, or send. A function that ends a value's life takes `self`. Ask for the
+  least: `&str` over `&String`, `&[T]` over `&Vec<T>`, one field over the whole
+  context; `Copy` types go by value. Never take `&T` and clone inside. A `clone()`
+  is for two independent values: one added to satisfy the borrow checker means the
+  ownership is wrong, so reshape the data.
+- **Fields and pointers.** A struct owns its fields. It holds a reference only when
+  it lives for one call or one transaction, since the lifetime spreads to every
+  holder. Add a pointer type only for a need you can name: `Box` for a large,
+  recursive, or trait-object value; `Arc` for several owners across threads; `Cow`
+  for a function that mostly returns its input. Before sharing, try one owner plus
+  ids: things that point back at each other (timers, queues, callbacks) hold an id
+  into the owner's collection. `Arc<Mutex<T>>` and `Rc<RefCell<T>>` are a last
+  resort. No alias hides an `Arc` or `Box`. Take `&Arc<T>` only to clone the handle
   into a task. Interior mutability only where shared ownership needs it.
   `parking_lot` locks; an async mutex only when held across `.await`, with the
-  reason. Where a lint checks one of these rules (clippy `redundant_clone`), enable
-  it; the rest is what the focused ownership review is for.
+  reason.
+- **Lint what can be linted.** Where a lint checks one of these rules, enable it
+  (clippy `redundant_clone`, `needless_pass_by_value`; `disallowed-types` for a
+  pointer type that must state its need). Clippy does not see a `&T` cloned inside,
+  an owned parameter only read in an `async fn`, a reference in a long-lived
+  struct, or an `Arc` with one owner: the focused ownership review covers those.
 - **Types.** Every kind of id and unit is a newtype, converted to raw types only at
   the edges (SQL, serde, IPC). No trait with a single implementation. Parsers return
   slices or `Cow`. Helpers that only read take a connection, not the app context.
