@@ -9,7 +9,6 @@ use axum::extract::{Path, State};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sm_core::Config;
-use sm_fake_gmail::FakeUser;
 use sm_gmail::{RefreshToken, TokenStore, TokenStoreError};
 
 use crate::platform::SignInMode;
@@ -22,15 +21,15 @@ pub(crate) struct UserReq {
     name: Option<String>,
 }
 
-fn create_user(s: &Server, req: &UserReq) -> FakeUser {
+/// Adds a Gmail user to the fake and returns its refresh token.
+fn create_user(s: &Server, req: &UserReq) -> RefreshToken {
     let user = s.fake.add_user(&req.email);
     if let Some(name) = &req.name {
         user.set_display_name(name);
     }
-    s.users
-        .lock()
-        .insert(req.email.to_lowercase(), user.clone());
-    user
+    let token = RefreshToken::new(user.refresh_token());
+    s.users.lock().insert(req.email.to_lowercase(), user);
+    token
 }
 
 /// Runs a token-file call off the async threads.
@@ -55,10 +54,9 @@ pub(crate) async fn add_account(State(s): State<Arc<Server>>, Json(req): Json<Us
         Core::Ready { app, .. } | Core::Running(app) => Arc::clone(app),
         Core::Down => return Err(Fail("the core is down; start it first".into())),
     };
-    let user = create_user(&s, &req);
-    let token = RefreshToken::new(user.refresh_token());
+    let token = create_user(&s, &req);
     let email = req.email.clone();
-    token_file(&s, move |tokens| tokens.store(&email, token)).await?;
+    token_file(&s, move |tokens| tokens.store(email, token)).await?;
     let id = app.accounts().register(&req.email).await?;
     Ok(Json(json!({ "id": id })))
 }

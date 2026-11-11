@@ -8,13 +8,10 @@ use percent_encoding::percent_decode_str;
 use crate::charset::decode_charset;
 use crate::encoded_word::decode_encoded_words;
 
-/// The kind of a structured header: the value before its first `;`,
-/// lowercased (`attachment`, `text/html`). Empty when the header is.
-pub(crate) fn header_kind(value: &str) -> String {
-    split_params(value)
-        .first()
-        .map(|kind| kind.trim().to_ascii_lowercase())
-        .unwrap_or_default()
+/// The kind of a structured header: the value before its first `;`, in the
+/// case it was written in (`attachment`, `Text/HTML`). Empty when the header is.
+pub(crate) fn header_kind(value: &str) -> &str {
+    split_params(value).next().map_or("", str::trim)
 }
 
 /// A parameter of a structured header, by case-insensitive name.
@@ -25,7 +22,7 @@ pub(crate) fn header_kind(value: &str) -> String {
 pub(crate) fn header_param<'a>(value: &'a str, name: &str) -> Option<Cow<'a, str>> {
     let mut plain = None;
     let mut sections = Vec::new();
-    for param in split_params(value).into_iter().skip(1) {
+    for param in split_params(value).skip(1) {
         let Some((key, val)) = param.split_once('=') else {
             continue;
         };
@@ -95,26 +92,29 @@ impl<'a> Section<'a> {
     }
 }
 
-/// Splits a structured header on the `;`s outside quoted strings.
-fn split_params(value: &str) -> Vec<&str> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    let mut in_quote = false;
-    let mut escaped = false;
-    for (i, c) in value.char_indices() {
-        match c {
-            _ if escaped => escaped = false,
-            '\\' if in_quote => escaped = true,
-            '"' => in_quote = !in_quote,
-            ';' if !in_quote => {
-                out.push(value.get(start..i).unwrap_or_default());
-                start = i + 1;
+/// Splits a structured header on the `;`s outside quoted strings: always at
+/// least one part, the last being what follows the last such `;`.
+fn split_params(value: &str) -> impl Iterator<Item = &str> {
+    let mut rest = Some(value);
+    std::iter::from_fn(move || {
+        let part = rest.take()?;
+        // A part ends outside any quote and escape, so the next starts so.
+        let mut in_quote = false;
+        let mut escaped = false;
+        for (i, c) in part.char_indices() {
+            match c {
+                _ if escaped => escaped = false,
+                '\\' if in_quote => escaped = true,
+                '"' => in_quote = !in_quote,
+                ';' if !in_quote => {
+                    rest = Some(part.get(i + 1..).unwrap_or_default());
+                    return Some(part.get(..i).unwrap_or_default());
+                }
+                _ => {}
             }
-            _ => {}
         }
-    }
-    out.push(value.get(start..).unwrap_or_default());
-    out
+        Some(part)
+    })
 }
 
 /// A parameter value without its quotes and backslash escapes.

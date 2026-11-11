@@ -287,14 +287,11 @@ fn json_body(body: &Bytes) -> ApiResult<Value> {
         .map_err(|e| ApiError::BadRequest(format!("Invalid JSON payload received: {e}")))
 }
 
-fn string_list(value: &Value) -> Vec<String> {
+/// The strings of a JSON array; anything else in it is left out.
+fn string_list(value: &Value) -> Vec<&str> {
     value
         .as_array()
-        .map(|a| {
-            a.iter()
-                .filter_map(|v| v.as_str().map(str::to_owned))
-                .collect()
-        })
+        .map(|a| a.iter().filter_map(Value::as_str).collect())
         .unwrap_or_default()
 }
 
@@ -402,7 +399,7 @@ async fn batch_modify(caller: Caller, body: Bytes) -> ApiResult<StatusCode> {
         if let Some(bad) = add.iter().chain(&remove).find(|l| mb.label(l).is_none()) {
             return Err(ApiError::BadRequest(format!("Invalid label: {bad}")));
         }
-        if ids.is_empty() || ids.iter().any(|id| !mb.messages.contains_key(id)) {
+        if ids.is_empty() || ids.iter().any(|&id| !mb.messages.contains_key(id)) {
             return Err(ApiError::NotFound);
         }
         for id in &ids {

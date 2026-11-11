@@ -71,15 +71,23 @@ static POLICY: LazyLock<ammonia::Builder<'static>> = LazyLock::new(|| {
 /// `background`); `background` also takes http(s). ammonia checks the schemes of
 /// every other URL attribute.
 fn is_allowed_url(element: &str, attribute: &str, value: &str) -> bool {
-    let url = value.trim_start().to_ascii_lowercase();
+    // Read in place: a value can be a whole image as a `data:` URL.
+    let url = value.trim_start();
     let is_image_slot = (element == "img" && attribute == "src") || attribute == "background";
-    if url.starts_with("data:") && !(is_image_slot && url.starts_with("data:image/")) {
+    if has_scheme(url, "data:") && !(is_image_slot && has_scheme(url, "data:image/")) {
         return false;
     }
     attribute != "background"
-        || url.starts_with("http://")
-        || url.starts_with("https://")
-        || url.starts_with("data:image/")
+        || has_scheme(url, "http://")
+        || has_scheme(url, "https://")
+        || has_scheme(url, "data:image/")
+}
+
+/// Whether `url` starts with `prefix`, which is ASCII, in any ASCII case.
+fn has_scheme(url: &str, prefix: &str) -> bool {
+    url.as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|start| start.eq_ignore_ascii_case(prefix.as_bytes()))
 }
 
 /// Sanitizes received HTML for storage and display.

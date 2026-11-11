@@ -34,7 +34,7 @@ pub(super) fn pin(
         &format!("Moved to {}", target.name),
         &UndoAction::Pin {
             pin_kind: kind,
-            value: pin.value().to_owned(),
+            value: pin.into_value(),
             split,
             replaced,
         },

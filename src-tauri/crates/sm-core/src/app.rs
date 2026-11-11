@@ -129,7 +129,7 @@ impl App {
     /// pool, and the effect router. Call it inside a tokio runtime; the
     /// core's tasks run on it. Nothing talks to Gmail until
     /// [`Lifecycle::launch`], so the E2E server can seed accounts first.
-    pub fn start(config: &Config, deps: Deps) -> Result<Self, Error> {
+    pub fn start(config: Config, deps: Deps) -> Result<Self, Error> {
         let runtime = tokio::runtime::Handle::try_current()?;
         let Deps {
             platform,
@@ -152,14 +152,14 @@ impl App {
         let snoozes = Arc::new(Kick::new(Arc::clone(&activity)));
         let workers = AccountWorkers::new(
             Arc::new(WorkerDeps {
-                data_dir: config.data_dir.clone(),
+                data_dir: config.data_dir,
                 writer: writer.clone(),
                 pool: Arc::clone(&pool),
                 clock: Arc::clone(&clock),
                 network: Arc::clone(&network),
                 notifier: Arc::clone(&notifier),
             }),
-            config.gmail.clone(),
+            config.gmail,
             HttpClient::new()?,
             tokens,
             tasks.clone(),

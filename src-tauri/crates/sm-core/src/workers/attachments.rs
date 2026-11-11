@@ -79,14 +79,12 @@ pub(crate) async fn ensure(
     if account != ctx.account {
         return Err(DownloadError::Gone);
     }
-    if let Some(path) = record.local_path.map(PathBuf::from) {
-        let on_disk = path.clone();
-        if tokio::task::spawn_blocking(move || on_disk.is_file())
+    if let Some(path) = record.local_path.map(PathBuf::from)
+        && let Some(on_disk) = tokio::task::spawn_blocking(move || path.is_file().then_some(path))
             .await
             .map_err(Error::from)?
-        {
-            return Ok(path);
-        }
+    {
+        return Ok(on_disk);
     }
     let bytes = match record.gmail_attachment_id.map(GmailAttachmentId::from) {
         Some(gmail_id) => {

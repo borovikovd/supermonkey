@@ -37,7 +37,7 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
 
 /// Reads a thread the user opens, or a neighbor prefetched for it, at
 /// priority 2, unless every body it has is stored.
-pub(crate) async fn fetch_opened(ctx: Arc<AccountCtx>, thread: ThreadId) {
+pub(crate) async fn fetch_opened(ctx: &AccountCtx, thread: ThreadId) {
     let account = ctx.account;
     let gmail_id = ctx
         .read(move |r| {
@@ -56,8 +56,8 @@ pub(crate) async fn fetch_opened(ctx: Arc<AccountCtx>, thread: ThreadId) {
             return;
         }
     };
-    retrying(&ctx, || async {
-        fetch_thread(&ctx, &gmail_id, Format::Full, Priority::P2).await
+    retrying(ctx, || async {
+        fetch_thread(ctx, &gmail_id, Format::Full, Priority::P2).await
     })
     .await;
 }
@@ -104,14 +104,14 @@ async fn run_one(ctx: &AccountCtx, slot: Slot, work: &Work) -> Result<(), GmailE
         } => {
             let query = ThreadQuery {
                 q: match listing {
-                    Listing::Query(q) => Some((*q).to_owned()),
+                    Listing::Query(q) => Some(*q),
                     Listing::Label(_) => None,
                 },
                 label_ids: match listing {
-                    Listing::Label(label) => vec![label.clone()],
-                    Listing::Query(_) => Vec::new(),
+                    Listing::Label(label) => std::slice::from_ref(label),
+                    Listing::Query(_) => &[],
                 },
-                page_token: page.clone(),
+                page_token: page.as_ref(),
                 max_results: Some(LIST_PAGE),
                 include_spam_trash: false,
             };
@@ -163,7 +163,7 @@ async fn run_one(ctx: &AccountCtx, slot: Slot, work: &Work) -> Result<(), GmailE
             }
             Ok(())
         }
-        Work::Backfill { page } => backfill_page(ctx, page.clone()).await,
+        Work::Backfill { page } => backfill_page(ctx, page.as_ref()).await,
     }
 }
 

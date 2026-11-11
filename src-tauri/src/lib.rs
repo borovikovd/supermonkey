@@ -204,7 +204,7 @@ fn start_core(app: &AppHandle) -> anyhow::Result<Shell> {
         tokens: setup.tokens,
         activity: Arc::clone(&activity),
     };
-    let core = Arc::new(App::start(&setup.config, deps)?);
+    let core = Arc::new(App::start(setup.config, deps)?);
     #[cfg(feature = "fake")]
     if let Some(demo) = &setup.demo {
         tauri::async_runtime::block_on(demo.register(&core))?;

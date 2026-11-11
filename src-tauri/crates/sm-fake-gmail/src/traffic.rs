@@ -177,7 +177,8 @@ pub(crate) struct Held {
     pub seq: usize,
     /// The hold fault that parked it.
     pub hold: u64,
-    pub info: RequestInfo,
+    /// The Gmail method it calls (see [`api_name`]).
+    pub api: &'static str,
     /// Waiting now. A [`Fault::HoldAnswer`] request is listed from when it chose the hold,
     /// so a release during its work is not lost, but parks only once its answer is ready.
     pub parked: bool,

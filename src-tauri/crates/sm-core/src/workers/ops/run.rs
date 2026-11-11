@@ -152,24 +152,27 @@ async fn narrow(ctx: &AccountCtx, mut op: ModifyOp) -> Result<Answer, Failure> {
             .map(|id| ctx.gmail.get_message(Priority::P1, id, Format::Minimal)),
     )
     .await;
+    // Whether Gmail still has each message, in the op's order.
     let mut alive = Vec::with_capacity(op.messages.len());
-    for (id, check) in op.messages.iter().zip(checks) {
+    for check in checks {
         match check {
-            Ok(_) => alive.push(id.clone()),
-            Err(e) if *e.outcome() == Outcome::NotFound => {}
+            Ok(_) => alive.push(true),
+            Err(e) if *e.outcome() == Outcome::NotFound => alive.push(false),
             Err(e) => return Err(Failure::Gmail(e)),
         }
     }
-    if alive.is_empty() {
+    let left = alive.iter().filter(|alive| **alive).count();
+    if left == 0 {
         return Ok(Answer::Done(Landing::Modify(op)));
     }
-    if alive.len() == op.messages.len() {
+    if left == op.messages.len() {
         // Every message is there, so the 404 was about a label.
         return Ok(Answer::Rejected(
             "Gmail rejected a change: a label it names is gone".to_owned(),
         ));
     }
-    op.messages = alive;
+    let mut alive = alive.into_iter();
+    op.messages.retain(|_| alive.next().unwrap_or(false));
     Ok(Answer::Narrowed(op))
 }
 
@@ -332,8 +335,8 @@ async fn write(ctx: &AccountCtx, id: OpId, answer: Answer) -> Result<(), Error> 
             // Stored even when a newer save replaced the op: the next write
             // updates this Gmail draft instead of making another.
             Answer::Done(Landing::Draft { draft, written }) => {
-                if let Some(written) = &written {
-                    let ids = GmailIds::of(written);
+                if let Some(written) = written {
+                    let ids = GmailIds::of(*written);
                     let made = ids.draft.clone();
                     // Discarded while its upsert was in flight: the Gmail
                     // draft the upsert made goes too, or sync would bring
@@ -352,8 +355,7 @@ async fn write(ctx: &AccountCtx, id: OpId, answer: Answer) -> Result<(), Error> 
             }
             Answer::Done(Landing::Plain) => tx.ops().delete(id),
             Answer::Done(Landing::Label { local, gmail }) => {
-                let used = tx.labels().assign_gmail_id(account, &local, &gmail)?;
-                if used != local {
+                if let Some(used) = tx.labels().assign_gmail_id(account, &local, &gmail)? {
                     relabel(tx, account, &local, &used)?;
                 }
                 lane.label_mapped();

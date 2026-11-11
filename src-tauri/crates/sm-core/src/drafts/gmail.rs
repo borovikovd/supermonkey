@@ -7,9 +7,9 @@ use std::sync::Arc;
 
 use sm_domain::{
     AccountId, DraftId, DraftKind, GmailDraftId, GmailThreadId, Millis, NoticeKind, Rev, Thread,
-    gmail_draft_aim, gmail_draft_kind,
+    ThreadId, gmail_draft_aim, gmail_draft_kind,
 };
-use sm_store::{Draft, NewNotice, NewOp, OpKind, Reads, StoreError, WriteTx};
+use sm_store::{Draft, DraftAttachment, NewNotice, NewOp, OpKind, Reads, StoreError, WriteTx};
 
 use super::lifecycle::{self, DraftsWriting, GmailIds};
 use super::save::message_attachments;
@@ -38,12 +38,12 @@ pub(crate) struct GmailDraft {
 }
 
 impl GmailDraft {
-    /// Its Gmail ids.
-    fn ids(&self) -> GmailIds {
+    /// Its Gmail ids, taken: the rest of it goes.
+    fn into_ids(self) -> GmailIds {
         GmailIds {
-            draft: self.id.clone(),
-            message: self.message.message.gmail_id.clone(),
-            thread: self.thread.clone(),
+            draft: self.id,
+            message: self.message.message.gmail_id,
+            thread: self.thread,
         }
     }
 }
@@ -217,7 +217,7 @@ pub(crate) fn apply_gmail_draft(
                     return delete_gmail_draft(tx, state, account, &gmail.id, now);
                 }
                 let mut adopted = record.draft;
-                lifecycle::written(&mut adopted, gmail.ids());
+                lifecycle::written(&mut adopted, gmail.into_ids());
                 return tx.drafts().put(&adopted);
             }
             // An edit Gmail has not confirmed (its upsert waits to run or to
@@ -252,20 +252,43 @@ pub(crate) fn apply_gmail_draft(
         state.effect(Effect::DraftBack(draft.id.clone()));
         draft
     };
-    lifecycle::read_from_gmail(&mut draft, gmail.ids(), !attachments.is_empty());
-    let message = gmail.message.message;
+    take_gmail_content(&mut draft, gmail, thread, attachments);
+    tx.drafts().put(&draft)
+}
+
+/// Replaces the draft's content with what Gmail has: its Gmail ids, its
+/// mailboxes, subject, and text, and `attachments`, on `thread` unless it is
+/// a new message.
+fn take_gmail_content(
+    draft: &mut Draft,
+    gmail: GmailDraft,
+    thread: ThreadId,
+    attachments: Vec<DraftAttachment>,
+) {
+    let GmailDraft {
+        id,
+        thread: gmail_thread,
+        message: ReadMessage { message, .. },
+        editor_html,
+        quote_html,
+    } = gmail;
+    let ids = GmailIds {
+        draft: id,
+        message: message.gmail_id,
+        thread: gmail_thread,
+    };
+    lifecycle::read_from_gmail(draft, ids, !attachments.is_empty());
     draft.thread = (draft.kind != DraftKind::New).then_some(thread);
     draft.from = Some(message.from);
     draft.to = message.to;
     draft.cc = message.cc;
     draft.bcc = message.bcc;
     draft.subject = message.subject;
-    draft.snippet = snippet(&gmail.editor_html);
-    draft.body_html = gmail.editor_html;
-    draft.quote_html = gmail.quote_html;
+    draft.snippet = snippet(&editor_html);
+    draft.body_html = editor_html;
+    draft.quote_html = quote_html;
     draft.attachments = attachments;
     draft.updated_at = message.date;
-    tx.drafts().put(&draft)
 }
 
 /// Whether a Gmail draft is not read at all, because something already
@@ -319,7 +342,7 @@ fn new_gmail_draft(
     reads: Reads<'_>,
     account: AccountId,
     gmail: &GmailDraft,
-    thread: sm_domain::ThreadId,
+    thread: ThreadId,
 ) -> Result<Draft, StoreError> {
     let message = &gmail.message.message;
     let facts = Thread::new(reads.messages().facts(thread)?);

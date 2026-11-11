@@ -108,6 +108,8 @@ explicit_outlives_requirements = "warn"
 unsafe_op_in_unsafe_fn = "warn"
 unused_extern_crates = "warn"
 unused_lifetimes = "warn"
+# A lifetime named once can be elided: fewer names to follow through a signature.
+single_use_lifetimes = "warn"
 
 [workspace.lints.rustdoc]
 all = { level = "warn", priority = -1 }
@@ -161,21 +163,41 @@ allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
 missing_assert_message = "warn"
 
-# Ownership (AGENTS.md).
+# Ownership (AGENTS.md): borrow to read, `&mut` to change, take by value to keep.
+# `all` and `pedantic` above already check most of it: `ptr_arg` (`&str` over
+# `&String`), `needless_pass_by_value`, `trivially_copy_pass_by_ref`,
+# `large_types_passed_by_value`, `ref_option`, `borrowed_box`, `box_collection`,
+# `redundant_allocation`, `unnecessary_box_returns`, `implicit_clone`,
+# `clone_on_copy`, `unnecessary_to_owned`, `wrong_self_convention`. These are the
+# ones outside those groups. No lint sees a `&T` cloned inside, a reference kept in
+# a long-lived struct, or an `Arc` with one owner, and `needless_pass_by_value`
+# does not look inside an `async fn`: the ownership review does.
 # An Arc clone reads as `Arc::clone(&x)`, never like a deep copy.
 clone_on_ref_ptr = "warn"
 # A clone of a value never used again is a move.
 redundant_clone = "warn"
 needless_pass_by_ref_mut = "warn"
+# A collection built only to be iterated or counted is an iterator.
+needless_collect = "warn"
 rc_buffer = "warn"
+rc_mutex = "warn"
 str_to_string = "warn"
 unnecessary_struct_initialization = "warn"
+# A future that is not `Send` holds an `Rc`, a `RefCell`, or a guard across an
+# `.await`, and can't move between the runtime's threads.
+future_not_send = "warn"
 
 # Locks.
 # A guard held through a `match` or `if let` body is a deadlock waiting to happen.
 significant_drop_in_scrutinee = "warn"
 await_holding_lock = "warn"
+# A lock around a bool or an integer is an atomic.
+mutex_atomic = "warn"
 mutex_integer = "warn"
+# significant_drop_tightening stays off: 18 hits (tried 2026-11-11), 12 sampled,
+# none a lock held over slow work. Each guard is needed to the end of its scope (a
+# condvar loop, a block that is already the critical section) or outlives its last
+# use by one expression that builds the return value.
 
 # Numbers.
 # Numeric conversions are explicit (`From` / `try_from`), never `as`.
@@ -235,6 +257,6 @@ verbose_file_reads = "warn"
 # - tests_outside_test_module: 53 hits, all in integration test crates
 #   (`crates/*/tests`, `tests/`), which only ever build as tests.
 # - the lints vulcan allows (len_without_is_empty, wrong_self_convention,
-#   result_large_err, needless_collect, manual_unwrap_or, and so on) stay on:
+#   result_large_err, manual_unwrap_or, and so on) stay on:
 #   this workspace passes them.
 

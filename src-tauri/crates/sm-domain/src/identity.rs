@@ -1,9 +1,12 @@
 //! Who an account is: its address and the `sendAs` addresses it may send as.
 
+use serde::{Deserialize, Serialize};
+
 use crate::Addr;
 
-/// One of Gmail's `sendAs` addresses for an account.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One of Gmail's `sendAs` addresses for an account. Its JSON form is what
+/// the account row stores: renaming a field changes the stored format.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SendAsAddress {
     /// The address.
     pub email: String,

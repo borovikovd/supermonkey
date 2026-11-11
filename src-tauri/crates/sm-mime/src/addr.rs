@@ -188,7 +188,7 @@ fn parse_mailbox(s: &str) -> Option<Addr> {
     } else {
         (phrase, comment)
     };
-    let email = clean_email(&email);
+    let email = clean_email(email);
     if !email.contains('@') {
         return None;
     }
@@ -196,22 +196,36 @@ fn parse_mailbox(s: &str) -> Option<Addr> {
     Some(Addr { name, email })
 }
 
-fn clean_email(s: &str) -> String {
-    let compact: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-    let unquoted = compact.trim_matches(|c| c == '"' || c == '\'');
+/// The address in `email`: without whitespace, the quotes around it, or a
+/// `mailto:` before it. Copies only when it had quotes or a `mailto:`.
+fn clean_email(mut email: String) -> String {
+    email.retain(|c| !c.is_whitespace());
+    let unquoted = email.trim_matches(|c| c == '"' || c == '\'');
     let bare = match unquoted.get(..7) {
         Some(scheme) if scheme.eq_ignore_ascii_case("mailto:") => {
             unquoted.get(7..).unwrap_or_default()
         }
         _ => unquoted,
     };
-    bare.to_owned()
+    if bare.len() == email.len() {
+        email
+    } else {
+        bare.to_owned()
+    }
 }
 
+/// The display name in `s`: its encoded words decoded, its whitespace
+/// collapsed, and no quotes around it. `None` when nothing is left.
 fn clean_name(s: &str) -> Option<String> {
     let collapsed = collapse_whitespace(&decode_encoded_words(s.trim()));
     let name = collapsed.trim_matches(|c| c == '"' || c == '\'').trim();
-    (!name.is_empty()).then(|| name.to_owned())
+    if name.is_empty() {
+        None
+    } else if name.len() == collapsed.len() {
+        Some(collapsed)
+    } else {
+        Some(name.to_owned())
+    }
 }
 
 /// A practical address check for recipient chips: one `@`; a local part of at

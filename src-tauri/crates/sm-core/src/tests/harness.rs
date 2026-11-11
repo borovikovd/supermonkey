@@ -64,7 +64,7 @@ impl Harness {
         clock: Arc<dyn Clock>,
     ) -> Self {
         let app = App::start(
-            &Config::in_data_dir(
+            Config::in_data_dir(
                 dir.path(),
                 true,
                 GmailConfig::google(OAuthConfig::google("", ""), QuotaConfig::default()),

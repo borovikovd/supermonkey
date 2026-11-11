@@ -62,15 +62,18 @@ pub async fn run(port: u16, dist: PathBuf, now: Millis) -> anyhow::Result<()> {
         revoke_url: fake.revoke_url(),
     };
     let browser = Tasks::new(tokio::runtime::Handle::current(), Arc::clone(&activity));
-    let bridge = WebBridge::new(None, Arc::clone(&activity));
     let mut server = Server {
         fake,
         users: Mutex::new(HashMap::new()),
         tokens: Arc::new(TokenFile::new(data_dir.join(Config::TOKEN_FILE))),
         platform: Arc::new(RecordingPlatform::new(browser)),
-        bridge: bridge.clone(),
+        bridge: WebBridge::new(None, Arc::clone(&activity)),
         clock,
         activity,
+        #[expect(
+            clippy::disallowed_types,
+            reason = "held while the core starts or quits, which awaits"
+        )]
         core: tokio::sync::Mutex::new(Core::Down),
         quota: Mutex::new(fast_quota()),
         oauth,
@@ -81,7 +84,10 @@ pub async fn run(port: u16, dist: PathBuf, now: Millis) -> anyhow::Result<()> {
     let quota = fast_quota();
     let app = server.open_core(quota)?;
     *server.core.get_mut() = Core::Ready { app, quota };
-    let routes = bridge.router().merge(control::router(Arc::new(server)));
+    let routes = server
+        .bridge
+        .router()
+        .merge(control::router(Arc::new(server)));
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
     let addr = listener.local_addr()?;
     #[expect(

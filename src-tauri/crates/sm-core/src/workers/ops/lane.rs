@@ -4,6 +4,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[expect(
+    clippy::disallowed_types,
+    reason = "the turn is held for the whole run of one op, across its Gmail calls"
+)]
 use tokio::sync::{Mutex, OwnedMutexGuard};
 
 use crate::activity::Tasks;
@@ -23,6 +27,10 @@ use crate::workers::account::Freshness;
 pub(crate) struct OpsLane {
     /// Held for the whole run of one op, across its Gmail calls: an async
     /// mutex, because holding it across `.await` is its purpose.
+    #[expect(
+        clippy::disallowed_types,
+        reason = "the turn is held for the whole run of one op, across its Gmail calls"
+    )]
     turn: Arc<Mutex<()>>,
     /// Op runs: cancelled only when the account goes or the app quits.
     tasks: Tasks,

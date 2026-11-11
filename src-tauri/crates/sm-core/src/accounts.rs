@@ -149,7 +149,7 @@ impl Accounts {
             email.to_owned(),
             token.clone(),
         );
-        tokio::task::spawn_blocking(move || store.store(&email, token)).await??;
+        tokio::task::spawn_blocking(move || store.store(email, token)).await??;
         Ok(())
     }
 

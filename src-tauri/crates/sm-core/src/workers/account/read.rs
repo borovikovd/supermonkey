@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use sm_domain::{Addr, GmailMessageId, GmailThreadId, LabelSet, Millis, SystemLabel};
 use sm_gmail::{Format, GmailAttachmentId, GmailError, HistoryId, Message, Outcome, Priority};
-use sm_mime::{CidImages, DraftBody, ParsedMessage, Part};
+use sm_mime::{CidImages, DraftBody, MessageHeaders, ParsedMessage, Part};
 use sm_store::{NewAttachment, NewBody, NewMessage};
 
 use super::ctx::AccountCtx;
@@ -47,6 +47,13 @@ pub(crate) struct ReadMessage {
     pub(crate) body: Option<NewBody>,
 }
 
+impl ReadMessage {
+    /// Its Gmail id, and the body the read brought for it, if any.
+    pub(crate) const fn brought(&self) -> (&GmailMessageId, Option<&NewBody>) {
+        (&self.message.gmail_id, self.body.as_ref())
+    }
+}
+
 /// Reads a thread at `priority` and parses it. With [`Format::Full`],
 /// messages in `stored` keep the body they have, which never changes: they
 /// are parsed without one, so their inline images are not fetched again.
@@ -67,11 +74,11 @@ pub(crate) async fn read_thread(
         .get_thread(priority, thread, format, headers)
         .await?;
     let mut messages = Vec::with_capacity(read.messages.len());
-    for m in &read.messages {
-        let parsed = parse(m);
-        let message = new_message(m, &parsed);
-        let body = if format == Format::Full && !stored.contains(&m.id) {
-            Some(body(ctx, m, parsed, priority).await?)
+    for m in read.messages {
+        let mut parsed = parse(&m);
+        let message = new_message(m, std::mem::take(&mut parsed.headers), &parsed.parts);
+        let body = if format == Format::Full && !stored.contains(&message.gmail_id) {
+            Some(body(ctx, &message.gmail_id, parsed, priority).await?)
         } else {
             None
         };
@@ -96,43 +103,49 @@ pub(crate) fn parse(m: &Message) -> ParsedMessage {
     })
 }
 
-/// The stored form of a message's headers. Its labels are Gmail's ids.
-pub(crate) fn new_message(m: &Message, parsed: &ParsedMessage) -> NewMessage {
-    let h = &parsed.headers;
-    let labels: LabelSet = m.label_ids.iter().cloned().collect();
+/// The stored form of a message: what Gmail says of it, its parsed
+/// `headers`, and whether one of its `parts` is an attachment. Its labels
+/// are Gmail's ids.
+pub(crate) fn new_message(m: Message, headers: MessageHeaders, parts: &[Part]) -> NewMessage {
+    let labels: LabelSet = m.label_ids.into_iter().collect();
     NewMessage {
-        gmail_id: m.id.clone(),
-        date: m.internal_date.or(h.date).unwrap_or(Millis(0)),
-        from: h.from.clone().unwrap_or_else(|| Addr::new(String::new())),
-        to: h.to.clone(),
-        cc: h.cc.clone(),
-        bcc: h.bcc.clone(),
-        reply_to: h.reply_to.clone(),
-        subject: h.subject.clone(),
+        gmail_id: m.id,
+        date: m.internal_date.or(headers.date).unwrap_or(Millis(0)),
+        from: headers.from.unwrap_or_else(|| Addr::new(String::new())),
+        to: headers.to,
+        cc: headers.cc,
+        bcc: headers.bcc,
+        reply_to: headers.reply_to,
+        subject: headers.subject,
         snippet: sm_mime::snippet_text(&m.snippet).into_owned(),
-        message_id_header: h.message_id.clone(),
-        in_reply_to: h.in_reply_to.clone(),
-        references: h.references.join(" "),
-        is_list: h.is_list,
+        message_id_header: headers.message_id,
+        in_reply_to: headers.in_reply_to,
+        references: headers.references.join(" "),
+        is_list: headers.is_list,
         is_draft: labels.has(SystemLabel::Draft),
-        sm_draft: h.draft_id.clone(),
+        sm_draft: headers.draft_id,
         labels,
-        has_attachments: parsed.parts.iter().any(|p| !p.is_inline),
+        has_attachments: parts.iter().any(|p| !p.is_inline),
     }
 }
 
-/// The body of a full read: its inline images fetched (a missing one is
-/// left out), then rendered and sanitized off the async threads.
+/// The body of a full read of `message`: its inline images fetched (a
+/// missing one is left out), then rendered and sanitized off the async
+/// threads.
 async fn body(
     ctx: &AccountCtx,
-    m: &Message,
+    message: &GmailMessageId,
     parsed: ParsedMessage,
     priority: Priority,
 ) -> Result<NewBody, GmailError> {
     let mut images = parsed.cid_images();
     for fetch in parsed.inline_images_to_fetch() {
         let attachment = GmailAttachmentId::from(fetch.attachment_id);
-        match ctx.gmail.get_attachment(priority, &m.id, &attachment).await {
+        match ctx
+            .gmail
+            .get_attachment(priority, message, &attachment)
+            .await
+        {
             Ok(bytes) => images.insert(fetch.content_id, fetch.mime_type, &bytes),
             Err(e) if *e.outcome() == Outcome::NotFound => {
                 tracing::debug!("an inline image is gone; leaving it out");
@@ -169,10 +182,12 @@ async fn body(
 /// block (SPEC Addressing). Its inline images are not fetched: the composer
 /// shows only the text above the quote. Slow on a big draft: call it off
 /// the async threads.
-pub(crate) fn draft_message(m: &Message) -> (ReadMessage, DraftBody) {
-    let parsed = parse(m);
-    let message = new_message(m, &parsed);
-    let rendered = parsed.body.clone().render(&CidImages::new());
+pub(crate) fn draft_message(m: Message) -> (ReadMessage, DraftBody) {
+    let parsed = parse(&m);
+    let message = new_message(m, parsed.headers, &parsed.parts);
+    // Before the render, which takes the body.
+    let draft = parsed.body.to_draft();
+    let rendered = parsed.body.render(&CidImages::new());
     let body = NewBody {
         html: Some(rendered.html),
         quote_html: rendered.quote,
@@ -180,7 +195,6 @@ pub(crate) fn draft_message(m: &Message) -> (ReadMessage, DraftBody) {
         is_plain: rendered.is_plain,
         attachments: parsed.parts.iter().map(new_attachment).collect(),
     };
-    let draft = parsed.body.into_draft();
     (
         ReadMessage {
             message,

@@ -8,7 +8,7 @@ use sm_domain::{
 };
 
 use crate::StoreError;
-use crate::db::{Db, json_column};
+use crate::db::{Db, json_column_opt};
 use crate::drafts::stamp_thread;
 use crate::tx::{WriteTx, require};
 
@@ -73,7 +73,6 @@ pub struct NewOutbox {
 }
 
 fn outbox_row(r: &Row<'_>) -> rusqlite::Result<OutboxRecord> {
-    let to: Option<String> = r.get("to_addrs")?;
     Ok(OutboxRecord {
         outbox: Outbox {
             id: r.get("id")?,
@@ -90,10 +89,7 @@ fn outbox_row(r: &Row<'_>) -> rusqlite::Result<OutboxRecord> {
             error: r.get("error")?,
         },
         rev: r.get("rev")?,
-        to: match to {
-            Some(_) => json_column(r, "to_addrs")?,
-            None => Vec::new(),
-        },
+        to: json_column_opt(r, "to_addrs")?.unwrap_or_default(),
         subject: r.get::<_, Option<String>>("subject")?.unwrap_or_default(),
         snippet: r.get::<_, Option<String>>("snippet")?.unwrap_or_default(),
         undo_entry: r.get("undo_entry")?,
@@ -245,8 +241,8 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
 
     /// Writes a row's state back. Its account and draft can't change.
     pub fn update(&mut self, row: &Outbox) -> Result<(), StoreError> {
-        let before = require(self.tx.read().outbox().get(row.id)?, "outbox row", &row.id)?;
-        if before.outbox.account != row.account || before.outbox.draft != row.draft {
+        let (account, draft, thread) = require(self.placed(row.id)?, "outbox row", &row.id)?;
+        if account != row.account || draft != row.draft {
             return Err(StoreError::Invalid(format!(
                 "outbox row {} can't change its account or draft",
                 row.id
@@ -268,12 +264,12 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
                 ":rev": rev,
             },
         )?;
-        self.changed(row.account, row.id, [before.outbox.thread, row.thread])
+        self.changed(row.account, row.id, [thread, row.thread])
     }
 
     /// Deletes a row. Unknown ids are skipped.
     pub fn delete(&mut self, id: OutboxId) -> Result<(), StoreError> {
-        let Some(before) = self.tx.read().outbox().get(id)? else {
+        let Some((account, draft, thread)) = self.placed(id)? else {
             return Ok(());
         };
         self.tx.stamp();
@@ -282,10 +278,29 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
             "DELETE FROM outbox WHERE id = ?1",
             [id],
         )?;
-        self.changed(before.outbox.account, id, [before.outbox.thread, None])?;
+        self.changed(account, id, [thread, None])?;
         // The draft, if kept, is out of the outbox.
-        self.tx.record().drafts.insert(before.outbox.draft);
+        self.tx.record().drafts.insert(draft);
         Ok(())
+    }
+
+    /// The account, draft, and thread of a stored row.
+    fn placed(
+        &self,
+        id: OutboxId,
+    ) -> Result<Option<(AccountId, DraftId, Option<ThreadId>)>, StoreError> {
+        self.tx.db().optional(
+            "read where an outbox row is",
+            "SELECT account_id, draft_id, thread_id FROM outbox WHERE id = ?1",
+            [id],
+            |r| {
+                Ok((
+                    r.get("account_id")?,
+                    r.get("draft_id")?,
+                    r.get("thread_id")?,
+                ))
+            },
+        )
     }
 
     fn changed(

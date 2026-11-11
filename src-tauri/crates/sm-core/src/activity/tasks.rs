@@ -49,9 +49,20 @@ impl Drop for TaskActivity {
     }
 }
 
-tokio::task_local! {
-    static TASK: Arc<TaskActivity>;
+/// The running task's activity mark, in a module of its own so the lint
+/// exception covers the macro's expansion and nothing else.
+#[expect(
+    clippy::disallowed_types,
+    reason = "`tokio::task_local!` keeps its value in a `RefCell`, which no code here touches"
+)]
+mod local {
+    use super::{Arc, TaskActivity};
+
+    tokio::task_local! {
+        pub(super) static TASK: Arc<TaskActivity>;
+    }
 }
+use local::TASK;
 
 /// A group of tasks under one cancellation token: the core's root group, or
 /// an account worker's. Cancelling it ends every task in it at its next
@@ -174,28 +185,48 @@ pub async fn busy_scope<F: Future>(
 /// before the core can look idle: a test that advances the clock to the
 /// next timer once the core is idle then always finds it.
 pub async fn parked<F: Future>(fut: F) -> F::Output {
-    let task = TASK.try_with(Arc::clone).ok();
-    let mut unpark: Option<Unpark> = None;
+    let mut wait = Wait {
+        task: TASK.try_with(Arc::clone).ok(),
+        parked: false,
+    };
     let mut fut = std::pin::pin!(fut);
     std::future::poll_fn(|cx| {
         let poll = fut.as_mut().poll(cx);
-        if poll.is_pending()
-            && unpark.is_none()
-            && let Some(task) = &task
-        {
-            task.park();
-            unpark = Some(Unpark(Arc::clone(task)));
+        if poll.is_pending() {
+            wait.park();
         }
         poll
     })
     .await
 }
 
-struct Unpark(Arc<TaskActivity>);
+/// One [`parked`] wait: it parks its task once, at the wait's first pending
+/// poll, and unparks it when the wait ends or is dropped.
+struct Wait {
+    /// The task's activity mark; `None` outside a core task.
+    task: Option<Arc<TaskActivity>>,
+    /// Whether this wait has parked the task.
+    parked: bool,
+}
 
-impl Drop for Unpark {
+impl Wait {
+    fn park(&mut self) {
+        if !self.parked
+            && let Some(task) = &self.task
+        {
+            task.park();
+            self.parked = true;
+        }
+    }
+}
+
+impl Drop for Wait {
     fn drop(&mut self) {
-        self.0.unpark();
+        if self.parked
+            && let Some(task) = &self.task
+        {
+            task.unpark();
+        }
     }
 }
 

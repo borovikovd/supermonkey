@@ -20,6 +20,10 @@ pub struct Tokens {
     /// Held across a refresh request, so callers that need a new token while
     /// one is being fetched wait for it instead of fetching their own. An
     /// async mutex because it is held across that `.await`.
+    #[expect(
+        clippy::disallowed_types,
+        reason = "held across the refresh request's `.await`, so a second caller waits for that token"
+    )]
     refreshing: tokio::sync::Mutex<()>,
 }
 
@@ -32,6 +36,10 @@ impl Tokens {
             http,
             refresh_token,
             cached: Mutex::new(None),
+            #[expect(
+                clippy::disallowed_types,
+                reason = "held across the refresh request's `.await`, so a second caller waits for that token"
+            )]
             refreshing: tokio::sync::Mutex::new(()),
         }
     }

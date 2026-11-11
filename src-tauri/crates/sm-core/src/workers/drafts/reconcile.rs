@@ -15,7 +15,9 @@ use crate::Error;
 use crate::drafts::lifecycle;
 use crate::drafts::{GmailDraft, Reconcile, apply_gmail_draft, defer_if_open, drop_gone};
 use crate::read::read;
-use crate::workers::account::{AccountCtx, LATE, OTHER_META, Work, draft_message, fetch_thread};
+use crate::workers::account::{
+    AccountCtx, FetchQueue, LATE, OTHER_META, Work, draft_message, fetch_thread,
+};
 use sm_domain::AccountId;
 use sm_store::ReadPool;
 
@@ -62,7 +64,7 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
     let started = started(&ctx.deps.pool, ctx.account).await;
     let listed = list_drafts(ctx, meta).await?;
     if occasion == Occasion::Sync {
-        queue_threads(ctx, &listed);
+        queue_threads(&ctx.queue, &listed);
     }
     let reconcile = Reconcile {
         account: ctx.account,
@@ -130,9 +132,9 @@ pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<()
 
 /// Queues a metadata read of each listed draft's thread, and its bodies
 /// late, as the connect sync asks.
-fn queue_threads(ctx: &AccountCtx, listed: &[sm_gmail::Draft]) {
+fn queue_threads(queue: &FetchQueue, listed: &[sm_gmail::Draft]) {
     for draft in listed {
-        ctx.queue.push(
+        queue.push(
             OTHER_META,
             Work::Meta {
                 thread: draft.message.thread_id.clone(),
@@ -145,9 +147,9 @@ fn queue_threads(ctx: &AccountCtx, listed: &[sm_gmail::Draft]) {
 
 /// Reads a Gmail change to the draft that was skipped while a composer had
 /// it open: its composer closed without edits.
-pub(crate) async fn read_skipped(ctx: &AccountCtx, id: &DraftId) {
+pub(crate) async fn read_skipped(ctx: &AccountCtx, id: DraftId) {
     let account = ctx.account;
-    let draft = super::write::load(&ctx.deps.pool, id.clone()).await;
+    let draft = super::write::load(&ctx.deps.pool, id).await;
     let gmail = match draft {
         Ok(Some(draft)) => lifecycle::gmail_draft(&draft).cloned(),
         Ok(None) => None,
@@ -230,10 +232,12 @@ async fn has_mail(
 async fn store(ctx: &AccountCtx, full: sm_gmail::Draft, reconcile: Reconcile) {
     let account = ctx.account;
     let parsed = tokio::task::spawn_blocking(move || {
-        let (message, body) = draft_message(&full.message);
+        // The message goes whole into its stored form, which has no thread.
+        let thread = full.message.thread_id.clone();
+        let (message, body) = draft_message(full.message);
         GmailDraft {
             id: full.id,
-            thread: full.message.thread_id,
+            thread,
             message,
             editor_html: body.editor_html,
             quote_html: body.quote_html,

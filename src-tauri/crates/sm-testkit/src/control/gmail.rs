@@ -269,13 +269,12 @@ pub(crate) async fn modify(
     Path(email): Path<String>,
     Json(req): Json<ModifyReq>,
 ) -> Ctl {
-    let user = s.user(&email)?;
-    if user.message(&req.id).is_none() {
+    if !s
+        .user(&email)?
+        .modify_labels(&req.id, &req.add, &req.remove)
+    {
         return Err(Fail(format!("no message {}", req.id)));
     }
-    let add: Vec<&str> = req.add.iter().map(String::as_str).collect();
-    let remove: Vec<&str> = req.remove.iter().map(String::as_str).collect();
-    user.modify_labels(&req.id, &add, &remove);
     if req.poll {
         s.poll().await;
     }
@@ -295,11 +294,9 @@ pub(crate) async fn delete_message(
     Path(email): Path<String>,
     Json(req): Json<IdReq>,
 ) -> Ctl {
-    let user = s.user(&email)?;
-    if user.message(&req.id).is_none() {
+    if !s.user(&email)?.delete_message(&req.id) {
         return Err(Fail(format!("no message {}", req.id)));
     }
-    user.delete_message(&req.id);
     if req.poll {
         s.poll().await;
     }
@@ -330,15 +327,11 @@ pub(crate) async fn label(
     Path(email): Path<String>,
     Json(req): Json<NameReq>,
 ) -> Ctl {
-    let user = s.user(&email)?;
-    if user
-        .labels()
-        .iter()
-        .any(|(_, name)| name.eq_ignore_ascii_case(&req.name))
-    {
-        return Err(Fail(format!("label {} exists", req.name)));
-    }
-    Ok(Json(json!({ "id": user.add_label(&req.name) })))
+    let id = s
+        .user(&email)?
+        .add_label(&req.name)
+        .ok_or_else(|| Fail(format!("label {} exists", req.name)))?;
+    Ok(Json(json!({ "id": id })))
 }
 
 #[derive(Deserialize)]
@@ -354,7 +347,7 @@ pub(crate) async fn send_as(
     Path(email): Path<String>,
     Json(req): Json<SendAsReq>,
 ) -> Ctl {
-    s.user(&email)?.add_send_as(&req.email, &req.display_name);
+    s.user(&email)?.add_send_as(req.email, req.display_name);
     Ok(done())
 }
 

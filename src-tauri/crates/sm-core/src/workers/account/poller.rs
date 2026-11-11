@@ -16,7 +16,8 @@ use super::history::HistoryBatch;
 use super::ingest::{Polled, apply_history};
 use super::profile::{refresh_labels, refresh_send_as};
 use super::queue::{
-    BACKFILL, INBOX_BODIES, INBOX_META, LATE, Listing, OTHER_META, POLL_BODIES, POLL_META, Work,
+    BACKFILL, FetchQueue, INBOX_BODIES, INBOX_META, LATE, Listing, OTHER_META, POLL_BODIES,
+    POLL_META, Work,
 };
 use super::read::{ReadThread, read_thread};
 use super::resync::full_resync;
@@ -70,7 +71,7 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
 async fn resume_or_connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> ControlFlow<()> {
     match is_connected(&ctx.deps.pool, ctx.account).await {
         Ok(true) => {
-            queue_inbox(ctx);
+            queue_inbox(&ctx.queue);
             queue_owed(ctx).await;
             // A draft reconcile the last run owed may have been cut off by
             // the quit: the first poll runs one.
@@ -173,8 +174,8 @@ async fn connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<
     refresh_send_as(ctx).await?;
     refresh_labels(ctx).await?;
     store_connect_cursor(ctx, profile.history_id).await;
-    queue_inbox(ctx);
-    queue_starred_and_sent(ctx);
+    queue_inbox(&ctx.queue);
+    queue_starred_and_sent(&ctx.queue);
     // A draft that fails to read does not hold up the connect sync: the
     // first poll runs the reconcile again. No connection does.
     match reconcile(ctx, Occasion::Sync).await {
@@ -254,8 +255,8 @@ async fn queue_owed(ctx: &AccountCtx) {
 /// Inbox, newest first: metadata, then bodies. Unchanged threads are
 /// skipped by their history id, so after a restart this only fetches what
 /// changed and the bodies not reached yet.
-pub(crate) fn queue_inbox(ctx: &AccountCtx) {
-    ctx.queue.push(
+pub(crate) fn queue_inbox(queue: &FetchQueue) {
+    queue.push(
         INBOX_META,
         Work::List {
             listing: Listing::Label(SystemLabel::Inbox.label_id()),
@@ -267,8 +268,8 @@ pub(crate) fn queue_inbox(ctx: &AccountCtx) {
 }
 
 /// Starred threads and the last 90 days of Sent, behind the Inbox.
-pub(crate) fn queue_starred_and_sent(ctx: &AccountCtx) {
-    ctx.queue.push(
+pub(crate) fn queue_starred_and_sent(queue: &FetchQueue) {
+    queue.push(
         OTHER_META,
         Work::List {
             listing: Listing::Label(SystemLabel::Starred.label_id()),
@@ -277,7 +278,7 @@ pub(crate) fn queue_starred_and_sent(ctx: &AccountCtx) {
             body: Some(LATE),
         },
     );
-    ctx.queue.push(
+    queue.push(
         LATE,
         Work::List {
             listing: Listing::Query("in:sent newer_than:90d"),
@@ -320,7 +321,6 @@ async fn poll(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(),
     let (read, deferred) = read_threads(ctx, &to_read).await?;
     let now = ctx.clock().now();
     let notifier = Arc::clone(&ctx.deps.notifier);
-    let kept = deferred.clone();
     let applied = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
@@ -328,7 +328,7 @@ async fn poll(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(),
                 account,
                 batch: &batch,
                 read,
-                deferred: &kept,
+                deferred: &deferred,
                 cursor: latest,
                 now,
                 ticket: &ticket,
@@ -339,11 +339,13 @@ async fn poll(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(),
                 stored: &added,
                 reported: &batch.added,
             };
-            crate::notify::new_mail(tx.read(), state, account, arrivals, focused)
+            crate::notify::new_mail(tx.read(), state, account, arrivals, focused)?;
+            // Back to the poll, which queues them once this has landed.
+            Ok::<_, sm_store::StoreError>(deferred)
         })
         .await;
     match applied {
-        Ok(()) => queue_after_poll(ctx, to_read, &deferred),
+        Ok(deferred) => queue_after_poll(&ctx.queue, to_read, deferred),
         Err(e) => {
             tracing::warn!(account = account.0, error = %e, "couldn't apply a poll's history");
         }
@@ -405,12 +407,16 @@ async fn read_threads(
 
 /// After a poll lands: the bodies of the threads it read, and the threads
 /// whose read failed, which the fetch queue reads again.
-fn queue_after_poll(ctx: &AccountCtx, read: BTreeSet<GmailThreadId>, deferred: &[GmailThreadId]) {
+fn queue_after_poll(
+    queue: &FetchQueue,
+    read: BTreeSet<GmailThreadId>,
+    deferred: Vec<GmailThreadId>,
+) {
     for thread in read.into_iter().filter(|t| !deferred.contains(t)) {
-        ctx.queue.push(POLL_BODIES, Work::Body { thread });
+        queue.push(POLL_BODIES, Work::Body { thread });
     }
-    for thread in deferred.iter().cloned() {
-        ctx.queue.push(
+    for thread in deferred {
+        queue.push(
             POLL_META,
             Work::Meta {
                 thread,

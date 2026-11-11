@@ -133,7 +133,7 @@ pub async fn blocked_senders(app: &App, account: AccountId) -> CmdResult<Blocked
 }
 
 /// Unblocks a sender by deleting its Gmail filter `id`.
-pub async fn unblock(app: &App, account: AccountId, id: &str) -> CmdResult<()> {
+pub async fn unblock(app: &App, account: AccountId, id: String) -> CmdResult<()> {
     app.mail().unblock(account, id).await.map_err(|e| err(&e))
 }
 

@@ -1,6 +1,8 @@
 //! From decoded bodies to what the app stores: sanitized HTML split at its
 //! quoted history, and text for search.
 
+use std::borrow::Cow;
+
 use crate::cid::CidImages;
 use crate::quote::{split_gmail_quote, split_quoted_history};
 use crate::sanitize::sanitize_html;
@@ -62,11 +64,22 @@ impl RawBody {
         }
     }
 
+    /// The HTML body, or the text body as HTML: the HTML [`RawBody::into_html`]
+    /// gives, borrowed when the message has an HTML body.
+    fn html(&self) -> Cow<'_, str> {
+        match (&self.html, &self.text) {
+            (Some(html), _) => Cow::Borrowed(html),
+            (None, Some(text)) => Cow::Owned(text_to_html(text)),
+            (None, None) => Cow::Borrowed(""),
+        }
+    }
+
     /// Splits and sanitizes the body of a draft read from Gmail. Its inline
-    /// images stay `cid:` references, which the sanitizer drops.
+    /// images stay `cid:` references, which the sanitizer drops. The body
+    /// is only read, so it can still be [rendered](RawBody::render).
     #[must_use]
-    pub fn into_draft(self) -> DraftBody {
-        let (html, _, _) = self.into_html();
+    pub fn to_draft(&self) -> DraftBody {
+        let html = self.html();
         let (editor, quote) = split_gmail_quote(&html);
         let images = CidImages::new();
         DraftBody {

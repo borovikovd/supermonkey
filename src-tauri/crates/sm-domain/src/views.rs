@@ -7,7 +7,7 @@ impl View {
     /// the thread has `snooze_until` set, due or not. Drafts lists drafts,
     /// never threads.
     #[must_use]
-    pub fn lists(&self, thread: &ThreadDigest, snoozed: bool) -> bool {
+    pub fn lists(&self, thread: &ThreadDigest<'_>, snoozed: bool) -> bool {
         match self {
             Self::Inbox => thread.in_inbox() && !snoozed,
             Self::Done => !thread.in_inbox() && !snoozed && thread.has_live,

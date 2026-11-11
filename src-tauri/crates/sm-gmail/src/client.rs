@@ -249,7 +249,7 @@ impl Gmail {
     pub async fn list_threads(
         &self,
         priority: Priority,
-        query: &ThreadQuery,
+        query: &ThreadQuery<'_>,
     ) -> Result<ThreadPage, GmailError> {
         let mut call = Call::new(
             "threads.list",
@@ -258,13 +258,10 @@ impl Gmail {
             Method::GET,
             &["threads"],
         )
-        .query_opt("q", query.q.as_deref())
-        .query_opt(
-            "pageToken",
-            query.page_token.as_ref().map(PageToken::as_str),
-        )
+        .query_opt("q", query.q)
+        .query_opt("pageToken", query.page_token.map(PageToken::as_str))
         .query_opt("maxResults", query.max_results.map(|n| n.to_string()));
-        for label in &query.label_ids {
+        for label in query.label_ids {
             call = call.query("labelIds", label.as_str());
         }
         if query.include_spam_trash {

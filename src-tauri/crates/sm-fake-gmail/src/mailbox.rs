@@ -306,14 +306,13 @@ impl Mailbox {
         id
     }
 
-    /// Removes a message and records `messagesDeleted`.
-    pub(crate) fn delete(&mut self, id: &str) -> Result<(), Missing> {
+    /// Removes a message and records `messagesDeleted`. Returns the message.
+    pub(crate) fn delete(&mut self, id: &str) -> Result<Msg, Missing> {
         if !self.messages.contains_key(id) {
             return Err(Missing);
         }
         self.record(id, Change::Deleted);
-        self.messages.remove(id);
-        Ok(())
+        self.messages.remove(id).ok_or(Missing)
     }
 
     /// Stores `raw` as a new draft's message (`DRAFT`), in `thread_id` or a new thread.
@@ -340,10 +339,13 @@ impl Mailbox {
         date: Option<u64>,
     ) -> Result<String, Missing> {
         let old = self.drafts.get(draft_id).cloned().ok_or(Missing)?;
-        let thread_id = thread_id.unwrap_or_else(|| self.messages[&old].thread_id.clone());
-        self.delete(&old)?;
+        let gone = self.delete(&old)?;
+        let thread_id = thread_id.unwrap_or(gone.thread_id);
         let message_id = self.insert_raw(raw, Some(thread_id), vec!["DRAFT".into()], date);
-        self.drafts.insert(draft_id.to_owned(), message_id.clone());
+        self.drafts
+            .get_mut(draft_id)
+            .ok_or(Missing)?
+            .clone_from(&message_id);
         Ok(message_id)
     }
 
@@ -356,16 +358,15 @@ impl Mailbox {
         date: Option<u64>,
     ) -> Result<String, Missing> {
         let old = self.drafts.remove(draft_id).ok_or(Missing)?;
-        let raw = raw.unwrap_or_else(|| self.messages[&old].raw.clone());
-        let thread_id = self.messages[&old].thread_id.clone();
-        self.delete(&old)?;
-        Ok(self.insert_raw(raw, Some(thread_id), vec!["SENT".into()], date))
+        let gone = self.delete(&old)?;
+        let raw = raw.unwrap_or(gone.raw);
+        Ok(self.insert_raw(raw, Some(gone.thread_id), vec!["SENT".into()], date))
     }
 
     /// Deletes a draft and its message.
     pub(crate) fn delete_draft(&mut self, draft_id: &str) -> Result<(), Missing> {
         let message = self.drafts.remove(draft_id).ok_or(Missing)?;
-        self.delete(&message)
+        self.delete(&message).map(drop)
     }
 
     /// Adds and removes labels, recording only real changes.

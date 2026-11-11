@@ -44,12 +44,14 @@ pub(crate) fn update(
         body_html,
         attachments,
     } = fields;
+    // The stored attachments, taken: the list built below replaces them.
+    let old = std::mem::take(&mut draft.attachments);
     // The composer holds attachments as it first loaded them; a file stored
     // since (a download of a Gmail draft's parts) is kept.
     let mut attachments: Vec<DraftAttachment> = attachments
         .into_iter()
         .map(|a| {
-            let stored = draft.attachments.iter().find(|s| s.id == a.id);
+            let stored = old.iter().find(|s| s.id == a.id);
             DraftAttachment {
                 path: a.path.or_else(|| stored.and_then(|s| s.path.clone())),
                 added: stored.and_then(|s| s.added),
@@ -63,12 +65,10 @@ pub(crate) fn update(
         .collect();
     // One Rust added after the state the composer saved from (a forward's,
     // once its target's body landed) was never shown there, so not removed.
-    let unseen: Vec<DraftAttachment> = draft
-        .attachments
-        .iter()
+    let unseen: Vec<DraftAttachment> = old
+        .into_iter()
         .filter(|s| s.added.is_some_and(|added| added > seen))
         .filter(|s| attachments.iter().all(|a| a.id != s.id))
-        .cloned()
         .collect();
     attachments.extend(unseen);
     draft.from = from.map(Into::into);

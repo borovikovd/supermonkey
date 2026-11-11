@@ -188,7 +188,7 @@ pub fn generate(path: &Path, size: Size, accounts: &[&str], now: Millis) -> Resu
         let plan = Plan { n, size, now };
         writer.call_blocking(Priority::Background, move |tx, ()| {
             let mut rng = StdRng::seed_from_u64(seed);
-            write_account(tx, &mut rng, plan, &email)
+            write_account(tx, &mut rng, plan, email)
         })?;
     }
     writer.stop().wait()
@@ -219,22 +219,22 @@ fn write_account(
     tx: &mut WriteTx<'_>,
     rng: &mut StdRng,
     plan: Plan,
-    email: &str,
+    email: String,
 ) -> Result<(), StoreError> {
     let Plan { n, size, now } = plan;
-    let name = email.split('@').next().unwrap_or(email).to_owned();
-    let account = tx.accounts().create(email, &name)?;
-    let me = Addr::named(name.clone(), email.to_owned());
+    let name = email.split('@').next().unwrap_or(&email).to_owned();
+    let account = tx.accounts().create(&email, &name)?;
     tx.accounts().set_profile(
         account,
         &name,
         &[SendAsAddress {
-            email: email.to_owned(),
+            email: email.clone(),
             name: name.clone(),
             is_default: true,
             is_primary: true,
         }],
     )?;
+    let me = Addr::named(name, email);
     tx.accounts()
         .set_history(account, sm_domain::HistoryId(1), now)?;
     tx.accounts().set_connected(account)?;
@@ -271,9 +271,10 @@ fn write_account(
     }
     for c in 0..size.contacts {
         let who = person(rng);
+        let email = format!("{c}{}", who.email);
         let sighting = Sighting {
-            email: format!("{c}{}", who.email),
-            name: who.name.unwrap_or_default(),
+            email: &email,
+            name: who.name.as_deref().unwrap_or_default(),
             sent: u32::from(rng.random_bool(0.5)),
             received: 1,
             on_list: false,

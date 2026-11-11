@@ -151,10 +151,11 @@ impl Mail {
         unwanted::blocked_senders(worker.ctx()).await
     }
 
-    /// Unblocks a sender by deleting its Gmail filter.
-    pub async fn unblock(&self, account: AccountId, filter: &str) -> Result<(), Error> {
+    /// Unblocks a sender by deleting its Gmail filter, named by its id.
+    pub async fn unblock(&self, account: AccountId, filter: String) -> Result<(), Error> {
+        let filter = FilterId::from(filter);
         let worker = self.worker(account)?;
-        unwanted::unblock(worker.ctx(), FilterId::from(filter)).await
+        unwanted::unblock(worker.ctx(), &filter).await
     }
 
     /// The account's running worker: these calls need its Gmail.

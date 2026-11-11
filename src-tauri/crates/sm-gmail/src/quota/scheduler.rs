@@ -10,11 +10,12 @@ use tokio::time::Instant;
 use super::bucket::{BackgroundWindow, Bucket, Spend};
 use super::{Priority, QuotaConfig, Units};
 
-/// The schedulers of every account. A cheap handle: clones share the accounts.
-#[derive(Debug, Clone)]
+/// The schedulers of every account: one per app, held by whoever makes the
+/// accounts' clients.
+#[derive(Debug)]
 pub struct Scheduler {
     config: QuotaConfig,
-    accounts: Arc<Mutex<HashMap<String, AccountScheduler>>>,
+    accounts: Mutex<HashMap<String, AccountScheduler>>,
 }
 
 impl Scheduler {
@@ -23,7 +24,7 @@ impl Scheduler {
     pub fn new(config: QuotaConfig) -> Self {
         Self {
             config,
-            accounts: Arc::default(),
+            accounts: Mutex::default(),
         }
     }
 
@@ -64,11 +65,19 @@ struct Shared {
 /// Everything that must agree, under one lock.
 #[derive(Debug)]
 struct State {
+    budget: Budget,
+    /// Waiters by priority, then arrival.
+    waiters: BTreeMap<WaiterKey, Waiter>,
+}
+
+/// What admitting a request reads and changes: the units, the background
+/// spending, and the slots. Apart from the waiters, so the line can be walked
+/// while requests are admitted.
+#[derive(Debug)]
+struct Budget {
     bucket: Bucket,
     background: BackgroundWindow,
     in_flight: usize,
-    /// Waiters by priority, then arrival.
-    waiters: BTreeMap<WaiterKey, Waiter>,
     next_ticket: u64,
 }
 
@@ -104,11 +113,13 @@ impl AccountScheduler {
             shared: Arc::new(Shared {
                 config,
                 state: Mutex::new(State {
-                    bucket: Bucket::new(config.capacity, config.refill_per_minute, now),
-                    background: BackgroundWindow::default(),
-                    in_flight: 0,
+                    budget: Budget {
+                        bucket: Bucket::new(config.capacity, config.refill_per_minute, now),
+                        background: BackgroundWindow::default(),
+                        in_flight: 0,
+                        next_ticket: 0,
+                    },
                     waiters: BTreeMap::new(),
-                    next_ticket: 0,
                 }),
             }),
         }
@@ -133,7 +144,7 @@ impl AccountScheduler {
         let now = Instant::now();
         let key = {
             let mut state = self.shared.state.lock();
-            let key = (priority, state.ticket());
+            let key = (priority, state.budget.ticket());
             state.waiters.insert(
                 key,
                 Waiter {
@@ -183,13 +194,13 @@ impl AccountScheduler {
     #[must_use]
     pub fn bucket_level(&self) -> f64 {
         let now = Instant::now();
-        self.shared.state.lock().bucket.level(now)
+        self.shared.state.lock().budget.bucket.level(now)
     }
 
     /// Requests running now.
     #[must_use]
     pub fn in_flight(&self) -> usize {
-        self.shared.state.lock().in_flight
+        self.shared.state.lock().budget.in_flight
     }
 
     /// Requests waiting for a slot or budget.
@@ -213,7 +224,9 @@ impl Shared {
     }
 }
 
-impl State {
+impl Budget {
+    /// The next number: a waiter's place in arrival order, or a background
+    /// spend's name.
     const fn ticket(&mut self) -> u64 {
         let ticket = self.next_ticket;
         self.next_ticket += 1;
@@ -250,36 +263,38 @@ impl State {
         }
     }
 
+    /// Takes a slot and the units. Returns the background spend's ticket.
+    fn start(&mut self, priority: Priority, cost: Units, now: Instant) -> Option<u64> {
+        self.bucket.take(cost, now);
+        self.in_flight += 1;
+        priority.is_background().then(|| {
+            let ticket = self.ticket();
+            self.background.record(Spend {
+                at: now,
+                units: cost,
+                ticket,
+            });
+            ticket
+        })
+    }
+}
+
+impl State {
     /// Starts every waiter that may start, in line order. Once the first
     /// waiter still in line is blocked, everyone behind it waits too, so a
     /// cheap request never overtakes an earlier one waiting for budget.
     /// Returns the waiters to wake, for the caller to wake after unlocking.
     fn pump(&mut self, config: QuotaConfig, now: Instant) -> Vec<Arc<Notify>> {
         let mut woken = Vec::new();
-        let keys: Vec<WaiterKey> = self
+        let in_line = self
             .waiters
-            .iter()
-            .filter(|(_, w)| matches!(w.stage, Stage::Waiting { .. }))
-            .map(|(&key, _)| key)
-            .collect();
-        for key in keys {
-            let Some(cost) = self.waiters.get(&key).map(|w| w.cost) else {
-                continue;
-            };
-            let (priority, _) = key;
-            let admit = self.admit(config, priority, cost, now);
-            let spend = match admit {
-                Admit::Now => Some(self.start(priority, cost, now)),
-                Admit::WhenSlotFrees | Admit::At(_) => None,
-            };
-            let Some(waiter) = self.waiters.get_mut(&key) else {
-                continue;
-            };
-            match admit {
+            .iter_mut()
+            .filter(|(_, w)| matches!(w.stage, Stage::Waiting { .. }));
+        for (&(priority, _), waiter) in in_line {
+            match self.budget.admit(config, priority, waiter.cost, now) {
                 Admit::Now => {
-                    waiter.stage = Stage::Granted {
-                        spend: spend.flatten(),
-                    };
+                    let spend = self.budget.start(priority, waiter.cost, now);
+                    waiter.stage = Stage::Granted { spend };
                     woken.push(Arc::clone(&waiter.notify));
                 }
                 Admit::WhenSlotFrees => {
@@ -298,21 +313,6 @@ impl State {
             }
         }
         woken
-    }
-
-    /// Takes a slot and the units. Returns the background spend's ticket.
-    fn start(&mut self, priority: Priority, cost: Units, now: Instant) -> Option<u64> {
-        self.bucket.take(cost, now);
-        self.in_flight += 1;
-        priority.is_background().then(|| {
-            let ticket = self.ticket();
-            self.background.record(Spend {
-                at: now,
-                units: cost,
-                ticket,
-            });
-            ticket
-        })
     }
 }
 
@@ -342,10 +342,10 @@ impl Drop for InLine<'_> {
             ..
         }) = state.waiters.remove(&key)
         {
-            state.in_flight -= 1;
-            state.bucket.give_back(cost, now);
+            state.budget.in_flight -= 1;
+            state.budget.bucket.give_back(cost, now);
             if let Some(ticket) = spend {
-                state.background.cancel(ticket);
+                state.budget.background.cancel(ticket);
             }
         }
         let woken = state.pump(self.shared.config, now);
@@ -365,7 +365,7 @@ impl Drop for Permit {
     fn drop(&mut self) {
         let now = Instant::now();
         let mut state = self.shared.state.lock();
-        state.in_flight -= 1;
+        state.budget.in_flight -= 1;
         let woken = state.pump(self.shared.config, now);
         drop(state);
         wake(woken);

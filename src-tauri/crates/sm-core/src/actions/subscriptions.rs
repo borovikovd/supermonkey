@@ -51,7 +51,7 @@ pub(super) fn subscribe(
             {
                 effects.push(Effect::DraftParts {
                     account: record.draft.account,
-                    draft: draft.clone(),
+                    draft: record.draft.id,
                 });
             }
         }

@@ -40,6 +40,12 @@ disallowed-types = [
   { path = "std::sync::Mutex", reason = "use parking_lot::Mutex" },
   { path = "std::sync::RwLock", reason = "use parking_lot::RwLock" },
   { path = "std::collections::LinkedList", reason = "use `Vec` or `VecDeque`" },
+  # Ownership: shared, run-time-checked state is a last resort, so each use says
+  # why at the place it is declared (`#[expect(clippy::disallowed_types, reason)]`).
+  { path = "std::rc::Rc", reason = "one owner plus ids usually does; if not, `#[expect]` this with the need" },
+  { path = "std::cell::RefCell", reason = "one owner plus ids usually does; if not, `#[expect]` this with the need" },
+  { path = "tokio::sync::Mutex", reason = "use parking_lot::Mutex; an async mutex only where the guard must be held across an `.await`, with `#[expect]` and that reason" },
+  { path = "tokio::sync::RwLock", reason = "use parking_lot::RwLock; an async lock only where the guard must be held across an `.await`, with `#[expect]` and that reason" },
 ]
 # vulcan also bans std's HashMap and HashSet in favor of FxHash. Not here (124
 # uses): these maps are keyed by ids, addresses, and label names taken from mail,

@@ -131,7 +131,7 @@ impl<'c> SplitReads<'c> {
             query: s.query,
             enabled: s.enabled,
         });
-        Ok(Router::new(splits.collect::<Vec<_>>(), self.pins(account)?))
+        Ok(Router::new(splits, self.pins(account)?))
     }
 }
 

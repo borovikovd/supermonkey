@@ -38,7 +38,7 @@
 //! let tokens = Arc::new(Tokens::from_grant(config.clone(), http.clone(), grant));
 //! let probe = Gmail::new(GMAIL_BASE_URL, http.clone(), Arc::clone(&tokens), scheduler.account("sign-in"))?;
 //! let email = probe.get_profile(Priority::P1).await?.email_address;
-//! store.store(&email, tokens.refresh_token().clone())?;
+//! store.store(email.clone(), tokens.refresh_token().clone())?;
 //!
 //! // Later launches: from the stored refresh token.
 //! if let Some(refresh_token) = store.load(&email)? {

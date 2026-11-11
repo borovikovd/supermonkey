@@ -36,8 +36,8 @@ impl Demo {
         for email in ACCOUNTS {
             let user = fake.add_user(email);
             user.set_display_name(email.split('@').next().unwrap_or(email));
-            seed(&user, email);
-            tokens.store(email, RefreshToken::new(user.refresh_token()))?;
+            seed(&user, email)?;
+            tokens.store(email.to_owned(), RefreshToken::new(user.refresh_token()))?;
         }
         tracing::info!(base = %fake.base_url(), "demo mode: fake Gmail started");
         Ok(Self {
@@ -133,9 +133,9 @@ fn labels(ids: &[&str]) -> Vec<String> {
 }
 
 /// The demo mail of the account `me`.
-fn seed(user: &FakeUser, me: &str) {
+fn seed(user: &FakeUser, me: &str) -> anyhow::Result<()> {
     seed_people(user, me);
-    seed_the_rest(user, me);
+    seed_the_rest(user, me)
 }
 
 /// Conversations with people, every other one with a reply from `me`
@@ -218,9 +218,9 @@ fn seed_people(user: &FakeUser, me: &str) {
 
 /// Newsletters, a receipt and a trip under user labels, and a hostile
 /// message the sanitizer must defuse.
-fn seed_the_rest(user: &FakeUser, me: &str) {
-    let receipts = user.add_label("Receipts");
-    let travel = user.add_label("Travel");
+fn seed_the_rest(user: &FakeUser, me: &str) -> anyhow::Result<()> {
+    let receipts = demo_label(user, "Receipts")?;
+    let travel = demo_label(user, "Travel")?;
     // Nothing replies to these messages, so their ids go unused.
     for issue in 100..106 {
         _ = user.add_message(NewMessage {
@@ -270,4 +270,11 @@ fn seed_the_rest(user: &FakeUser, me: &str) {
         labels: labels(&["INBOX", "UNREAD"]),
         ..Default::default()
     });
+    Ok(())
+}
+
+/// Creates one of the demo's user labels and returns its id.
+fn demo_label(user: &FakeUser, name: &str) -> anyhow::Result<String> {
+    user.add_label(name)
+        .ok_or_else(|| anyhow::anyhow!("the demo label {name} exists already"))
 }

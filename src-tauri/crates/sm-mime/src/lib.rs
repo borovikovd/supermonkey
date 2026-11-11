@@ -13,7 +13,7 @@
 //! 3. [`RawBody::render`] gives the sanitized [`Body`], split at its quoted
 //!    history, with text for search.
 //!
-//! A draft read from Gmail goes through [`RawBody::into_draft`] instead, which
+//! A draft read from Gmail goes through [`RawBody::to_draft`] instead, which
 //! splits it at its `gmail_quote`.
 //!
 //! # Compose

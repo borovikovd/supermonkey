@@ -66,7 +66,7 @@ pub async fn dispatch(app: &App, name: &str, args: Value) -> CmdResult<Answer> {
             reply.send(commands::blocked_senders(app, account).await?)
         }
         Command::Unblock { account, id, reply } => {
-            reply.send(commands::unblock(app, account, &id).await?)
+            reply.send(commands::unblock(app, account, id).await?)
         }
         Command::SenderThreads {
             account,

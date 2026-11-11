@@ -134,7 +134,7 @@ pub(crate) fn change_threads(
             messages,
             add,
             remove,
-            threads: entry.clone(),
+            threads: entry,
         };
         let origin = OpOrigin {
             account,
@@ -142,6 +142,7 @@ pub(crate) fn change_threads(
             now,
         };
         queue_modify(tx, state, origin, &op)?;
+        return Ok(op.threads);
     }
     Ok(entry)
 }

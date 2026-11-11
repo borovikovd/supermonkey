@@ -67,7 +67,7 @@ pub use crate::traffic::{Answer, LoggedRequest, Release, RequestInfo, api_name};
 
 /// App time for the fake: what Gmail's own clock reads (dates of new messages,
 /// `newer_than:`) and when requests arrive.
-type Clock = Arc<dyn Fn() -> u64 + Send + Sync>;
+type ClockFn = dyn Fn() -> u64 + Send + Sync;
 
 /// The fake Gmail server. Dropping it stops accepting connections.
 pub struct FakeGmail {
@@ -92,7 +92,8 @@ pub(crate) struct Shared {
     traffic: Mutex<Traffic>,
     log: Mutex<Vec<LoggedRequest>>,
     in_flight: AtomicUsize,
-    clock: Mutex<Option<Clock>>,
+    /// Shared so a reader can take it out and call it with the lock released.
+    clock: Mutex<Option<Arc<ClockFn>>>,
 }
 
 /// Faults and the requests holds have parked, under one lock: a release must never fall
@@ -212,12 +213,12 @@ impl Shared {
     }
 
     /// Adds a request to the log as it arrives. Returns its place there.
-    fn log_request(&self, info: &RequestInfo, headers: &HeaderMap, body: &[u8]) -> usize {
+    fn log_request(&self, info: RequestInfo, headers: &HeaderMap, body: &[u8]) -> usize {
         // The clock is the caller's code: never run it under the log lock.
         let at_ms = self.now_ms();
         let mut log = self.log.lock();
         let seq = log.len();
-        log.push(LoggedRequest::new(seq, info.clone(), headers, body, at_ms));
+        log.push(LoggedRequest::new(seq, info, headers, body, at_ms));
         seq
     }
 
@@ -256,7 +257,7 @@ impl Shared {
         traffic.held.push(Held {
             seq,
             hold,
-            info: request.clone(),
+            api: request.api,
             parked,
             release,
         });
@@ -797,7 +798,7 @@ impl FakeGmail {
         });
         let released: Vec<Held> = traffic
             .held
-            .extract_if(.., |h| which.covers(h.hold, Some(h.info.api)))
+            .extract_if(.., |h| which.covers(h.hold, Some(h.api)))
             .collect();
         drop(traffic);
         let n = released.len();
@@ -830,7 +831,7 @@ impl FakeGmail {
             .lock()
             .held
             .iter()
-            .filter(|h| h.parked && which.covers(h.hold, Some(h.info.api)))
+            .filter(|h| h.parked && which.covers(h.hold, Some(h.api)))
             .count()
     }
 
@@ -874,11 +875,6 @@ impl FakeGmail {
     #[must_use]
     pub fn revocations(&self) -> Vec<Revocation> {
         self.shared.world().revocations.clone()
-    }
-
-    /// Clears the request log.
-    pub fn clear_requests(&self) {
-        self.shared.log.lock().clear();
     }
 
     /// Takes the server off the network or back. Offline, the port refuses connections and
@@ -999,20 +995,20 @@ impl FakeUser {
     }
 
     /// Adds a send-as alias.
-    pub fn add_send_as(&self, email: &str, display_name: &str) {
+    pub fn add_send_as(&self, email: String, display_name: String) {
         self.with(|mb| {
             mb.send_as.push(SendAsEntry {
-                email: email.to_owned(),
-                display_name: display_name.to_owned(),
+                email,
+                display_name,
                 primary: false,
             });
         });
     }
 
-    /// Creates a user label and returns its id. Panics if the name exists.
+    /// Creates a user label and returns its id, or `None` if the name is taken.
     #[must_use]
-    pub fn add_label(&self, name: &str) -> String {
-        self.with(|mb| mb.create_label(name).expect("label name is free"))
+    pub fn add_label(&self, name: &str) -> Option<String> {
+        self.with(|mb| mb.create_label(name))
     }
 
     /// Label ids and names.
@@ -1124,27 +1120,24 @@ impl FakeUser {
         });
     }
 
-    /// Stores raw RFC 822 bytes as a message.
-    #[must_use]
-    pub fn add_raw_message(&self, raw: &[u8], thread_id: Option<&str>, labels: &[&str]) -> String {
-        self.with(|mb| {
-            let thread_id = thread_id.map(str::to_owned);
-            mb.insert_raw(raw.to_vec(), thread_id, owned(labels), None)
-        })
-    }
-
     /// Changes a message's labels as another client would, recording history.
-    pub fn modify_labels(&self, message_id: &str, add: &[&str], remove: &[&str]) {
-        self.with(|mb| mb.modify(message_id, add, remove))
-            .expect("message exists");
+    /// Returns false if the message is gone.
+    #[must_use]
+    pub fn modify_labels<L: AsRef<str>>(&self, message_id: &str, add: &[L], remove: &[L]) -> bool {
+        self.with(|mb| mb.modify(message_id, add, remove).is_ok())
     }
 
     /// Deletes a message (and any draft holding it), recording `messagesDeleted`.
-    pub fn delete_message(&self, message_id: &str) {
+    /// Returns false if it was gone.
+    #[must_use]
+    pub fn delete_message(&self, message_id: &str) -> bool {
         self.with(|mb| {
+            if !mb.messages.contains_key(message_id) {
+                return false;
+            }
             mb.drafts.retain(|_, m| m != message_id);
-            mb.delete(message_id).expect("message exists");
-        });
+            mb.delete(message_id).is_ok()
+        })
     }
 
     /// A stored message.
@@ -1230,10 +1223,6 @@ fn built(mb: &mut Mailbox, msg: &mut NewMessage, date: u64) -> (Vec<u8>, String)
     )
 }
 
-fn owned(ids: &[&str]) -> Vec<String> {
-    ids.iter().map(|&id| id.to_owned()).collect()
-}
-
 fn bind(addr: SocketAddr) -> std::io::Result<TcpListener> {
     let socket = TcpSocket::new_v4()?;
     socket.set_reuseaddr(true)?;
@@ -1287,11 +1276,8 @@ async fn connection(
     backend: Backend,
     mut offline: watch::Receiver<bool>,
 ) {
-    let kill = Arc::new(Notify::new());
-    let service_kill = Arc::clone(&kill);
-    let service = hyper::service::service_fn(move |req| {
-        handle(backend.clone(), Arc::clone(&service_kill), req)
-    });
+    let kill = Notify::new();
+    let service = hyper::service::service_fn(|req| handle(&backend, &kill, req));
     let conn =
         hyper::server::conn::http1::Builder::new().serve_connection(TokioIo::new(stream), service);
     tokio::select! {
@@ -1303,8 +1289,8 @@ async fn connection(
 
 /// Answers one request: logs it, applies the fault or hold that matches it, and routes it.
 async fn handle(
-    backend: Backend,
-    kill: Arc<Notify>,
+    backend: &Backend,
+    kill: &Notify,
     req: hyper::Request<Incoming>,
 ) -> Result<Response, Infallible> {
     let Backend { shared, router } = backend;
@@ -1313,7 +1299,7 @@ async fn handle(
         .await
         .unwrap_or_default();
     let info = RequestInfo::new(&shared.world(), &parts, &body);
-    let seq = shared.log_request(&info, &parts.headers, &body);
+    let seq = shared.log_request(info.clone(), &parts.headers, &body);
     let _in_flight = InFlight::new(&shared.in_flight);
     let mut hold_answer = None;
     let fault = match shared.fault_for(seq, &info) {
@@ -1326,13 +1312,14 @@ async fn handle(
         }
     };
     let req = hyper::Request::from_parts(parts, Body::from(body));
+    let route = |req: hyper::Request<Body>| router.clone().oneshot(req);
     let response = match fault {
         None | Some(Fault::Hold | Fault::HoldAnswer) => {
-            router.oneshot(req).await.unwrap_or_else(|e| match e {})
+            route(req).await.unwrap_or_else(|e| match e {})
         }
         Some(Fault::Delay(wait)) => {
             tokio::time::sleep(wait).await;
-            router.oneshot(req).await.unwrap_or_else(|e| match e {})
+            route(req).await.unwrap_or_else(|e| match e {})
         }
         Some(Fault::Status {
             status,
@@ -1340,11 +1327,11 @@ async fn handle(
             retry_after_secs,
         }) => routes::google_error(status, &reason, "Injected fault", retry_after_secs),
         Some(Fault::StatusAfterApply { status, reason }) => {
-            let _ = router.oneshot(req).await;
+            let _ = route(req).await;
             routes::google_error(status, &reason, "Injected fault", None)
         }
         Some(Fault::OmitThreads(ids)) => {
-            let response = router.oneshot(req).await.unwrap_or_else(|e| match e {});
+            let response = route(req).await.unwrap_or_else(|e| match e {});
             omit_threads(response, &ids).await
         }
         // Never answer; the connection task drops the connection on `kill`.
@@ -1354,7 +1341,7 @@ async fn handle(
             return std::future::pending().await;
         }
         Some(Fault::NoResponse) => {
-            let _ = router.oneshot(req).await;
+            let _ = route(req).await;
             shared.answered(seq, Answer::NoResponse);
             kill.notify_one();
             return std::future::pending().await;

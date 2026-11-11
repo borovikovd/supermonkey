@@ -43,7 +43,10 @@ pub(crate) fn html_to_plain(html: &str) -> String {
         out.push_str(line);
         out.push('\n');
     }
-    let mut out = out.trim_matches('\n').to_owned();
+    // No blank lines at either end, and one newline at the end.
+    out.truncate(out.trim_end_matches('\n').len());
+    let leading = out.len() - out.trim_start_matches('\n').len();
+    out.drain(..leading);
     out.push('\n');
     out
 }
@@ -92,7 +95,7 @@ fn render(html: &str, style: Style) -> String {
     let mut w = TextWriter::new(style);
     let mut pre_depth = 0u32;
     // The open link: its href and where its text starts in the output.
-    let mut link: Option<(String, usize)> = None;
+    let mut link: Option<(Cow<'_, str>, usize)> = None;
     let mut last = 0;
     for tag in TAG.captures_iter(&html) {
         let Some(whole) = tag.get(0) else { continue };
@@ -103,11 +106,10 @@ fn render(html: &str, style: Style) -> String {
         last = whole.end();
 
         let is_end = tag.get(1).is_some_and(|m| !m.as_str().is_empty());
-        let name = tag
-            .get(2)
-            .map_or_else(String::new, |m| m.as_str().to_ascii_lowercase());
+        let mut name = [0; MAX_TAG_NAME];
+        let name = lowercase_tag_name(tag.get(2).map_or("", |m| m.as_str()), &mut name);
         let attributes = tag.get(3).map_or("", |m| m.as_str());
-        match (name.as_str(), is_end) {
+        match (name, is_end) {
             ("br", _) => w.newline(),
             ("pre", false) => {
                 pre_depth += 1;
@@ -160,14 +162,30 @@ fn render(html: &str, style: Style) -> String {
     w.out
 }
 
-/// The decoded `href` of a start tag's attributes.
-fn href(attributes: &str) -> Option<String> {
+/// The longest tag name [`render`] acts on: `blockquote`.
+const MAX_TAG_NAME: usize = 10;
+
+/// A tag's name in ASCII lowercase, written into `buffer`. A name longer
+/// than every tag [`render`] acts on is empty, which is no tag.
+fn lowercase_tag_name<'b>(name: &str, buffer: &'b mut [u8; MAX_TAG_NAME]) -> &'b str {
+    let Some(lowered) = buffer.get_mut(..name.len()) else {
+        return "";
+    };
+    lowered.copy_from_slice(name.as_bytes());
+    lowered.make_ascii_lowercase();
+    // Changing the case of ASCII letters keeps UTF-8 valid.
+    std::str::from_utf8(lowered).unwrap_or_default()
+}
+
+/// The decoded `href` of a start tag's attributes. Borrows when it has no
+/// entities to decode.
+fn href(attributes: &str) -> Option<Cow<'_, str>> {
     let found = HREF.captures(attributes)?;
     let value = found
         .get(1)
         .or_else(|| found.get(2))
         .or_else(|| found.get(3))?;
-    Some(html_escape::decode_html_entities(value.as_str()).into_owned())
+    Some(html_escape::decode_html_entities(value.as_str()))
 }
 
 /// Zero-width and filler characters newsletters pad their preview text with.

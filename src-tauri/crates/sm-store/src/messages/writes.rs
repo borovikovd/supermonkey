@@ -71,7 +71,7 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
             touched.insert(write_labels(
                 self.tx,
                 change.message,
-                &change.apply(&current),
+                &change.apply(current),
             )?);
         }
         derive_all(self.tx, touched)
@@ -167,13 +167,13 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
             "UPDATE attachments SET local_path = ?2 WHERE id = ?1",
             (id, path),
         )?;
-        db.execute(
+        let thread: Option<ThreadId> = db.optional(
             "stamp a message",
-            "UPDATE messages SET rev = ?2 WHERE id = ?1",
+            "UPDATE messages SET rev = ?2 WHERE id = ?1 RETURNING thread_id",
             (message, rev),
+            |r| r.get("thread_id"),
         )?;
         self.tx.record().message(message);
-        let thread = self.tx.read().messages().get(message)?.map(|m| m.thread);
         derive_all(self.tx, thread.into_iter().collect())
     }
 }

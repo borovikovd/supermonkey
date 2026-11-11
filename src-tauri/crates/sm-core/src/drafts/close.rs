@@ -80,7 +80,7 @@ pub(crate) fn discard(
     let copies = tx.read().messages().draft_copies(draft.account, id)?;
     tx.messages().delete(&copies)?;
     state.draft_gone(draft.account, id.clone());
-    state.effect(Effect::DraftFilesGone(id.clone()));
+    state.effect(Effect::DraftFilesGone(draft.id));
     Ok(())
 }
 

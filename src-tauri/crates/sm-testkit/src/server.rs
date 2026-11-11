@@ -61,6 +61,10 @@ pub(crate) struct Server {
     pub(crate) activity: Arc<Activity>,
     /// An async lock: `start` and `stop` hold it while the core starts or
     /// quits, so no other control call sees it half way.
+    #[expect(
+        clippy::disallowed_types,
+        reason = "held while the core starts or quits, which awaits"
+    )]
     pub(crate) core: tokio::sync::Mutex<Core>,
     /// The budget for the next start.
     pub(crate) quota: Mutex<QuotaConfig>,
@@ -103,7 +107,7 @@ impl Server {
             tokens: Arc::<TokenFile>::clone(&self.tokens),
             activity: Arc::clone(&self.activity),
         };
-        Ok(Arc::new(App::start(&self.config(quota), deps)?))
+        Ok(Arc::new(App::start(self.config(quota), deps)?))
     }
 
     /// The database file.

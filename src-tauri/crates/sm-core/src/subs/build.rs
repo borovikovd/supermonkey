@@ -7,7 +7,7 @@ use sm_ipc::{ListEntry, SubKey, SubUpdate};
 use sm_store::{Changes, Reads, StoreError};
 
 use super::affects::affects;
-use super::diff::diff;
+use super::diff::{ListDiff, diff};
 use super::lists::{FIRST_WINDOW, SearchTraits, search_ids, view_ids};
 use super::registry::Sub;
 use crate::views;
@@ -236,15 +236,20 @@ impl<'a, 'c> ListUpdate<'a, 'c> {
         if !forced && d.is_empty() {
             return Ok(None);
         }
-        let rows = views::rows_for_keys(reads, drafts, &d.changed)?;
+        let ListDiff {
+            removed,
+            moved,
+            changed,
+        } = d;
+        let rows = views::rows_for_keys(reads, drafts, &changed)?;
         let oldest_hit = oldest_hit(&ids, &sub.gmail_hits);
         sub.ids = ids;
         Ok(Some(SubUpdate::List {
             sub: sub_id,
             first: false,
             ids: None,
-            removed: d.removed,
-            moved: d.moved,
+            removed,
+            moved,
             rows,
             searching: sub.searching,
             needs_gmail: kind.needs_gmail(),

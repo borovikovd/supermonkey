@@ -101,7 +101,7 @@ fn parsers_never_panic() {
         let parsed = parse_message(&payload).unwrap();
         _ = parsed.inline_images_to_fetch().count();
         _ = parsed.body.clone().render(&parsed.cid_images());
-        _ = parsed.body.into_draft();
+        _ = parsed.body.to_draft();
         _ = RawBody {
             html: None,
             text: Some(input),

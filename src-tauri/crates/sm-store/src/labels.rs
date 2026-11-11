@@ -1,6 +1,6 @@
 //! Labels, per account (SPEC Labels).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use rusqlite::{Row, named_params};
 use sm_domain::{AccountId, LabelId, LabelSet};
@@ -224,14 +224,14 @@ impl<'t, 'c> LabelWrites<'t, 'c> {
     /// Records the Gmail id of a label made here, once `labels.create`
     /// answers. When another label already has that id (the name existed on
     /// Gmail), the local label merges into it: messages that had the local
-    /// label get the other one, and the local label goes. Returns the id
-    /// now in use.
+    /// label get the other one, and the local label goes. Returns that other
+    /// label when the two merged, `None` when `local` keeps its place.
     pub fn assign_gmail_id(
         &mut self,
         account: AccountId,
         local: &LabelId,
         gmail_id: &LabelId,
-    ) -> Result<LabelId, StoreError> {
+    ) -> Result<Option<LabelId>, StoreError> {
         let existing: Option<LabelId> = self.tx.db().optional(
             "find a label holding a Gmail id",
             "SELECT id FROM labels WHERE account_id = ?1 AND gmail_id = ?2 AND id != ?3",
@@ -245,7 +245,7 @@ impl<'t, 'c> LabelWrites<'t, 'c> {
                 (account, local, gmail_id),
             )?;
             self.tx.touch(account, Table::Labels);
-            return Ok(local.clone());
+            return Ok(None);
         };
         let carrying: Vec<(sm_domain::MessageId, LabelSet)> = self.tx.db().all(
             "find messages with a label",
@@ -272,7 +272,7 @@ impl<'t, 'c> LabelWrites<'t, 'c> {
             .map(drop)
         })?;
         self.tx.messages().set_labels(&relabeled)?;
-        Ok(existing)
+        Ok(Some(existing))
     }
 
     /// Drops a label made here that Gmail refused.
@@ -294,14 +294,7 @@ impl<'t, 'c> LabelWrites<'t, 'c> {
         account: AccountId,
         write: impl FnOnce(Db<'c>) -> Result<(), StoreError>,
     ) -> Result<(), StoreError> {
-        let names = |tx: &WriteTx<'c>| -> Result<BTreeMap<LabelId, String>, StoreError> {
-            Ok(tx
-                .read()
-                .labels()
-                .user_label_names(account)?
-                .into_iter()
-                .collect())
-        };
+        let names = |tx: &WriteTx<'c>| tx.read().labels().user_label_names(account);
         let before = names(self.tx)?;
         write(self.tx.db())?;
         self.tx.touch(account, Table::Labels);

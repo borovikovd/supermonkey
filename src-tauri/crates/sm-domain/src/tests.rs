@@ -134,18 +134,19 @@ fn digest_counts_and_flags() {
 
 #[test]
 fn view_membership() {
-    let digest = |labels: &[&str]| {
-        Thread::new(vec![message(1, alice(), labels)])
-            .digest()
-            .unwrap()
-    };
-    let inbox = digest(&["INBOX", "STARRED", "Label_1"]);
-    let archived = digest(&["SENT"]);
-    let trashed = digest(&["TRASH", "INBOX"]);
+    let thread = |labels: &[&str]| Thread::new(vec![message(1, alice(), labels)]);
+    let (inbox, archived, trashed) = (
+        thread(&["INBOX", "STARRED", "Label_1"]),
+        thread(&["SENT"]),
+        thread(&["TRASH", "INBOX"]),
+    );
+    let inbox = inbox.digest().unwrap();
+    let archived = archived.digest().unwrap();
+    let trashed = trashed.digest().unwrap();
     let label = View::Label {
         label: LabelId::from("Label_1"),
     };
-    let cases: [(&View, &ThreadDigest, bool, bool); 18] = [
+    let cases: [(&View, &ThreadDigest<'_>, bool, bool); 18] = [
         (&View::Inbox, &inbox, false, true),
         (&View::Inbox, &inbox, true, false),
         (&View::Done, &inbox, false, false),
@@ -177,9 +178,8 @@ fn view_membership() {
     let mixed = Thread::new(vec![
         message(1, alice(), &["INBOX"]),
         message(2, alice(), &["TRASH"]),
-    ])
-    .digest()
-    .unwrap();
+    ]);
+    let mixed = mixed.digest().unwrap();
     assert!(View::Inbox.lists(&mixed, false) && View::Trash.lists(&mixed, false));
 }
 
@@ -323,11 +323,11 @@ fn deltas_are_checked_and_presets_match_the_spec() {
 #[test]
 fn revert_undoes_only_what_is_still_there() {
     let done = change(1, &["STARRED"], &["INBOX", "UNREAD"]);
-    let now = done.apply(&set(&["INBOX", "UNREAD", "Label_1"]));
+    let now = done.apply(set(&["INBOX", "UNREAD", "Label_1"]));
     assert_eq!(now, set(&["Label_1", "STARRED"]));
     let back = done.reverted(&now).unwrap();
     assert_eq!(back, change(1, &["INBOX", "UNREAD"], &["STARRED"]));
-    assert_eq!(back.apply(&now), set(&["INBOX", "UNREAD", "Label_1"]));
+    assert_eq!(back.apply(now), set(&["INBOX", "UNREAD", "Label_1"]));
     // INBOX put back and STARRED removed elsewhere since: only UNREAD is left to revert.
     let partly = done.reverted(&set(&["INBOX", "Label_1"])).unwrap();
     assert_eq!(partly, change(1, &["UNREAD"], &[]));

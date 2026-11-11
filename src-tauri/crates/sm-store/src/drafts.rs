@@ -260,8 +260,8 @@ pub struct DraftRecord {
 }
 
 fn draft_row(r: &Row<'_>) -> rusqlite::Result<DraftRecord> {
-    let stage: String = r.get("stage")?;
-    let stage = DraftStage::from_columns(&stage, json_column_opt(r, "defaults")?)?;
+    let stage = r.get_ref("stage")?.as_str()?;
+    let stage = DraftStage::from_columns(stage, json_column_opt(r, "defaults")?)?;
     Ok(DraftRecord {
         draft: Draft {
             id: r.get("id")?,
@@ -453,13 +453,13 @@ impl<'t, 'c> DraftWrites<'t, 'c> {
     /// Writes a draft's whole state, adding it if new. A draft can't move to
     /// another account.
     pub fn put(&mut self, draft: &Draft) -> Result<(), StoreError> {
-        let before = self.tx.read().drafts().get(&draft.id)?;
-        if let Some(before) = &before
-            && before.draft.account != draft.account
+        let before = self.placed(&draft.id)?;
+        if let Some((account, _)) = before
+            && account != draft.account
         {
             return Err(StoreError::Invalid(format!(
                 "draft {} belongs to account {}, not {}",
-                draft.id, before.draft.account, draft.account
+                draft.id, account, draft.account
             )));
         }
         let rev = self.tx.stamp();
@@ -503,20 +503,30 @@ impl<'t, 'c> DraftWrites<'t, 'c> {
                 ":rev": rev,
             },
         )?;
-        let old_thread = before.and_then(|b| b.draft.thread);
+        let old_thread = before.and_then(|(_, thread)| thread);
         self.changed(draft.account, &draft.id, [old_thread, draft.thread])
     }
 
     /// Deletes a draft. Unknown ids are skipped.
     pub fn delete(&mut self, id: &DraftId) -> Result<(), StoreError> {
-        let Some(before) = self.tx.read().drafts().get(id)? else {
+        let Some((account, thread)) = self.placed(id)? else {
             return Ok(());
         };
         self.tx.stamp();
         self.tx
             .db()
             .execute("delete a draft", "DELETE FROM drafts WHERE id = ?1", [id])?;
-        self.changed(before.draft.account, id, [before.draft.thread, None])
+        self.changed(account, id, [thread, None])
+    }
+
+    /// The account and thread a stored draft is in.
+    fn placed(&self, id: &DraftId) -> Result<Option<(AccountId, Option<ThreadId>)>, StoreError> {
+        self.tx.db().optional(
+            "read where a draft is",
+            "SELECT account_id, thread_id FROM drafts WHERE id = ?1",
+            [id],
+            |r| Ok((r.get("account_id")?, r.get("thread_id")?)),
+        )
     }
 
     /// Records the draft and stamps the threads it was and is on.

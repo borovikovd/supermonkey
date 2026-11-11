@@ -18,6 +18,7 @@ use sm_store::{Outbox, Priority as WritePriority, StoreError};
 use super::account::{AccountCtx, OFFLINE_RETRY, fetch_thread};
 use super::drafts::{WriteFailure, load, write};
 use crate::Error;
+use crate::clock::Clock;
 use crate::drafts::lifecycle::{self, GmailIds};
 use crate::drafts::store_ids;
 use crate::outbox::{Event, resolve};
@@ -39,7 +40,7 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
         let wait = match pass {
             Ok(next_due) => {
                 backoff.reset();
-                next_due.map_or(IDLE_WAIT, |due| until(&ctx, due))
+                next_due.map_or(IDLE_WAIT, |due| until(ctx.clock(), due))
             }
             Err(Failure::Gmail(e)) => {
                 ctx.health.failed(&e);
@@ -99,8 +100,8 @@ impl From<StoreError> for Failure {
 }
 
 /// How long until `due`, within the runner's bounds.
-fn until(ctx: &AccountCtx, due: Millis) -> Duration {
-    let ms = u64::try_from(due.0.saturating_sub(ctx.clock().now().0)).unwrap_or(0);
+fn until(clock: &dyn Clock, due: Millis) -> Duration {
+    let ms = u64::try_from(due.0.saturating_sub(clock.now().0)).unwrap_or(0);
     Duration::from_millis(ms).clamp(MIN_WAIT, IDLE_WAIT)
 }
 
@@ -175,7 +176,7 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
     };
     // 1 to 3: parts, MIME, and the Gmail draft. Failing here, Gmail never
     // got a send.
-    let written = match write(ctx, &draft).await {
+    let written = match write(ctx, draft).await {
         Ok(Some(written)) => written,
         // The draft went with its account while its target's body was read.
         Ok(None) => return Ok(()),
@@ -212,7 +213,9 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
     };
     // The draft keeps the Gmail ids and the send its Gmail draft together.
     let (id, now, local) = (row.id, ctx.clock().now(), row.draft.clone());
-    let (ids, gmail) = (GmailIds::of(&written), written.id.clone());
+    let ids = GmailIds::of(written);
+    // Gmail's draft: the send's row keeps it, and step 4 sends it.
+    let (gmail, to_send) = (ids.draft.clone(), ids.draft.clone());
     let applied = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
@@ -226,7 +229,7 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
         return Ok(());
     }
     // 4: drafts.send.
-    send_draft(ctx, row, &written.id).await
+    send_draft(ctx, row, &to_send).await
 }
 
 /// `drafts.send`, unless an undo is held on the row: then it is not sent.

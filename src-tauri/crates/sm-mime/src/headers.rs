@@ -24,21 +24,22 @@ pub(crate) fn is_message_id(id: &str) -> bool {
 
 /// The ids in a `Message-ID`, `In-Reply-To` or `References` value, without angle
 /// brackets. A value with no brackets at all is read as whitespace-separated ids.
-/// Ids that could not be written back safely are dropped.
-pub(crate) fn message_ids(value: &str) -> Vec<String> {
-    let ids: Vec<&str> = if value.contains('<') {
+/// Ids that could not be written back safely are dropped. The ids are slices
+/// of `value`.
+pub(crate) fn message_ids(value: &str) -> Vec<&str> {
+    if value.contains('<') {
         value
             .split('<')
             .skip(1)
             .filter_map(|s| s.split_once('>').map(|(id, _)| id.trim()))
+            .filter(|id| is_message_id(id))
             .collect()
     } else {
-        value.split_whitespace().collect()
-    };
-    ids.into_iter()
-        .filter(|id| is_message_id(id))
-        .map(str::to_owned)
-        .collect()
+        value
+            .split_whitespace()
+            .filter(|id| is_message_id(id))
+            .collect()
+    }
 }
 
 /// An RFC 2822 `Date` value as a point in time. Tolerates a trailing comment

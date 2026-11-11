@@ -70,10 +70,12 @@ impl Searches {
         };
         let ctx = Arc::clone(worker.ctx());
         worker.ctx().tasks.spawn("gmail listing", async move {
-            let stopped = listing.run.stopped().clone();
-            tokio::select! {
-                () = stopped.cancelled() => {}
-                (hits, next) = list_page(&ctx, &progress, query, page) => listing.settle(hits, next),
+            let listed = tokio::select! {
+                () = listing.run.stopped().cancelled() => None,
+                listed = list_page(&ctx, &progress, &query, page.as_ref()) => Some(listed),
+            };
+            if let Some((hits, next)) = listed {
+                listing.settle(hits, next);
             }
         });
     }
@@ -149,8 +151,8 @@ impl Progress {
 async fn list_page(
     ctx: &AccountCtx,
     progress: &Progress,
-    query: GmailQuery,
-    page: Option<PageToken>,
+    query: &GmailQuery,
+    page: Option<&PageToken>,
 ) -> (Vec<ThreadId>, Option<PageToken>) {
     if matches!(query, GmailQuery::Search(_)) && page.is_none() {
         sleep(ctx.clock(), TYPING_PAUSE).await;
@@ -189,7 +191,7 @@ async fn list_page(
 async fn list_when_reachable(
     ctx: &AccountCtx,
     progress: &Progress,
-    request: &ThreadQuery,
+    request: &ThreadQuery<'_>,
 ) -> Result<ThreadPage, GmailError> {
     let network = &ctx.deps.network;
     loop {
@@ -250,7 +252,8 @@ async fn queue_bodies(ctx: &AccountCtx, hits: &[GmailThreadId]) {
     }
 }
 
-fn thread_query(query: GmailQuery, page: Option<PageToken>) -> ThreadQuery {
+/// The `threads.list` request for a page of `query`, borrowing from both.
+fn thread_query<'a>(query: &'a GmailQuery, page: Option<&'a PageToken>) -> ThreadQuery<'a> {
     let mut q = ThreadQuery {
         page_token: page,
         max_results: Some(PAGE),
@@ -262,8 +265,8 @@ fn thread_query(query: GmailQuery, page: Option<PageToken>) -> ThreadQuery {
             gmail_label,
             include_spam_trash,
         } => {
-            q.label_ids = vec![gmail_label];
-            q.include_spam_trash = include_spam_trash;
+            q.label_ids = std::slice::from_ref(gmail_label);
+            q.include_spam_trash = *include_spam_trash;
         }
     }
     q

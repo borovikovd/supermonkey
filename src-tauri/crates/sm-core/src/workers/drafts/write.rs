@@ -41,22 +41,20 @@ pub(crate) async fn load(pool: &Arc<ReadPool>, id: DraftId) -> Result<Option<Dra
 /// target's body was read or its message built: nothing is written.
 pub(crate) async fn write(
     ctx: &AccountCtx,
-    draft: &Draft,
+    draft: Draft,
 ) -> Result<Option<sm_gmail::Draft>, WriteFailure> {
-    let filled;
-    let draft = if lifecycle::awaits_target_body(draft) {
-        let Some(settled) = with_target_body(ctx, draft).await? else {
+    let draft = if lifecycle::awaits_target_body(&draft) {
+        let Some(settled) = with_target_body(ctx, &draft).await? else {
             return Ok(None);
         };
-        filled = settled;
-        &filled
+        settled
     } else {
         draft
     };
-    let raw = build_raw(ctx, draft).await?;
-    let thread = gmail_thread(&ctx.deps.pool, draft).await?;
+    let (draft, raw) = build_raw(ctx, draft).await?;
+    let thread = gmail_thread(&ctx.deps.pool, &draft).await?;
     let recovered;
-    let existing = match lifecycle::gmail_write(draft) {
+    let existing = match lifecycle::gmail_write(&draft) {
         GmailWrite::Update(id) => Some(id),
         GmailWrite::Recover => {
             recovered = recover_create(ctx, &draft.id).await?.map(|d| d.id);
@@ -296,48 +294,46 @@ pub(super) async fn list_drafts(
 
 /// The draft's RFC 5322 bytes (SPEC Compose): its HTML and quote, its
 /// attachments (downloading those not cached yet), and the quoted
-/// message's `cid:` images turned back from `data:`.
-async fn build_raw(ctx: &AccountCtx, draft: &Draft) -> Result<Vec<u8>, WriteFailure> {
-    let attachments = attachment_bytes(ctx, draft).await?;
+/// message's `cid:` images turned back from `data:`. The message is built
+/// off the async threads from the draft itself, which comes back with the
+/// bytes.
+async fn build_raw(ctx: &AccountCtx, draft: Draft) -> Result<(Draft, Vec<u8>), WriteFailure> {
+    let attachments = attachment_bytes(ctx, &draft).await?;
     let html = format!(
         "{}{}",
         draft.body_html,
         draft.quote_html.as_deref().unwrap_or_default()
     );
-    let known = quoted_inline(ctx, draft, &html).await?;
-    let from = draft
-        .from
-        .clone()
-        .unwrap_or_else(|| Addr::new(String::new()));
+    let known = quoted_inline(ctx, &draft, &html).await?;
     let date = ctx.clock().now();
-    let id = draft.id.clone();
-    let (to, cc, bcc) = (draft.to.clone(), draft.cc.clone(), draft.bcc.clone());
-    let (subject, in_reply_to) = (draft.subject.clone(), draft.in_reply_to.clone());
     let references: Vec<String> = draft
         .references
         .split_whitespace()
         .map(str::to_owned)
         .collect();
-    let built = tokio::task::spawn_blocking(move || {
+    let (draft, built) = tokio::task::spawn_blocking(move || {
         let (html, inline) = sm_mime::data_images_to_cid(&html, known);
-        sm_mime::build_mime(&Outgoing {
-            from: &from,
-            to: &to,
-            cc: &cc,
-            bcc: &bcc,
-            subject: &subject,
+        let nobody = Addr::new(String::new());
+        let built = sm_mime::build_mime(&Outgoing {
+            from: draft.from.as_ref().unwrap_or(&nobody),
+            to: &draft.to,
+            cc: &draft.cc,
+            bcc: &draft.bcc,
+            subject: &draft.subject,
             html: &html,
-            in_reply_to: in_reply_to.as_deref(),
+            in_reply_to: draft.in_reply_to.as_deref(),
             references: &references,
-            draft_id: &id,
+            draft_id: &draft.id,
             attachments: &attachments,
             inline: &inline,
             date,
-        })
+        });
+        (draft, built)
     })
     .await
     .map_err(Error::from)?;
-    built.map_err(|e| WriteFailure::Local(format!("The message can't be built: {e}")))
+    let raw = built.map_err(|e| WriteFailure::Local(format!("The message can't be built: {e}")))?;
+    Ok((draft, raw))
 }
 
 /// The bytes of every attachment of the draft: a file added to it, or a
@@ -350,7 +346,9 @@ async fn attachment_bytes(
     let mut out = Vec::with_capacity(draft.attachments.len());
     for a in &draft.attachments {
         let path = match (&a.path, a.source) {
-            (Some(path), source) if kept_file(ctx, draft, path, source.is_some()).await => {
+            (Some(path), source)
+                if kept_file(&ctx.deps.data_dir, draft, path, source.is_some()).await =>
+            {
                 PathBuf::from(path)
             }
             (_, Some(source)) => download(ctx, source).await?,
@@ -371,12 +369,13 @@ async fn attachment_bytes(
     Ok(out)
 }
 
-/// Whether `path` is a file the app keeps for this draft: one added to it,
-/// or, for an attachment it carries, one downloaded for the account.
-async fn kept_file(ctx: &AccountCtx, draft: &Draft, path: &str, carried: bool) -> bool {
+/// Whether `path` is a file the app keeps for this draft in its data folder
+/// (`data_dir`): one added to it, or, for an attachment it carries, one
+/// downloaded for the account.
+async fn kept_file(data_dir: &Path, draft: &Draft, path: &str, carried: bool) -> bool {
     let path = PathBuf::from(path);
-    let added = draft_dir(&ctx.deps.data_dir, &draft.id);
-    let downloaded = carried.then(|| attachments_dir(&ctx.deps.data_dir, draft.account));
+    let added = draft_dir(data_dir, &draft.id);
+    let downloaded = carried.then(|| attachments_dir(data_dir, draft.account));
     tokio::task::spawn_blocking(move || {
         is_inside(&path, &added) || downloaded.is_some_and(|dir| is_inside(&path, &dir))
     })

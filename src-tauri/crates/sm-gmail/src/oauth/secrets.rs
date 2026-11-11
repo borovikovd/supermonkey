@@ -20,6 +20,13 @@ impl RefreshToken {
     pub fn secret(&self) -> &str {
         &self.0
     }
+
+    /// The token itself, moved out, for a token store that keeps it. Never
+    /// log it.
+    #[must_use]
+    pub fn into_secret(self) -> String {
+        self.0
+    }
 }
 
 impl fmt::Debug for RefreshToken {

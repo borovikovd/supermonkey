@@ -4,6 +4,7 @@
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE};
 use serde_json::{Value, json};
+use std::borrow::Cow;
 use std::fmt::Write as _;
 
 use crate::{NewAttachment, NewMessage};
@@ -55,9 +56,10 @@ fn parse_part(bytes: &[u8], part_id: &str, ctx: &mut Ctx<'_>) -> (Value, Vec<(St
     let headers = parse_headers(&String::from_utf8_lossy(head));
     let (mime_type, params) = header(&headers, "Content-Type")
         .map_or_else(|| ("text/plain".into(), Vec::new()), parse_params);
-    let filename = header(&headers, "Content-Disposition")
-        .map(parse_params)
-        .and_then(|(_, p)| param(&p, "filename"))
+    let disposition = header(&headers, "Content-Disposition").map(parse_params);
+    let filename = disposition
+        .as_ref()
+        .and_then(|(_, p)| param(p, "filename"))
         .or_else(|| param(&params, "name"))
         .unwrap_or_default();
     let json_headers: Vec<Value> = headers
@@ -76,7 +78,7 @@ fn parse_part(bytes: &[u8], part_id: &str, ctx: &mut Ctx<'_>) -> (Value, Vec<(St
         mime_type.starts_with("multipart/"),
         param(&params, "boundary"),
     ) {
-        let parts: Vec<Value> = split_multipart(body, &boundary)
+        let parts: Vec<Value> = split_multipart(body, boundary)
             .into_iter()
             .enumerate()
             .map(|(i, part)| {
@@ -106,7 +108,7 @@ fn parse_part(bytes: &[u8], part_id: &str, ctx: &mut Ctx<'_>) -> (Value, Vec<(St
         } else {
             let id = (ctx.new_id)();
             node["body"] = json!({ "attachmentId": id, "size": data.len() });
-            ctx.attachments.push((id, data));
+            ctx.attachments.push((id, data.into_owned()));
         }
     }
     (node, headers)
@@ -138,7 +140,9 @@ fn parse_headers(head: &str) -> Vec<(String, String)> {
         }
     }
     for (_, value) in &mut headers {
-        *value = decode_words(value);
+        if let Cow::Owned(decoded) = decode_words(value) {
+            *value = decoded;
+        }
     }
     headers
 }
@@ -171,11 +175,11 @@ fn parse_params(value: &str) -> (String, Vec<(String, String)>) {
     (first, params)
 }
 
-fn param(params: &[(String, String)], name: &str) -> Option<String> {
+fn param<'a>(params: &'a [(String, String)], name: &str) -> Option<&'a str> {
     params
         .iter()
         .find(|(k, _)| k == name)
-        .map(|(_, v)| v.clone())
+        .map(|(_, v)| v.as_str())
 }
 
 fn split_multipart<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
@@ -213,7 +217,7 @@ fn split_multipart<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
     parts
 }
 
-fn decode_transfer(body: &[u8], encoding: &str) -> Vec<u8> {
+fn decode_transfer<'a>(body: &'a [u8], encoding: &str) -> Cow<'a, [u8]> {
     match encoding.to_ascii_lowercase().as_str() {
         "base64" => {
             let clean: Vec<u8> = body
@@ -221,10 +225,10 @@ fn decode_transfer(body: &[u8], encoding: &str) -> Vec<u8> {
                 .copied()
                 .filter(|b| !b.is_ascii_whitespace())
                 .collect();
-            STANDARD.decode(&clean).unwrap_or_default()
+            Cow::Owned(STANDARD.decode(&clean).unwrap_or_default())
         }
-        "quoted-printable" => decode_qp(body),
-        _ => body.to_vec(),
+        "quoted-printable" => Cow::Owned(decode_qp(body)),
+        _ => Cow::Borrowed(body),
     }
 }
 
@@ -259,7 +263,10 @@ fn decode_qp(body: &[u8]) -> Vec<u8> {
 }
 
 /// Decodes RFC 2047 encoded words in UTF-8 or US-ASCII; others are left as they are.
-fn decode_words(value: &str) -> String {
+fn decode_words(value: &str) -> Cow<'_, str> {
+    if !value.contains("=?") {
+        return Cow::Borrowed(value);
+    }
     let mut out = String::new();
     let mut rest = value;
     let mut last_was_word = false;
@@ -296,7 +303,7 @@ fn decode_words(value: &str) -> String {
         }
     }
     out.push_str(rest);
-    out
+    Cow::Owned(out)
 }
 
 fn strip_tags(html: &str) -> String {
@@ -393,14 +400,14 @@ fn attachment(a: &NewAttachment) -> String {
         "attachment"
     };
     let mut headers = vec![(
-        "Content-Disposition".to_owned(),
+        "Content-Disposition",
         format!("{disposition}; filename=\"{}\"", a.filename),
     )];
     if let Some(cid) = &a.content_id {
-        headers.push(("Content-ID".to_owned(), format!("<{cid}>")));
+        headers.push(("Content-ID", format!("<{cid}>")));
     }
     if a.served_inline {
-        headers.push((SERVED_INLINE.to_owned(), "yes".to_owned()));
+        headers.push((SERVED_INLINE, "yes".to_owned()));
     }
     leaf(
         &format!("{}; name=\"{}\"", a.mime_type, a.filename),
@@ -410,7 +417,7 @@ fn attachment(a: &NewAttachment) -> String {
 }
 
 /// A part with headers and a base64 body.
-fn leaf(content_type: &str, data: &[u8], extra: &[(String, String)]) -> String {
+fn leaf(content_type: &str, data: &[u8], extra: &[(&str, String)]) -> String {
     let mut out = format!("Content-Type: {content_type}\r\nContent-Transfer-Encoding: base64\r\n");
     for (name, value) in extra {
         // Writing to a String cannot fail.
@@ -435,11 +442,11 @@ fn multipart(subtype: &str, boundary: &str, parts: &[String]) -> String {
     out
 }
 
-fn encode_word(text: &str) -> String {
+fn encode_word(text: &str) -> Cow<'_, str> {
     if text.is_ascii() {
-        text.to_owned()
+        Cow::Borrowed(text)
     } else {
-        format!("=?utf-8?B?{}?=", STANDARD.encode(text))
+        Cow::Owned(format!("=?utf-8?B?{}?=", STANDARD.encode(text)))
     }
 }
 

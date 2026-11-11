@@ -13,18 +13,15 @@ use tokio::sync::Notify;
 
 use crate::activity::{Activity, Busy, parked};
 
-/// A timer from [`Clock::timer`]. It resolves with the activity of its
-/// firing, on a clock that has one, for the caller to drop once resumed.
-pub type Timer<'a> = Pin<Box<dyn Future<Output = Option<Busy>> + Send + 'a>>;
-
 /// The core's time: the wall clock and the timers that run on it.
 pub trait Clock: Send + Sync {
     /// App time.
     fn now(&self) -> Millis;
 
-    /// Resolves after `duration` of app time. Prefer [`sleep`], which also
-    /// parks the task while it waits.
-    fn timer(&self, duration: Duration) -> Timer<'_>;
+    /// Resolves after `duration` of app time, with the activity of the
+    /// timer's firing, on a clock that has one, for the caller to drop once
+    /// resumed. Prefer [`sleep`], which also parks the task while it waits.
+    fn timer(&self, duration: Duration) -> Pin<Box<dyn Future<Output = Option<Busy>> + Send + '_>>;
 }
 
 /// Waits `duration` of app time. The task is not busy while it waits.
@@ -45,7 +42,7 @@ impl Clock for SystemClock {
         Millis(i64::try_from(since_epoch.as_millis()).unwrap_or(i64::MAX))
     }
 
-    fn timer(&self, duration: Duration) -> Timer<'_> {
+    fn timer(&self, duration: Duration) -> Pin<Box<dyn Future<Output = Option<Busy>> + Send + '_>> {
         Box::pin(async move {
             tokio::time::sleep(duration).await;
             None
@@ -167,7 +164,7 @@ impl Clock for ManualClock {
         self.state.lock().wall
     }
 
-    fn timer(&self, duration: Duration) -> Timer<'_> {
+    fn timer(&self, duration: Duration) -> Pin<Box<dyn Future<Output = Option<Busy>> + Send + '_>> {
         Box::pin(async move { Some(self.sleep(duration).await) })
     }
 }

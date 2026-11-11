@@ -288,15 +288,16 @@ impl Format {
     }
 }
 
-/// The parameters of `threads.list`.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ThreadQuery {
+/// The parameters of `threads.list`, borrowed from the caller for the one
+/// call they are made for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ThreadQuery<'a> {
     /// A Gmail search query.
-    pub q: Option<String>,
+    pub q: Option<&'a str>,
     /// Threads must carry every one of these labels.
-    pub label_ids: Vec<LabelId>,
+    pub label_ids: &'a [LabelId],
     /// The page to read; `None` for the first.
-    pub page_token: Option<PageToken>,
+    pub page_token: Option<&'a PageToken>,
     /// Gmail's default is 100, its maximum 500.
     pub max_results: Option<u32>,
     /// Include Spam and Trash.

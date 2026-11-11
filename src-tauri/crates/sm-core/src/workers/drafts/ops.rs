@@ -61,7 +61,7 @@ pub(crate) async fn upsert(ctx: &AccountCtx, id: &DraftId) -> Result<Upserted, W
         return Ok(Upserted::Nothing);
     };
     // Gone while its target's body was read: discarded meanwhile.
-    let Some(written) = write(ctx, &draft).await? else {
+    let Some(written) = write(ctx, draft).await? else {
         return Ok(Upserted::Nothing);
     };
     Ok(Upserted::Written {

@@ -35,6 +35,6 @@ pub(crate) use fetcher::{fetch_thread, is_current, needs_bodies};
 pub(crate) use freshness::Freshness;
 pub(crate) use ingest::store_draft_message;
 pub(crate) use queue::OTHER_META;
-pub(crate) use queue::{LATE, Work};
+pub(crate) use queue::{FetchQueue, LATE, Work};
 pub(crate) use read::{ReadMessage, draft_message, parse};
 pub(crate) use worker::{AccountWorker, WorkerParts};

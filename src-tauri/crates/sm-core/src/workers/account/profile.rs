@@ -26,11 +26,13 @@ pub(crate) async fn refresh_send_as(ctx: &AccountCtx) -> Result<(), GmailError> 
             is_primary: s.is_primary,
         })
         .collect();
-    let name = send_as
+    // Where the primary entry is, when it has a display name.
+    let named = send_as
         .iter()
-        .find(|s| s.is_primary)
-        .map(|s| s.name.clone())
-        .filter(|n| !n.is_empty());
+        .enumerate()
+        .find(|(_, s)| s.is_primary)
+        .filter(|(_, s)| !s.name.is_empty())
+        .map(|(at, _)| at);
     let account = ctx.account;
     ctx.writer().queue(
         WritePriority::Sync,
@@ -42,9 +44,11 @@ pub(crate) async fn refresh_send_as(ctx: &AccountCtx) -> Result<(), GmailError> 
             let Some(record) = tx.read().accounts().get(account)? else {
                 return Ok(());
             };
-            let name = name.unwrap_or_else(|| record.display_name.clone());
+            let name = named
+                .and_then(|at| send_as.get(at))
+                .map_or(record.display_name.as_str(), |s| s.name.as_str());
             if record.send_as != send_as || record.display_name != name {
-                tx.accounts().set_profile(account, &name, &send_as)?;
+                tx.accounts().set_profile(account, name, &send_as)?;
             }
             Ok(())
         },
@@ -96,13 +100,13 @@ pub(crate) async fn refresh_labels(ctx: &AccountCtx) -> Result<(), GmailError> {
                     }
                 }
             }
-            let stored: BTreeMap<LabelId, (String, bool)> = all
-                .into_iter()
-                .filter_map(|l| Some((l.gmail_id?, (l.name, l.system))))
-                .collect();
-            let listed: BTreeMap<LabelId, (String, bool)> = labels
+            let stored: BTreeMap<&LabelId, (&str, bool)> = all
                 .iter()
-                .map(|l| (l.gmail_id.clone(), (l.name.clone(), l.system)))
+                .filter_map(|l| Some((l.gmail_id.as_ref()?, (l.name.as_str(), l.system))))
+                .collect();
+            let listed: BTreeMap<&LabelId, (&str, bool)> = labels
+                .iter()
+                .map(|l| (&l.gmail_id, (l.name.as_str(), l.system)))
                 .collect();
             if stored != listed {
                 tx.labels().sync_from_gmail(account, &labels)?;

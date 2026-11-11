@@ -67,7 +67,7 @@ pub(crate) async fn full_resync(
     // 3 and 4.
     reconcile_cached(ctx, &listed, started).await?;
     // Of the threads not cached, those the connect sync would read.
-    queue_starred_and_sent(ctx);
+    queue_starred_and_sent(&ctx.queue);
     // 5. Drafts.
     resync_drafts(ctx, drafts_due).await?;
     // 6. The snooze rule runs as each thread is stored.
@@ -85,8 +85,8 @@ async fn list_threads(
         let mut page: Option<PageToken> = None;
         loop {
             let query = ThreadQuery {
-                label_ids: label.iter().cloned().collect(),
-                page_token: page.take(),
+                label_ids: label.as_slice(),
+                page_token: page.as_ref(),
                 max_results: Some(RESYNC_PAGE),
                 include_spam_trash: true,
                 ..ThreadQuery::default()

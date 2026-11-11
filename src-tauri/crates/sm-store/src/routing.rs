@@ -28,7 +28,7 @@ impl Routing {
         })
     }
 
-    fn place(&self, thread: &Thread, digest: &ThreadDigest) -> Option<SplitId> {
+    fn place(&self, thread: &Thread, digest: &ThreadDigest<'_>) -> Option<SplitId> {
         let names: Vec<&str> = digest
             .labels
             .iter()
@@ -42,7 +42,7 @@ fn split_for(
     tx: &mut WriteTx<'_>,
     account: AccountId,
     thread: &Thread,
-    digest: &ThreadDigest,
+    digest: &ThreadDigest<'_>,
 ) -> Result<Option<SplitId>, StoreError> {
     if !digest.in_inbox() {
         return Ok(None);

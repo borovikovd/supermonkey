@@ -21,11 +21,11 @@ pub(crate) struct GmailIds {
 
 impl GmailIds {
     /// The ids of a Gmail draft as Gmail answered a write of it.
-    pub(crate) fn of(written: &sm_gmail::Draft) -> Self {
+    pub(crate) fn of(written: sm_gmail::Draft) -> Self {
         Self {
-            draft: written.id.clone(),
-            message: written.message.id.clone(),
-            thread: written.message.thread_id.clone(),
+            draft: written.id,
+            message: written.message.id,
+            thread: written.message.thread_id,
         }
     }
 }

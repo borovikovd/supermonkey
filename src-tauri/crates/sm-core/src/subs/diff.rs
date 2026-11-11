@@ -10,19 +10,20 @@ use std::collections::{HashMap, HashSet};
 
 use sm_ipc::{ListEntry, ListMove};
 
-/// What a list patch carries besides its rows.
+/// What a list patch carries besides its rows. It lives until the patch is
+/// built: `changed` borrows the new list's keys.
 #[derive(Debug, Default, PartialEq)]
-pub(crate) struct ListDiff {
+pub(crate) struct ListDiff<'a> {
     /// Keys no longer listed.
     pub(crate) removed: Vec<String>,
     /// Keys inserted or moved, each after the key before it.
     pub(crate) moved: Vec<ListMove>,
     /// Keys in the new list whose rows changed: their rows go with the
     /// patch, inside the window or not.
-    pub(crate) changed: Vec<String>,
+    pub(crate) changed: Vec<&'a str>,
 }
 
-impl ListDiff {
+impl ListDiff<'_> {
     /// Whether the patch would change nothing in the mirror.
     pub(crate) const fn is_empty(&self) -> bool {
         self.removed.is_empty() && self.moved.is_empty() && self.changed.is_empty()
@@ -32,11 +33,11 @@ impl ListDiff {
 /// The patch from `old` to `new`. `changed` says whether a key's row changed.
 /// A key that stays in place but changes split counts as moved, so the patch
 /// carries its new split.
-pub(crate) fn diff(
+pub(crate) fn diff<'a>(
     old: &[ListEntry],
-    new: &[ListEntry],
+    new: &'a [ListEntry],
     changed: impl Fn(&str) -> bool,
-) -> ListDiff {
+) -> ListDiff<'a> {
     let new_at: HashMap<&str, usize> = new
         .iter()
         .enumerate()
@@ -74,7 +75,7 @@ pub(crate) fn diff(
     let changed = new
         .iter()
         .filter(|e| changed(&e.key))
-        .map(|e| e.key.clone())
+        .map(|e| e.key.as_str())
         .collect();
     ListDiff {
         removed,
@@ -128,7 +129,7 @@ mod tests {
 
     /// The mirror's `applyListPatch`, written out here rather than shared
     /// with the diff, so a bug in both can't cancel out.
-    fn apply(list: &[ListEntry], d: &ListDiff) -> Vec<ListEntry> {
+    fn apply(list: &[ListEntry], d: &ListDiff<'_>) -> Vec<ListEntry> {
         let mut out: Vec<ListEntry> = list
             .iter()
             .filter(|e| !d.removed.contains(&e.key) && !d.moved.iter().any(|m| m.key == e.key))
@@ -151,7 +152,7 @@ mod tests {
         out
     }
 
-    fn keys(d: &ListDiff) -> (Vec<&str>, Vec<(&str, Option<&str>)>) {
+    fn keys<'a>(d: &'a ListDiff<'_>) -> (Vec<&'a str>, Vec<(&'a str, Option<&'a str>)>) {
         (
             d.removed.iter().map(String::as_str).collect(),
             d.moved
@@ -170,7 +171,8 @@ mod tests {
 
     #[test]
     fn a_removal_is_listed_and_nothing_moves() {
-        let d = diff(&entries("a b c"), &entries("a c"), |_| false);
+        let new = entries("a c");
+        let d = diff(&entries("a b c"), &new, |_| false);
         assert_eq!(keys(&d), (vec!["b"], vec![]));
     }
 
@@ -206,7 +208,8 @@ mod tests {
 
     #[test]
     fn changed_rows_are_only_those_still_listed() {
-        let d = diff(&entries("a b c"), &entries("a c"), |k| k != "a");
+        let new = entries("a c");
+        let d = diff(&entries("a b c"), &new, |k| k != "a");
         assert_eq!(d.changed, ["c"], "b left the list; a did not change");
     }
 

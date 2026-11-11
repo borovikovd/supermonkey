@@ -71,15 +71,16 @@ impl AccountWorker {
 
     /// Starts the worker's tasks. With `replaced`, they start only once that
     /// worker has stopped, so the two never poll or replay at once.
-    pub(crate) fn start(&self, replaced: Option<Self>) {
+    pub(crate) fn start(self, replaced: Option<Self>) {
         self.replaced.lock().clone_from(&replaced);
-        let starting = self.clone();
-        self.ctx.tasks.spawn("account start", async move {
+        // The task keeps the worker; this handle is only to spawn it on.
+        let ctx = Arc::clone(&self.ctx);
+        ctx.tasks.spawn("account start", async move {
             if let Some(old) = replaced {
                 old.stop().await;
-                starting.replaced.lock().take();
+                self.replaced.lock().take();
             }
-            let (ctx, tasks) = (&starting.ctx, &starting.ctx.tasks);
+            let (ctx, tasks) = (&self.ctx, &self.ctx.tasks);
             tasks.spawn("poller", poller::run(Arc::clone(ctx)));
             tasks.spawn("ops", ops::run(Arc::clone(ctx)));
             tasks.spawn("outbox", outbox::run(Arc::clone(ctx)));
@@ -136,7 +137,7 @@ impl AccountWorker {
     pub(crate) fn read_draft(&self, draft: DraftId) {
         let ctx = Arc::clone(&self.ctx);
         self.ctx.tasks.spawn("read draft", async move {
-            drafts::read_skipped(&ctx, &draft).await;
+            drafts::read_skipped(&ctx, draft).await;
         });
     }
 
@@ -174,7 +175,7 @@ impl AccountWorker {
             tokio::select! {
                 biased;
                 () = read.stopped().cancelled() => {}
-                () = fetcher::fetch_opened(ctx, thread) => {}
+                () = fetcher::fetch_opened(&ctx, thread) => {}
             }
             drop(read);
         });

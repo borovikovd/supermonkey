@@ -5,10 +5,11 @@
 use std::collections::{BTreeSet, HashMap};
 
 use sm_domain::{
-    AccountId, GmailThreadId, LabelId, LabelSet, MessageId, Millis, SystemLabel, Thread, ThreadId,
+    AccountId, GmailMessageId, GmailThreadId, LabelId, LabelSet, MessageId, Millis, SystemLabel,
+    Thread, ThreadId,
 };
 use sm_gmail::HistoryId;
-use sm_store::{FetchedThread, Reads, StoreError, WriteTx};
+use sm_store::{FetchedThread, NewBody, NewMessage, Reads, StoreError, WriteTx};
 
 use super::contacts::sightings;
 use super::history::HistoryBatch;
@@ -48,7 +49,7 @@ pub(crate) fn store_thread(
             account = account.0,
             "a thread read was overtaken; keeping its bodies only"
         );
-        store_bodies(tx, account, &read.messages)?;
+        store_bodies(tx, account, read.messages.iter().map(ReadMessage::brought))?;
         return Ok(Stored {
             thread: Some(thread),
             added: Vec::new(),
@@ -56,25 +57,34 @@ pub(crate) fn store_thread(
     }
     let labels = Labels::load(reads, account)?;
     let mut unknown = false;
+    // Each message moves into the thread to store. What the steps after
+    // need of it stays, in the same order: its body, and whether Gmail has
+    // it in Spam, before this app's changes go on top of its labels.
+    let mut rest = Vec::with_capacity(read.messages.len());
     let messages = read
         .messages
-        .iter()
+        .into_iter()
         .map(|m| {
-            let mut message = m.message.clone();
+            let ReadMessage { mut message, body } = m;
+            rest.push((body, message.labels.has(SystemLabel::Spam)));
             message.labels = labels.local(&message.labels, &mut unknown);
             local.apply(&message.gmail_id, &mut message.labels);
             message
         })
         .collect();
-    let stored = tx.threads().store(&FetchedThread {
+    let fetched = FetchedThread {
         account,
         gmail_id: read.gmail_id,
         history_id: read.history,
         messages,
         complete: true,
-    })?;
-    store_bodies(tx, account, &read.messages)?;
-    count_contacts(tx, account, &read.messages)?;
+    };
+    let stored = tx.threads().store(&fetched)?;
+    let each = || fetched.messages.iter().zip(&rest);
+    let brought = each().map(|(m, (body, _))| (&m.gmail_id, body.as_ref()));
+    store_bodies(tx, account, brought)?;
+    let not_spam = each().filter(|(_, (_, in_spam))| !in_spam).map(|(m, _)| m);
+    count_contacts(tx, account, not_spam)?;
     if let Some(thread) = stored.thread {
         wake_if_back_in_inbox(tx, thread, local)?;
     }
@@ -109,7 +119,7 @@ pub(crate) fn store_draft_message(
         messages: vec![message],
         complete: false,
     })?;
-    store_bodies(tx, account, std::slice::from_ref(read))?;
+    store_bodies(tx, account, [read.brought()])?;
     if unknown {
         state.effect(Effect::RefreshLabels(account));
     }
@@ -181,7 +191,7 @@ pub(crate) fn apply_history(
     }
     tx.messages().delete(&gone)?;
     let mut added = Vec::new();
-    let refetched: BTreeSet<GmailThreadId> = read.iter().map(|(id, _)| id.clone()).collect();
+    let mut refetched = BTreeSet::new();
     for (thread, answer) in read {
         match answer {
             Some(answer) => {
@@ -191,6 +201,7 @@ pub(crate) fn apply_history(
             }
             None => drop_thread(tx, account, &thread)?,
         }
+        refetched.insert(thread);
     }
     let reads = tx.read();
     let labels = Labels::load(reads, account)?;
@@ -241,22 +252,19 @@ fn stored_history(reads: Reads<'_>, thread: ThreadId) -> Result<Option<HistoryId
     Ok(reads.threads().row(thread)?.and_then(|row| row.history_id))
 }
 
-/// Stores the bodies a read brought for messages that have none yet, and
-/// fills the drafts that quote one's snippet.
-fn store_bodies(
+/// Stores the bodies a read brought, each with its message's Gmail id, for
+/// messages that have none yet, and fills the drafts that quote one's
+/// snippet.
+fn store_bodies<'a>(
     tx: &mut WriteTx<'_>,
     account: AccountId,
-    messages: &[ReadMessage],
+    brought: impl IntoIterator<Item = (&'a GmailMessageId, Option<&'a NewBody>)>,
 ) -> Result<(), StoreError> {
-    for m in messages {
-        let Some(body) = &m.body else {
+    for (message, body) in brought {
+        let Some(body) = body else {
             continue;
         };
-        let Some(record) = tx
-            .read()
-            .messages()
-            .by_gmail_id(account, &m.message.gmail_id)?
-        else {
+        let Some(record) = tx.read().messages().by_gmail_id(account, message)? else {
             continue;
         };
         if !record.has_body {
@@ -269,17 +277,17 @@ fn store_bodies(
 
 /// Counts the addresses of messages not in drafts or spam for recipient
 /// autocomplete, each message once (SPEC Recipients and autocomplete).
-fn count_contacts(
+/// `not_spam` are the read's messages Gmail does not have in Spam.
+fn count_contacts<'a>(
     tx: &mut WriteTx<'_>,
     account: AccountId,
-    messages: &[ReadMessage],
+    not_spam: impl IntoIterator<Item = &'a NewMessage>,
 ) -> Result<(), StoreError> {
     let Some(me) = tx.read().accounts().identity(account)? else {
         return Ok(());
     };
-    for m in messages {
-        let m = &m.message;
-        if m.is_draft || m.labels.has(SystemLabel::Spam) {
+    for m in not_spam {
+        if m.is_draft {
             continue;
         }
         if tx.read().contacts().is_counted(account, &m.gmail_id)? {

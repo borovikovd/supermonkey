@@ -22,12 +22,12 @@ const BACKFILL_HEADERS: &[&str] = &["From", "To", "Cc", "Date"];
 /// gains a received count; co-recipients are stored with no count, unless
 /// it is list mail, which adds nothing for them. The account's own
 /// addresses are never contacts.
-pub(crate) fn sightings(m: &NewMessage, me: &Identity) -> Vec<Sighting> {
-    let seen = |a: &Addr, sent: u32, received: u32, on_list: bool| {
+pub(crate) fn sightings<'m>(m: &'m NewMessage, me: &Identity) -> Vec<Sighting<'m>> {
+    let seen = |a: &'m Addr, sent: u32, received: u32, on_list: bool| {
         let email = a.email.trim();
         (!email.is_empty() && email.contains('@') && !me.is_mine(email)).then(|| Sighting {
-            email: email.to_owned(),
-            name: a.name.clone().unwrap_or_default(),
+            email,
+            name: a.name.as_deref().unwrap_or_default(),
             sent,
             received,
             on_list,
@@ -58,10 +58,10 @@ pub(crate) fn sightings(m: &NewMessage, me: &Identity) -> Vec<Sighting> {
 /// message, counted once. The next page queues behind it.
 pub(crate) async fn backfill_page(
     ctx: &AccountCtx,
-    page: Option<PageToken>,
+    page: Option<&PageToken>,
 ) -> Result<(), GmailError> {
     let query = ThreadQuery {
-        q: Some(BACKFILL_QUERY.to_owned()),
+        q: Some(BACKFILL_QUERY),
         page_token: page,
         max_results: Some(BACKFILL_PAGE),
         ..ThreadQuery::default()
@@ -79,12 +79,15 @@ pub(crate) async fn backfill_page(
         };
         let sent: Vec<NewMessage> = read
             .messages
-            .iter()
+            .into_iter()
             .filter(|m| {
                 let has = |l: SystemLabel| m.label_ids.iter().any(|id| id.as_str() == l.id());
                 has(SystemLabel::Sent) && !has(SystemLabel::Draft)
             })
-            .map(|m| new_message(m, &parse(m)))
+            .map(|m| {
+                let parsed = parse(&m);
+                new_message(m, parsed.headers, &parsed.parts)
+            })
             .collect();
         if sent.is_empty() {
             continue;

@@ -1,7 +1,6 @@
 //! Accounts: who each one is, its rail place, and its sync state.
 
 use rusqlite::{Row, named_params};
-use serde::{Deserialize, Serialize};
 use sm_domain::{
     AccountId, HistoryId, IMPORTANT_POSITION, Identity, Millis, OTHER_POSITION, SendAsAddress,
     SplitKind, SyncStatus, SystemLabel, avatar_hue,
@@ -65,44 +64,12 @@ impl AccountRecord {
     }
 }
 
-/// A `sendAs` entry as its JSON column stores it.
-#[derive(Serialize, Deserialize)]
-struct SendAsJson {
-    email: String,
-    name: String,
-    is_default: bool,
-    is_primary: bool,
-}
-
-impl From<SendAsJson> for SendAsAddress {
-    fn from(s: SendAsJson) -> Self {
-        Self {
-            email: s.email,
-            name: s.name,
-            is_default: s.is_default,
-            is_primary: s.is_primary,
-        }
-    }
-}
-
-impl From<&SendAsAddress> for SendAsJson {
-    fn from(s: &SendAsAddress) -> Self {
-        Self {
-            email: s.email.clone(),
-            name: s.name.clone(),
-            is_default: s.is_default,
-            is_primary: s.is_primary,
-        }
-    }
-}
-
 fn account_row(r: &Row<'_>) -> rusqlite::Result<AccountRecord> {
-    let send_as: Vec<SendAsJson> = json_column(r, "send_as")?;
     Ok(AccountRecord {
         id: r.get("id")?,
         email: r.get("email")?,
         display_name: r.get("display_name")?,
-        send_as: send_as.into_iter().map(SendAsAddress::from).collect(),
+        send_as: json_column(r, "send_as")?,
         position: r.get("position")?,
         hue_slot: r.get("hue")?,
         history_id: r.get("history_id")?,
@@ -172,11 +139,10 @@ impl<'c> AccountReads<'c> {
             "SELECT email, display_name, send_as FROM accounts WHERE id = ?1",
             [id],
             |r| {
-                let send_as: Vec<SendAsJson> = json_column(r, "send_as")?;
                 Ok(Identity::new(
                     r.get("email")?,
                     r.get("display_name")?,
-                    send_as.into_iter().map(SendAsAddress::from).collect(),
+                    json_column(r, "send_as")?,
                 ))
             },
         )
@@ -275,11 +241,10 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
         send_as: &[SendAsAddress],
     ) -> Result<(), StoreError> {
         let before = self.tx.read().accounts().identity(id)?;
-        let json: Vec<SendAsJson> = send_as.iter().map(SendAsJson::from).collect();
         self.tx.db().execute(
             "store an account's profile",
             "UPDATE accounts SET display_name = :name, send_as = :send_as WHERE id = :id",
-            named_params! { ":id": id, ":name": display_name, ":send_as": to_json("send_as", &json)? },
+            named_params! { ":id": id, ":name": display_name, ":send_as": to_json("send_as", send_as)? },
         )?;
         self.tx.touch(id, Table::Account);
         let after = self.tx.read().accounts().identity(id)?;

@@ -10,13 +10,14 @@ use crate::db::Db;
 use crate::tx::WriteTx;
 use crate::{StoreError, Table};
 
-/// One address seen on one message, with what it adds to the counts.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Sighting {
+/// One address seen on one message, with what it adds to the counts. It
+/// borrows the message's text for the one [`ContactWrites::count`] call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sighting<'a> {
     /// The address; stored lowercased.
-    pub email: String,
+    pub email: &'a str,
     /// Its display name on this message; empty for none.
-    pub name: String,
+    pub name: &'a str,
     /// Messages this account sent to it: 0 or 1.
     pub sent: u32,
     /// Messages this account received from it: 0 or 1.
@@ -130,7 +131,7 @@ impl<'t, 'c> ContactWrites<'t, 'c> {
         &mut self,
         account: AccountId,
         message: &GmailMessageId,
-        sightings: &[Sighting],
+        sightings: &[Sighting<'_>],
     ) -> Result<bool, StoreError> {
         let db = self.tx.db();
         let fresh = db.execute(

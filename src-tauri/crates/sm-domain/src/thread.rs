@@ -95,7 +95,7 @@ impl Thread {
     /// The thread's derived row, or `None` when it has no messages left and
     /// its row should go.
     #[must_use]
-    pub fn digest(&self) -> Option<ThreadDigest> {
+    pub fn digest(&self) -> Option<ThreadDigest<'_>> {
         let latest = self.latest()?;
         let live = self.messages.iter().filter(|m| m.is_live()).count();
         let non_draft = self.non_drafts().count();
@@ -112,12 +112,12 @@ impl Thread {
             .find(|m| !m.subject.is_empty())
             .unwrap_or(latest)
             .subject
-            .clone();
+            .as_str();
         Some(ThreadDigest {
             subject,
-            snippet: latest.snippet.clone(),
-            sender: latest.sender_display().to_owned(),
-            sender_email: latest.from.email.clone(),
+            snippet: &latest.snippet,
+            sender: latest.sender_display(),
+            sender_email: &latest.from.email,
             sort_time: latest.date,
             message_count: u32::try_from(shown).unwrap_or(u32::MAX),
             unread,
@@ -139,18 +139,19 @@ impl Thread {
     }
 }
 
-/// A thread's list row values, derived from its messages by [`Thread::digest`].
+/// A thread's list row values, derived from its messages by [`Thread::digest`]
+/// and borrowing their text: it lives for the one derive that reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ThreadDigest {
+pub struct ThreadDigest<'a> {
     /// The first non-draft message's subject that is not empty, else the
     /// latest message's.
-    pub subject: String,
+    pub subject: &'a str,
     /// The latest message's snippet.
-    pub snippet: String,
+    pub snippet: &'a str,
     /// The latest message's sender name, or address when it has no name.
-    pub sender: String,
+    pub sender: &'a str,
     /// The latest message's sender address.
-    pub sender_email: String,
+    pub sender_email: &'a str,
     /// The latest message's date; lists sort by it.
     pub sort_time: Millis,
     /// Live messages, or when there are none the non-drafts, at least 1.
@@ -165,7 +166,7 @@ pub struct ThreadDigest {
     pub labels: LabelSet,
 }
 
-impl ThreadDigest {
+impl ThreadDigest<'_> {
     /// In the Inbox (snoozed or not).
     #[must_use]
     pub fn in_inbox(&self) -> bool {

@@ -97,10 +97,12 @@ pub struct MessageChange {
 impl MessageChange {
     /// `labels` with this change applied.
     #[must_use]
-    pub fn apply(&self, labels: &LabelSet) -> LabelSet {
-        let mut out = labels.without(&self.removed);
-        out.extend(self.added.iter().cloned());
-        out
+    pub fn apply(&self, mut labels: LabelSet) -> LabelSet {
+        for gone in &self.removed {
+            labels.remove(gone.as_str());
+        }
+        labels.extend(self.added.iter().cloned());
+        labels
     }
 
     /// The change that undoes this one on a message whose labels are now

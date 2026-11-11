@@ -234,7 +234,7 @@ impl Router {
     pub fn place(
         &self,
         thread: &Thread,
-        digest: &ThreadDigest,
+        digest: &ThreadDigest<'_>,
         me: &Identity,
         thread_label_names: &[&str],
     ) -> Option<SplitId> {

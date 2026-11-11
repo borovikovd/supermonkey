@@ -267,11 +267,11 @@ impl AppEvent {
     /// The event's name and payload, as the page listens for them.
     pub fn parts(&self) -> Result<(String, Value), serde_json::Error> {
         let mut event = serde_json::to_value(self)?;
-        let name = event
-            .get("event")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
+        let name = if let Some(Value::String(name)) = event.get_mut("event").map(Value::take) {
+            name
+        } else {
+            String::new()
+        };
         let payload = event
             .get_mut("payload")
             .map(Value::take)
