@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/borovikovd/supermonkey/compare/v0.7.0...v0.7.1) (2026-11-11)
+
+
+### Bug Fixes
+
+* **accounts:** an account removed while its sign-in waits no longer comes back signed out ([06f0133](https://github.com/borovikovd/supermonkey/commit/06f01338caca34ef0b878cca03c4262097759478))
+
 ## [0.7.0](https://github.com/borovikovd/ubermensch/compare/v0.6.1...v0.7.0) (2026-11-08)
 
 
