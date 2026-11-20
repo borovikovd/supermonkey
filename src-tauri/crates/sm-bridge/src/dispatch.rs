@@ -29,50 +29,52 @@ pub async fn dispatch(app: &App, name: &str, args: Value) -> CmdResult<Answer> {
     let reply = match Command::parse(name, args)? {
         Command::Connect { reply } => reply.send(app.lifecycle().launch_info()),
         Command::Submit { actions, reply } => {
-            commands::submit(app, actions);
+            app.actions().submit(actions);
             reply.send(())
         }
         Command::FetchRows {
             drafts,
             keys,
             reply,
-        } => reply.send(commands::fetch_rows(app, drafts, keys).await?),
-        Command::GetBodies { ids, reply } => reply.send(commands::get_bodies(app, ids).await?),
+        } => reply.send(shown(app.queries().fetch_rows(drafts, keys).await)?),
+        Command::GetBodies { ids, reply } => {
+            reply.send(shown(app.queries().get_bodies(ids).await)?)
+        }
         Command::Autocomplete {
             account,
             query,
             reply,
-        } => reply.send(commands::autocomplete(app, account, query).await?),
-        Command::AddAccount { reply } => reply.send(commands::add_account(app).await?),
+        } => reply.send(shown(app.queries().autocomplete(account, query).await)?),
+        Command::AddAccount { reply } => reply.send(shown(app.accounts().add().await)?),
         Command::SignInAgain { account, reply } => {
-            reply.send(commands::sign_in_again(app, account).await?)
+            reply.send(shown(app.accounts().sign_in_again(account).await)?)
         }
         Command::OpenAttachment { attachment, reply } => {
-            reply.send(commands::open_attachment(app, attachment).await?)
+            reply.send(shown(app.mail().open_attachment(attachment).await)?)
         }
-        Command::OpenUrl { url, reply } => reply.send(commands::open_url(app, &url)?),
+        Command::OpenUrl { url, reply } => reply.send(shown(app.mail().open_url(&url))?),
         Command::Unsubscribe {
             account,
             thread,
             reply,
-        } => reply.send(commands::unsubscribe(app, account, thread).await?),
+        } => reply.send(shown(app.mail().unsubscribe(account, thread).await)?),
         Command::Block {
             account,
             thread,
             domain,
             reply,
-        } => reply.send(commands::block(app, account, thread, domain).await?),
+        } => reply.send(shown(app.mail().block(account, thread, domain).await)?),
         Command::BlockedSenders { account, reply } => {
-            reply.send(commands::blocked_senders(app, account).await?)
+            reply.send(shown(app.mail().blocked_senders(account).await)?)
         }
         Command::Unblock { account, id, reply } => {
-            reply.send(commands::unblock(app, account, id).await?)
+            reply.send(shown(app.mail().unblock(account, id).await)?)
         }
         Command::SenderThreads {
             account,
             thread,
             reply,
-        } => reply.send(commands::sender_threads(app, account, thread).await?),
+        } => reply.send(shown(app.queries().sender_threads(account, thread).await)?),
         Command::AddAttachment {
             draft,
             filename,
@@ -90,9 +92,14 @@ pub async fn dispatch(app: &App, name: &str, args: Value) -> CmdResult<Answer> {
             commands::perf_report(&action, ms, budget);
             reply.send(())
         }
-        Command::SnoozeOptions { text, reply } => reply.send(commands::snooze_options(app, &text)),
+        Command::SnoozeOptions { text, reply } => reply.send(app.queries().snooze_options(&text)),
     };
     reply
         .map(Answer::Reply)
         .map_err(|e| format!("couldn't encode the result: {e}"))
+}
+
+/// A core result, with its error as the message the UI shows.
+fn shown<T>(result: Result<T, sm_core::Error>) -> CmdResult<T> {
+    result.map_err(|e| commands::message(&e))
 }

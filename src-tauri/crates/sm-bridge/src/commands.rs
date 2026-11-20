@@ -1,15 +1,11 @@
-//! The commands, typed: one function per command over the core's handles,
-//! with its result or the error string the UI reads. [`crate::dispatch`]
-//! calls them by name; the app's `connect` calls [`connect`] with its
-//! channel.
+//! The commands that do more than call the core, and the error string the
+//! UI reads. [`crate::dispatch`] calls the core's handles itself for the
+//! rest; the app's `connect` calls [`connect`] with its channel.
 
 use base64::Engine as _;
 use sm_core::{App, MAX_ATTACHMENT_BYTES, NewAttachment, attachment_too_large};
-use sm_domain::{AccountId, AttachmentId, DraftId, MessageId, ThreadId};
-use sm_ipc::{
-    BlockResult, BlockedSenders, ChannelMessage, ContactSuggestion, DraftAttachment, LaunchInfo,
-    ListRow, MessageBody, SnoozeChoice, Submitted, Unsubscribed,
-};
+use sm_domain::DraftId;
+use sm_ipc::{ChannelMessage, DraftAttachment, LaunchInfo};
 
 /// A command's result: its value, or the message the UI shows.
 pub type CmdResult<T> = Result<T, String>;
@@ -41,112 +37,6 @@ pub async fn connect(
     sink: Box<dyn FnMut(ChannelMessage) + Send>,
 ) -> CmdResult<LaunchInfo> {
     app.lifecycle().connect(sink).await.map_err(|e| err(&e))
-}
-
-/// Queues the page's numbered actions. Returns once they are queued.
-pub fn submit(app: &App, actions: Vec<Submitted>) {
-    app.actions().submit(actions);
-}
-
-/// Rows outside the pushed window, with their `rev`.
-pub async fn fetch_rows(app: &App, drafts: bool, keys: Vec<String>) -> CmdResult<Vec<ListRow>> {
-    app.queries()
-        .fetch_rows(drafts, keys)
-        .await
-        .map_err(|e| err(&e))
-}
-
-/// Sanitized bodies. A message without a stored body is left out.
-pub async fn get_bodies(app: &App, ids: Vec<MessageId>) -> CmdResult<Vec<MessageBody>> {
-    app.queries().get_bodies(ids).await.map_err(|e| err(&e))
-}
-
-/// Recipient suggestions for what the user typed.
-pub async fn autocomplete(
-    app: &App,
-    account: AccountId,
-    query: String,
-) -> CmdResult<Vec<ContactSuggestion>> {
-    app.queries()
-        .autocomplete(account, query)
-        .await
-        .map_err(|e| err(&e))
-}
-
-/// Signs a new account in with Google in the browser and adds it.
-pub async fn add_account(app: &App) -> CmdResult<AccountId> {
-    app.accounts().add().await.map_err(|e| err(&e))
-}
-
-/// Signs an account in again.
-pub async fn sign_in_again(app: &App, account: AccountId) -> CmdResult<()> {
-    app.accounts()
-        .sign_in_again(account)
-        .await
-        .map_err(|e| err(&e))
-}
-
-/// Downloads an attachment if needed and opens it with its default app.
-pub async fn open_attachment(app: &App, attachment: AttachmentId) -> CmdResult<()> {
-    app.mail()
-        .open_attachment(attachment)
-        .await
-        .map_err(|e| err(&e))
-}
-
-/// Opens a link from a message in the default browser or mail app.
-pub fn open_url(app: &App, url: &str) -> CmdResult<()> {
-    app.mail().open_url(url).map_err(|e| err(&e))
-}
-
-/// Unsubscribes from the list a conversation came from.
-pub async fn unsubscribe(
-    app: &App,
-    account: AccountId,
-    thread: ThreadId,
-) -> CmdResult<Unsubscribed> {
-    app.mail()
-        .unsubscribe(account, thread)
-        .await
-        .map_err(|e| err(&e))
-}
-
-/// Blocks a conversation's sender, or the sender's domain.
-pub async fn block(
-    app: &App,
-    account: AccountId,
-    thread: ThreadId,
-    domain: bool,
-) -> CmdResult<BlockResult> {
-    app.mail()
-        .block(account, thread, domain)
-        .await
-        .map_err(|e| err(&e))
-}
-
-/// The account's blocked senders.
-pub async fn blocked_senders(app: &App, account: AccountId) -> CmdResult<BlockedSenders> {
-    app.mail()
-        .blocked_senders(account)
-        .await
-        .map_err(|e| err(&e))
-}
-
-/// Unblocks a sender by deleting its Gmail filter `id`.
-pub async fn unblock(app: &App, account: AccountId, id: String) -> CmdResult<()> {
-    app.mail().unblock(account, id).await.map_err(|e| err(&e))
-}
-
-/// Inbox conversations from the sender of `thread`'s latest message.
-pub async fn sender_threads(
-    app: &App,
-    account: AccountId,
-    thread: ThreadId,
-) -> CmdResult<Vec<ThreadId>> {
-    app.queries()
-        .sender_threads(account, thread)
-        .await
-        .map_err(|e| err(&e))
 }
 
 /// Keeps a file the user picked with the draft's files. `data` is the
@@ -190,9 +80,4 @@ pub fn perf_report(action: &str, ms: f64, budget: f64) {
     } else {
         tracing::debug!(action, ms, "within the performance budget");
     }
-}
-
-/// The snooze picker's choices for what the user typed.
-pub fn snooze_options(app: &App, text: &str) -> Vec<SnoozeChoice> {
-    app.queries().snooze_options(text)
 }
