@@ -740,4 +740,27 @@ test.describe("attachments", () => {
     expect(sentMime.headers.cc).toContain("dora@cc.test");
     expect(Object.keys(filesOf(sentMime))).toEqual(["notes.txt"]);
   });
+
+  test("ATT-22 files a discarded draft left behind when a quit cut off their clean-up go at the next launch; a kept draft's stay", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    // A draft that is kept, with a file.
+    await newMessage(app, "Kept with a file", "See attached.");
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await expect(app.page.getByRole("button", { name: "Remove notes.txt" })).toBeVisible();
+    await app.settle();
+    await app.press("Escape", "Escape");
+    await app.settle();
+    const kept = await gmail.draftFolders();
+    expect(kept).toHaveLength(1);
+
+    await app.restart(async () => {
+      await gmail.leaveDraftFolder("left-behind");
+      expect(await gmail.draftFolders()).toHaveLength(2);
+    });
+    await app.settle();
+    expect(await gmail.draftFolders()).toEqual(kept);
+  });
 });

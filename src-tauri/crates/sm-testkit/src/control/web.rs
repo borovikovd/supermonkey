@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::server::{Ctl, Fail, Hit, Server};
+use crate::server::{Ctl, Fail, Hit, Server, done};
 
 /// The app's Tauri config, for the CSP the release app runs the UI under.
 const TAURI_CONF: &str = include_str!("../../../../tauri.conf.json");
@@ -143,6 +143,29 @@ pub(crate) async fn draft_folders(State(s): State<Arc<Server>>) -> Ctl {
     }
     names.sort();
     Ok(Json(json!(names)))
+}
+
+/// What `/__test/draft-folders` takes to leave a folder behind.
+#[derive(Deserialize)]
+pub(crate) struct LeftFolderReq {
+    /// The folder's name, as a draft id.
+    name: String,
+}
+
+/// Leaves a draft's folder of added files in the data folder with no draft
+/// to go with it, as a quit between a discard and its clean-up does. Call it
+/// while the core is down.
+pub(crate) async fn leave_draft_folder(
+    State(s): State<Arc<Server>>,
+    Json(req): Json<LeftFolderReq>,
+) -> Ctl {
+    if req.name.is_empty() || req.name.contains(['/', '\\', '.']) {
+        return Err(Fail("not a folder name".into()));
+    }
+    let dir = s.data_dir.join("drafts").join(&req.name).join("1");
+    tokio::fs::create_dir_all(&dir).await?;
+    tokio::fs::write(dir.join("left.txt"), b"left behind").await?;
+    Ok(done())
 }
 
 /// Serves the built UI; unknown paths get `index.html`.

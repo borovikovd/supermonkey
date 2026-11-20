@@ -73,7 +73,10 @@ pub(crate) fn router(server: Arc<Server>) -> Router {
         .route("/__test/clear-recorded", post(lifecycle::clear_recorded))
         .route("/__test/hits", get(web::hits))
         .route("/__test/db-contains", get(web::db_contains))
-        .route("/__test/draft-folders", get(web::draft_folders))
+        .route(
+            "/__test/draft-folders",
+            get(web::draft_folders).post(web::leave_draft_folder),
+        )
         .route("/img/{name}", get(web::remote_image))
         .route("/sink/{*rest}", any(web::sink))
         .fallback(get(web::static_file))

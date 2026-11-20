@@ -566,4 +566,13 @@ export class Control {
   draftFolders(): Promise<string[]> {
     return this.call("GET", "/__test/draft-folders");
   }
+
+  /**
+   * Leaves a draft's folder of added files behind with no draft to go with
+   * it, as a quit between a discard and its clean-up does. Call it while the
+   * app is down.
+   */
+  async leaveDraftFolder(name: string): Promise<void> {
+    await this.call("POST", "/__test/draft-folders", { name });
+  }
 }

@@ -15,7 +15,7 @@ use sm_store::{AccountRecord, Priority};
 use tokio::sync::{mpsc, watch};
 
 use super::account::{AccountWorker, SignOutSender, WorkerDeps, WorkerId, WorkerParts};
-use super::files::{ATTACHMENTS_DIR, attachments_dir, draft_dir};
+use super::files::{ATTACHMENTS_DIR, attachments_dir, draft_dir, draft_folder, drafts_dir};
 use super::grants::{Grant, Grants};
 use super::ops::OpsLane;
 use crate::activity::{Tasks, Tracked, parked};
@@ -191,6 +191,7 @@ impl AccountWorkers {
                 }
             };
             workers.sweep(&accounts).await;
+            workers.sweep_draft_files().await;
             for record in accounts.into_iter().filter(|a| !a.needs_signin) {
                 let grant = workers.live.grants.current(record.id);
                 if let Err(e) = workers.start_stored(record.id, &record.email, grant).await {
@@ -210,12 +211,39 @@ impl AccountWorkers {
         let dir = self.deps.data_dir.join(ATTACHMENTS_DIR);
         let swept = tokio::task::spawn_blocking(move || {
             sweep_tokens(&*tokens, &emails);
-            sweep_folders(&dir, &ids);
+            delete_folders(&dir, folders(&dir), &ids);
         })
         .await;
         if let Err(e) = swept {
             tracing::warn!(error = %e, "the launch clean-up failed");
         }
+    }
+
+    /// At launch: the added files of drafts no longer stored are deleted.
+    /// A quit or crash between a discard or a send and the delete that
+    /// follows it leaves them (SPEC Drafts).
+    async fn sweep_draft_files(&self) {
+        if let Err(e) = self.delete_left_draft_files().await {
+            tracing::warn!(error = %e, "the launch clean-up of draft files failed; keeping them");
+        }
+    }
+
+    async fn delete_left_draft_files(&self) -> Result<(), Error> {
+        let dir = drafts_dir(&self.deps.data_dir);
+        // The folders first, then the drafts: a draft is stored before it
+        // has a folder, so one made meanwhile is never taken for a leftover.
+        let scanned = dir.clone();
+        let found = tokio::task::spawn_blocking(move || folders(&scanned)).await?;
+        if found.is_empty() {
+            return Ok(());
+        }
+        let kept: HashSet<String> = read(&self.deps.pool, |r| r.drafts().ids())
+            .await?
+            .iter()
+            .map(draft_folder)
+            .collect();
+        tokio::task::spawn_blocking(move || delete_folders(&dir, found, &kept)).await?;
+        Ok(())
     }
 
     /// An account was added or signed in again with the refresh token in
@@ -449,17 +477,23 @@ fn delete_swept_token(tokens: &dyn TokenStore, email: &str) {
 
 /// Deletes the attachments folders in `dir` of accounts not among `ids`.
 /// With no `dir` to read, there is nothing to delete.
-fn sweep_folders(dir: &Path, ids: &HashSet<String>) {
-    let Ok(folders) = std::fs::read_dir(dir) else {
-        return;
+/// The names of the folders in `dir`; none when it can't be read.
+fn folders(dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
     };
-    for folder in folders.flatten() {
-        let is_dir = folder.file_type().is_ok_and(|t| t.is_dir());
-        if !is_dir || ids.contains(&folder.file_name().to_string_lossy().into_owned()) {
-            continue;
-        }
-        if let Err(e) = std::fs::remove_dir_all(folder.path()) {
-            tracing::warn!(error = %e, "couldn't delete a removed account's files");
+    entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect()
+}
+
+/// Deletes the folders of `dir` named in `found` and not in `kept`.
+fn delete_folders(dir: &Path, found: Vec<String>, kept: &HashSet<String>) {
+    for name in found.into_iter().filter(|name| !kept.contains(name)) {
+        if let Err(e) = std::fs::remove_dir_all(dir.join(name)) {
+            tracing::warn!(error = %e, "couldn't delete files left behind");
         }
     }
 }

@@ -331,6 +331,14 @@ impl<'c> DraftReads<'c> {
         )
     }
 
+    /// Every stored draft's id, of every account.
+    pub fn ids(self) -> Result<Vec<DraftId>, StoreError> {
+        self.db
+            .all("read the drafts' ids", "SELECT id FROM drafts", [], |r| {
+                r.get("id")
+            })
+    }
+
     /// The Drafts list (SPEC Views): drafts with no outbox row, newest edit
     /// first.
     pub fn list(self, account: AccountId) -> Result<Vec<DraftId>, StoreError> {

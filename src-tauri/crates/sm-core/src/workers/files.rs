@@ -16,10 +16,20 @@ pub(crate) fn attachments_dir(data_dir: &Path, account: AccountId) -> PathBuf {
     data_dir.join(ATTACHMENTS_DIR).join(account.0.to_string())
 }
 
+/// The folder that holds every draft's folder of added files.
+pub(crate) fn drafts_dir(data_dir: &Path) -> PathBuf {
+    data_dir.join(DRAFTS_DIR)
+}
+
+/// The name of a draft's folder in [`drafts_dir`]. The draft id is the UI's,
+/// so it is made safe as a folder name.
+pub(crate) fn draft_folder(draft: &DraftId) -> String {
+    safe_name(draft.as_str())
+}
+
 /// The folder of a draft's added files, kept until it is sent or discarded.
-/// The draft id is the UI's, so it is made safe as a folder name.
 pub(crate) fn draft_dir(data_dir: &Path, draft: &DraftId) -> PathBuf {
-    data_dir.join(DRAFTS_DIR).join(safe_name(draft.as_str()))
+    drafts_dir(data_dir).join(draft_folder(draft))
 }
 
 /// A file name safe to create: no path separators or control characters,
