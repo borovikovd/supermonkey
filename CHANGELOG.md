@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.2](https://github.com/borovikovd/supermonkey/compare/v0.7.1...v0.7.2) (2026-11-20)
+
+
+### Bug Fixes
+
+* **drafts:** a discarded draft's Gmail copy is deleted even when Gmail could not read it at first ([5633445](https://github.com/borovikovd/supermonkey/commit/563344536c1456132b619e95ee5b235187dde6a7))
+* **drafts:** a draft reopened and emptied is emptied in Gmail too ([93dd6f7](https://github.com/borovikovd/supermonkey/commit/93dd6f74e9faa827cecbc0dce2a7156ccbe732d1))
+* **drafts:** files of a draft that is gone are cleaned up at the next launch ([752af70](https://github.com/borovikovd/supermonkey/commit/752af7099ccdab32d1e97bc67ef8bf8cc119764f))
+* **offline:** a draft that is slow to upload no longer holds back archives and other mail changes ([1580cb0](https://github.com/borovikovd/supermonkey/commit/1580cb03ff75f2b124085bed983b6bbeaf26032f))
+* **sync:** a quit during the first sync no longer leaves starred and sent mail unread ([5148af6](https://github.com/borovikovd/supermonkey/commit/5148af6055ed83992b929d667bd93a6b01fe0482))
+
 ## [0.7.1](https://github.com/borovikovd/supermonkey/compare/v0.7.0...v0.7.1) (2026-11-11)
 
 
