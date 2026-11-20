@@ -615,7 +615,7 @@ Offline, the search field notes that results are from this Mac.
 
 The cached mailbox stays readable with no network: list, thread, search of cached mail, and recipient autocomplete. A search, or a Done, All Mail, Label, Trash, or Spam view, still open when the network returns then runs its Gmail listing, as Search says.
 
-These actions queue and replay in order per account when the network returns: archive, trash, spam, star, read-state, return to inbox, label changes, label create, snooze, unsnooze, draft upsert, and discard. A label created offline gets a local id, and replay maps it to the Gmail id. Sends wait in the outbox instead.
+These actions queue and replay per account when the network returns: archive, trash, spam, star, read-state, return to inbox, label changes, label create, snooze, unsnooze, draft upsert, and discard. Mail changes replay in the order they were made, and so do draft writes (upsert and discard). The two do not wait for each other: a draft that is slow to upload, or that Gmail keeps failing, does not hold back an archive made after it. A label created offline gets a local id, and replay maps it to the Gmail id. Sends wait in the outbox instead.
 
 The app finds out that Gmail can be reached again from its own calls: once any call fails to reach Gmail, every account polls every 10 s instead of every 45 s, and the first answer wakes everything that waits for the network, so a queued action, a send, or an open search runs within about 10 s of the network returning, even when nothing else calls Gmail. The poll is the check: it costs 2 quota units and needs no other signal from macOS.
 

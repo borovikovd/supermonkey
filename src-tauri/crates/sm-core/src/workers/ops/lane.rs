@@ -14,8 +14,9 @@ use crate::activity::Tasks;
 use crate::drafts::DraftsWriting;
 use crate::ops::Landed;
 use crate::workers::account::Freshness;
+use sm_store::OpQueue;
 
-/// The account's op lane: one op runs at a time, and a run outlives the
+/// The account's op lane: one op of each queue runs at a time, and a run outlives the
 /// worker that started it.
 ///
 /// Replacing a worker (a second sign-in, ACC-13) cancels the old one's
@@ -25,13 +26,21 @@ use crate::workers::account::Freshness;
 /// written, and the new worker's runner takes the turn first: it waits for
 /// the old run to land and then sees the op gone.
 pub(crate) struct OpsLane {
-    /// Held for the whole run of one op, across its Gmail calls: an async
-    /// mutex, because holding it across `.await` is its purpose.
+    /// The mail queue's turn, held for the whole run of one op, across its
+    /// Gmail calls: an async mutex, because holding it across `.await` is
+    /// its purpose.
     #[expect(
         clippy::disallowed_types,
         reason = "the turn is held for the whole run of one op, across its Gmail calls"
     )]
-    turn: Arc<Mutex<()>>,
+    mail_turn: Arc<Mutex<()>>,
+    /// The drafts queue's turn, held the same way. Its own, so a draft
+    /// write that is slow or failing holds back no mail change.
+    #[expect(
+        clippy::disallowed_types,
+        reason = "the turn is held for the whole run of one op, across its Gmail calls"
+    )]
+    draft_turn: Arc<Mutex<()>>,
     /// Op runs: cancelled only when the account goes or the app quits.
     tasks: Tasks,
     /// Ops that landed while reads were in flight.
@@ -52,7 +61,8 @@ impl OpsLane {
     /// A lane whose runs belong to `tasks`.
     pub(crate) fn new(tasks: Tasks) -> Arc<Self> {
         Arc::new(Self {
-            turn: Arc::default(),
+            mail_turn: Arc::default(),
+            draft_turn: Arc::default(),
             tasks,
             landed: Arc::default(),
             writing: Arc::default(),
@@ -62,9 +72,14 @@ impl OpsLane {
         })
     }
 
-    /// Waits for the lane's turn: no op of the account is running.
-    pub(crate) async fn turn(&self) -> OwnedMutexGuard<()> {
-        Arc::clone(&self.turn).lock_owned().await
+    /// Waits for `queue`'s turn: no op of that queue is running for the
+    /// account.
+    pub(crate) async fn turn(&self, queue: OpQueue) -> OwnedMutexGuard<()> {
+        let turn = match queue {
+            OpQueue::Mail => &self.mail_turn,
+            OpQueue::Drafts => &self.draft_turn,
+        };
+        Arc::clone(turn).lock_owned().await
     }
 
     /// The group op runs belong to.

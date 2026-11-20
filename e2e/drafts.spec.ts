@@ -819,12 +819,14 @@ test("DRF-21 a draft deleted on Gmail while an edit waits to reach Gmail is writ
   await app.press("Escape", "Escape");
   await app.settle();
 
-  // A star waits on Gmail, so the edit's upsert queues behind it.
-  const star = await gmail.hold("messages.batchModify");
-  await app.press("s");
-  await expect
-    .poll(async () => (await gmail.requests("messages.batchModify")).some((r) => r.held))
-    .toBe(true);
+  // Another draft's first write waits on Gmail, so the edit's upsert queues
+  // behind it: draft writes reach Gmail one at a time.
+  const create = await gmail.hold("drafts.create");
+  await app.compose();
+  await app.subject.fill("In the way");
+  await expect.poll(async () => (await creates(gmail)).some((r) => r.held)).toBe(true);
+  await app.press("Escape", "Escape");
+  await expect(app.page.getByRole("heading", { name: "New Message" })).toHaveCount(0);
   await app.reply("r");
   await expect(app.editor).toHaveText("one");
   await app.type(" two");
@@ -837,7 +839,7 @@ test("DRF-21 a draft deleted on Gmail while an edit waits to reach Gmail is writ
   await app.settle();
   await expect(stub(app, "one two")).toHaveCount(1);
 
-  await star.release();
+  await create.release();
   await app.settle();
   await expect(stub(app, "one two")).toHaveCount(1);
   const now = await draftsIn(gmail, p3.threadId);

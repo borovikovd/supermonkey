@@ -53,7 +53,32 @@ pub enum OpKind {
     TrashMessage,
 }
 
+/// One of an account's two replay queues. Each replays in the order its ops
+/// were made, and neither waits for the other (SPEC Offline): a mail change
+/// names messages a draft write never touches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpQueue {
+    /// Label changes, label creates, and trashing a sent message.
+    Mail,
+    /// Draft upserts and deletes.
+    Drafts,
+}
+
+impl OpQueue {
+    /// Both queues.
+    pub const ALL: [Self; 2] = [Self::Mail, Self::Drafts];
+}
+
 impl OpKind {
+    /// The queue ops of this kind replay in.
+    #[must_use]
+    pub const fn queue(self) -> OpQueue {
+        match self {
+            Self::Modify | Self::LabelCreate | Self::TrashMessage => OpQueue::Mail,
+            Self::DraftUpsert | Self::DraftDelete => OpQueue::Drafts,
+        }
+    }
+
     /// The stored text.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
@@ -172,14 +197,19 @@ impl<'c> OpReads<'c> {
         Self { db }
     }
 
-    /// The account's next op to run.
-    pub fn next(self, account: AccountId) -> Result<Option<OpRecord>, StoreError> {
+    /// The next op to run in one of the account's queues.
+    pub fn next(self, account: AccountId, queue: OpQueue) -> Result<Option<OpRecord>, StoreError> {
         self.db.optional(
             "read the next op",
             "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload,
                     created_at
-             FROM ops WHERE account_id = ?1 ORDER BY id LIMIT 1",
-            [account],
+             FROM ops WHERE account_id = ?1 AND (kind IN (?2, ?3)) = ?4 ORDER BY id LIMIT 1",
+            (
+                account,
+                OpKind::DraftUpsert,
+                OpKind::DraftDelete,
+                queue == OpQueue::Drafts,
+            ),
             op_row,
         )
     }

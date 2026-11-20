@@ -6,6 +6,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use sm_domain::{AccountId, DraftId, ThreadId};
 use sm_gmail::Gmail;
+use sm_store::OpQueue;
 
 use super::ctx::{AccountCtx, SignOutSender, WorkerDeps, WorkerId};
 use super::health::Health;
@@ -82,7 +83,9 @@ impl AccountWorker {
             }
             let (ctx, tasks) = (&self.ctx, &self.ctx.tasks);
             tasks.spawn("poller", poller::run(Arc::clone(ctx)));
-            tasks.spawn("ops", ops::run(Arc::clone(ctx)));
+            for queue in OpQueue::ALL {
+                tasks.spawn("ops", ops::run(Arc::clone(ctx), queue));
+            }
             tasks.spawn("outbox", outbox::run(Arc::clone(ctx)));
             for _ in 0..fetcher::FETCHERS {
                 tasks.spawn("fetcher", fetcher::run(Arc::clone(ctx)));
@@ -111,9 +114,11 @@ impl AccountWorker {
         self.ctx.poll.kick();
     }
 
-    /// Wakes the ops runner: ops were queued.
+    /// Wakes the ops runners: ops were queued.
     pub(crate) fn kick_ops(&self) {
-        self.ctx.ops.kick();
+        for queue in OpQueue::ALL {
+            self.ctx.ops(queue).kick();
+        }
     }
 
     /// Wakes the outbox runner: a send was queued or undone.

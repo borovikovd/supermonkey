@@ -317,7 +317,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 ### offline.spec.ts (OFF)
 
 - OFF-01 · P1 · Airplane mode: read, search, autocomplete, and act; it all lands when the network returns · §Offline, §Done when
-- OFF-02 · P1 · Every kind of queued action replays in order · §Offline
+- OFF-02 · P1 · Every kind of queued action replays, mail changes and draft writes each in order · §Offline
 - OFF-03 · P1 · The queue survives a restart · §Offline
 - OFF-04 · P1 · A queued action wins on the messages it recorded, without hiding newer mail · §Offline, §Archive, trash, star, read
 - OFF-07 · P1 · A Gmail answer read before an action landed does not undo it · §Offline, §Sync
@@ -325,6 +325,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - OFF-06 · P2 · Losing the network during replay leaves the rest queued · §Offline
 - OFF-08 · P2 · Conversations opened offline read only the bodies still on screen when the network returns · §Sync, §Offline
 - OFF-09 · P1 · A poll during the replay of a queued action keeps the action applied · §Offline, §Archive, trash, star, read
+- OFF-10 · P1 · A draft write on its way to Gmail does not hold up an archive made after it · §Offline
 
 ### gmail-errors.spec.ts (ERR)
 

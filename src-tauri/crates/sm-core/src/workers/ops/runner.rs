@@ -1,10 +1,11 @@
-//! The ops runner's loop: takes the account's next op in the lane's turn,
+//! An ops runner's loop: takes the next op of its queue in that queue's turn,
 //! runs it in the lane's task group, and waits as its outcome asks.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use sm_gmail::{Backoff, Outcome};
+use sm_store::OpQueue;
 use tokio::sync::oneshot;
 
 use super::run::{Failure, run_op};
@@ -19,23 +20,23 @@ const IDLE_WAIT: Duration = Duration::from_secs(60);
 /// again.
 const BUSY_WAIT: Duration = Duration::from_secs(1);
 
-/// Replays the account's ops until the worker stops.
-pub(crate) async fn run(ctx: Arc<AccountCtx>) {
+/// Replays one of the account's op queues until the worker stops.
+pub(crate) async fn run(ctx: Arc<AccountCtx>, queue: OpQueue) {
     let mut backoff = Backoff::new();
     loop {
-        let turn = ctx.lane.turn().await;
+        let turn = ctx.lane.turn(queue).await;
         let account = ctx.account;
-        let op = match ctx.read(move |r| r.ops().next(account)).await {
+        let op = match ctx.read(move |r| r.ops().next(account, queue)).await {
             Ok(Some(op)) => op,
             Ok(None) => {
                 drop(turn);
-                ctx.ops.wait(ctx.clock(), IDLE_WAIT).await;
+                ctx.ops(queue).wait(ctx.clock(), IDLE_WAIT).await;
                 continue;
             }
             Err(e) => {
                 drop(turn);
                 tracing::warn!(account = account.0, error = %e, "couldn't read the op queue");
-                ctx.ops.wait(ctx.clock(), OFFLINE_RETRY).await;
+                ctx.ops(queue).wait(ctx.clock(), OFFLINE_RETRY).await;
                 continue;
             }
         };
@@ -63,7 +64,7 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
         match result {
             Ok(()) => backoff.reset(),
             Err(failure) => {
-                if !wait_after(&ctx, &failure, &mut backoff).await {
+                if !wait_after(&ctx, queue, &failure, &mut backoff).await {
                     return;
                 }
             }
@@ -73,15 +74,20 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
 
 /// Waits as a failed run's outcome asks (SPEC Gmail errors). Returns false
 /// when the runner should stop: the account is signed out.
-async fn wait_after(ctx: &AccountCtx, failure: &Failure, backoff: &mut Backoff) -> bool {
+async fn wait_after(
+    ctx: &AccountCtx,
+    queue: OpQueue,
+    failure: &Failure,
+    backoff: &mut Backoff,
+) -> bool {
     let network = &ctx.deps.network;
     match failure {
         Failure::Store(e) => {
             tracing::warn!(account = ctx.account.0, error = %e, "couldn't run an op; trying again");
-            draining(ctx, network.wait(ctx.clock(), OFFLINE_RETRY)).await;
+            draining(ctx, queue, network.wait(ctx.clock(), OFFLINE_RETRY)).await;
         }
         Failure::Busy => {
-            draining(ctx, network.wait(ctx.clock(), BUSY_WAIT)).await;
+            draining(ctx, queue, network.wait(ctx.clock(), BUSY_WAIT)).await;
         }
         Failure::Gmail(err) => {
             ctx.health.failed(err);
@@ -90,7 +96,9 @@ async fn wait_after(ctx: &AccountCtx, failure: &Failure, backoff: &mut Backoff) 
                     ctx.signed_out();
                     return false;
                 }
-                Outcome::Offline => draining(ctx, network.wait(ctx.clock(), OFFLINE_RETRY)).await,
+                Outcome::Offline => {
+                    draining(ctx, queue, network.wait(ctx.clock(), OFFLINE_RETRY)).await;
+                }
                 outcome @ (Outcome::NoResponse
                 | Outcome::Unauthorized
                 | Outcome::RateLimited { .. }
@@ -100,7 +108,7 @@ async fn wait_after(ctx: &AccountCtx, failure: &Failure, backoff: &mut Backoff) 
                 | Outcome::Rejected { .. }) => {
                     let wait = backoff.next_delay(err);
                     tracing::debug!(account = ctx.account.0, %outcome, ?wait, "an op backs off");
-                    draining(ctx, network.wait(ctx.clock(), wait)).await;
+                    draining(ctx, queue, network.wait(ctx.clock(), wait)).await;
                 }
             }
         }
@@ -112,14 +120,14 @@ async fn wait_after(ctx: &AccountCtx, failure: &Failure, backoff: &mut Backoff) 
 /// goes back to the queue when the wait ends, so a kick asks for nothing
 /// more, and a kick nobody took would keep the core busy. A kick never
 /// cuts a wait short, so a back-off keeps its timing.
-async fn draining(ctx: &AccountCtx, wait: impl Future<Output = ()>) {
+async fn draining(ctx: &AccountCtx, queue: OpQueue, wait: impl Future<Output = ()>) {
     tokio::pin!(wait);
     loop {
         // The wait first, so its timer is set before this task parks.
         tokio::select! {
             biased;
             () = &mut wait => return,
-            () = ctx.ops.wait(ctx.clock(), IDLE_WAIT) => {}
+            () = ctx.ops(queue).wait(ctx.clock(), IDLE_WAIT) => {}
         }
     }
 }

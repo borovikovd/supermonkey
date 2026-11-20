@@ -79,7 +79,7 @@ Crates live under `src-tauri/crates/` with a `ub-` prefix (`sm-domain`, `sm-mime
 - **Per account:** one `AccountWorker`, a supervised task group owned by a `CancellationToken`. Its tasks:
   - poller (`history.list` every 45 s, on focus and wake);
   - fetch queue (priority-ordered, de-duplicated thread fetches);
-  - ops runner (queued Gmail mutations, replayed in order);
+  - two ops runners (queued Gmail mutations: one replays mail changes in order, one draft writes in order, and neither waits for the other);
   - outbox runner (undo send, `drafts.send`);
   - draft reconciler;
   - contacts backfill;
@@ -187,7 +187,7 @@ Each has exactly two implementations. AGENTS.md forbids traits with one.
 
 Rules that write live in modules the writer runs, each a set of functions over `&mut WriteTx` and the writer state: `actions` (one module per group of UI actions), `ops` (queueing, revert, rejection), `outbox` (a pure send state machine and its steps), `drafts` (whose `lifecycle` alone reads and changes a draft's stage, waits, and Gmail copy, through named transitions, and keeps two writes of one draft to Gmail from overlapping; the store keeps that state as plain data), `snooze` (waking due threads, as the same label change as Return to inbox), and `notify` (which new mail notifies, decided in the poll's own transaction so open conversations and stored messages agree). They record `Effect`s; the writer releases them to the router only after the commit lands.
 
-The router (`effects::Router`) is one task that hands each effect to its worker: fetches, Gmail listings, ops, outbox and draft work go to the account's worker; `Notify` goes to the `Notifier`, which posts it and remembers it for click-through; `Snoozes` re-arms the snooze timer; `Badge` kicks the badge task, which recounts unread mail once per wake, so a burst of commits costs one count. Each account's ops run in an `OpsLane` that outlives its worker, so a replaced worker's in-flight op lands before the next one replays, and a second sign-in never sends a queued op twice. An op's row goes only when its result is written, so an op that quitting cuts off stays queued and is sent again on the next launch; `batchModify` and `labels.create` (by its 409) make that harmless.
+The router (`effects::Router`) is one task that hands each effect to its worker: fetches, Gmail listings, ops, outbox and draft work go to the account's worker; `Notify` goes to the `Notifier`, which posts it and remembers it for click-through; `Snoozes` re-arms the snooze timer; `Badge` kicks the badge task, which recounts unread mail once per wake, so a burst of commits costs one count. Each account's ops run in an `OpsLane` that outlives its worker, so a replaced worker's in-flight op lands before the next one replays, and a second sign-in never sends a queued op twice. The lane has two turns, one per `OpQueue` (mail changes, draft writes): one op of each runs at a time, so a draft upload that is slow or keeps failing holds back no archive. An op's row goes only when its result is written, so an op that quitting cuts off stays queued and is sent again on the next launch; `batchModify` and `labels.create` (by its 409) make that harmless.
 
 Every task, timer, kick, and queued job counts in one `Activity`, so the E2E server's `settle()` can tell when the core is idle, and its manual clock moves app time.
 

@@ -59,7 +59,7 @@ pub use messages::{
 pub use meta::{MetaReads, MetaWrites};
 pub use notices::{NewNotice, NoticeReads, NoticeRecord, NoticeWrites};
 pub use open::SCHEMA_VERSION;
-pub use ops::{NewOp, OpId, OpKind, OpReads, OpRecord, OpWrites};
+pub use ops::{NewOp, OpId, OpKind, OpQueue, OpReads, OpRecord, OpWrites};
 pub use outbox::{NewOutbox, Outbox, OutboxReads, OutboxRecord, OutboxWrites};
 pub use pool::ReadPool;
 pub use reply::Pending;

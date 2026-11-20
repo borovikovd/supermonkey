@@ -1,5 +1,5 @@
 // Offline (SPEC §Offline): the cached mailbox stays usable,
-// actions queue in SQLite and replay in order per account when the network
+// actions queue in SQLite and replay per account, each queue in order, when the network
 // returns, and a rejection during replay rolls back only its own action.
 import type { App } from "./app.ts";
 import type { GmailMessage, GmailState, LoggedRequest } from "./control.ts";
@@ -73,6 +73,9 @@ async function applied(app: App, afterSeq: number): Promise<LoggedRequest[]> {
       r.answer < 300,
   );
 }
+
+/** Whether a request is in the draft writes' replay queue (the rest are mail changes). */
+const isDraftWrite = (r: LoggedRequest): boolean => r.api.startsWith("drafts.");
 
 async function lastSeq(app: App): Promise<number> {
   return (await app.gmail.requests()).at(-1)?.seq ?? -1;
@@ -153,7 +156,10 @@ test("OFF-01 airplane mode: read, search, autocomplete, and act; it all lands wh
   expect(reply?.raw).toContain("Written on the plane");
 });
 
-test("OFF-02 every kind of queued action replays in order", async ({ app, gmail }) => {
+test("OFF-02 every kind of queued action replays, mail changes and draft writes each in order", async ({
+  app,
+  gmail,
+}) => {
   const s = await seeds.standard(gmail, app);
 
   // Online first: search caches archivedOld, ownAlias gets snoozed, and a
@@ -259,15 +265,16 @@ test("OFF-02 every kind of queued action replays in order", async ({ app, gmail 
   expect(replyDraft?.message.raw).toContain("Queued draft text");
   expect(a.drafts.map((d) => d.id)).not.toContain(spare.id);
 
-  // The replay follows the action order.
+  // The replay follows the action order: mail changes among themselves,
+  // and draft writes among themselves.
   const log = await applied(app, since);
-  expect(log.map((r) => r.api)).toEqual([
+  expect(log.filter((r) => !isDraftWrite(r)).map((r) => r.api)).toEqual([
     ...Array.from({ length: 7 }, () => "messages.batchModify"),
     "labels.create",
     ...Array.from({ length: 3 }, () => "messages.batchModify"),
-    "drafts.create",
-    "drafts.delete",
   ]);
+  const draftWrites = log.filter(isDraftWrite);
+  expect(draftWrites.map((r) => r.api)).toEqual(["drafts.create", "drafts.delete"]);
   const ids = (key: string) =>
     s
       .thread(key)
@@ -288,7 +295,7 @@ test("OFF-02 every kind of queued action replays in order", async ({ app, gmail 
   ]);
   expect(modifies[6]?.addLabelIds).toEqual([s.label(A, "Travel")]);
   expect(modifies[7]?.addLabelIds).toEqual([newL?.id]);
-  expect(log.at(-1)?.path).toContain(spare.id);
+  expect(draftWrites.at(-1)?.path).toContain(spare.id);
 
   await app.expectNoErrorToasts();
   await expect(app.toasts.filter({ hasNotText: "Draft discarded" })).toHaveCount(0);
@@ -393,6 +400,37 @@ test("OFF-09 a poll during the replay of a queued action keeps the action applie
 });
 
 // Re-applying only queued actions let a stale answer undo an action that had left the queue (the snooze-at-launch bug).
+test("OFF-10 a draft write on its way to Gmail does not hold up an archive made after it", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const create = await gmail.hold("drafts.create");
+  await highlight(app, "Ticket #42");
+  await app.reply("r");
+  await app.type("Slow draft");
+  await app.settle();
+  await app.press("Escape", "Escape");
+  await expect(app.editor).toHaveCount(0);
+  await app.press("Escape");
+  await expect
+    .poll(async () => (await gmail.requests("drafts.create")).some((r) => r.held))
+    .toBe(true);
+
+  // The draft's write is still out when the archive is made.
+  await highlight(app, "Person 1");
+  await app.press("e");
+  await app.settle();
+  expect(threadHas(await gmail.gmail(A), s.thread("p1").threadId, "INBOX")).toBe(false);
+
+  await create.release();
+  await app.settle();
+  const draft = (await gmail.gmail(A)).drafts.find(
+    (d) => d.message.threadId === s.thread("replyto").threadId,
+  );
+  expect(draft?.message.raw).toContain("Slow draft");
+});
+
 test("OFF-07 a Gmail answer read before an action landed does not undo it", async ({
   app,
   gmail,

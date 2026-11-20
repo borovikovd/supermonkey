@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use sm_domain::AccountId;
 use sm_gmail::{Backoff, Gmail, GmailError, Outcome};
-use sm_store::{ReadPool, ReadTx, StoreError};
+use sm_store::{OpQueue, ReadPool, ReadTx, StoreError};
 use tokio::sync::mpsc;
 
 use super::WorkerParts;
@@ -56,8 +56,10 @@ pub(crate) struct AccountCtx {
     pub(crate) queue: FetchQueue,
     /// Wakes the poller: a poll now.
     pub(crate) poll: Kick,
-    /// Wakes the ops runner: ops were queued.
-    pub(crate) ops: Kick,
+    /// Wakes the mail ops runner: ops were queued.
+    mail_ops: Kick,
+    /// Wakes the draft ops runner: ops were queued.
+    draft_ops: Kick,
     /// Wakes the outbox runner: a send was queued, undone, or unblocked.
     pub(crate) outbox: Kick,
     /// What the account's op replay keeps across worker replacements.
@@ -97,7 +99,8 @@ impl AccountCtx {
             gmail,
             queue,
             poll: Kick::new(Arc::clone(tasks.activity())),
-            ops: Kick::new(Arc::clone(tasks.activity())),
+            mail_ops: Kick::new(Arc::clone(tasks.activity())),
+            draft_ops: Kick::new(Arc::clone(tasks.activity())),
             outbox: Kick::new(Arc::clone(tasks.activity())),
             lane,
             health,
@@ -123,6 +126,14 @@ impl AccountCtx {
         read: impl FnOnce(&ReadTx<'_>) -> Result<T, StoreError> + Send + 'static,
     ) -> Result<T, Error> {
         crate::read::read(&self.deps.pool, read).await
+    }
+
+    /// The kick that wakes `queue`'s ops runner.
+    pub(crate) const fn ops(&self, queue: OpQueue) -> &Kick {
+        match queue {
+            OpQueue::Mail => &self.mail_ops,
+            OpQueue::Drafts => &self.draft_ops,
+        }
     }
 
     /// Records a call's outcome for the account's sync state.
