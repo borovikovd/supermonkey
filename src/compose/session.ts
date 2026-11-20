@@ -83,9 +83,6 @@ export const composerOnScreen = () => useCompose.getState().onScreen;
 
 export const composeBlurred = () => useCompose.getState().blurred;
 
-/** Calls `listener` on every change of compose state; returns the unsubscribe. */
-export const onComposeChange = (listener: () => void) => useCompose.subscribe(listener);
-
 let mounted: ComposerHandle | null = null;
 
 /** Files attached to a draft reopened while they attached, until its composer mounts. */

@@ -2,13 +2,6 @@
 
 import { launch, perfReport } from "../ipc/bridge";
 
-declare global {
-  interface Window {
-    /** Debug builds: every measured shortcut, for automated checks. */
-    ubPerf?: { action: string; ms: number; budget: number }[];
-  }
-}
-
 export const BUDGETS: Record<string, number> = {
   j: 50,
   k: 50,
@@ -33,7 +26,7 @@ export const BUDGETS: Record<string, number> = {
 };
 
 /** Call on keydown; measures to the frame that shows the result. */
-export function measure(action: string, start = performance.now()) {
+export function measure(action: string, start: number) {
   if (!launch.debug) return;
   const budget = BUDGETS[action];
   if (budget === undefined) return;
@@ -41,7 +34,6 @@ export function measure(action: string, start = performance.now()) {
   requestAnimationFrame(() => {
     setTimeout(() => {
       const ms = performance.now() - start;
-      (window.ubPerf ??= []).push({ action, ms, budget });
       if (ms > budget) console.warn(`[perf] ${action} ${ms.toFixed(1)}ms > ${budget}ms`);
       void perfReport(action, ms, budget);
     }, 0);

@@ -39,10 +39,6 @@ export function useAppState(): AppState | null {
 }
 
 /** The account needs Sign in again: its screen shows that, not its mail. */
-export function needsSignin(account: number | null): boolean {
-  return signedOut(useMirror.getState(), account);
-}
-
 export function useNeedsSignin(account: number | null): boolean {
   return useMirror((s) => signedOut(s, account));
 }
@@ -83,7 +79,7 @@ export function useListView(key: SubKey | null): ListView & {
         oldestHit: null,
       };
     }
-    const view = viewList({ ack: 0, rev: 0, subs: { [id]: sub }, rows, pending, removals }, id);
+    const view = viewList({ ack: 0, subs: { [id]: sub }, rows, pending, removals }, id);
     return {
       ...view,
       loaded: sub.loaded,

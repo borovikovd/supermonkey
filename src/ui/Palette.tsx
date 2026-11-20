@@ -102,6 +102,8 @@ function useCommands(mode: PaletteMode, query: string): Commands {
   }, [mode.kind, account]);
 
   const userLabels = (summary?.labels ?? []).filter((l) => !l.system);
+  // A choice acts on what the palette opened on (see `withFixedTargets`).
+  const bound = (run: () => void) => () => withFixedTargets(opened.threads, opened.highlight, run);
   switch (mode.kind) {
     case "commands": {
       // The commands that work where the palette opened; while a composer is
@@ -112,7 +114,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           id: cmd.id,
           label: labelOf(cmd, opened.ctx),
           keys: keyChips(cmd),
-          run: () => withFixedTargets(opened.threads, opened.highlight, () => runFromPalette(cmd)),
+          run: bound(() => runFromPalette(cmd)),
         })),
         placeholder: composing ? "Draft actions" : "Type a command",
       };
@@ -124,7 +126,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
         return {
           id: l.id,
           label: `${all ? "✓ " : ""}${l.name}`,
-          run: () => applyLabel(l.id, opened.threads),
+          run: bound(() => applyLabel(l.id)),
         };
       });
       const q = query.trim();
@@ -177,25 +179,25 @@ function useCommands(mode: PaletteMode, query: string): Commands {
         items: (snoozes?.options ?? []).map((o) => ({
           id: `${o.at}`,
           label: o.label,
-          run: () => snooze(o.at, opened.threads),
+          run: bound(() => snooze(o.at)),
         })),
         placeholder: "Snooze until… (try “fri 9am”)",
         stale: snoozes?.query !== query,
-        snoozeAt: (at) => snooze(at, opened.threads),
+        snoozeAt: (at) => bound(() => snooze(at))(),
       };
     case "unsubscribe":
       return {
         items: [
-          { id: "keep", label: "Unsubscribe", run: () => void unsubscribe("keep", opened.threads) },
+          { id: "keep", label: "Unsubscribe", run: bound(() => void unsubscribe("keep")) },
           {
             id: "done",
             label: "Unsubscribe, and mark done all",
-            run: () => void unsubscribe("done", opened.threads),
+            run: bound(() => void unsubscribe("done")),
           },
           {
             id: "trash",
             label: "Unsubscribe, and trash all",
-            run: () => void unsubscribe("trash", opened.threads),
+            run: bound(() => void unsubscribe("trash")),
           },
         ],
         placeholder: "Unsubscribe from this sender",
@@ -210,7 +212,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
       const then = asSpam ? "Mark spam, and block" : "Block";
       return {
         items: [
-          ...(asSpam ? [{ id: "spam", label: "Mark spam", run: () => spam(opened.threads) }] : []),
+          ...(asSpam ? [{ id: "spam", label: "Mark spam", run: bound(spam) }] : []),
           {
             id: "address",
             label: email ? `${then} ${email}` : `${then} the sender`,

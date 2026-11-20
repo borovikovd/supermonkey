@@ -54,7 +54,6 @@ export type Removal = { sub: string; key: string; after: string | null };
 
 export type MirrorState = {
   ack: number;
-  rev: number;
   subs: Record<string, Sub>;
   /** Confirmed rows by key, shared by every list. */
   rows: Record<string, ListRow>;
@@ -65,7 +64,6 @@ export type MirrorState = {
 
 export const emptyMirror = (): MirrorState => ({
   ack: 0,
-  rev: 0,
   subs: {},
   rows: {},
   pending: [],
@@ -165,7 +163,7 @@ function heldKeys(subs: Record<string, Sub>, removals: Record<number, Removal[]>
 export function applyChannel(
   s: MirrorState,
   msg: ChannelMessage,
-  keep: ReadonlySet<string> = new Set(),
+  keep: ReadonlySet<string>,
 ): MirrorState {
   const subs = { ...s.subs };
   // Most messages carry no list rows: keep the row map as it is for them.
@@ -222,7 +220,6 @@ export function applyChannel(
       ? s.pending.filter((p) => p.n > msg.ack)
       : s.pending,
     ack: Math.max(s.ack, msg.ack),
-    rev: Math.max(s.rev, msg.rev),
   };
 }
 

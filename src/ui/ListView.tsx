@@ -2,7 +2,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Paperclip, Star } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef } from "react";
 
-import { startReply } from "../compose/start";
+import { resumeDraftById } from "../compose/start";
 import { act, fetchRows } from "../ipc/bridge";
 import type { ListRow } from "../ipc/types";
 import { listScroll } from "../keyboard/refs";
@@ -275,7 +275,7 @@ export function ListView() {
     (k: string) => {
       if (isDrafts) {
         setHighlight(k);
-        startReply("resumeDraft", k);
+        resumeDraftById(k);
         return;
       }
       openConversation(Number(k));

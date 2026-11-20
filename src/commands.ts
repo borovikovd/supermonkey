@@ -58,7 +58,6 @@ export function modify(
     snooze?: ModifyAction["snooze"];
     account?: number;
     threads?: number[];
-    undoable?: boolean;
   } = {},
 ) {
   const c = useChrome.getState();
@@ -74,10 +73,10 @@ export function modify(
     add,
     remove,
     snooze: opts.snooze ?? null,
-    undoable: opts.undoable ?? true,
+    undoable: true,
   });
   if (account !== c.account) return;
-  if (opts.undoable !== false) c.setSelection([]);
+  c.setSelection([]);
   moveOn(threads);
 }
 
@@ -91,9 +90,9 @@ type Acting = { account: number; threads: number[] };
  * resolve the wrong way (SPEC UI state, Actions). With every row in, it runs
  * at once.
  */
-function withRows(resolve: (acting: Acting) => void, fixed?: number[]) {
+function withRows(resolve: (acting: Acting) => void) {
   const { account } = useChrome.getState();
-  const threads = fixed ? stillShown(fixed) : targets();
+  const threads = targets();
   if (account === null || threads.length === 0) return;
   const missing = threads.map(String).filter((k) => !rowOf(k));
   if (missing.length === 0) {
@@ -144,18 +143,13 @@ export const trash = () => {
   modify("trash", ["TRASH"], ["INBOX", "SPAM"]);
 };
 
-/** `fixed`: the threads a palette opened on (see `stillShown`). */
-export const spam = (fixed?: number[]) => {
+export const spam = () => {
   if (currentView()?.kind === "spam") return;
-  modify("spam", ["SPAM"], ["INBOX", "TRASH"], fixed ? { threads: stillShown(fixed) } : {});
+  modify("spam", ["SPAM"], ["INBOX", "TRASH"]);
 };
 
-/** `fixed`: the threads a palette opened on (see `stillShown`). */
-export const snooze = (at: number, fixed?: number[]) =>
-  modify("snooze", [], ["INBOX"], {
-    snooze: { kind: "set", at },
-    ...(fixed ? { threads: stillShown(fixed) } : {}),
-  });
+export const snooze = (at: number) =>
+  modify("snooze", [], ["INBOX"], { snooze: { kind: "set", at } });
 
 const allHave = (threads: number[], field: "starred" | "unread") =>
   threads.every((id) => rowOf(String(id))?.[field]);
@@ -172,16 +166,13 @@ export const toggleRead = () =>
     else modify("unread", ["UNREAD"], [], acting);
   });
 
-/**
- * `l`: if every target has the label it is removed from all, else added to
- * all. `fixed`: the threads the palette opened on (see `stillShown`).
- */
-export function applyLabel(labelId: string, fixed?: number[]) {
+/** `l`: if every target has the label it is removed from all, else added to all. */
+export function applyLabel(labelId: string) {
   withRows((acting) => {
     const all = acting.threads.every((id) => rowOf(String(id))?.labels.includes(labelId));
     if (all) modify("removeLabel", [], [labelId], acting);
     else modify("label", [labelId], [], acting);
-  }, fixed);
+  });
 }
 
 /** `y`: remove the current view's label when it can be removed. */
@@ -217,9 +208,9 @@ export type UnsubscribeThen = "keep" | "done" | "trash";
  * and "trash" first archive or trash every Inbox conversation from that
  * sender, as ordinary undoable actions.
  */
-export async function unsubscribe(then: UnsubscribeThen, fixed?: number[]) {
+export async function unsubscribe(then: UnsubscribeThen) {
   const account = useChrome.getState().account;
-  const [thread] = fixed ? stillShown(fixed) : targets();
+  const [thread] = targets();
   if (account === null || thread === undefined) return;
   if (then !== "keep") {
     const same: number[] = await senderThreads(account, thread).catch((err: unknown) => {

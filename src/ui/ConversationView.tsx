@@ -4,7 +4,7 @@ import { toast } from "sonner";
 
 import { Composer } from "../compose/Composer";
 import { composerOnScreen, useComposeState } from "../compose/session";
-import { startReply } from "../compose/start";
+import { resumeDraftById } from "../compose/start";
 import { openAttachment } from "../ipc/bridge";
 import { useCommand, type CommandId } from "../keyboard/table";
 import type { AttachmentInfo, DraftSummary, MessageSummary, OutboxRow } from "../ipc/types";
@@ -226,7 +226,7 @@ function PendingSend({ row }: { row: OutboxRow }) {
 function DraftStub({ draft }: { draft: DraftSummary }) {
   return (
     <button
-      onClick={() => startReply("resumeDraft", draft.id)}
+      onClick={() => resumeDraftById(draft.id)}
       className="my-1 flex w-full items-center gap-3 rounded-md bg-surface px-4 py-2 text-left text-row hover:bg-fill-half"
     >
       <File size={14} strokeWidth={1.5} className="text-danger" />

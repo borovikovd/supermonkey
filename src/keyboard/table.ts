@@ -25,7 +25,7 @@ import {
   type ComposeState,
 } from "../compose/session";
 import { notSent } from "../compose/sends";
-import { startCompose, startReply } from "../compose/start";
+import { resumeDraftById, startCompose, startReply } from "../compose/start";
 import { addAccount, act, subIdFor } from "../ipc/bridge";
 import type { View } from "../ipc/types";
 import {
@@ -675,7 +675,7 @@ const DEFS = {
     when: (c) => onList(c) && c.highlight && isView(c, "drafts"),
     run: () => {
       const highlight = useChrome.getState().current()?.highlight;
-      if (highlight != null) startReply("resumeDraft", highlight);
+      if (highlight != null) resumeDraftById(highlight);
     },
   },
   escape: {

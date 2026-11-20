@@ -20,7 +20,7 @@ import {
   openScreen,
 } from "./session";
 
-export type ReplyMode = "reply" | "replyAll" | "forward" | "resumeDraft";
+export type ReplyMode = "reply" | "replyAll" | "forward";
 
 /** `c`: a new message that replaces the screen. */
 export function startCompose() {
@@ -153,23 +153,14 @@ function whenLoaded(thread: number, trashMode: boolean, run: (data: Conversation
  * selected message; with the selection on the latest message, the newest one
  * started on the latest; else start a new one aimed at the selected message.
  */
-export function startReply(mode: ReplyMode, draftId?: string) {
+export function startReply(mode: ReplyMode) {
   const c = useChrome.getState();
   const { account } = c;
   const cur = c.current();
   if (account === null || !cur) return;
 
-  if (mode === "resumeDraft" && draftId) {
-    resumeDraftById(draftId);
-    return;
-  }
-
   let fromList = false;
   if (cur.screen.kind === "list") {
-    if (cur.where.kind === "view" && cur.where.view.kind === "drafts") {
-      if (cur.highlight !== null) resumeDraftById(cur.highlight);
-      return;
-    }
     // From a palette: the row highlighted when it opened, as `r` takes the
     // highlighted row, if still shown.
     const row =
@@ -223,7 +214,7 @@ export function startReply(mode: ReplyMode, draftId?: string) {
 }
 
 /** A draft by id: in the open conversation, aimed at its target; else on its thread from the list row. */
-function resumeDraftById(draft: string) {
+export function resumeDraftById(draft: string) {
   const data = openConversationData();
   const own = data?.drafts.find((d) => d.id === draft);
   if (own && data) {

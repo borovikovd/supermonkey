@@ -1,8 +1,6 @@
 // Re-exports of the types generated from Rust by ts-rs. No IPC type is written by hand.
 export type { AccountInfo } from "../bindings/AccountInfo";
 export type { Unsubscribed } from "../bindings/Unsubscribed";
-export type { BlockResult } from "../bindings/BlockResult";
-export type { BlockedSender } from "../bindings/BlockedSender";
 export type { BlockedSenders } from "../bindings/BlockedSenders";
 export type { AccountSummary } from "../bindings/AccountSummary";
 export type { Action } from "../bindings/Action";
@@ -21,7 +19,6 @@ export type { DraftKind } from "../bindings/DraftKind";
 export type { DraftSave } from "../bindings/DraftSave";
 export type { DraftState } from "../bindings/DraftState";
 export type { DraftSummary } from "../bindings/DraftSummary";
-export type { LabelInfo } from "../bindings/LabelInfo";
 export type { LaunchInfo } from "../bindings/LaunchInfo";
 export type { ListEntry } from "../bindings/ListEntry";
 export type { ListMove } from "../bindings/ListMove";
@@ -35,10 +32,7 @@ export type { NumberedAction } from "../bindings/NumberedAction";
 export type { OutboxRow } from "../bindings/OutboxRow";
 export type { Rejection } from "../bindings/Rejection";
 export type { PinKind } from "../bindings/PinKind";
-export type { SendAs } from "../bindings/SendAs";
 export type { SnoozeChoice } from "../bindings/SnoozeChoice";
 export type { SplitInfo } from "../bindings/SplitInfo";
 export type { SubKey } from "../bindings/SubKey";
-export type { SubUpdate } from "../bindings/SubUpdate";
-export type { UndoEntryInfo } from "../bindings/UndoEntryInfo";
 export type { View } from "../bindings/View";
