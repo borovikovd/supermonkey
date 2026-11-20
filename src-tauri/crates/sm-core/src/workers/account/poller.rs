@@ -71,7 +71,11 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
 async fn resume_or_connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> ControlFlow<()> {
     match is_connected(&ctx.deps.pool, ctx.account).await {
         Ok(true) => {
+            // The lists the connect sync queued live in memory: a quit before
+            // they were read through lost what was left. Listing them again
+            // reads only what is missing or changed.
             queue_inbox(&ctx.queue);
+            queue_starred_and_sent(&ctx.queue);
             queue_owed(ctx).await;
             // A draft reconcile the last run owed may have been cut off by
             // the quit: the first poll runs one.

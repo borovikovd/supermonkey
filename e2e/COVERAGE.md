@@ -353,6 +353,8 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - SYN-07 · P3 · An opened thread fetches its bodies right away · §Sync
 - SYN-08 · P1 · A slower thread fetch never undoes a newer one · §Sync, §Data
 - SYN-09 · P2 · A connect sync retried after a failure misses no change made in between · §Sync
+- SYN-12 · P1 · A quit during the first sync loses none of it: starred and recent sent mail are read after the relaunch · §Sync
+- SYN-13 · P3 · A quit during the contacts backfill does not end it: it runs again after the relaunch · §Sync, §Recipients and autocomplete
 - SYN-11 · P2 · A slower label or `sendAs` read never undoes a newer one · §Sync
 
 ### notifications.spec.ts (NOT)

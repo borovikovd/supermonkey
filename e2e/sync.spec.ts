@@ -492,6 +492,74 @@ test("SYN-09 a connect sync retried after a failure misses no change made in bet
   await expectInboxMatchesGmail(app, A);
 });
 
+test("SYN-12 a quit during the first sync loses none of it: starred and recent sent mail are read after the relaunch", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.drafts(gmail, app, { open: false });
+  // The Starred and Sent listings are still out when the app quits.
+  const starred = await gmail.hold("threads.list", { account: A, query: { labelIds: "STARRED" } });
+  const sent = await gmail.hold("threads.list", {
+    account: A,
+    query: { q: "in:sent newer_than:90d" },
+  });
+  await app.open();
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await app.settle();
+  await expect
+    .poll(
+      async () =>
+        (await gmail.requests("threads.list", { account: A })).filter((r) => r.held).length,
+    )
+    .toBe(2);
+
+  await app.restart(async () => {
+    await gmail.release({ id: starred.id });
+    await gmail.release({ id: sent.id });
+  });
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await app.settle();
+
+  await app.press("g", "s");
+  await app.settle();
+  await expect(app.row("Trip ideas")).toHaveCount(1);
+  await app.press("g", "t");
+  await app.settle();
+  await expect(app.row("Sent 10 days ago")).toHaveCount(1);
+  await expect(app.row("Sent 89 days ago")).toHaveCount(1);
+});
+
+test("SYN-13 a quit during the contacts backfill does not end it: it runs again after the relaunch", async ({
+  app,
+  gmail,
+}) => {
+  test.fail(
+    true,
+    "BUG: the backfill is queued in memory by the connect sync only, so a quit ends it for good. Resuming it needs a stored mark on the account: a new column, which goes in with the first schema migration.",
+  );
+  const backfills = async () =>
+    (await gmail.requests("threads.list", { account: A })).filter(
+      (r) => r.params.q === "in:sent newer_than:1y",
+    );
+  await seeds.standard(gmail, app, { open: false });
+  const backfill = await gmail.hold("threads.list", {
+    account: A,
+    query: { q: "in:sent newer_than:1y" },
+  });
+  await app.open();
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await app.settle();
+  await expect.poll(async () => (await backfills()).some((r) => r.held)).toBe(true);
+  const before = (await backfills()).length;
+
+  await app.restart(async () => {
+    await gmail.release({ id: backfill.id });
+  });
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await app.settle();
+  expect((await backfills()).length).toBeGreaterThan(before);
+});
+
 test("SYN-11 a slower label or sendAs read never undoes a newer one", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   const refresh = async () => {

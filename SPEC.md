@@ -650,6 +650,8 @@ On connect, store the account profile and `historyId`. The display name comes fr
 
 Older mail arrives when search or an open hits it.
 
+A quit before these fetches finish loses none of them. At the next launch the Inbox, starred, and recent sent lists are fetched again, and a thread whose stored copy is current is skipped, so only what was not reached or has changed is read. The contacts backfill starts again too, until it has once run to its end.
+
 Each list is fetched newest first. Metadata uses `threads.get` with `format=metadata`, and bodies use `threads.get` with `format=full`. Gmail requests take this priority, highest first:
 1. UI actions, sends, and draft upserts
 2. A thread the user opens whose bodies are not stored yet, then its prefetched neighbors. Search, the `threads.list` of Label, Trash, and Spam views and the metadata of their hits, attachment downloads, and a poll's draft reconciliation reads rank here too
