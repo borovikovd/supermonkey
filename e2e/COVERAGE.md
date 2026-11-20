@@ -283,6 +283,7 @@ The end-to-end cases, one line each. [SPEC.md](../SPEC.md) is the source of trut
 - DRF-20 · P1 · `j` and `k` in a conversation opened from Drafts open the other drafts' threads and keep the Drafts highlight · §Reading, §Keyboard
 - DRF-21 · P1 · A draft deleted on Gmail while an edit waits to reach Gmail is written again with the edit · §Drafts
 - DRF-22 · P2 · A draft deleted elsewhere just before its composer loads leaves the screen and says so · §Drafts
+- DRF-24 · P2 · A reply emptied again after it reached Gmail is emptied in Gmail too · §Drafts
 - DRF-23 · P1 · A draft discarded after a create with no answer stays gone across a restart, even when Gmail failed to read its copy · §Drafts, §Gmail errors
 
 ### undo-send.spec.ts (SND)

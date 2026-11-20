@@ -246,7 +246,7 @@ A composer started fresh by `r`, `Enter`, `f`, or `c` is discarded on close, loc
 - subject, body, and attachments are as the composer started them
 - recipients and From are the defaults
 
-It is judged by value, so text typed and then deleted leaves a composer untouched. A stray `r` leaves nothing behind. A resumed draft, or one reopened by undo, is never discarded this way.
+It is judged by value, so text typed and then deleted leaves a composer untouched. A stray `r` leaves nothing behind. A resumed draft, or one reopened by undo, is never discarded this way: emptied again, it stays a draft, and the empty text is written to Gmail like any other edit.
 
 `Esc` in the palette closes it. Search has its own `Esc` rule below. While a sheet (Settings, Split Inbox settings, the shortcut sheet) is open, the shortcut table does not apply, and `Esc` or a click outside closes the sheet.
 

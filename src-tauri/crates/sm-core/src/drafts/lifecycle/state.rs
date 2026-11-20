@@ -61,7 +61,7 @@ pub(crate) const fn is_fresh(draft: &Draft) -> bool {
 /// Whether the draft is as its composer started it: the defaults' From,
 /// recipients, subject, and attachments, and the same body or a blank one.
 /// A kept draft is never untouched.
-pub(crate) fn is_untouched(draft: &Draft) -> bool {
+fn is_untouched(draft: &Draft) -> bool {
     match &draft.lifecycle.stage {
         DraftStage::Fresh { defaults } | DraftStage::Opened { defaults } => {
             defaults.is_untouched_by(draft.content(), is_blank(&draft.body_html))

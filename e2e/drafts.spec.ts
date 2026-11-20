@@ -848,6 +848,34 @@ test("DRF-21 a draft deleted on Gmail while an edit waits to reach Gmail is writ
   expect(bodyOf(now[0])).toContain("one two");
 });
 
+test("DRF-24 a reply emptied again after it reached Gmail is emptied in Gmail too", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const p3 = s.thread("p3");
+  await openThread(app, "Person 3");
+  await app.reply();
+  await app.type("one");
+  await app.settle();
+  expect(bodyOf((await draftsIn(gmail, p3.threadId))[0])).toContain("one");
+  await app.press("Escape", "Escape");
+  await app.settle();
+
+  // Reopened, and its text deleted: the draft is as a new reply starts.
+  await app.reply("r");
+  await expect(app.editor).toHaveText("one");
+  await app.press("Meta+A", "Backspace");
+  await expect(app.editor).toHaveText("");
+  await app.settle();
+  await app.press("Escape", "Escape");
+  await app.settle();
+
+  const drafts = await draftsIn(gmail, p3.threadId);
+  expect(drafts).toHaveLength(1);
+  expect(bodyOf(drafts[0])).not.toContain("one");
+});
+
 test("DRF-23 a draft discarded after a create with no answer stays gone across a restart, even when Gmail failed to read its copy", async ({
   app,
   gmail,

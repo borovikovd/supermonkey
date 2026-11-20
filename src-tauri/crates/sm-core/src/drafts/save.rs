@@ -82,7 +82,10 @@ pub(crate) fn update(
     draft.updated_at = now;
     lifecycle::edited(&mut draft);
     tx.drafts().put(&draft)?;
-    if !lifecycle::is_untouched(&draft) {
+    // A fresh draft still as it started is not written: closing discards
+    // it. One opened again may be in Gmail with other text, so it is
+    // written even when the edit put it back as it started.
+    if !lifecycle::discards_on_close(&draft) {
         queue_upsert(tx, state, draft.account, id, now)?;
     }
     Ok(())
