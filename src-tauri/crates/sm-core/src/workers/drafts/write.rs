@@ -203,7 +203,9 @@ async fn recover_create(
             Err(e) => return Err(e.into()),
         }
     }
-    let mut found = copies_of(ctx, local).await?.into_iter();
+    // A copy the scan could not read is missed here: the write then makes
+    // an extra copy, which sync deletes.
+    let mut found = copies_of(ctx, local).await?.ours.into_iter();
     let keep = found.next();
     for extra in found {
         if let Err(e) = ctx.gmail.delete_draft(Priority::P1, &extra.id).await {
@@ -213,12 +215,18 @@ async fn recover_create(
     Ok(keep)
 }
 
+/// What a scan for a local draft's Gmail copies found.
+pub(super) struct Copies {
+    /// The Gmail drafts that name the local draft.
+    pub(super) ours: Vec<sm_gmail::Draft>,
+    /// Why a Gmail draft could not be read, when another try might read it:
+    /// it may be a copy too.
+    pub(super) unread: Option<GmailError>,
+}
+
 /// The Gmail drafts the app has no id for whose `X-Supermonkey-Draft` header
 /// names `local`, each read with `format=metadata`.
-pub(super) async fn copies_of(
-    ctx: &AccountCtx,
-    local: &DraftId,
-) -> Result<Vec<sm_gmail::Draft>, WriteFailure> {
+pub(super) async fn copies_of(ctx: &AccountCtx, local: &DraftId) -> Result<Copies, WriteFailure> {
     let account = ctx.account;
     let known: HashSet<GmailDraftId> = ctx
         .read(move |r| r.drafts().for_account(account))
@@ -226,7 +234,10 @@ pub(super) async fn copies_of(
         .into_iter()
         .filter_map(|record| lifecycle::gmail_draft(&record.draft).cloned())
         .collect();
-    let mut ours = Vec::new();
+    let mut copies = Copies {
+        ours: Vec::new(),
+        unread: None,
+    };
     for id in list_all(ctx)
         .await?
         .into_iter()
@@ -252,18 +263,21 @@ pub(super) async fn copies_of(
                 return Err(e.into());
             }
             // One draft Gmail fails to read must not hold up the account's
-            // queue: it is skipped. A copy missed this way is an extra copy,
-            // which sync deletes.
+            // queue: it is skipped, and the caller told when another try
+            // might read it.
             Err(e) => {
                 tracing::warn!(account = account.0, outcome = %e.outcome(), "couldn't read a Gmail draft while looking for copies; skipping it");
+                if e.outcome().is_transient() {
+                    copies.unread = copies.unread.or(Some(e));
+                }
                 continue;
             }
         };
         if parse(&read.message).headers.draft_id.as_ref() == Some(local) {
-            ours.push(read);
+            copies.ours.push(read);
         }
     }
-    Ok(ours)
+    Ok(copies)
 }
 
 /// The ids of every Gmail draft of the account.

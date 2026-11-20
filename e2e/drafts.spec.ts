@@ -848,6 +848,40 @@ test("DRF-21 a draft deleted on Gmail while an edit waits to reach Gmail is writ
   expect(bodyOf(now[0])).toContain("one two");
 });
 
+test("DRF-23 a draft discarded after a create with no answer stays gone across a restart, even when Gmail failed to read its copy", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const thread = s.thread("p3").threadId;
+  // Gmail makes the draft, but its answer is lost, and the look for the copy
+  // it made fails too: the app has no id for it.
+  await gmail.fault("drafts.create", { kind: "noResponse" }, { times: 1 });
+  await gmail.fault("drafts.list", { kind: "status", status: 503 }, { times: 1 });
+  await openThread(app, "Person 3");
+  await app.reply();
+  await app.type("discard me");
+  await app.settle();
+  expect(await draftsIn(gmail, thread)).toHaveLength(1);
+
+  // The discard looks for the copy by its header, and Gmail fails to read it.
+  await gmail.fault("drafts.get", { kind: "status", status: 500 }, { times: 2 });
+  await app.press("Meta+Shift+Comma");
+  await expect(app.editor).toHaveCount(0);
+  await app.advance(60_000, { stepwise: true });
+  expect((await gmail.requests("drafts.get", { account: A })).some((r) => r.answer === 500)).toBe(
+    true,
+  );
+
+  // A restart forgets what was discarded in the last run.
+  await app.restart();
+  await gmail.poll();
+  await app.advance(120_000, { stepwise: true });
+  expect(await draftsIn(gmail, thread)).toEqual([]);
+  await goDrafts(app);
+  await expect(app.row("Person 3")).toHaveCount(0);
+});
+
 test("DRF-22 a draft deleted elsewhere just before its composer loads leaves the screen and says so", async ({
   app,
   gmail,

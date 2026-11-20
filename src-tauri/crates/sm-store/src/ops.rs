@@ -350,6 +350,21 @@ impl<'t, 'c> OpWrites<'t, 'c> {
         Ok(())
     }
 
+    /// Moves an op to the back of its queue, under a new id: it could not
+    /// finish yet, and the ops behind it should not wait for it. Unknown ids
+    /// are skipped.
+    pub fn requeue(&mut self, id: OpId) -> Result<(), StoreError> {
+        self.tx.db().execute(
+            "queue an op again",
+            "INSERT INTO ops (account_id, action, kind, draft_id, gmail_draft_id, payload,
+                 created_at)
+             SELECT account_id, action, kind, draft_id, gmail_draft_id, payload, created_at
+             FROM ops WHERE id = ?1",
+            [id],
+        )?;
+        self.delete(id)
+    }
+
     /// Removes an op: done, rejected, or dropped. Unknown ids are skipped.
     pub fn delete(&mut self, id: OpId) -> Result<(), StoreError> {
         let account: Option<AccountId> = self.tx.db().optional(

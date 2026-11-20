@@ -267,7 +267,18 @@ async fn draft_delete(ctx: &AccountCtx, op: &OpRecord) -> Result<Answer, Failure
         return Ok(Answer::Unreadable);
     };
     match delete_copies(ctx, local).await {
-        Ok(()) => Ok(Answer::Done(Landing::Plain)),
+        Ok(None) => Ok(Answer::Done(Landing::Plain)),
+        // A draft Gmail failed to read may be a copy. The op stays, so sync
+        // does not bring the copy back as a draft, and goes behind the
+        // queue's other ops, so they do not wait for it.
+        Ok(Some(unread)) => {
+            let id = op.id;
+            ctx.writer()
+                .call(WritePriority::Sync, move |tx, _| tx.ops().requeue(id))
+                .await
+                .map_err(|e| Failure::Store(e.into()))?;
+            Err(Failure::Gmail(unread))
+        }
         Err(WriteFailure::Gmail(e)) => refused(e),
         Err(WriteFailure::Store(e)) => Err(Failure::Store(e)),
         Err(WriteFailure::Local(message)) => Ok(Answer::Rejected(message)),

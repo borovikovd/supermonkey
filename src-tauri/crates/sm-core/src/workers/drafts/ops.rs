@@ -79,12 +79,18 @@ async fn load_record(pool: &Arc<ReadPool>, id: DraftId) -> Result<Option<bool>, 
 
 /// Deletes every Gmail copy of a local draft discarded while a
 /// `drafts.create` of it had no answer: Gmail may hold one the app has no
-/// id for, found by its `X-Supermonkey-Draft` header.
-pub(crate) async fn delete_copies(ctx: &AccountCtx, local: &DraftId) -> Result<(), WriteFailure> {
-    for copy in super::write::copies_of(ctx, local).await? {
+/// id for, found by its `X-Supermonkey-Draft` header. Returns why a Gmail
+/// draft could not be read, when one could not: it may be a copy too, so
+/// the delete is not done until a later scan has read it.
+pub(crate) async fn delete_copies(
+    ctx: &AccountCtx,
+    local: &DraftId,
+) -> Result<Option<GmailError>, WriteFailure> {
+    let copies = super::write::copies_of(ctx, local).await?;
+    for copy in copies.ours {
         delete_draft(ctx, &copy.id).await?;
     }
-    Ok(())
+    Ok(copies.unread)
 }
 
 /// `drafts.delete`. A draft Gmail no longer has is deleted already.
