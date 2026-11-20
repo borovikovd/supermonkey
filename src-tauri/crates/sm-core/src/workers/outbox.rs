@@ -12,8 +12,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use sm_domain::{GmailDraftId, GmailMessageId, GmailThreadId, Millis, OutboxState, SystemLabel};
-use sm_gmail::{Backoff, Format, GmailError, Outcome, Priority};
-use sm_store::{Outbox, Priority as WritePriority, StoreError};
+use sm_gmail::{Backoff, Format, Outcome, Priority};
+use sm_store::{Outbox, Priority as WritePriority};
 
 use super::account::{AccountCtx, OFFLINE_RETRY, fetch_thread};
 use super::drafts::{WriteFailure, load, write};
@@ -42,7 +42,7 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
                 backoff.reset();
                 next_due.map_or(IDLE_WAIT, |due| until(ctx.clock(), due))
             }
-            Err(Failure::Gmail(e)) => {
+            Err(Error::Gmail(e)) => {
                 ctx.health.failed(&e);
                 match e.outcome() {
                     Outcome::InvalidGrant => {
@@ -59,7 +59,7 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
                     | Outcome::Rejected { .. } => backoff.next_delay(&e),
                 }
             }
-            Err(Failure::Store(e)) => {
+            Err(e) => {
                 tracing::warn!(account = ctx.account.0, error = %e, "the outbox couldn't read or write; trying again");
                 OFFLINE_RETRY
             }
@@ -69,33 +69,6 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
             () = ctx.outbox.wait(ctx.clock(), wait) => {}
             () = network.wait(ctx.clock(), wait) => {}
         }
-    }
-}
-
-/// Why a pass stopped before its last row.
-#[derive(Debug)]
-enum Failure {
-    /// Gmail did not answer clearly.
-    Gmail(GmailError),
-    /// The database refused a read or write.
-    Store(Error),
-}
-
-impl From<GmailError> for Failure {
-    fn from(e: GmailError) -> Self {
-        Self::Gmail(e)
-    }
-}
-
-impl From<Error> for Failure {
-    fn from(e: Error) -> Self {
-        Self::Store(e)
-    }
-}
-
-impl From<StoreError> for Failure {
-    fn from(e: StoreError) -> Self {
-        Self::Store(e.into())
     }
 }
 
@@ -109,12 +82,12 @@ fn until(clock: &dyn Clock, due: Millis) -> Duration {
 /// waiting one, oldest first. Returns when the next waiting row is due. A
 /// row that fails does not hold up the rows after it: the pass goes on and
 /// reports the first failure at the end, unless the account signed out.
-async fn pass(ctx: &AccountCtx) -> Result<Option<Millis>, Failure> {
+async fn pass(ctx: &AccountCtx) -> Result<Option<Millis>, Error> {
     let account = ctx.account;
     let rows = ctx.read(move |r| r.outbox().unsent(account)).await?;
     let now = ctx.clock().now();
     let mut next_due: Option<Millis> = None;
-    let mut failed: Option<Failure> = None;
+    let mut failed: Option<Error> = None;
     for record in rows {
         let row = record.outbox;
         let done = if row.state == OutboxState::Sending {
@@ -126,8 +99,8 @@ async fn pass(ctx: &AccountCtx) -> Result<Option<Millis>, Failure> {
             Ok(())
         };
         match done {
-            Err(Failure::Gmail(e)) if *e.outcome() == Outcome::InvalidGrant => {
-                return Err(Failure::Gmail(e));
+            Err(Error::Gmail(e)) if *e.outcome() == Outcome::InvalidGrant => {
+                return Err(Error::Gmail(e));
             }
             Err(e) => {
                 tracing::info!(account = account.0, outbox = %row.id, error = ?e, "a send couldn't go on; trying the next");
@@ -141,7 +114,7 @@ async fn pass(ctx: &AccountCtx) -> Result<Option<Millis>, Failure> {
 
 /// Writes a step of the row's state machine. Returns whether it applied:
 /// the row was where the event expects it.
-async fn step(ctx: &AccountCtx, row: &Outbox, event: Event) -> Result<bool, Failure> {
+async fn step(ctx: &AccountCtx, row: &Outbox, event: Event) -> Result<bool, Error> {
     let (id, now) = (row.id, ctx.clock().now());
     Ok(ctx
         .writer()
@@ -152,7 +125,7 @@ async fn step(ctx: &AccountCtx, row: &Outbox, event: Event) -> Result<bool, Fail
 }
 
 /// The row as stored now, or `None` when it is gone.
-async fn current(pool: &Arc<ReadPool>, row: &Outbox) -> Result<Option<Outbox>, Failure> {
+async fn current(pool: &Arc<ReadPool>, row: &Outbox) -> Result<Option<Outbox>, Error> {
     let id = row.id;
     Ok(read(pool, move |r| r.outbox().get(id))
         .await?
@@ -160,7 +133,7 @@ async fn current(pool: &Arc<ReadPool>, row: &Outbox) -> Result<Option<Outbox>, F
 }
 
 /// Sends a due waiting row: steps 1 to 4 of SPEC Send and undo.
-async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
+async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Error> {
     // An upsert of the draft is still in flight: it wakes the outbox once it
     // lands, and this send writes after it.
     let Some(_writing) = ctx.lane.writing.begin(row.draft.clone()) else {
@@ -191,10 +164,10 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
                     | Outcome::RateLimited { .. }
                     | Outcome::ServerError { .. }
                     | Outcome::NotFound
-                    | Outcome::Conflict => Ok(Failure::Gmail(e)),
+                    | Outcome::Conflict => Ok(Error::Gmail(e)),
                 },
                 WriteFailure::Local(message) => Err(message),
-                WriteFailure::Store(e) => Ok(Failure::Store(e)),
+                WriteFailure::Store(e) => Ok(e),
             };
             return match retry {
                 // It can never go through as it is.
@@ -233,7 +206,7 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
 }
 
 /// `drafts.send`, unless an undo is held on the row: then it is not sent.
-async fn send_draft(ctx: &AccountCtx, row: &Outbox, gmail: &GmailDraftId) -> Result<(), Failure> {
+async fn send_draft(ctx: &AccountCtx, row: &Outbox, gmail: &GmailDraftId) -> Result<(), Error> {
     // Gone meanwhile, with its account: never sent.
     let Some(now) = current(&ctx.deps.pool, row).await? else {
         return Ok(());
@@ -275,7 +248,7 @@ async fn send_draft(ctx: &AccountCtx, row: &Outbox, gmail: &GmailDraftId) -> Res
 
 /// A sending row with no clear answer yet: `drafts.get` finds its draft,
 /// which is sent again, or Gmail no longer has it, which means it was sent.
-async fn settle(ctx: &AccountCtx, row: &Outbox) -> Result<(), Failure> {
+async fn settle(ctx: &AccountCtx, row: &Outbox) -> Result<(), Error> {
     let Some(gmail) = current(&ctx.deps.pool, row)
         .await?
         .and_then(|r| r.gmail_draft_id)
@@ -317,7 +290,7 @@ async fn sent_message(
     thread: &GmailThreadId,
     written: Option<&GmailMessageId>,
     since: Millis,
-) -> Result<Option<GmailMessageId>, Failure> {
+) -> Result<Option<GmailMessageId>, Error> {
     let read = match ctx
         .gmail
         .get_thread(Priority::P1, thread, Format::Minimal, &[])
@@ -353,7 +326,7 @@ async fn sent(
     row: &Outbox,
     message: Option<GmailMessageId>,
     thread: Option<GmailThreadId>,
-) -> Result<(), Failure> {
+) -> Result<(), Error> {
     if !step(ctx, row, Event::Accepted(message)).await? {
         return Ok(());
     }

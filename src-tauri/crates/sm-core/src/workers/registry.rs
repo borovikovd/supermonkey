@@ -475,8 +475,6 @@ fn delete_swept_token(tokens: &TokenFile, email: &str) {
     }
 }
 
-/// Deletes the attachments folders in `dir` of accounts not among `ids`.
-/// With no `dir` to read, there is nothing to delete.
 /// The names of the folders in `dir`; none when it can't be read.
 fn folders(dir: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(dir) else {
