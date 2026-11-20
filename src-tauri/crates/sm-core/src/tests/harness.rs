@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use sm_domain::{AccountId, Addr, GmailMessageId, GmailThreadId, LabelSet, Millis, ThreadId};
-use sm_gmail::{MemoryTokenStore, OAuthConfig, QuotaConfig};
+use sm_gmail::{OAuthConfig, QuotaConfig, TokenFile};
 use sm_ipc::{Action, ChannelMessage, NumberedAction};
 use sm_store::{FetchedThread, NewMessage, Priority, StoreError, WriteTx};
 use tempfile::TempDir;
@@ -72,7 +72,7 @@ impl Harness {
             Deps {
                 platform: Arc::new(Recorder),
                 clock,
-                tokens: Arc::new(MemoryTokenStore::default()),
+                tokens: Arc::new(TokenFile::new(dir.path().join(Config::TOKEN_FILE))),
                 activity: Arc::clone(&activity),
             },
         )

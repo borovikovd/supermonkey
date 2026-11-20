@@ -9,7 +9,7 @@ use axum::extract::{Path, State};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sm_core::Config;
-use sm_gmail::{RefreshToken, TokenStore, TokenStoreError};
+use sm_gmail::{RefreshToken, TokenFile, TokenStoreError};
 
 use crate::platform::SignInMode;
 use crate::server::{Core, Ctl, Fail, Server, done, fast_quota};
@@ -35,10 +35,10 @@ fn create_user(s: &Server, req: &UserReq) -> RefreshToken {
 /// Runs a token-file call off the async threads.
 async fn token_file<T: Send + 'static>(
     s: &Server,
-    call: impl FnOnce(&dyn TokenStore) -> Result<T, TokenStoreError> + Send + 'static,
+    call: impl FnOnce(&TokenFile) -> Result<T, TokenStoreError> + Send + 'static,
 ) -> Result<T, Fail> {
     let tokens = Arc::clone(&s.tokens);
-    Ok(tokio::task::spawn_blocking(move || call(&*tokens)).await??)
+    Ok(tokio::task::spawn_blocking(move || call(&tokens)).await??)
 }
 
 /// A Gmail user that exists in the fake but not in the app (for Add account).
@@ -102,7 +102,7 @@ pub(crate) async fn next_sign_in(State(s): State<Arc<Server>>, Json(req): Json<S
 
 /// The token file's entries, as stored on disk.
 pub(crate) async fn tokens(State(s): State<Arc<Server>>) -> Ctl {
-    let entries = token_file(&s, |tokens| tokens.entries()).await?;
+    let entries = token_file(&s, TokenFile::entries).await?;
     let items: Vec<Value> = entries
         .into_iter()
         .map(|(account, token)| json!({ "account": account, "token": token.secret() }))

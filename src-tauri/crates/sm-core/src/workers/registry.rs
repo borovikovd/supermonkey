@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use parking_lot::Mutex;
 use sm_domain::{AccountId, DraftId, ThreadId};
-use sm_gmail::{Gmail, HttpClient, RefreshToken, Scheduler, TokenStore, Tokens};
+use sm_gmail::{Gmail, HttpClient, RefreshToken, Scheduler, TokenFile, Tokens};
 use sm_store::{AccountRecord, Priority};
 use tokio::sync::{mpsc, watch};
 
@@ -29,7 +29,7 @@ pub(crate) struct AccountWorkers {
     gmail: GmailConfig,
     http: HttpClient,
     scheduler: Scheduler,
-    tokens: Arc<dyn TokenStore>,
+    tokens: Arc<TokenFile>,
     tasks: Tasks,
     live: Arc<Live>,
     /// Each account's op lane. It outlives the account's workers, so an op
@@ -74,7 +74,7 @@ impl AccountWorkers {
         deps: Arc<WorkerDeps>,
         gmail: GmailConfig,
         http: HttpClient,
-        tokens: Arc<dyn TokenStore>,
+        tokens: Arc<TokenFile>,
         tasks: Tasks,
     ) -> Arc<Self> {
         let live = Arc::new(Live {
@@ -113,7 +113,7 @@ impl AccountWorkers {
     }
 
     /// Where refresh tokens live.
-    pub(crate) fn tokens(&self) -> &Arc<dyn TokenStore> {
+    pub(crate) const fn tokens(&self) -> &Arc<TokenFile> {
         &self.tokens
     }
 
@@ -210,7 +210,7 @@ impl AccountWorkers {
         let tokens = Arc::clone(&self.tokens);
         let dir = self.deps.data_dir.join(ATTACHMENTS_DIR);
         let swept = tokio::task::spawn_blocking(move || {
-            sweep_tokens(&*tokens, &emails);
+            sweep_tokens(&tokens, &emails);
             delete_folders(&dir, folders(&dir), &ids);
         })
         .await;
@@ -455,7 +455,7 @@ impl AccountWorkers {
 }
 
 /// Deletes the stored refresh tokens of accounts not among `emails`.
-fn sweep_tokens(tokens: &dyn TokenStore, emails: &HashSet<String>) {
+fn sweep_tokens(tokens: &TokenFile, emails: &HashSet<String>) {
     match tokens.entries() {
         Ok(entries) => {
             for (email, _) in entries.iter().filter(|(e, _)| !emails.contains(e)) {
@@ -467,7 +467,7 @@ fn sweep_tokens(tokens: &dyn TokenStore, emails: &HashSet<String>) {
 }
 
 /// Deletes the refresh token of an account removed before a quit.
-fn delete_swept_token(tokens: &dyn TokenStore, email: &str) {
+fn delete_swept_token(tokens: &TokenFile, email: &str) {
     if let Err(e) = tokens.delete(email) {
         tracing::warn!(error = %e, "couldn't delete a removed account's token");
     } else {

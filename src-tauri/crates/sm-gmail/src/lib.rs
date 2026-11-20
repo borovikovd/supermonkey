@@ -7,7 +7,7 @@
 //! - [`Outcome`] and [`GmailError`]: SPEC's Gmail errors table.
 //! - [`retry`]: back-off with jitter and `Retry-After`.
 //! - [`SignIn`], [`Tokens`], [`revoke`]: Google OAuth for an installed app.
-//! - [`TokenStore`]: where refresh tokens live, a 0600 file or memory.
+//! - [`TokenFile`]: where refresh tokens live, a 0600 file.
 //!
 //! ## Time
 //!
@@ -23,7 +23,7 @@
 //! ## Wiring one account
 //!
 //! ```no_run
-//! # async fn demo(store: &dyn sm_gmail::TokenStore) -> Result<(), Box<dyn std::error::Error>> {
+//! # async fn demo(store: &sm_gmail::TokenFile) -> Result<(), Box<dyn std::error::Error>> {
 //! use std::sync::Arc;
 //! use sm_gmail::*;
 //!
@@ -71,7 +71,7 @@ pub use oauth::{
 pub use outcome::{GmailError, Outcome};
 pub use quota::{AccountScheduler, Permit, Priority, QuotaConfig, Scheduler, Units};
 pub use retry::{Backoff, backoff};
-pub use token_store::{MemoryTokenStore, TokenFile, TokenStore, TokenStoreError};
+pub use token_store::{TokenFile, TokenStoreError};
 pub use unsubscribe::one_click_unsubscribe;
 pub use wire::{
     Draft, DraftPage, Filter, FilterAction, FilterCriteria, Format, HistoryLabelChange,

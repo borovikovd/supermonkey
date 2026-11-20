@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use sm_core::activity::{Activity, Tasks};
 use sm_core::clock::SystemClock;
 use sm_core::{App, Config, Deps, GmailConfig};
-use sm_gmail::{OAuthConfig, QuotaConfig, TokenFile, TokenStore, Units};
+use sm_gmail::{OAuthConfig, QuotaConfig, TokenFile, Units};
 use sm_ipc::AppEvent;
 use tauri::{AppHandle, Emitter as _, Manager as _, RunEvent, WindowEvent};
 use tauri_plugin_window_state::StateFlags;
@@ -46,14 +46,6 @@ pub(crate) const MAIN_WINDOW: &str = "main";
 // server: never into a release build.
 #[cfg(all(feature = "fake", not(debug_assertions)))]
 compile_error!("the `fake` feature is for debug builds only");
-
-/// Endpoint overrides a debug build takes (`gmail_config`).
-const ENDPOINT_OVERRIDES: [&str; 4] = [
-    "SUPERMONKEY_GMAIL_BASE",
-    "SUPERMONKEY_OAUTH_AUTH_URL",
-    "SUPERMONKEY_OAUTH_TOKEN_URL",
-    "SUPERMONKEY_OAUTH_REVOKE_URL",
-];
 
 /// How long after launch the window shows even if the page has not
 /// connected (SPEC Window).
@@ -101,7 +93,7 @@ impl Shell {
 /// refresh tokens live.
 struct Setup {
     config: Config,
-    tokens: Arc<dyn TokenStore>,
+    tokens: Arc<TokenFile>,
     #[cfg(feature = "fake")]
     demo: Option<sm_testkit::Demo>,
 }
@@ -256,8 +248,7 @@ fn setup(app: &AppHandle) -> anyhow::Result<Setup> {
 }
 
 /// Google's Gmail with the OAuth client and budget the build baked in
-/// (`build.rs`). Debug builds may point every endpoint elsewhere, such as at
-/// a fake.
+/// (`build.rs`).
 fn gmail_config() -> GmailConfig {
     let per_minute = env!("SUPERMONKEY_QUOTA_PER_MIN")
         .parse()
@@ -266,42 +257,11 @@ fn gmail_config() -> GmailConfig {
             DEFAULT_QUOTA_PER_MIN
         });
     let oauth = OAuthConfig::google(env!("GOOGLE_CLIENT_ID"), env!("GOOGLE_CLIENT_SECRET"));
-    #[cfg_attr(
-        not(debug_assertions),
-        expect(unused_mut, reason = "only debug builds take endpoint overrides")
-    )]
-    let mut gmail = GmailConfig::google(oauth, QuotaConfig::for_budget(Units(per_minute)));
-    #[cfg(debug_assertions)]
-    {
-        let set = |name: &str, field: &mut String| match std::env::var_os(name)
-            .map(std::ffi::OsString::into_string)
-        {
-            Some(Ok(value)) => *field = value,
-            Some(Err(_)) => {
-                tracing::warn!(name, "an endpoint override is not UTF-8; ignoring it");
-            }
-            None => {}
-        };
-        let [base, auth, token, revoke] = ENDPOINT_OVERRIDES;
-        set(base, &mut gmail.base_url);
-        set(auth, &mut gmail.oauth.auth_url);
-        set(token, &mut gmail.oauth.token_url);
-        set(revoke, &mut gmail.oauth.revoke_url);
-    }
-    gmail
+    GmailConfig::google(oauth, QuotaConfig::for_budget(Units(per_minute)))
 }
 
-/// The refresh-token file in the data folder. A debug build with any
-/// endpoint pointed elsewhere keeps its tokens in memory, so the user's
-/// refresh tokens are never sent to another token or revoke endpoint.
-fn token_store(data_dir: &Path) -> Arc<dyn TokenStore> {
-    if cfg!(debug_assertions)
-        && ENDPOINT_OVERRIDES
-            .iter()
-            .any(|name| std::env::var_os(name).is_some())
-    {
-        return Arc::new(sm_gmail::MemoryTokenStore::default());
-    }
+/// The refresh-token file in the data folder.
+fn token_store(data_dir: &Path) -> Arc<TokenFile> {
     Arc::new(TokenFile::new(data_dir.join(Config::TOKEN_FILE)))
 }
 

@@ -6,7 +6,7 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use sm_gmail::{GMAIL_BASE_URL, HttpClient, OAuthConfig, QuotaConfig, TokenStore};
+use sm_gmail::{GMAIL_BASE_URL, HttpClient, OAuthConfig, QuotaConfig, TokenFile};
 use sm_store::{Priority, ReadPool, StoreError};
 use tokio::sync::mpsc;
 
@@ -94,7 +94,7 @@ pub struct Deps {
     /// App time.
     pub clock: Arc<dyn Clock>,
     /// Where refresh tokens live.
-    pub tokens: Arc<dyn TokenStore>,
+    pub tokens: Arc<TokenFile>,
     /// Counts the core's work in progress; the same one a manual clock counts
     /// its fired timers in.
     pub activity: Arc<Activity>,

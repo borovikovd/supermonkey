@@ -3,7 +3,8 @@
 //! The app keeps them in `tokens.json` in its data folder, only the user can
 //! read it, and it is replaced atomically on each change. Not the Keychain: an
 //! unsigned build has no stable identity, so macOS would ask for the login
-//! password after every update. Tests and demo mode use [`MemoryTokenStore`].
+//! password after every update. Tests and demo mode point it at a temporary
+//! folder.
 //!
 //! The calls block on file I/O: run them off the async runtime.
 
@@ -43,21 +44,9 @@ pub enum TokenStoreError {
     },
 }
 
-/// Where refresh tokens live, keyed by account address. One store per app:
-/// the file, or memory for tests and demo mode.
-pub trait TokenStore: Send + Sync {
-    /// Saves or replaces the account's refresh token.
-    fn store(&self, email: String, token: RefreshToken) -> Result<(), TokenStoreError>;
-    /// The account's refresh token, or `None` if there is none.
-    fn load(&self, email: &str) -> Result<Option<RefreshToken>, TokenStoreError>;
-    /// Deletes the account's refresh token. A missing one is not an error.
-    fn delete(&self, email: &str) -> Result<(), TokenStoreError>;
-    /// Every stored account with its token, by address.
-    fn entries(&self) -> Result<Vec<(String, RefreshToken)>, TokenStoreError>;
-}
-
-/// Refresh tokens in a JSON file, `{email: token}`, mode 0600, replaced
-/// atomically so a crash leaves the old file or the new one, whole.
+/// Refresh tokens in a JSON file, `{email: token}` keyed by account address,
+/// mode 0600, replaced atomically so a crash leaves the old file or the new
+/// one, whole. One per app.
 #[derive(Debug)]
 pub struct TokenFile {
     path: PathBuf,
@@ -134,6 +123,37 @@ impl TokenFile {
     }
 }
 
+impl TokenFile {
+    /// Saves or replaces the account's refresh token.
+    pub fn store(&self, email: String, token: RefreshToken) -> Result<(), TokenStoreError> {
+        self.update(|tokens| {
+            tokens.insert(email, token.into_secret());
+            true
+        })
+    }
+
+    /// The account's refresh token, or `None` if there is none.
+    pub fn load(&self, email: &str) -> Result<Option<RefreshToken>, TokenStoreError> {
+        let _file = self.file.lock();
+        Ok(self.read()?.remove(email).map(RefreshToken::new))
+    }
+
+    /// Deletes the account's refresh token. A missing one is not an error.
+    pub fn delete(&self, email: &str) -> Result<(), TokenStoreError> {
+        self.update(|tokens| tokens.remove(email).is_some())
+    }
+
+    /// Every stored account with its token, by address.
+    pub fn entries(&self) -> Result<Vec<(String, RefreshToken)>, TokenStoreError> {
+        let _file = self.file.lock();
+        Ok(self
+            .read()?
+            .into_iter()
+            .map(|(email, token)| (email, RefreshToken::new(token)))
+            .collect())
+    }
+}
+
 fn io_error(path: &Path, what: &'static str, source: io::Error) -> TokenStoreError {
     TokenStoreError::Io {
         path: path.to_path_buf(),
@@ -154,63 +174,4 @@ fn owner_only() -> fs::OpenOptions {
 fn restrict(file: &fs::File) -> io::Result<()> {
     use std::os::unix::fs::PermissionsExt as _;
     file.set_permissions(fs::Permissions::from_mode(0o600))
-}
-
-impl TokenStore for TokenFile {
-    fn store(&self, email: String, token: RefreshToken) -> Result<(), TokenStoreError> {
-        self.update(|tokens| {
-            tokens.insert(email, token.into_secret());
-            true
-        })
-    }
-
-    fn load(&self, email: &str) -> Result<Option<RefreshToken>, TokenStoreError> {
-        let _file = self.file.lock();
-        Ok(self.read()?.remove(email).map(RefreshToken::new))
-    }
-
-    fn delete(&self, email: &str) -> Result<(), TokenStoreError> {
-        self.update(|tokens| tokens.remove(email).is_some())
-    }
-
-    fn entries(&self) -> Result<Vec<(String, RefreshToken)>, TokenStoreError> {
-        let _file = self.file.lock();
-        Ok(self
-            .read()?
-            .into_iter()
-            .map(|(email, token)| (email, RefreshToken::new(token)))
-            .collect())
-    }
-}
-
-/// Refresh tokens in memory, for tests and demo mode, which must keep tokens
-/// out of the user's data folder.
-#[derive(Debug, Default)]
-pub struct MemoryTokenStore {
-    tokens: Mutex<BTreeMap<String, RefreshToken>>,
-}
-
-impl TokenStore for MemoryTokenStore {
-    fn store(&self, email: String, token: RefreshToken) -> Result<(), TokenStoreError> {
-        self.tokens.lock().insert(email, token);
-        Ok(())
-    }
-
-    fn load(&self, email: &str) -> Result<Option<RefreshToken>, TokenStoreError> {
-        Ok(self.tokens.lock().get(email).cloned())
-    }
-
-    fn delete(&self, email: &str) -> Result<(), TokenStoreError> {
-        self.tokens.lock().remove(email);
-        Ok(())
-    }
-
-    fn entries(&self) -> Result<Vec<(String, RefreshToken)>, TokenStoreError> {
-        Ok(self
-            .tokens
-            .lock()
-            .iter()
-            .map(|(email, token)| (email.clone(), token.clone()))
-            .collect())
-    }
 }

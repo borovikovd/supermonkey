@@ -6,9 +6,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use sm_core::{App, GmailConfig};
+use sm_core::{App, Config, GmailConfig};
 use sm_fake_gmail::{FakeGmail, FakeUser, NewAttachment, NewMessage};
-use sm_gmail::{MemoryTokenStore, OAuthConfig, QuotaConfig, RefreshToken, TokenStore};
+use sm_gmail::{OAuthConfig, QuotaConfig, RefreshToken, TokenFile};
 
 /// The demo accounts, in rail order.
 const ACCOUNTS: [&str; 2] = ["alex@demo.dev", "sam@demo.dev"];
@@ -21,7 +21,7 @@ const DATA_DIR: &str = "supermonkey-demo";
 #[derive(Debug)]
 pub struct Demo {
     fake: FakeGmail,
-    tokens: Arc<MemoryTokenStore>,
+    tokens: Arc<TokenFile>,
     data_dir: PathBuf,
 }
 
@@ -32,7 +32,7 @@ impl Demo {
         let data_dir = std::env::temp_dir().join(DATA_DIR);
         fresh_dir(&data_dir)?;
         let fake = FakeGmail::start();
-        let tokens = Arc::new(MemoryTokenStore::default());
+        let tokens = Arc::new(TokenFile::new(data_dir.join(Config::TOKEN_FILE)));
         for email in ACCOUNTS {
             let user = fake.add_user(email);
             user.set_display_name(email.split('@').next().unwrap_or(email));
@@ -69,11 +69,10 @@ impl Demo {
         }
     }
 
-    /// The demo accounts' refresh tokens, in memory.
+    /// The demo accounts' refresh tokens, in the demo's data folder.
     #[must_use]
-    pub fn tokens(&self) -> Arc<dyn TokenStore> {
-        let tokens: Arc<dyn TokenStore> = Arc::<MemoryTokenStore>::clone(&self.tokens);
-        tokens
+    pub fn tokens(&self) -> Arc<TokenFile> {
+        Arc::clone(&self.tokens)
     }
 
     /// Signs the demo accounts in on `app`, before it launches.

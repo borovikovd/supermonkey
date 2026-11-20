@@ -148,7 +148,7 @@ A worker fetches from Gmail, parses and sanitizes the result off the writer thre
 - **`Outcome`:** the SPEC's taxonomy, one variant per row of the Gmail errors table (offline, no response, unauthorized, invalid grant, rate limited, server error, not found, conflict, rejected with Google's reason). Callers match on it; nothing parses error strings.
 - **`Scheduler`:** the quota bucket (1,000 capacity, 4,800 per minute refill, background cap) and at most 8 requests at once per account, by priority 1 to 6. `acquire(Priority, cost)` gives the permit a request holds, and is the only way to call Gmail.
 - **`Retry`:** one policy type (back-off with jitter and `Retry-After`) used by the workers, with the per-call exceptions SPEC names (`drafts.create`, `drafts.send`).
-- **OAuth:** the loopback server, PKCE, state check, token refresh shortly before expiry, and revoke. Tokens persist through a `TokenStore` port with two implementations, the 0600 file and memory.
+- **OAuth:** the loopback server, PKCE, state check, token refresh shortly before expiry, and revoke. Tokens persist in `TokenFile`, the 0600 file; tests and demo point it at a temporary folder.
 - **One-click unsubscribe:** the `POST` goes through the same `reqwest::Client`, to `https` only and following no redirect. Debug builds also allow loopback `http`, where the E2E server stands in for a list.
 
 ## 8. Core
@@ -175,11 +175,10 @@ Each handle holds only the `Arc`s it needs. A handle is a struct with methods, n
 
 ### 8.3 Ports
 
-| Port         | Implementations                     | Why a trait                                                    |
-| ------------ | ----------------------------------- | -------------------------------------------------------------- |
-| `Platform`   | Tauri (`app`), recorder (`testkit`) | Notifications, badge, open URL or path, focus, sign-in browser |
-| `Clock`      | System, manual (`testkit`)          | Tests move time with `app.advance()`                           |
-| `TokenStore` | 0600 file, memory                   | Tests and demo keep tokens out of the user's folder            |
+| Port       | Implementations                     | Why a trait                                                    |
+| ---------- | ----------------------------------- | -------------------------------------------------------------- |
+| `Platform` | Tauri (`app`), recorder (`testkit`) | Notifications, badge, open URL or path, focus, sign-in browser |
+| `Clock`    | System, manual (`testkit`)          | Tests move time with `app.advance()`                           |
 
 Each has exactly two implementations. AGENTS.md forbids traits with one.
 
