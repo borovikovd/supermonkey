@@ -189,7 +189,6 @@ struct MessageView {
     thread_id: String,
     labels: Vec<String>,
     date: u64,
-    snippet: String,
     headers: HashMap<String, String>,
     /// The raw RFC 822 message, for checking what was sent.
     raw: String,
@@ -208,7 +207,6 @@ fn message_view(m: FakeMessage) -> MessageView {
         thread_id: m.thread_id,
         labels: m.label_ids,
         date: m.internal_date,
-        snippet: m.snippet,
         headers,
         raw: String::from_utf8(m.raw)
             .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()),
@@ -241,7 +239,6 @@ pub(crate) async fn gmail_state(State(s): State<Arc<Server>>, Path(email): Path<
         "drafts": drafts,
         "labels": labels,
         "sendAs": send_as,
-        "historyId": user.history_id(),
     })))
 }
 

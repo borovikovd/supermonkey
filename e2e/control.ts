@@ -54,7 +54,6 @@ export type GmailMessage = {
   threadId: string;
   labels: string[];
   date: number;
-  snippet: string;
   /** Lower-cased header names; the first of repeated headers. */
   headers: Record<string, string>;
   /** The raw RFC 822 message (see `parseMime`). */
@@ -66,7 +65,6 @@ export type GmailState = {
   drafts: { id: string; message: GmailMessage }[];
   labels: { id: string; name: string }[];
   sendAs: { email: string; displayName: string; primary: boolean }[];
-  historyId: number;
 };
 
 /** A draft made in Gmail by another client (web, a phone). */
@@ -132,8 +130,6 @@ export type Outcome =
   | { kind: "status"; status: number; reason?: string; retryAfterSecs?: number }
   /** The work is done, then a Google error is returned. */
   | { kind: "statusAfterApply"; status: number; reason?: string }
-  /** Wall-clock delay, then handled normally. */
-  | { kind: "delay"; delayMs: number }
   /** Handled, then these Gmail thread ids are left out of the `threads.list` page. */
   | { kind: "omitThreads"; threads: string[] };
 
@@ -161,8 +157,6 @@ export type LoggedRequest = {
   api: ApiMethod | "unknown";
   method: string;
   path: string;
-  /** The raw query string. */
-  query: string;
   /** Query parameters; repeated keys are joined with commas. */
   params: Record<string, string>;
   account: string | null;
@@ -450,14 +444,11 @@ export class Control {
   }
 
   /**
-   * Ends holds (one by id, those on one method, or all) and lets the requests
-   * they parked go on: handled normally, or suffering `outcome`. With `min`,
-   * first waits until they have parked that many. Returns how many.
+   * Ends the hold `id` and lets the requests it parked go on: handled
+   * normally, or suffering `outcome`. With `min`, first waits until it has
+   * parked that many. Returns how many.
    */
-  async release(
-    which: { id?: number; api?: ApiMethod; min?: number } = {},
-    outcome?: Outcome,
-  ): Promise<number> {
+  async release(which: { id: number; min?: number }, outcome?: Outcome): Promise<number> {
     const r = await this.call<{ released: number }>("POST", "/__test/release", {
       ...which,
       outcome,

@@ -35,14 +35,6 @@ pub const PERF: Size = Size {
     long_thread: 60,
 };
 
-/// A small fixture, for a quick look.
-pub const DEMO: Size = Size {
-    threads: 400,
-    inbox: 60,
-    contacts: 200,
-    long_thread: 12,
-};
-
 /// The fixture's user labels: Gmail's id and the name.
 const LABELS: [(&str, &str); 3] = [
     ("Label_1", "Receipts"),

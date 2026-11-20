@@ -8,7 +8,7 @@ use axum::Json;
 use axum::extract::State;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
-use sm_fake_gmail::{Answer, Fault, LoggedRequest, Matcher, Release};
+use sm_fake_gmail::{Answer, Fault, LoggedRequest, Matcher};
 
 use crate::server::{Ctl, Fail, SETTLE_LIMIT, Server, done};
 
@@ -62,7 +62,7 @@ impl MatchReq {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FaultSpec {
-    /// `drop`, `noResponse`, `status`, `statusAfterApply`, `delay`, `hold`,
+    /// `drop`, `noResponse`, `status`, `statusAfterApply`, `hold`,
     /// `holdAnswer`, or `omitThreads`.
     kind: String,
     #[serde(default)]
@@ -71,8 +71,6 @@ pub(crate) struct FaultSpec {
     reason: Option<String>,
     #[serde(default)]
     retry_after_secs: Option<u64>,
-    #[serde(default)]
-    delay_ms: Option<u64>,
     #[serde(default)]
     threads: Vec<String>,
 }
@@ -108,7 +106,6 @@ impl FaultSpec {
                     reason: reason(self.reason, code),
                 }
             }
-            "delay" => Fault::Delay(Duration::from_millis(self.delay_ms.unwrap_or(1000))),
             "hold" => Fault::Hold,
             "holdAnswer" => Fault::HoldAnswer,
             "omitThreads" => Fault::OmitThreads(self.threads),
@@ -135,12 +132,8 @@ pub(crate) async fn fault(State(s): State<Arc<Server>>, Json(req): Json<FaultReq
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ReleaseReq {
-    /// One hold, by the id `fault` returned.
-    #[serde(default)]
-    id: Option<u64>,
-    /// Holds on this Gmail method. With neither, every hold.
-    #[serde(default)]
-    api: Option<String>,
+    /// The hold, by the id `fault` returned.
+    id: u64,
     /// What released requests suffer instead of being handled normally.
     #[serde(default)]
     outcome: Option<FaultSpec>,
@@ -150,20 +143,15 @@ pub(crate) struct ReleaseReq {
     min: usize,
 }
 
-/// Ends holds and lets the requests they parked go on.
+/// Ends a hold and lets the requests it parked go on.
 pub(crate) async fn release(State(s): State<Arc<Server>>, Json(req): Json<ReleaseReq>) -> Ctl {
-    let which = match (req.id, req.api) {
-        (Some(id), _) => Release::Hold(id),
-        (None, Some(api)) => Release::Api(api),
-        (None, None) => Release::All,
-    };
     let outcome = req.outcome.map(FaultSpec::fault).transpose()?;
     let deadline = tokio::time::Instant::now() + SETTLE_LIMIT;
-    while s.fake.held_by(&which) < req.min {
+    while s.fake.held_by(req.id) < req.min {
         if tokio::time::Instant::now() > deadline {
             return Err(Fail(format!(
                 "release: {} of {} requests held after {}s",
-                s.fake.held_by(&which),
+                s.fake.held_by(req.id),
                 req.min,
                 SETTLE_LIMIT.as_secs(),
             )));
@@ -171,7 +159,7 @@ pub(crate) async fn release(State(s): State<Arc<Server>>, Json(req): Json<Releas
         // The fake has no signal for a newly parked request.
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
-    let released = s.fake.release(&which, outcome.as_ref());
+    let released = s.fake.release(req.id, outcome.as_ref());
     Ok(Json(json!({ "released": released })))
 }
 
@@ -229,7 +217,6 @@ fn request_json(r: &LoggedRequest) -> Value {
         "api": r.info.api,
         "method": r.info.method,
         "path": r.info.path,
-        "query": r.info.query,
         "params": params,
         "account": r.info.account,
         "body": r.body,

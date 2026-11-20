@@ -85,7 +85,7 @@ Lint setup:
 Perf fixture (two accounts × 20,000 threads):
 
 ```sh
-cargo run --manifest-path src-tauri/Cargo.toml --release --features fake --bin perf-fixture -- /tmp/perf.db perf
+cargo run --manifest-path src-tauri/Cargo.toml --release --features fake --bin perf-fixture -- /tmp/perf.db
 SUPERMONKEY_DB=/tmp/perf.db vp run tauri dev
 SUPERMONKEY_PERF_DB=/tmp/perf.db cargo test --manifest-path src-tauri/Cargo.toml -p sm-core --release --lib perf -- --ignored --nocapture
 ```

@@ -17,7 +17,7 @@
 //! ## Faults
 //!
 //! [`FakeGmail::inject`] makes matching requests misbehave: [`Fault::Status`] answers with a
-//! Google-shaped error, [`Fault::Delay`] waits first, [`Fault::Drop`] closes the connection
+//! Google-shaped error, [`Fault::Drop`] closes the connection
 //! without doing anything, and [`Fault::NoResponse`] does the work and then closes the
 //! connection without answering. To the client both closes look like "sent, no response".
 //! A real "offline" (connection refused, nothing sent) cannot depend on a request the server
@@ -63,7 +63,10 @@ use tower::ServiceExt;
 pub use crate::mailbox::Filter;
 use crate::mailbox::{Mailbox, Msg, SendAsEntry};
 use crate::traffic::Held;
-pub use crate::traffic::{Answer, LoggedRequest, Release, RequestInfo, api_name};
+pub use crate::traffic::{Answer, LoggedRequest, RequestInfo, api_name};
+
+/// How long an issued access token lives.
+pub(crate) const TOKEN_LIFETIME: Duration = Duration::from_secs(3600);
 
 /// App time for the fake: what Gmail's own clock reads (dates of new messages,
 /// `newer_than:`) and when requests arrive.
@@ -108,6 +111,7 @@ struct Traffic {
     held: Vec<Held>,
 }
 
+#[derive(Default)]
 pub(crate) struct World {
     /// Users in the order they were added.
     pub users: Vec<String>,
@@ -120,8 +124,6 @@ pub(crate) struct World {
     pub invalid_grant: HashSet<String>,
     /// Users whose grant lacks `gmail.settings.basic`.
     pub no_settings_scope: HashSet<String>,
-    pub token_lifetime: Duration,
-    pub last_auth_request: Option<Vec<(String, String)>>,
     /// The next consent page answers `access_denied`.
     pub deny_next_auth: bool,
     pub revocations: Vec<Revocation>,
@@ -145,25 +147,6 @@ pub(crate) struct AuthCode {
     pub code_challenge: String,
 }
 
-impl Default for World {
-    fn default() -> Self {
-        Self {
-            users: Vec::new(),
-            mailboxes: HashMap::new(),
-            refresh_tokens: HashMap::new(),
-            access_tokens: HashMap::new(),
-            auth_codes: HashMap::new(),
-            invalid_grant: HashSet::new(),
-            no_settings_scope: HashSet::new(),
-            token_lifetime: Duration::from_secs(3600),
-            last_auth_request: None,
-            deny_next_auth: false,
-            revocations: Vec::new(),
-            counter: 0,
-        }
-    }
-}
-
 impl World {
     pub(crate) const fn next(&mut self) -> u64 {
         self.counter += 1;
@@ -172,7 +155,7 @@ impl World {
 
     pub(crate) fn issue_access_token(&mut self, email: &str) -> String {
         let token = format!("ya29.fake-{}", self.next());
-        let expires = Instant::now() + self.token_lifetime;
+        let expires = Instant::now() + TOKEN_LIFETIME;
         self.access_tokens
             .insert(token.clone(), (email.to_owned(), expires));
         token
@@ -249,7 +232,6 @@ impl Shared {
             other @ (Fault::Drop
             | Fault::NoResponse
             | Fault::Status { .. }
-            | Fault::Delay(_)
             | Fault::StatusAfterApply { .. }
             | Fault::OmitThreads(_)) => return Some(Plan::Fault(other)),
         };
@@ -257,7 +239,6 @@ impl Shared {
         traffic.held.push(Held {
             seq,
             hold,
-            api: request.api,
             parked,
             release,
         });
@@ -484,8 +465,6 @@ pub enum Fault {
         /// The `Retry-After` header, in seconds. `None` sends no such header.
         retry_after_secs: Option<u64>,
     },
-    /// Wait, then handle the request normally.
-    Delay(Duration),
     /// Park the request until [`FakeGmail::release`] lets it go.
     Hold,
     /// Do the request's work now, then park the answer until [`FakeGmail::release`]:
@@ -501,18 +480,6 @@ pub enum Fault {
     },
     /// Handle the request, then leave these thread ids out of a `threads.list` page.
     OmitThreads(Vec<String>),
-}
-
-impl Fault {
-    /// A [`Fault::Status`] without `Retry-After`.
-    #[must_use]
-    pub fn status(status: u16, reason: &str) -> Self {
-        Self::Status {
-            status,
-            reason: reason.to_owned(),
-            retry_after_secs: None,
-        }
-    }
 }
 
 struct FaultEntry {
@@ -640,14 +607,6 @@ pub struct FakeMessage {
     pub raw: Vec<u8>,
 }
 
-impl FakeMessage {
-    /// The first header named `name`, case-insensitively.
-    #[must_use]
-    pub fn header(&self, name: &str) -> Option<&str> {
-        mime::header(&self.headers, name)
-    }
-}
-
 /// A snapshot of a stored draft.
 #[derive(Debug, Clone)]
 pub struct FakeDraft {
@@ -745,11 +704,6 @@ impl FakeGmail {
         }
     }
 
-    /// How long newly issued access tokens live. Default one hour.
-    pub fn set_token_lifetime(&self, lifetime: Duration) {
-        self.shared.world().token_lifetime = lifetime;
-    }
-
     /// Expires every access token issued so far, so the next Gmail call gets a 401.
     pub fn expire_access_tokens(&self) {
         // A token lives while its expiry is after now, so now is already too late.
@@ -759,14 +713,8 @@ impl FakeGmail {
         }
     }
 
-    /// The query parameters of the last consent-page request.
-    #[must_use]
-    pub fn last_auth_request(&self) -> Option<Vec<(String, String)>> {
-        self.shared.world().last_auth_request.clone()
-    }
-
     /// Adds a fault for matching requests. The first applicable fault wins. Returns its id,
-    /// which [`Release::Hold`] names.
+    /// which [`FakeGmail::release`] takes for a hold.
     #[must_use]
     pub fn inject(&self, matcher: Matcher, fault: Fault) -> u64 {
         let mut traffic = self.shared.traffic.lock();
@@ -786,20 +734,16 @@ impl FakeGmail {
         self.shared.traffic.lock().faults.clear();
     }
 
-    /// Ends holds and lets the requests they parked go on: handled normally, or suffering
+    /// Ends hold `id` and lets the requests it parked go on: handled normally, or suffering
     /// `then`. Returns how many requests it released, answers of [`Fault::HoldAnswer`]
     /// still being worked on included.
     #[must_use]
-    pub fn release(&self, which: &Release, then: Option<&Fault>) -> usize {
+    pub fn release(&self, id: u64, then: Option<&Fault>) -> usize {
         let mut traffic = self.shared.traffic.lock();
-        traffic.faults.retain(|e| {
-            !(matches!(e.fault, Fault::Hold | Fault::HoldAnswer)
-                && which.covers(e.id, e.matcher.api.as_deref()))
-        });
-        let released: Vec<Held> = traffic
-            .held
-            .extract_if(.., |h| which.covers(h.hold, Some(h.api)))
-            .collect();
+        traffic
+            .faults
+            .retain(|e| !(matches!(e.fault, Fault::Hold | Fault::HoldAnswer) && e.id == id));
+        let released: Vec<Held> = traffic.held.extract_if(.., |h| h.hold == id).collect();
         drop(traffic);
         let n = released.len();
         for h in released {
@@ -823,15 +767,15 @@ impl FakeGmail {
             .count()
     }
 
-    /// Requests parked now by the holds `which` names.
+    /// Requests parked now by hold `id`.
     #[must_use]
-    pub fn held_by(&self, which: &Release) -> usize {
+    pub fn held_by(&self, id: u64) -> usize {
         self.shared
             .traffic
             .lock()
             .held
             .iter()
-            .filter(|h| h.parked && which.covers(h.hold, Some(h.api)))
+            .filter(|h| h.parked && h.hold == id)
             .count()
     }
 
@@ -931,12 +875,6 @@ impl FakeUser {
     #[must_use]
     pub fn refresh_token(&self) -> &str {
         &self.refresh_token
-    }
-
-    /// Issues a fresh access token.
-    #[must_use]
-    pub fn access_token(&self) -> String {
-        self.shared.world().issue_access_token(&self.email)
     }
 
     /// Expires every access token of this user, so its next Gmail call gets a 401.
@@ -1140,27 +1078,10 @@ impl FakeUser {
         })
     }
 
-    /// A stored message.
-    #[must_use]
-    pub fn message(&self, id: &str) -> Option<FakeMessage> {
-        self.with(|mb| mb.messages.get(id).map(FakeMessage::from))
-    }
-
     /// Every stored message, in id order.
     #[must_use]
     pub fn messages(&self) -> Vec<FakeMessage> {
         self.with(|mb| mb.messages.values().map(FakeMessage::from).collect())
-    }
-
-    /// A thread's messages, oldest first.
-    #[must_use]
-    pub fn thread(&self, thread_id: &str) -> Vec<FakeMessage> {
-        self.with(|mb| {
-            mb.thread_messages(thread_id)
-                .into_iter()
-                .map(FakeMessage::from)
-                .collect()
-        })
     }
 
     /// Every draft.
@@ -1181,11 +1102,6 @@ impl FakeUser {
     #[must_use]
     pub fn history_id(&self) -> u64 {
         self.with(|mb| mb.history_id)
-    }
-
-    /// `history.list` with a start below `floor` answers 404.
-    pub fn set_history_floor(&self, floor: u64) {
-        self.with(|mb| mb.history_floor = floor);
     }
 
     /// Expires all history so far, as Gmail does after about a week: any `history.list`
@@ -1315,10 +1231,6 @@ async fn handle(
     let route = |req: hyper::Request<Body>| router.clone().oneshot(req);
     let response = match fault {
         None | Some(Fault::Hold | Fault::HoldAnswer) => {
-            route(req).await.unwrap_or_else(|e| match e {})
-        }
-        Some(Fault::Delay(wait)) => {
-            tokio::time::sleep(wait).await;
             route(req).await.unwrap_or_else(|e| match e {})
         }
         Some(Fault::Status {

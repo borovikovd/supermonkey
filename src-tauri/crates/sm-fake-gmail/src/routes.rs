@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::mailbox::{Filter, Mailbox, Missing};
-use crate::{AuthCode, Shared};
+use crate::{AuthCode, Shared, TOKEN_LIFETIME};
 
 const BASE64URL_LENIENT: GeneralPurpose = GeneralPurpose::new(
     &base64::alphabet::URL_SAFE,
@@ -617,7 +617,6 @@ async fn auth(
 ) -> Result<Response, (StatusCode, &'static str)> {
     let bad_request = |message| (StatusCode::BAD_REQUEST, message);
     let mut world = s.world();
-    world.last_auth_request = Some(params.0.clone());
     let (Some(redirect_uri), Some(challenge)) =
         (params.get("redirect_uri"), params.get("code_challenge"))
     else {
@@ -709,7 +708,7 @@ async fn token(State(s): State<Arc<Shared>>, body: Bytes) -> Response {
     };
     let mut out = json!({
         "access_token": access,
-        "expires_in": world.token_lifetime.as_secs(),
+        "expires_in": TOKEN_LIFETIME.as_secs(),
         "scope": scope,
         "token_type": "Bearer",
     });

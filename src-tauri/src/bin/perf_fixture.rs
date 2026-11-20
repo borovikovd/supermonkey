@@ -1,7 +1,7 @@
-//! Writes the perf fixture (SPEC Performance) or demo-sized data into a new
-//! database file, through the store, as sync would leave it:
+//! Writes the perf fixture (SPEC Performance) into a new database file,
+//! through the store, as sync would leave it:
 //!
-//! `cargo run --features fake --bin perf-fixture -- <db path> [perf|demo]`
+//! `cargo run --features fake --bin perf-fixture -- <db path>`
 //!
 //! Point the app at it with `SUPERMONKEY_DB=<db path>`, or the search bench
 //! with `SUPERMONKEY_PERF_DB=<db path>`.
@@ -11,22 +11,16 @@ use std::time::Instant;
 
 use anyhow::Context as _;
 use sm_core::clock::{Clock as _, SystemClock};
-use sm_testkit::fixture::{DEMO, PERF, generate};
+use sm_testkit::fixture::{PERF, generate};
 
 /// The fixture's accounts.
 const ACCOUNTS: [&str; 2] = ["alex@example.com", "sam@example.com"];
 
 fn main() -> anyhow::Result<()> {
     supermonkey_lib::init_logging();
-    let mut args = std::env::args().skip(1);
-    let path = args
-        .next()
-        .context("usage: perf-fixture <db path> [perf|demo]")?;
-    let size = match args.next().as_deref() {
-        None | Some("perf") => PERF,
-        Some("demo") => DEMO,
-        Some(other) => anyhow::bail!("unknown size {other}: perf or demo"),
-    };
+    let path = std::env::args()
+        .nth(1)
+        .context("usage: perf-fixture <db path>")?;
     let path = Path::new(&path);
     for suffix in ["", "-wal", "-shm"] {
         let mut file = path.as_os_str().to_owned();
@@ -39,7 +33,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
     let started = Instant::now();
-    generate(path, size, &ACCOUNTS, SystemClock.now())?;
+    generate(path, PERF, &ACCOUNTS, SystemClock.now())?;
     #[expect(clippy::print_stdout, reason = "a command-line tool reports on stdout")]
     {
         println!(

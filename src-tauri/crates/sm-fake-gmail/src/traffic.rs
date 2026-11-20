@@ -177,33 +177,9 @@ pub(crate) struct Held {
     pub seq: usize,
     /// The hold fault that parked it.
     pub hold: u64,
-    /// The Gmail method it calls (see [`api_name`]).
-    pub api: &'static str,
     /// Waiting now. A [`Fault::HoldAnswer`] request is listed from when it chose the hold,
     /// so a release during its work is not lost, but parks only once its answer is ready.
     pub parked: bool,
     /// Receives what happens next: a fault to suffer, or `None` to be handled normally.
     pub release: oneshot::Sender<Option<Fault>>,
-}
-
-/// Which held requests to let go.
-#[derive(Debug, Clone)]
-pub enum Release {
-    /// Every hold, and every request held.
-    All,
-    /// One hold (by the id [`crate::FakeGmail::inject`] returned) and what it parked.
-    Hold(u64),
-    /// Holds on this Gmail method, and the requests to it they parked.
-    Api(String),
-}
-
-impl Release {
-    /// Whether this names hold `id` (or a hold on Gmail method `api`).
-    pub(crate) fn covers(&self, id: u64, api: Option<&str>) -> bool {
-        match self {
-            Self::All => true,
-            Self::Hold(h) => *h == id,
-            Self::Api(name) => api == Some(name.as_str()),
-        }
-    }
 }

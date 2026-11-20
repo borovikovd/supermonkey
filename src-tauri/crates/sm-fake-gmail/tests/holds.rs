@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
-use sm_fake_gmail::{FakeGmail, Fault, Matcher, Release};
+use sm_fake_gmail::{FakeGmail, Fault, Matcher};
 use tokio::time::timeout;
 
 /// Long enough for any unparked request on a loaded machine.
@@ -47,7 +47,7 @@ async fn a_release_racing_a_hold_never_strands_the_request() {
         }
         // Either the hold goes before the request finds it, or the request is
         // let go: both counts are right, and the answer below is what is checked.
-        _ = fake.release(&Release::Hold(id), None);
+        _ = fake.release(id, None);
         if timeout(ANSWER_LIMIT, request).await.is_err() {
             stranded = Some(round);
             break;
@@ -91,7 +91,7 @@ async fn a_release_while_a_held_answer_is_worked_on_lets_the_answer_through() {
     wait(&working).await;
     // Not parked yet: only a finished answer counts as held.
     let held_while_working = fake.held();
-    let released = fake.release(&Release::Hold(id), None);
+    let released = fake.release(id, None);
     wait(&resume).await;
 
     assert_eq!(held_while_working, 0);
