@@ -5,11 +5,11 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use sm_domain::{GmailMessageId, GmailThreadId, ThreadId};
-use sm_gmail::{Backoff, Format, GmailError, HistoryId, Outcome, Priority, ThreadQuery};
+use sm_gmail::{Format, GmailError, HistoryId, Outcome, Priority, ThreadQuery};
 use sm_store::Priority as WritePriority;
 
 use super::contacts::backfill_page;
-use super::ctx::{AccountCtx, AfterError};
+use super::ctx::AccountCtx;
 use super::ingest::{drop_thread, store_thread};
 use super::queue::{Listing, Slot, Work};
 use super::read::read_thread;
@@ -73,23 +73,31 @@ pub(crate) enum Ended {
 
 /// Runs `call` until it succeeds or its outcome says to stop trying, backing
 /// off as SPEC Gmail errors says.
-pub(crate) async fn retrying<F, Fut>(ctx: &AccountCtx, mut call: F) -> Ended
+pub(crate) async fn retrying<F, Fut>(ctx: &AccountCtx, call: F) -> Ended
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<(), GmailError>>,
 {
-    let mut backoff = Backoff::new();
-    loop {
-        match call().await {
-            Ok(()) => {
-                ctx.health.succeeded();
-                return Ended::Done;
-            }
-            Err(err) => match ctx.after_error(&err, &mut backoff).await {
-                AfterError::Retry => {}
-                AfterError::Drop => return Ended::Done,
-                AfterError::Stop => return Ended::SignedOut,
-            },
+    let Err(err) = ctx.retried(call).await else {
+        return Ended::Done;
+    };
+    match err.outcome() {
+        Outcome::InvalidGrant => {
+            ctx.signed_out();
+            Ended::SignedOut
+        }
+        // Gone, or not this app's to read: dropped, with no toast.
+        Outcome::NotFound => Ended::Done,
+        outcome @ (Outcome::Offline
+        | Outcome::NoResponse
+        | Outcome::Unauthorized
+        | Outcome::RateLimited { .. }
+        | Outcome::ServerError { .. }
+        | Outcome::Conflict
+        | Outcome::Rejected { .. }) => {
+            // Nothing retries it before the next launch, so say so.
+            tracing::info!(account = ctx.account.0, %outcome, "Gmail refused a background read; dropping it");
+            Ended::Done
         }
     }
 }

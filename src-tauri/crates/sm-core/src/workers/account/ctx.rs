@@ -1,5 +1,5 @@
 //! What an account worker's tasks share (ARCHITECTURE.md, section 8.2), and
-//! how each of them handles a failed Gmail call.
+//! how a background read is retried.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -71,17 +71,6 @@ pub(crate) struct AccountCtx {
     sign_out: SignOutSender,
 }
 
-/// What a task does after a Gmail call failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AfterError {
-    /// Call again: the wait the outcome asks for is over.
-    Retry,
-    /// The item is gone or not this app's to read: drop it, with no toast.
-    Drop,
-    /// The account is signed out: the worker is stopping.
-    Stop,
-}
-
 impl AccountCtx {
     pub(crate) fn new(parts: WorkerParts, health: Health, queue: FetchQueue) -> Self {
         let WorkerParts {
@@ -144,38 +133,33 @@ impl AccountCtx {
         }
     }
 
-    /// Handles a failed call: records it, waits as its outcome asks (SPEC
-    /// Gmail errors), and says what to do next. A refused grant signs the
-    /// account out.
-    pub(crate) async fn after_error(&self, err: &GmailError, backoff: &mut Backoff) -> AfterError {
-        self.health.failed(err);
-        match err.outcome() {
-            Outcome::InvalidGrant => {
-                self.signed_out();
-                AfterError::Stop
-            }
-            Outcome::Offline => {
-                self.deps.network.wait(self.clock(), OFFLINE_RETRY).await;
-                AfterError::Retry
-            }
-            Outcome::NotFound => AfterError::Drop,
-            outcome @ (Outcome::NoResponse
-            | Outcome::Unauthorized
-            | Outcome::RateLimited { .. }
-            | Outcome::ServerError { .. }
-            | Outcome::Conflict
-            | Outcome::Rejected { .. }) => {
-                if outcome.is_transient() {
-                    let wait = backoff.next_delay(err);
-                    tracing::debug!(account = self.account.0, %outcome, ?wait, "backing off");
-                    self.deps.network.wait(self.clock(), wait).await;
-                    AfterError::Retry
-                } else {
-                    // Nothing retries it before the next launch, so say so.
-                    tracing::info!(account = self.account.0, %outcome, "Gmail refused a background read; dropping it");
-                    AfterError::Drop
+    /// Runs a background read's Gmail call until it gets an answer to act on:
+    /// with no connection or a transient outcome it waits as SPEC Gmail
+    /// errors says and calls again. Any other error is the caller's.
+    pub(crate) async fn retried<T, F, Fut>(&self, mut call: F) -> Result<T, GmailError>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = Result<T, GmailError>>,
+    {
+        let mut backoff = Backoff::new();
+        loop {
+            let err = match call().await {
+                Ok(value) => {
+                    self.health.succeeded();
+                    return Ok(value);
                 }
-            }
+                Err(err) => err,
+            };
+            let wait = if *err.outcome() == Outcome::Offline {
+                OFFLINE_RETRY
+            } else if err.is_transient() {
+                backoff.next_delay(&err)
+            } else {
+                return Err(err);
+            };
+            self.health.failed(&err);
+            tracing::debug!(account = self.account.0, outcome = %err.outcome(), ?wait, "trying again");
+            self.deps.network.wait(self.clock(), wait).await;
         }
     }
 

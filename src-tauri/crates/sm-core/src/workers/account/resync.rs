@@ -4,10 +4,10 @@
 use std::collections::HashMap;
 
 use sm_domain::{GmailThreadId, Rev, SystemLabel, ThreadId};
-use sm_gmail::{Backoff, Format, GmailError, HistoryId, Outcome, PageToken, Priority, ThreadQuery};
+use sm_gmail::{Format, GmailError, HistoryId, Outcome, PageToken, Priority, ThreadQuery};
 use sm_store::{Priority as WritePriority, ThreadSyncState};
 
-use super::ctx::{AccountCtx, OFFLINE_RETRY};
+use super::ctx::AccountCtx;
 use super::ingest::drop_thread;
 use super::poller::{queue_starred_and_sent, store_cursor};
 use super::queue::{INBOX_BODIES, INBOX_META, LATE, Work};
@@ -16,37 +16,10 @@ use crate::workers::drafts::{Occasion, reconcile};
 /// Threads per resync `threads.list` page: about 10 units per 500 threads.
 const RESYNC_PAGE: u32 = 500;
 
-/// A resync step's Gmail call, retried as background reads are: a
-/// transient outcome or no connection waits and calls again, so one error
-/// does not start the whole resync over. Any other outcome stops the resync,
-/// which runs again from the start at the next poll.
-async fn step<T, F, Fut>(ctx: &AccountCtx, mut call: F) -> Result<T, GmailError>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, GmailError>>,
-{
-    let mut backoff = Backoff::new();
-    loop {
-        match call().await {
-            Ok(value) => {
-                ctx.health.succeeded();
-                return Ok(value);
-            }
-            Err(e) if *e.outcome() == Outcome::Offline => {
-                ctx.health.failed(&e);
-                ctx.deps.network.wait(ctx.clock(), OFFLINE_RETRY).await;
-            }
-            Err(e) if e.is_transient() => {
-                ctx.health.failed(&e);
-                let wait = backoff.next_delay(&e);
-                ctx.deps.network.wait(ctx.clock(), wait).await;
-            }
-            Err(e) => return Err(e),
-        }
-    }
-}
-
-/// Runs the full resync. It notifies nothing.
+/// Runs the full resync. It notifies nothing. Each Gmail call is retried as
+/// background reads are, so one transient error does not start the whole
+/// resync over. Any other error stops it, and it runs again from the start
+/// at the next poll.
 pub(crate) async fn full_resync(
     ctx: &AccountCtx,
     drafts_due: &mut Option<Occasion>,
@@ -57,7 +30,7 @@ pub(crate) async fn full_resync(
     );
     // 1. A fresh cursor, stored once the resync is done: one cut short by an
     // error or a quit leaves the old cursor, so the next poll runs it again.
-    let profile = step(ctx, || ctx.gmail.get_profile(Priority::P3)).await?;
+    let profile = ctx.retried(|| ctx.gmail.get_profile(Priority::P3)).await?;
     let started = ctx.read(|r| r.meta().rev()).await.unwrap_or_else(|e| {
         tracing::warn!(error = %e, "couldn't read the rev; keeping every cached thread");
         Rev(0)
@@ -91,7 +64,9 @@ async fn list_threads(
                 include_spam_trash: true,
                 ..ThreadQuery::default()
             };
-            let threads = step(ctx, || ctx.gmail.list_threads(Priority::P4, &query)).await?;
+            let threads = ctx
+                .retried(|| ctx.gmail.list_threads(Priority::P4, &query))
+                .await?;
             for thread in threads.threads {
                 if label.is_some() && !listed.contains_key(&thread.id) {
                     ctx.queue.push(
@@ -174,11 +149,12 @@ async fn reconcile_cached(
 /// (`format=minimal`), and drops it when Gmail answers 404. One Gmail
 /// refuses to check is kept. Only a refused grant fails the resync.
 async fn drop_if_gone(ctx: &AccountCtx, thread: GmailThreadId) -> Result<(), GmailError> {
-    let check = step(ctx, || {
-        ctx.gmail
-            .get_thread(Priority::P4, &thread, Format::Minimal, &[])
-    })
-    .await;
+    let check = ctx
+        .retried(|| {
+            ctx.gmail
+                .get_thread(Priority::P4, &thread, Format::Minimal, &[])
+        })
+        .await;
     match check {
         Ok(_) => {}
         Err(e) if *e.outcome() == Outcome::NotFound => drop_cached(ctx, thread).await,
