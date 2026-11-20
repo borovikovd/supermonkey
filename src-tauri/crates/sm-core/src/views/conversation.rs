@@ -2,13 +2,9 @@
 
 use sm_domain::{AccountId, Rev, SystemLabel, ThreadId};
 use sm_ipc::{
-    Addr, AttachmentInfo, ConversationData, DraftSummary, MessageBody, MessageSummary, OutboxRow,
+    AttachmentInfo, ConversationData, DraftSummary, MessageBody, MessageSummary, OutboxRow,
 };
 use sm_store::{BodyRecord, ConversationMessage, OutboxRecord, Reads, StoreError};
-
-fn addrs(list: Vec<sm_domain::Addr>) -> Vec<Addr> {
-    list.into_iter().map(Addr::from).collect()
-}
 
 /// A send as its toast and the pending message show it.
 pub(crate) fn outbox_row(record: OutboxRecord) -> OutboxRow {
@@ -24,7 +20,7 @@ pub(crate) fn outbox_row(record: OutboxRecord) -> OutboxRow {
         undo_requested: o.undo_requested,
         toast_closed: o.toast_closed,
         delayed: o.delayed,
-        to: addrs(record.to),
+        to: record.to,
         snippet: record.snippet,
         subject: record.subject,
         undo_entry: record.undo_entry,
@@ -42,10 +38,10 @@ fn message_summary(entry: ConversationMessage) -> MessageSummary {
         starred: m.labels.has(SystemLabel::Starred),
         in_trash: m.labels.has(SystemLabel::Trash),
         in_spam: m.labels.has(SystemLabel::Spam),
-        from: Addr::from(m.from),
-        to: addrs(m.to),
-        cc: addrs(m.cc),
-        bcc: addrs(m.bcc),
+        from: m.from,
+        to: m.to,
+        cc: m.cc,
+        bcc: m.bcc,
         subject: m.subject,
         snippet: m.snippet,
         date: m.date,
@@ -97,7 +93,7 @@ pub(crate) fn conversation(
                 kind: d.kind,
                 target: d.target,
                 started_on_latest: d.started_on_latest,
-                to: addrs(d.to),
+                to: d.to,
                 snippet: d.snippet,
                 updated_at: d.updated_at,
             }

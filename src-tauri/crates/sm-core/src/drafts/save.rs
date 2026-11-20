@@ -71,10 +71,10 @@ pub(crate) fn update(
         .filter(|s| attachments.iter().all(|a| a.id != s.id))
         .collect();
     attachments.extend(unseen);
-    draft.from = from.map(Into::into);
-    draft.to = to.into_iter().map(Into::into).collect();
-    draft.cc = cc.into_iter().map(Into::into).collect();
-    draft.bcc = bcc.into_iter().map(Into::into).collect();
+    draft.from = from;
+    draft.to = to;
+    draft.cc = cc;
+    draft.bcc = bcc;
     draft.subject = subject;
     draft.snippet = snippet(&body_html);
     draft.body_html = body_html;

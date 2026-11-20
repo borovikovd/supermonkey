@@ -2,13 +2,16 @@
 
 use serde::{Deserialize, Serialize};
 
-/// One mailbox, as in a `From` or `To` header. Parsing and formatting header
-/// values is `sm-mime`'s job; this is only the value.
+/// One mailbox: a display name and an address.
+// The docs here land in the UI's binding, so they say only what the UI
+// needs. This is only the value, as in a `From` or `To` header: parsing and
+// formatting header values is `sm-mime`'s job, and `Addr::key` compares two.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(export))]
 pub struct Addr {
     /// The display name. `None` when the header gives only an address.
     pub name: Option<String>,
-    /// The address. [`Addr::key`] compares two, ignoring case.
+    /// The address.
     pub email: String,
 }
 

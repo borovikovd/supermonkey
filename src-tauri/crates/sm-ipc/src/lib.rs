@@ -13,7 +13,6 @@
 
 mod account;
 mod actions;
-mod addr;
 mod commands;
 mod compose;
 mod conversation;
@@ -27,7 +26,6 @@ pub use account::{
 pub use actions::{
     Action, ModifyAction, NumberedAction, Setting, SnoozeChange, Submitted, Unreadable,
 };
-pub use addr::Addr;
 pub use commands::{
     AppEvent, BlockResult, BlockedSender, BlockedSenders, Command, CommandReply, ContactSuggestion,
     LaunchInfo, Replier, Reply, SnoozeChoice, Unsubscribed,
@@ -37,6 +35,7 @@ pub use conversation::{
     AttachmentInfo, ConversationData, DraftSummary, MessageBody, MessageSummary, OutboxRow,
 };
 pub use list::{ListEntry, ListMove, ListRow};
+pub use sm_domain::Addr;
 pub use sm_domain::{
     DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SplitKind, SyncStatus, UndoKind, View,
 };

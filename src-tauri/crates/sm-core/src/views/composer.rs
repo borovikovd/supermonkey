@@ -1,7 +1,7 @@
 //! A draft as its composer shows it.
 
 use sm_domain::{AccountId, DraftId, DraftKind, Rev};
-use sm_ipc::{Addr, DraftAttachment, DraftState};
+use sm_ipc::{DraftAttachment, DraftState};
 use sm_store::{Reads, StoreError};
 
 use crate::drafts::lifecycle;
@@ -32,7 +32,6 @@ pub(crate) fn draft_state(reads: Reads<'_>, id: &DraftId) -> Result<DraftState, 
     };
     let d = record.draft;
     let resumed = !lifecycle::is_fresh(&d);
-    let addrs = |list: Vec<sm_domain::Addr>| list.into_iter().map(Addr::from).collect();
     Ok(DraftState {
         id: d.id,
         account: d.account,
@@ -40,10 +39,10 @@ pub(crate) fn draft_state(reads: Reads<'_>, id: &DraftId) -> Result<DraftState, 
         reply_all: d.reply_all,
         thread: d.thread,
         target: d.target,
-        from: d.from.map(Addr::from),
-        to: addrs(d.to),
-        cc: addrs(d.cc),
-        bcc: addrs(d.bcc),
+        from: d.from,
+        to: d.to,
+        cc: d.cc,
+        bcc: d.bcc,
         subject: d.subject,
         body_html: d.body_html,
         quote_html: d.quote_html,
