@@ -16,7 +16,7 @@ use crate::clock::Clock;
 /// busy until it has resumed, so the core never looks idle between the
 /// firing and the work it starts.
 #[derive(Debug)]
-pub struct Signal {
+pub(crate) struct Signal {
     activity: Arc<Activity>,
     state: Mutex<Waiters>,
 }
@@ -36,7 +36,7 @@ struct Waiter {
 
 impl Signal {
     /// A signal whose wake-ups count in `activity`.
-    pub fn new(activity: Arc<Activity>) -> Self {
+    pub(crate) fn new(activity: Arc<Activity>) -> Self {
         Self {
             activity,
             state: Mutex::new(Waiters::default()),
@@ -44,7 +44,7 @@ impl Signal {
     }
 
     /// Wakes every task waiting now.
-    pub fn fire(&self) {
+    pub(crate) fn fire(&self) {
         let woken: Vec<Arc<Waiter>> = {
             let mut state = self.state.lock();
             std::mem::take(&mut state.waiting).into_values().collect()
@@ -57,13 +57,13 @@ impl Signal {
 
     /// Waits until the signal fires, or for `timeout` of app time on `clock`.
     /// The task is not busy while it waits.
-    pub async fn wait(&self, clock: &dyn Clock, timeout: Duration) {
+    pub(crate) async fn wait(&self, clock: &dyn Clock, timeout: Duration) {
         self.wait_unless(clock, timeout, || false).await;
     }
 
     /// Waits as [`Signal::wait`] does, unless `ready` holds once the wait is
     /// in place: a firing that makes it hold is never missed in between.
-    pub async fn wait_unless(
+    pub(crate) async fn wait_unless(
         &self,
         clock: &dyn Clock,
         timeout: Duration,

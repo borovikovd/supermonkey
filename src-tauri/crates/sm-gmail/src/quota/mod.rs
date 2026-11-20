@@ -17,5 +17,5 @@ mod priority;
 mod scheduler;
 
 pub use limits::{QuotaConfig, Units};
-pub use priority::{InvalidPriority, Priority};
+pub use priority::Priority;
 pub use scheduler::{AccountScheduler, Permit, Scheduler};

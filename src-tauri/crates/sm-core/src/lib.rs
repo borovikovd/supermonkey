@@ -14,18 +14,18 @@
 //! Inside, one writer thread applies every write (`writer`), the
 //! subscription registry lives on it (`subs`), store records become IPC
 //! read models in one place (`views`), and committed effects go to the
-//! effect router ([`effects`]), which hands them to the async workers
+//! effect router (`effects`), which hands them to the async workers
 //! (`workers`): one task group per signed-in account that syncs it with
 //! Gmail, and the Gmail listings of list subscriptions.
 
 pub mod activity;
 pub mod clock;
-pub mod effects;
 
 mod accounts;
 mod actions;
 mod app;
 mod drafts;
+mod effects;
 mod error;
 mod lifecycle;
 mod mail;

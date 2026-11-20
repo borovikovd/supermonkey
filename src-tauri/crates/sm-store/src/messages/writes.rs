@@ -132,7 +132,6 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
             (id, id_list(&parts)?),
         )?;
         reindex(db, id)?;
-        self.tx.record().message(id);
         derive_all(self.tx, BTreeSet::from([thread]))
     }
 
@@ -173,7 +172,6 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
             (message, rev),
             |r| r.get("thread_id"),
         )?;
-        self.tx.record().message(message);
         derive_all(self.tx, thread.into_iter().collect())
     }
 }
@@ -243,7 +241,6 @@ pub(crate) fn upsert_row(
     };
     reindex(db, id)?;
     touched.insert(thread);
-    tx.record().message(id);
     Ok((id, is_new))
 }
 
@@ -275,7 +272,6 @@ fn write_labels(
          WHERE id = :id",
         named_params! { ":id": id, ":labels": to_json("label_ids", labels)?, ":rev": rev },
     )?;
-    tx.record().message(id);
     Ok(thread)
 }
 
@@ -318,7 +314,6 @@ pub(crate) fn delete_row(
         [id],
     )?;
     let changes = tx.record();
-    changes.message(id);
     for draft in aimed {
         changes.draft(account, draft);
     }

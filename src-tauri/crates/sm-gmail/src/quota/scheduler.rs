@@ -125,15 +125,6 @@ impl AccountScheduler {
         }
     }
 
-    /// Waits for a slot and `cost` units at `priority`, then runs `request`.
-    ///
-    /// Dropping the returned future cancels it: a queued request leaves the
-    /// line, and a running one frees its slot.
-    pub async fn run<F: Future>(&self, priority: Priority, cost: Units, request: F) -> F::Output {
-        let _permit = self.acquire(priority, cost).await;
-        request.await
-    }
-
     /// Waits for a slot and `cost` units at `priority`. The slot is held until
     /// the [`Permit`] drops; the units are spent.
     ///

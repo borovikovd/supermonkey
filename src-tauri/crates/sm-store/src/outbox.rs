@@ -8,6 +8,7 @@ use sm_domain::{
 };
 
 use crate::StoreError;
+use crate::changes::Table;
 use crate::db::{Db, json_column_opt};
 use crate::drafts::stamp_thread;
 use crate::tx::{WriteTx, require};
@@ -233,7 +234,7 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
                 ":send_after": new.send_after, ":rev": rev,
             },
         )?);
-        self.changed(new.account, id, [new.thread, None])?;
+        self.changed(new.account, [new.thread, None])?;
         // The draft is in the outbox now.
         self.tx.record().drafts.insert(new.draft);
         Ok(id)
@@ -264,7 +265,7 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
                 ":rev": rev,
             },
         )?;
-        self.changed(row.account, row.id, [thread, row.thread])
+        self.changed(row.account, [thread, row.thread])
     }
 
     /// Deletes a row. Unknown ids are skipped.
@@ -278,7 +279,7 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
             "DELETE FROM outbox WHERE id = ?1",
             [id],
         )?;
-        self.changed(account, id, [thread, None])?;
+        self.changed(account, [thread, None])?;
         // The draft, if kept, is out of the outbox.
         self.tx.record().drafts.insert(draft);
         Ok(())
@@ -306,10 +307,9 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
     fn changed(
         &mut self,
         account: AccountId,
-        id: OutboxId,
         threads: [Option<ThreadId>; 2],
     ) -> Result<(), StoreError> {
-        self.tx.record().outbox(account, id);
+        self.tx.record().touch(account, Table::Outbox);
         for thread in threads.into_iter().flatten() {
             stamp_thread(self.tx, thread)?;
         }

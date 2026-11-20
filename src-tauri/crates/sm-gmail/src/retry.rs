@@ -3,8 +3,8 @@
 //!
 //! Whether to retry is the caller's call: the core's queue and outbox keep an
 //! action pending across retries, and `drafts.create` and `drafts.send` must
-//! not simply be repeated after no clear answer. The waits take a `sleep`
-//! function, so the core sleeps on its own clock.
+//! not simply be repeated after no clear answer. This module only says how
+//! long to wait, so the core sleeps on its own clock.
 
 use std::time::Duration;
 
@@ -46,42 +46,8 @@ impl Backoff {
         wait
     }
 
-    /// Failures in a row so far.
-    #[must_use]
-    pub const fn failures(self) -> u32 {
-        self.failures
-    }
-
     /// Starts over after a success.
     pub const fn reset(&mut self) {
         self.failures = 0;
-    }
-}
-
-/// Runs an idempotent call, retrying transient outcomes
-/// ([`GmailError::is_transient`]) after [`backoff`] waits slept with `sleep`,
-/// up to `max_attempts` calls in all. Never use it for `drafts.create` or
-/// `drafts.send`.
-pub async fn with_retry<T, Call, CallFut, Sleep, SleepFut>(
-    max_attempts: u32,
-    mut sleep: Sleep,
-    mut call: Call,
-) -> Result<T, GmailError>
-where
-    Call: FnMut() -> CallFut,
-    CallFut: Future<Output = Result<T, GmailError>>,
-    Sleep: FnMut(Duration) -> SleepFut,
-    SleepFut: Future<Output = ()>,
-{
-    let mut backoff = Backoff::new();
-    loop {
-        match call().await {
-            Err(err) if err.is_transient() && backoff.failures() + 1 < max_attempts => {
-                let wait = backoff.next_delay(&err);
-                tracing::debug!(outcome = %err.outcome(), ?wait, "retrying a Gmail call");
-                sleep(wait).await;
-            }
-            result => return result,
-        }
     }
 }

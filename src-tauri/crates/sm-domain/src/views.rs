@@ -34,13 +34,6 @@ impl View {
         }
     }
 
-    /// Whether the list sorts by snooze time, soonest first, instead of by
-    /// the latest message, newest first.
-    #[must_use]
-    pub const fn sorts_by_snooze(&self) -> bool {
-        matches!(self, Self::Snoozed)
-    }
-
     /// The Gmail `threads.list` the view also runs while online, since most
     /// archived, labeled, trashed, and spam mail is older than the first sync.
     #[must_use]

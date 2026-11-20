@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use sm_gmail::{GmailError, Outcome, Priority, QuotaConfig, Scheduler, Units, backoff, with_retry};
+use sm_gmail::{Priority, QuotaConfig, Scheduler, Units, backoff};
 use tokio::time::{Instant, sleep};
 
 const A: &str = "a@example.com";
@@ -32,15 +32,19 @@ async fn queued_requests_run_in_priority_order() {
 
     let blocker = account.acquire(Priority::P1, Units(1)).await;
     let mut tasks = Vec::new();
-    for level in [5, 3, 6, 1, 2, 4, 1] {
+    for (level, priority) in [
+        (5, Priority::P5),
+        (3, Priority::P3),
+        (6, Priority::P6),
+        (1, Priority::P1),
+        (2, Priority::P2),
+        (4, Priority::P4),
+        (1, Priority::P1),
+    ] {
         let (account, order) = (account.clone(), Arc::clone(&order));
-        let priority = Priority::try_from(level).unwrap();
         tasks.push(tokio::spawn(async move {
-            account
-                .run(priority, Units(1), async {
-                    order.lock().push(level);
-                })
-                .await;
+            let _permit = account.acquire(priority, Units(1)).await;
+            order.lock().push(level);
         }));
         settle().await;
     }
@@ -77,15 +81,12 @@ async fn at_most_eight_requests_run_at_once_per_account() {
             let account = scheduler.account(email);
             let (running, peak) = (Arc::clone(&running), Arc::clone(&peak));
             tasks.push(tokio::spawn(async move {
-                account
-                    .run(Priority::P2, Units(1), async {
-                        let now = running.fetch_add(1, Ordering::SeqCst) + 1;
-                        peak.fetch_max(now, Ordering::SeqCst);
-                        assert!(account.in_flight() <= 8);
-                        sleep(Duration::from_millis(10)).await;
-                        running.fetch_sub(1, Ordering::SeqCst);
-                    })
-                    .await;
+                let _permit = account.acquire(Priority::P2, Units(1)).await;
+                let now = running.fetch_add(1, Ordering::SeqCst) + 1;
+                peak.fetch_max(now, Ordering::SeqCst);
+                assert!(account.in_flight() <= 8);
+                sleep(Duration::from_millis(10)).await;
+                running.fetch_sub(1, Ordering::SeqCst);
             }));
         }
     }
@@ -220,7 +221,10 @@ async fn dropping_a_queued_or_running_request_frees_its_place() {
     let account = scheduler.account(A);
 
     // A running request that is dropped frees the slot.
-    let stuck = account.run(Priority::P2, Units(40), std::future::pending::<()>());
+    let stuck = async {
+        let _permit = account.acquire(Priority::P2, Units(40)).await;
+        std::future::pending::<()>().await;
+    };
     assert!(
         tokio::time::timeout(Duration::from_secs(1), stuck)
             .await
@@ -307,61 +311,4 @@ fn backoff_doubles_to_a_minute_with_jitter() {
         backoff(3, Some(Duration::from_secs(5))),
         Duration::from_secs(5)
     );
-}
-
-#[tokio::test(start_paused = true)]
-async fn with_retry_retries_transient_outcomes_only() {
-    let calls = AtomicUsize::new(0);
-    let result = with_retry(5, sleep, || async {
-        match calls.fetch_add(1, Ordering::SeqCst) {
-            0 => Err(GmailError::new(Outcome::ServerError { status: 503 })),
-            1 => Err(GmailError::new(Outcome::RateLimited {
-                retry_after: Some(Duration::from_secs(3)),
-            })),
-            2 => Err(GmailError::new(Outcome::NoResponse)),
-            _ => Ok("done"),
-        }
-    })
-    .await;
-    assert_eq!(result.unwrap(), "done");
-    assert_eq!(calls.load(Ordering::SeqCst), 4);
-
-    let calls = AtomicUsize::new(0);
-    let result: Result<(), _> = with_retry(5, sleep, || async {
-        calls.fetch_add(1, Ordering::SeqCst);
-        Err(GmailError::new(Outcome::NotFound))
-    })
-    .await;
-    assert_eq!(result.unwrap_err().outcome(), &Outcome::NotFound);
-    assert_eq!(calls.load(Ordering::SeqCst), 1);
-
-    let calls = AtomicUsize::new(0);
-    let result: Result<(), _> = with_retry(3, sleep, || async {
-        calls.fetch_add(1, Ordering::SeqCst);
-        Err(GmailError::new(Outcome::ServerError { status: 500 }))
-    })
-    .await;
-    assert_eq!(
-        result.unwrap_err().outcome(),
-        &Outcome::ServerError { status: 500 }
-    );
-    assert_eq!(calls.load(Ordering::SeqCst), 3);
-}
-
-#[tokio::test(start_paused = true)]
-async fn with_retry_waits_as_long_as_retry_after_says() {
-    let calls = AtomicUsize::new(0);
-    let start = Instant::now();
-    let result = with_retry(2, sleep, || async {
-        if calls.fetch_add(1, Ordering::SeqCst) == 0 {
-            Err(GmailError::new(Outcome::RateLimited {
-                retry_after: Some(Duration::from_secs(30)),
-            }))
-        } else {
-            Ok("done")
-        }
-    })
-    .await;
-    assert_eq!(result.unwrap(), "done");
-    assert_eq!(Instant::now() - start, Duration::from_secs(30));
 }

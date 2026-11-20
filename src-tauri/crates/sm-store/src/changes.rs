@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use sm_domain::{AccountId, DraftId, MessageId, OutboxId, Rev, ThreadId};
+use sm_domain::{AccountId, DraftId, Rev, ThreadId};
 
 /// A kind of data an account owns in the store, as [`Changes`] records a
 /// write to it. Each is one table, except that Gmail's sync bookkeeping is
@@ -66,16 +66,12 @@ impl Table {
 /// business.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Changes {
-    /// Thread rows written, stamped, or deleted.
+    /// Thread rows written, stamped, or deleted, and the threads of message
+    /// rows written or deleted, bodies included: those are re-derived.
     pub threads: BTreeSet<ThreadId>,
-    /// Message rows written or deleted, bodies included. Their threads are
-    /// re-derived, so they are in `threads` too.
-    pub messages: BTreeSet<MessageId>,
     /// Draft rows written or deleted, and drafts whose outbox row came or
     /// went.
     pub drafts: BTreeSet<DraftId>,
-    /// Outbox rows written or deleted.
-    pub outbox: BTreeSet<OutboxId>,
     /// Each account's tables that had a row added, changed, or removed.
     pub tables: BTreeSet<(AccountId, Table)>,
 }
@@ -108,18 +104,9 @@ impl Changes {
         self.touch(account, Table::Threads);
     }
 
-    pub(crate) fn message(&mut self, message: MessageId) {
-        self.messages.insert(message);
-    }
-
     pub(crate) fn draft(&mut self, account: AccountId, draft: DraftId) {
         self.drafts.insert(draft);
         self.touch(account, Table::Drafts);
-    }
-
-    pub(crate) fn outbox(&mut self, account: AccountId, outbox: OutboxId) {
-        self.outbox.insert(outbox);
-        self.touch(account, Table::Outbox);
     }
 }
 

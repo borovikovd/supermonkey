@@ -41,7 +41,7 @@ Adding a command touches three places, and the build checks each: a line in the 
 
 ## 3. Crates
 
-Crates live under `src-tauri/crates/` with a `ub-` prefix (`sm-domain`, `sm-mime`, `sm-gmail`, `sm-store`, `sm-ipc`, `sm-core`, `sm-bridge`, `sm-testkit`): a crate named `core` would shadow Rust's own. Below and in code paths they are written without the prefix.
+Crates live under `src-tauri/crates/` with an `sm-` prefix (`sm-domain`, `sm-mime`, `sm-gmail`, `sm-store`, `sm-ipc`, `sm-core`, `sm-bridge`, `sm-testkit`): a crate named `core` would shadow Rust's own. Below and in code paths they are written without the prefix.
 
 ```
                  app (src-tauri: Tauri shell, binary `supermonkey`)
@@ -146,7 +146,7 @@ A worker fetches from Gmail, parses and sanitizes the result off the writer thre
 
 - **`Gmail`:** one client per account: base URL, shared `reqwest::Client`, and `Arc<Tokens>`. One method per endpoint, returning `Result<T, GmailError>`. A 401 refreshes once inside.
 - **`Outcome`:** the SPEC's taxonomy, one variant per row of the Gmail errors table (offline, no response, unauthorized, invalid grant, rate limited, server error, not found, conflict, rejected with Google's reason). Callers match on it; nothing parses error strings.
-- **`Scheduler`:** the quota bucket (1,000 capacity, 4,800 per minute refill, background cap) and at most 8 requests at once per account, by priority 1 to 6. `sched.run(Priority, cost, future)` is the only way to call Gmail.
+- **`Scheduler`:** the quota bucket (1,000 capacity, 4,800 per minute refill, background cap) and at most 8 requests at once per account, by priority 1 to 6. `acquire(Priority, cost)` gives the permit a request holds, and is the only way to call Gmail.
 - **`Retry`:** one policy type (back-off with jitter and `Retry-After`) used by the workers, with the per-call exceptions SPEC names (`drafts.create`, `drafts.send`).
 - **OAuth:** the loopback server, PKCE, state check, token refresh shortly before expiry, and revoke. Tokens persist through a `TokenStore` port with two implementations, the 0600 file and memory.
 - **One-click unsubscribe:** the `POST` goes through the same `reqwest::Client`, to `https` only and following no redirect. Debug builds also allow loopback `http`, where the E2E server stands in for a list.

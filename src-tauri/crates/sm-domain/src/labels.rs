@@ -103,12 +103,6 @@ impl SystemLabel {
     pub fn label_id(self) -> LabelId {
         LabelId::from(self.id())
     }
-
-    /// The system label with exactly this id, if any.
-    #[must_use]
-    pub fn from_id(id: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|l| l.id() == id)
-    }
 }
 
 impl fmt::Display for SystemLabel {

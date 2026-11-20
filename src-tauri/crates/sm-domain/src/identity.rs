@@ -56,18 +56,6 @@ impl Identity {
         }
     }
 
-    /// The sign-in address.
-    #[must_use]
-    pub fn email(&self) -> &str {
-        &self.email
-    }
-
-    /// The `sendAs` addresses, as Gmail lists them.
-    #[must_use]
-    pub fn send_as(&self) -> &[SendAsAddress] {
-        &self.send_as
-    }
-
     /// Whether `email` is one of this account's addresses, ignoring case.
     #[must_use]
     pub fn is_mine(&self, email: &str) -> bool {

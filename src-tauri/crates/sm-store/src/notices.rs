@@ -76,17 +76,6 @@ impl<'c> NoticeReads<'c> {
             notice_row,
         )
     }
-
-    /// One notice.
-    pub fn get(self, id: NoticeId) -> Result<Option<NoticeRecord>, StoreError> {
-        self.db.optional(
-            "read a notice",
-            "SELECT id, account_id, kind, message, draft_id, thread_id, created_at
-             FROM notices WHERE id = ?1",
-            [id],
-            notice_row,
-        )
-    }
 }
 
 /// Writes to notices.

@@ -76,11 +76,6 @@ impl TokenFile {
         }
     }
 
-    /// The file's path.
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-
     fn read(&self) -> Result<BTreeMap<String, String>, TokenStoreError> {
         match fs::read(&self.path) {
             Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| TokenStoreError::Damaged {

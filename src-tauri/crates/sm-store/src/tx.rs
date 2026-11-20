@@ -76,12 +76,6 @@ impl<'c> WriteTx<'c> {
         self.rev
     }
 
-    /// What the transaction has changed so far.
-    #[must_use]
-    pub const fn changes(&self) -> &Changes {
-        &self.changes
-    }
-
     /// Reads inside the transaction, seeing its own writes.
     #[must_use]
     pub const fn read(&self) -> Reads<'c> {

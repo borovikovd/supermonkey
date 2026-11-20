@@ -134,10 +134,6 @@ fn a_commit_lists_and_stamps_what_it_wrote() {
     let commit = h.last_commit();
     let thread = stored.thread.unwrap();
     assert_eq!(commit.changes.threads, [thread].into());
-    assert_eq!(
-        commit.changes.messages,
-        stored.added.iter().copied().collect()
-    );
     assert_eq!(stored.added.len(), 2);
     assert_eq!(
         commit.changes.tables,

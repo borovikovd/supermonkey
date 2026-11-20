@@ -69,12 +69,6 @@ impl AccessToken {
         &self.secret
     }
 
-    /// When Google stops accepting it.
-    #[must_use]
-    pub const fn expires_at(&self) -> Instant {
-        self.expires_at
-    }
-
     /// Whether it is still good for a while: it expires after the refresh margin.
     pub(crate) fn is_fresh(&self) -> bool {
         Instant::now() + REFRESH_MARGIN < self.expires_at

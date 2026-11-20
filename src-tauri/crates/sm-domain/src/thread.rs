@@ -1,7 +1,7 @@
 //! A thread, derived from its messages (SPEC Views): the latest message, the
 //! labels that put it in views, and the values its list row shows.
 
-use crate::{Identity, LabelSet, MessageFacts, MessageId, Millis, SystemLabel};
+use crate::{Identity, LabelSet, MessageFacts, Millis, SystemLabel};
 
 /// A thread's stored messages, oldest first (by date, then row id).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -21,12 +21,6 @@ impl Thread {
     #[must_use]
     pub fn messages(&self) -> &[MessageFacts] {
         &self.messages
-    }
-
-    /// The message with this row id.
-    #[must_use]
-    pub fn message(&self, id: MessageId) -> Option<&MessageFacts> {
-        self.messages.iter().find(|m| m.id == id)
     }
 
     /// The messages that are not drafts, oldest first.
@@ -61,12 +55,6 @@ impl Thread {
             .rev()
             .find(|m| m.is_live() && !me.is_mine(&m.from.email))
             .or_else(|| self.latest())
-    }
-
-    /// Whether any message is live. Done, All Mail, and Search skip threads
-    /// with none.
-    pub fn has_live(&self) -> bool {
-        self.messages.iter().any(MessageFacts::is_live)
     }
 
     /// The labels the thread is in (SPEC Views): every label of a live
@@ -183,11 +171,5 @@ impl ThreadDigest<'_> {
     #[must_use]
     pub fn in_spam(&self) -> bool {
         self.labels.has(SystemLabel::Spam)
-    }
-
-    /// Starred.
-    #[must_use]
-    pub fn starred(&self) -> bool {
-        self.labels.has(SystemLabel::Starred)
     }
 }

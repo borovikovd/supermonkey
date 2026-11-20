@@ -17,8 +17,8 @@
 //! clock must not drive them (an E2E run at the production budget waits for
 //! real refills). Tests control this time with tokio's paused clock
 //! (`#[tokio::test(start_paused = true)]`, `tokio::time::advance`), from any
-//! crate. Back-off waits, which are app behavior, take the caller's `sleep`
-//! (see [`with_retry`]); the core sleeps those on its own clock.
+//! crate. Back-off waits are app behavior: [`Backoff`] only says how long,
+//! and the core sleeps on its own clock.
 //!
 //! ## Wiring one account
 //!
@@ -69,10 +69,8 @@ pub use oauth::{
     SignIn, SignInError, Tokens, revoke,
 };
 pub use outcome::{GmailError, Outcome};
-pub use quota::{
-    AccountScheduler, InvalidPriority, Permit, Priority, QuotaConfig, Scheduler, Units,
-};
-pub use retry::{Backoff, backoff, with_retry};
+pub use quota::{AccountScheduler, Permit, Priority, QuotaConfig, Scheduler, Units};
+pub use retry::{Backoff, backoff};
 pub use token_store::{MemoryTokenStore, TokenFile, TokenStore, TokenStoreError};
 pub use unsubscribe::one_click_unsubscribe;
 pub use wire::{

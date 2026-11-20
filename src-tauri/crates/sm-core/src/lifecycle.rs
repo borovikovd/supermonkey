@@ -13,7 +13,7 @@ use crate::actions::{ActionError, Received};
 use crate::activity::{Kick, Tasks};
 use crate::clock::Clock;
 use crate::mail::MAX_ATTACHMENT_BYTES;
-use crate::workers::{AccountWorkers, Network, Notifier, snooze};
+use crate::workers::{AccountWorkers, Notifier, snooze};
 use crate::writer::CoreWriter;
 use crate::{Error, Notification};
 
@@ -45,7 +45,6 @@ pub(crate) struct LifecycleDeps {
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) tasks: Tasks,
     pub(crate) workers: Arc<AccountWorkers>,
-    pub(crate) network: Arc<Network>,
     pub(crate) notifier: Arc<Notifier>,
     /// Wakes the snooze timer.
     pub(crate) snoozes: Arc<Kick>,
@@ -141,17 +140,6 @@ impl Lifecycle {
             self.deps.workers.refresh_all();
         }
         self.deps.notifier.focus(focused)
-    }
-
-    /// Records whether Gmail is reachable, as the outcome of a Gmail call
-    /// does; the app subscription shows it. Ordered with the UI's actions.
-    pub async fn set_online(&self, online: bool) -> Result<(), Error> {
-        self.deps.network.set_online(online);
-        self.deps
-            .writer
-            .call(Priority::Ui, |_, _| Ok::<_, StoreError>(()))
-            .await?;
-        Ok(())
     }
 
     /// Quits: nothing new starts, the writer commits the UI jobs already

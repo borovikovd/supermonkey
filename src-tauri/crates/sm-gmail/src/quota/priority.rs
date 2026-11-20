@@ -19,43 +19,9 @@ pub enum Priority {
 }
 
 impl Priority {
-    /// The level, 1 to 6.
-    #[must_use]
-    pub const fn level(self) -> u8 {
-        match self {
-            Self::P1 => 1,
-            Self::P2 => 2,
-            Self::P3 => 3,
-            Self::P4 => 4,
-            Self::P5 => 5,
-            Self::P6 => 6,
-        }
-    }
-
     /// Priorities 4 to 6, which leave the bucket's reserve to 1 to 3.
     #[must_use]
     pub fn is_background(self) -> bool {
         self >= Self::P4
-    }
-}
-
-/// A priority level outside 1 to 6.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("priority {0} is not between 1 and 6")]
-pub struct InvalidPriority(pub u8);
-
-impl TryFrom<u8> for Priority {
-    type Error = InvalidPriority;
-
-    fn try_from(level: u8) -> Result<Self, Self::Error> {
-        match level {
-            1 => Ok(Self::P1),
-            2 => Ok(Self::P2),
-            3 => Ok(Self::P3),
-            4 => Ok(Self::P4),
-            5 => Ok(Self::P5),
-            6 => Ok(Self::P6),
-            other => Err(InvalidPriority(other)),
-        }
     }
 }

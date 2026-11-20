@@ -70,24 +70,6 @@ async fn a_kick_with_no_waiter_is_kept_busy_for_the_next_wait() {
 }
 
 #[tokio::test]
-async fn a_closed_kick_wakes_its_waiter_and_every_later_wait() {
-    let activity = Activity::new();
-    let kick = Arc::new(Kick::new(Arc::clone(&activity)));
-    let k = Arc::clone(&kick);
-    let waiter = tokio::spawn(async move { k.wait(&SystemClock, Duration::from_secs(3600)).await });
-    until("the waiter waits", || kick.waiters() == 1).await;
-    kick.close();
-    waiter.await.unwrap();
-    // A loop that checked before the close and waits after it: no hour-long wait.
-    tokio::time::timeout(
-        Duration::from_secs(5),
-        kick.wait(&SystemClock, Duration::from_secs(3600)),
-    )
-    .await
-    .expect("a wait after close returns at once");
-}
-
-#[tokio::test]
 async fn advance_fires_due_sleeps_once_and_jump_fires_none() {
     let activity = Activity::new();
     let clock = Arc::new(ManualClock::new(Arc::clone(&activity), Millis(1_000)));

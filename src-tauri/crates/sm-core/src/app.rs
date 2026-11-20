@@ -22,6 +22,12 @@ use crate::workers::{AccountWorkers, Network, Notifier, Searches, WorkerDeps, ba
 use crate::writer::CoreWriter;
 use crate::{Error, Platform};
 
+/// Read-only connections for window fetches, bodies, and autocomplete.
+const READ_CONNECTIONS: NonZeroUsize = match NonZeroUsize::new(4) {
+    Some(n) => n,
+    None => NonZeroUsize::MIN,
+};
+
 /// Where the core keeps its data, how it runs, and which Gmail it talks to.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -30,8 +36,6 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// The SQLite file. Created, or moved aside for a new one, if needed.
     pub db_path: PathBuf,
-    /// Read-only connections for window fetches, bodies, and autocomplete.
-    pub read_connections: NonZeroUsize,
     /// A debug build: the UI shows its keydown-to-paint meter.
     pub debug: bool,
     /// Gmail's endpoints, the OAuth client, and the request budget.
@@ -45,13 +49,12 @@ impl Config {
     /// [`sm_gmail::TokenFile`].
     pub const TOKEN_FILE: &str = "tokens.json";
 
-    /// The app's database in `data_dir`, with four read connections.
+    /// The app's database in `data_dir`.
     #[must_use]
     pub fn in_data_dir(data_dir: &Path, debug: bool, gmail: GmailConfig) -> Self {
         Self {
             data_dir: data_dir.to_path_buf(),
             db_path: data_dir.join(Self::DB_FILE),
-            read_connections: NonZeroUsize::new(4).unwrap_or(NonZeroUsize::MIN),
             debug,
             gmail,
         }
@@ -145,7 +148,7 @@ impl App {
             to_router,
             Arc::clone(&clock),
         )?;
-        let pool = Arc::new(ReadPool::open(&config.db_path, config.read_connections)?);
+        let pool = Arc::new(ReadPool::open(&config.db_path, READ_CONNECTIONS)?);
         let received = resume_numbering(&pool, &writer)?;
         let network = Arc::new(Network::new(writer.clone(), Arc::clone(&activity)));
         let notifier = Arc::new(Notifier::new(Arc::clone(&platform), Arc::clone(&clock)));
@@ -156,7 +159,7 @@ impl App {
                 writer: writer.clone(),
                 pool: Arc::clone(&pool),
                 clock: Arc::clone(&clock),
-                network: Arc::clone(&network),
+                network,
                 notifier: Arc::clone(&notifier),
             }),
             config.gmail,
@@ -193,7 +196,6 @@ impl App {
                     clock,
                     tasks,
                     workers: Arc::clone(&workers),
-                    network,
                     notifier,
                     snoozes,
                 },

@@ -9,6 +9,7 @@ use rusqlite::named_params;
 use sm_domain::{AccountId, Identity, LabelId, Router, SplitId, Thread, ThreadDigest, ThreadId};
 
 use crate::StoreError;
+use crate::changes::Table;
 use crate::tx::{Reads, WriteTx, require};
 
 /// What routing an account's threads needs, read once per transaction.
@@ -123,18 +124,12 @@ pub(crate) fn delete_thread_row(
         [thread],
         |r| r.get("id"),
     )?;
-    let outbox = db.all(
-        "find a thread's outbox rows",
-        "SELECT id FROM outbox WHERE thread_id = ?1",
-        [thread],
-        |r| r.get("id"),
-    )?;
     db.execute(
         "unlink a thread's drafts",
         "UPDATE drafts SET thread_id = NULL, rev = ?2 WHERE thread_id = ?1",
         (thread, rev),
     )?;
-    db.execute(
+    let outbox = db.execute(
         "unlink a thread's outbox rows",
         "UPDATE outbox SET thread_id = NULL, rev = ?2 WHERE thread_id = ?1",
         (thread, rev),
@@ -149,8 +144,8 @@ pub(crate) fn delete_thread_row(
     for draft in drafts {
         changes.draft(account, draft);
     }
-    for row in outbox {
-        changes.outbox(account, row);
+    if outbox > 0 {
+        changes.touch(account, Table::Outbox);
     }
     Ok(())
 }

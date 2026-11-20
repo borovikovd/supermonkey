@@ -153,12 +153,6 @@ impl Gmail {
         })
     }
 
-    /// The account's scheduler, for work that should share its slots.
-    #[must_use]
-    pub const fn scheduler(&self) -> &AccountScheduler {
-        &self.scheduler
-    }
-
     /// `users.getProfile`: the address and the current history cursor. Cost 1.
     pub async fn get_profile(&self, priority: Priority) -> Result<Profile, GmailError> {
         let call = Call::new(

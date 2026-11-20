@@ -97,8 +97,8 @@ impl Actions {
 
     /// The last action number received, applied or still queued: where a
     /// reloaded page continues, so it never reuses a number still queued.
-    #[must_use]
-    pub fn last_received(&self) -> ActionNo {
+    #[cfg(test)]
+    pub(crate) fn last_received(&self) -> ActionNo {
         self.received.last()
     }
 

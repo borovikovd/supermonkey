@@ -1,8 +1,6 @@
 //! Settings: on or off by key, global (account 0) or per account. Stored as
 //! the key's text and `on` or `off`.
 
-use std::collections::BTreeMap;
-
 use rusqlite::named_params;
 use sm_domain::{AccountId, SettingKey};
 
@@ -40,17 +38,6 @@ impl<'c> SettingReads<'c> {
             Some(OFF) => false,
             _ => key.default_on(),
         })
-    }
-
-    /// Every stored value of one account, or the global ones, by key.
-    pub fn all(self, account: AccountId) -> Result<BTreeMap<String, String>, StoreError> {
-        let pairs = self.db.all(
-            "read settings",
-            "SELECT key, value FROM settings WHERE account_id = ?1",
-            [account],
-            |r| Ok((r.get("key")?, r.get("value")?)),
-        )?;
-        Ok(pairs.into_iter().collect())
     }
 }
 

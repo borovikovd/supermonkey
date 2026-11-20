@@ -165,7 +165,7 @@ impl Tasks {
 
 /// Runs `fut` in the current task, busy as `label` until it ends or parks:
 /// for work that runs outside the core's tasks but must count, such as a
-/// debug web bridge command. Inside it, [`parked`] and [`waiting_on_person`]
+/// debug web bridge command. Inside it, `parked` and [`waiting_on_person`]
 /// work as in a spawned task.
 pub async fn busy_scope<F: Future>(
     activity: &Arc<Activity>,
@@ -184,7 +184,7 @@ pub async fn busy_scope<F: Future>(
 /// wait is registered (a timer with the clock, a waiter with its signal)
 /// before the core can look idle: a test that advances the clock to the
 /// next timer once the core is idle then always finds it.
-pub async fn parked<F: Future>(fut: F) -> F::Output {
+pub(crate) async fn parked<F: Future>(fut: F) -> F::Output {
     let mut wait = Wait {
         task: TASK.try_with(Arc::clone).ok(),
         parked: false,

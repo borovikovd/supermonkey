@@ -68,18 +68,6 @@ impl ThreadRow {
     pub fn starred(&self) -> bool {
         self.labels.has(SystemLabel::Starred)
     }
-
-    /// In Trash.
-    #[must_use]
-    pub fn in_trash(&self) -> bool {
-        self.labels.has(SystemLabel::Trash)
-    }
-
-    /// In Spam.
-    #[must_use]
-    pub fn in_spam(&self) -> bool {
-        self.labels.has(SystemLabel::Spam)
-    }
 }
 
 /// One thread in a view list, in order.

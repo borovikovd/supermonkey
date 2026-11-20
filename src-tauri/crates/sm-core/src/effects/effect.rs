@@ -9,7 +9,7 @@ use crate::Notification;
 /// writer state; the writer releases them to the router only once the
 /// commit has landed, and drops them when it rolls back.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Effect {
+pub(crate) enum Effect {
     /// A conversation was subscribed: fetch its bodies if any are missing
     /// (SPEC Sync, priority 2).
     FetchThread {
@@ -81,33 +81,9 @@ pub enum Effect {
     Snoozes,
 }
 
-impl Effect {
-    /// The variant's name, for logs.
-    #[must_use]
-    pub const fn name(&self) -> &'static str {
-        match self {
-            Self::FetchThread { .. } => "fetch thread",
-            Self::ThreadUnneeded(_) => "thread unneeded",
-            Self::GmailList { .. } => "gmail list",
-            Self::CancelSub(_) => "cancel sub",
-            Self::DraftParts { .. } => "draft parts",
-            Self::DraftFilesGone(_) => "draft files gone",
-            Self::DraftBack(_) => "draft back",
-            Self::ReadDraft { .. } => "read draft",
-            Self::Outbox(_) => "outbox",
-            Self::RefreshLabels(_) => "refresh labels",
-            Self::AccountRemoved { .. } => "account removed",
-            Self::Badge => "badge",
-            Self::Ops(_) => "ops",
-            Self::Notify(_) => "notify",
-            Self::Snoozes => "snoozes",
-        }
-    }
-}
-
 /// The Gmail `threads.list` a list subscription merges into its local rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GmailQuery {
+pub(crate) enum GmailQuery {
     /// A search box query, as Gmail should get it; it waits for typing to
     /// pause.
     Search(String),

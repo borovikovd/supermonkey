@@ -5,5 +5,5 @@
 mod effect;
 mod router;
 
-pub use effect::{Effect, GmailQuery};
+pub(crate) use effect::{Effect, GmailQuery};
 pub(crate) use router::{EffectSender, Router};
