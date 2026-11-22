@@ -18,6 +18,14 @@ use crate::read::read;
 use crate::writer::CoreWriter;
 use crate::{Error, GmailConfig};
 
+#[derive(Clone)]
+pub(crate) struct GoogleAccess {
+    pub(crate) gmail: GmailConfig,
+    pub(crate) http: HttpClient,
+    pub(crate) tokens: Arc<TokenFile>,
+    pub(crate) grants: Arc<Grants>,
+}
+
 pub(crate) struct AccountWorkers {
     deps: Arc<WorkerDeps>,
     gmail: GmailConfig,
@@ -51,17 +59,17 @@ impl Live {
 }
 
 impl AccountWorkers {
-    pub(crate) fn new(
-        deps: Arc<WorkerDeps>,
-        gmail: GmailConfig,
-        http: HttpClient,
-        tokens: Arc<TokenFile>,
-        tasks: Tasks,
-    ) -> Arc<Self> {
+    pub(crate) fn new(deps: Arc<WorkerDeps>, google: GoogleAccess, tasks: Tasks) -> Arc<Self> {
+        let GoogleAccess {
+            gmail,
+            http,
+            tokens,
+            grants,
+        } = google;
         let live = Arc::new(Live {
             workers: Mutex::new(HashMap::new()),
             writer: deps.writer.clone(),
-            grants: Arc::default(),
+            grants,
         });
         let (sign_outs, reports) = mpsc::unbounded_channel();
         tasks.spawn("sign outs", sign_out_reports(Arc::clone(&live), reports));
@@ -80,26 +88,6 @@ impl AccountWorkers {
             launched: AtomicBool::new(false),
             removals: watch::Sender::new(0),
         })
-    }
-
-    pub(crate) const fn gmail_config(&self) -> &GmailConfig {
-        &self.gmail
-    }
-
-    pub(crate) const fn http(&self) -> &HttpClient {
-        &self.http
-    }
-
-    pub(crate) const fn tokens(&self) -> &Arc<TokenFile> {
-        &self.tokens
-    }
-
-    pub(crate) fn writer(&self) -> &CoreWriter {
-        &self.deps.writer
-    }
-
-    pub(crate) fn grants(&self) -> &Arc<Grants> {
-        &self.live.grants
     }
 
     pub(crate) fn get(&self, account: AccountId) -> Option<AccountWorker> {
@@ -251,7 +239,7 @@ impl AccountWorkers {
         Ok(())
     }
 
-    pub(crate) fn mark_signed_out(&self, account: AccountId, grant: Grant) {
+    fn mark_signed_out(&self, account: AccountId, grant: Grant) {
         mark_signed_out(&self.live, account, grant);
     }
 
@@ -272,10 +260,6 @@ impl AccountWorkers {
         for worker in self.all() {
             worker.release_opened(thread);
         }
-    }
-
-    pub(crate) fn retry_now(&self) {
-        self.deps.network.retry_now();
     }
 
     pub(crate) async fn removals_done(&self) {

@@ -8,13 +8,15 @@ use sm_gmail::{Gmail, Priority, RefreshToken, Scheduler, SignIn, Tokens};
 use sm_store::{Priority as WritePriority, StoreError};
 use tokio_util::sync::CancellationToken;
 
-use crate::workers::{AccountWorkers, Grant};
+use crate::workers::{AccountWorkers, GoogleAccess, Grant, Network};
 use crate::writer::CoreWriter;
 use crate::{Error, Platform};
 
 pub struct Accounts {
     writer: CoreWriter,
     workers: Arc<AccountWorkers>,
+    network: Arc<Network>,
+    google: GoogleAccess,
     platform: Arc<dyn Platform>,
     waiting: Mutex<Option<(u64, CancellationToken)>>,
     next: AtomicU64,
@@ -35,11 +37,15 @@ impl Accounts {
     pub(crate) fn new(
         writer: CoreWriter,
         workers: Arc<AccountWorkers>,
+        network: Arc<Network>,
+        google: GoogleAccess,
         platform: Arc<dyn Platform>,
     ) -> Self {
         Self {
             writer,
             workers,
+            network,
+            google,
             platform,
             waiting: Mutex::default(),
             next: AtomicU64::default(),
@@ -99,11 +105,11 @@ impl Accounts {
     }
 
     pub fn retry_now(&self) {
-        self.workers.retry_now();
+        self.network.retry_now();
     }
 
     async fn signed_in_row(&self, email: &str) -> Result<(AccountId, Grant), Error> {
-        let (email, grants) = (email.to_owned(), Arc::clone(self.workers.grants()));
+        let (email, grants) = (email.to_owned(), Arc::clone(&self.google.grants));
         let signed_in = self
             .writer
             .call(WritePriority::Ui, move |tx, _| {
@@ -123,7 +129,7 @@ impl Accounts {
     async fn keep_token(&self, email: &str, token: &RefreshToken) -> Result<(), Error> {
         self.workers.removals_done().await;
         let (store, email, token) = (
-            Arc::clone(self.workers.tokens()),
+            Arc::clone(&self.google.tokens),
             email.to_owned(),
             token.clone(),
         );
@@ -152,14 +158,14 @@ impl Accounts {
     }
 
     async fn sign_in_once(&self) -> Result<SignedIn, Error> {
-        let config = self.workers.gmail_config();
+        let config = &self.google.gmail;
         if config.oauth.client_id.is_empty() {
             return Err(Error::Invalid(
                 "This build has no Google OAuth client. Put google-oauth-client.json in the project and rebuild."
                     .to_owned(),
             ));
         }
-        let http = self.workers.http();
+        let http = &self.google.http;
         let sign_in = SignIn::start(config.oauth.clone()).await?;
         self.platform.open_sign_in(sign_in.consent_url())?;
         let grant = sign_in.finish(http, self.workers.removals_done()).await?;

@@ -23,12 +23,19 @@ pub(crate) struct GmailPage {
     pub(crate) token: Option<PageToken>,
 }
 
-#[derive(Default)]
 pub(crate) struct Searches {
     running: Arc<Runs<SubId>>,
+    writer: CoreWriter,
 }
 
 impl Searches {
+    pub(crate) fn new(writer: CoreWriter) -> Self {
+        Self {
+            running: Arc::default(),
+            writer,
+        }
+    }
+
     pub(crate) fn start(
         &self,
         workers: &AccountWorkers,
@@ -39,15 +46,15 @@ impl Searches {
         let GmailPage { query, token: page } = request;
         self.cancel(&sub);
         let Some(worker) = workers.get(account) else {
-            settle(workers.writer(), sub, Vec::new(), None);
+            settle(&self.writer, sub, Vec::new(), None);
             return;
         };
         let listing = Listing {
             run: self.running.replace(sub.clone()),
-            to_settle: Some((workers.writer().clone(), sub.clone())),
+            to_settle: Some((self.writer.clone(), sub.clone())),
         };
         let progress = Progress {
-            writer: workers.writer().clone(),
+            writer: self.writer.clone(),
             sub,
             first: page.is_none(),
         };

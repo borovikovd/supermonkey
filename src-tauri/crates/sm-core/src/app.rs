@@ -15,7 +15,9 @@ use crate::effects::{EffectReceiver, Router};
 use crate::lifecycle::{Lifecycle, LifecycleDeps};
 use crate::mail::Mail;
 use crate::queries::Queries;
-use crate::workers::{AccountWorkers, DraftFiles, Network, Notifier, Searches, WorkerDeps, badge};
+use crate::workers::{
+    AccountWorkers, DraftFiles, GoogleAccess, Network, Notifier, Searches, WorkerDeps, badge,
+};
 use crate::writer::CoreWriter;
 use crate::{Error, Platform};
 
@@ -117,8 +119,13 @@ impl App {
         let received = resume_numbering(&pool, &writer)?;
         let network = Arc::new(Network::new(writer.clone(), Arc::clone(&activity)));
         let notifier = Arc::new(Notifier::new(Arc::clone(&platform), Arc::clone(&clock)));
-        let snoozes = Arc::new(Kick::new(Arc::clone(&activity)));
         let draft_files = Arc::new(DraftFiles::new(&config.data_dir, tasks.clone()));
+        let google = GoogleAccess {
+            gmail: config.gmail,
+            http: HttpClient::new()?,
+            tokens,
+            grants: Arc::default(),
+        };
         let workers = AccountWorkers::new(
             Arc::new(WorkerDeps {
                 data_dir: config.data_dir,
@@ -126,15 +133,12 @@ impl App {
                 writer: writer.clone(),
                 pool: Arc::clone(&pool),
                 clock: Arc::clone(&clock),
-                network,
+                network: Arc::clone(&network),
                 notifier: Arc::clone(&notifier),
             }),
-            config.gmail,
-            HttpClient::new()?,
-            tokens,
+            google.clone(),
             tasks.clone(),
         );
-        let badge = Arc::new(Kick::new(Arc::clone(&activity)));
         let parts = Parts {
             core: LifecycleDeps {
                 writer,
@@ -144,11 +148,13 @@ impl App {
                 tasks,
                 workers,
                 notifier,
-                snoozes,
+                snoozes: Arc::new(Kick::new(Arc::clone(&activity))),
             },
             draft_files,
+            network,
+            google,
         };
-        start_effects(&parts, from_writers, badge, &platform);
+        start_effects(&parts, from_writers, &activity, &platform);
         Ok(Self::assemble(parts, platform, config.debug))
     }
 
@@ -156,6 +162,8 @@ impl App {
         let Parts {
             core: deps,
             draft_files,
+            network,
+            google,
         } = parts;
         let actions = Actions::new(
             deps.writer.clone(),
@@ -164,16 +172,19 @@ impl App {
             deps.tasks.clone(),
         );
         let queries = Queries::new(Arc::clone(&deps.pool), Arc::clone(&deps.clock));
-        let accounts = Accounts::new(
-            deps.writer.clone(),
-            Arc::clone(&deps.workers),
-            Arc::clone(&platform),
-        );
         let mail = Mail::new(
-            platform,
+            Arc::clone(&platform),
             Arc::clone(&deps.workers),
             Arc::clone(&deps.pool),
             draft_files,
+            google.http.clone(),
+        );
+        let accounts = Accounts::new(
+            deps.writer.clone(),
+            Arc::clone(&deps.workers),
+            network,
+            google,
+            platform,
         );
         #[cfg(test)]
         let writer = deps.writer.clone();
@@ -228,18 +239,21 @@ fn resume_numbering(pool: &ReadPool, writer: &CoreWriter) -> Result<Arc<Received
 struct Parts {
     core: LifecycleDeps,
     draft_files: Arc<DraftFiles>,
+    network: Arc<Network>,
+    google: GoogleAccess,
 }
 
 fn start_effects(
     parts: &Parts,
     effects: EffectReceiver,
-    badge: Arc<Kick>,
+    activity: &Arc<Activity>,
     platform: &Arc<dyn Platform>,
 ) {
     let deps = &parts.core;
+    let badge = Arc::new(Kick::new(Arc::clone(activity)));
     let router = Router {
         workers: Arc::clone(&deps.workers),
-        searches: Searches::default(),
+        searches: Searches::new(deps.writer.clone()),
         draft_files: Arc::clone(&parts.draft_files),
         notifier: Arc::clone(&deps.notifier),
         snoozes: Arc::clone(&deps.snoozes),

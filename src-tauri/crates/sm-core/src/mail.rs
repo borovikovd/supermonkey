@@ -6,7 +6,7 @@ use sm_ipc::{BlockResult, BlockedSenders, DraftAttachment, Unsubscribed};
 use sm_store::ReadPool;
 use url::Url;
 
-use sm_gmail::FilterId;
+use sm_gmail::{FilterId, HttpClient};
 
 use crate::workers::{AccountWorker, AccountWorkers, DraftFiles, open_attachment, unwanted};
 use crate::{Error, Platform};
@@ -16,6 +16,7 @@ pub struct Mail {
     workers: Arc<AccountWorkers>,
     pool: Arc<ReadPool>,
     draft_files: Arc<DraftFiles>,
+    http: HttpClient,
 }
 
 impl fmt::Debug for Mail {
@@ -39,12 +40,14 @@ impl Mail {
         workers: Arc<AccountWorkers>,
         pool: Arc<ReadPool>,
         draft_files: Arc<DraftFiles>,
+        http: HttpClient,
     ) -> Self {
         Self {
             platform,
             workers,
             pool,
             draft_files,
+            http,
         }
     }
 
@@ -100,7 +103,7 @@ impl Mail {
         thread: ThreadId,
     ) -> Result<Unsubscribed, Error> {
         let worker = self.worker(account)?;
-        unwanted::unsubscribe(worker.ctx(), self.workers.http(), &*self.platform, thread).await
+        unwanted::unsubscribe(worker.ctx(), &self.http, &*self.platform, thread).await
     }
 
     pub async fn block(

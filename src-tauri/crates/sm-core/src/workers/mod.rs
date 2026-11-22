@@ -23,5 +23,5 @@ pub(crate) use files::DraftFiles;
 pub(crate) use grants::Grant;
 pub(crate) use network::Network;
 pub(crate) use notifications::Notifier;
-pub(crate) use registry::AccountWorkers;
+pub(crate) use registry::{AccountWorkers, GoogleAccess};
 pub(crate) use search::{GmailPage, Searches};
