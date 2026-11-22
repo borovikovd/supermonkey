@@ -1,7 +1,7 @@
 import type { App } from "./app.ts";
 import type { LoggedRequest, Outcome } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
-import { inOrder, liveMessageHas, messagesOf } from "./helpers.ts";
+import { inOrder, liveMessageHas, messagesOf, threadHas } from "./helpers.ts";
 import * as seeds from "./seeds.ts";
 import { A } from "./seeds.ts";
 
@@ -258,8 +258,8 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
 
   a = await gmail.gmail(A);
   expect(liveMessageHas(a, t("p2"), "INBOX")).toBe(true);
-  expect(liveMessageHas(a, t("p2"), "TRASH")).toBe(false);
-  expect(liveMessageHas(a, t("p3"), "SPAM")).toBe(false);
+  expect(threadHas(a, t("p2"), "TRASH")).toBe(false);
+  expect(threadHas(a, t("p3"), "SPAM")).toBe(false);
   expect(liveMessageHas(a, t("p4"), "STARRED")).toBe(false);
   expect(liveMessageHas(a, t("p6"), "UNREAD")).toBe(false);
   expect(liveMessageHas(a, t("p5"), s.label(A, "Travel"))).toBe(false);
