@@ -1,22 +1,3 @@
-//! Test and demo support (ARCHITECTURE.md, sections 3 and 13): the E2E
-//! server, its `/__test` control API, and the recording platform; demo
-//! mode ([`Demo`]); and the perf fixture ([`fixture`]). Linked only into
-//! debug builds with the `fake` feature.
-//!
-//! [`run`] serves, on one origin:
-//! - the debug web bridge (`/invoke`, `/events`) over the real core;
-//! - the `/__test` control API that `e2e/control.ts` calls;
-//! - the remote image host (`/img`) and a sink for hostile links (`/sink`);
-//! - the built UI for every other path.
-//!
-//! The core runs against the fake Gmail, in a temporary data folder, on a
-//! manual clock. A test seeds accounts and mail through `/__test`, calls
-//! `POST /__test/start` to launch the core, and only then loads the page.
-//! `POST /__test/stop` quits (or crashes) the core in-process; the next
-//! `start` relaunches it on the same database, fake Gmail, and clock. Time
-//! moves only through `/__test/clock`, and `/__test/idle` waits until the
-//! core has nothing left to do.
-
 mod control;
 mod demo;
 pub mod fixture;
@@ -41,11 +22,6 @@ use sm_gmail::{OAuthConfig, TokenFile};
 use crate::platform::RecordingPlatform;
 use crate::server::{Core, Server, fast_quota};
 
-/// Runs the E2E server on 127.0.0.1:`port` (0 picks a free one) until the
-/// process is told to stop (`SIGTERM` or `SIGINT`), serving the UI from
-/// `dist`. App time starts at `now`. Prints `READY <url>` on stdout once
-/// listening. Its temporary data folder is deleted on the way out: a test
-/// run starts hundreds of servers, and each folder holds a database.
 pub async fn run(port: u16, dist: PathBuf, now: Millis) -> anyhow::Result<()> {
     let dir = tempfile::tempdir()?;
     let data_dir = dir.path().to_path_buf();
@@ -97,7 +73,6 @@ pub async fn run(port: u16, dist: PathBuf, now: Millis) -> anyhow::Result<()> {
     {
         println!("READY http://{addr}");
     }
-    // Not a graceful shutdown: the page's event stream never ends on its own.
     tokio::select! {
         result = axum::serve(listener, routes).into_future() => result?,
         signal = told_to_stop() => signal?,
@@ -106,7 +81,6 @@ pub async fn run(port: u16, dist: PathBuf, now: Millis) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Waits for `SIGTERM` (how the test runner stops a server) or `SIGINT`.
 async fn told_to_stop() -> std::io::Result<()> {
     use tokio::signal::unix::{SignalKind, signal};
     let mut terminate = signal(SignalKind::terminate())?;

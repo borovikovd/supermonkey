@@ -1,6 +1,3 @@
-// The inline reply composer: opening it, addressing, quoting, forwarding,
-// which draft each key resumes, and drafts that come from Gmail
-// (SPEC Reply composer, Addressing).
 import type { App } from "./app.ts";
 import type { Control, GmailMessage, Hold } from "./control.ts";
 import { attachment, files } from "./files.ts";
@@ -9,16 +6,12 @@ import { attachments, findPart, htmlOf, parseMime } from "./mime.ts";
 import * as seeds from "./seeds.ts";
 import { A, A_ALIAS, PERSONS, dates } from "./seeds.ts";
 
-// ------------------------------------------------------------------ helpers
-
-/** Every address in a header, lower-cased, in order. */
 function emails(header: string | undefined): string[] {
   return [...(header ?? "").matchAll(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)].map((m) =>
     m[0].toLowerCase(),
   );
 }
 
-/** Mail this app sent: SENT and carrying its draft header. */
 async function sentByApp(gmail: Control, account: string): Promise<GmailMessage[]> {
   const { messages } = await gmail.gmail(account);
   return messages.filter(
@@ -26,7 +19,6 @@ async function sentByApp(gmail: Control, account: string): Promise<GmailMessage[
   );
 }
 
-/** The one message the app sent whose HTML contains `marker`. */
 async function sentWith(gmail: Control, account: string, marker: string): Promise<GmailMessage> {
   const found = (await sentByApp(gmail, account)).filter((m) =>
     htmlOf(parseMime(m.raw)).includes(marker),
@@ -37,14 +29,12 @@ async function sentWith(gmail: Control, account: string, marker: string): Promis
   return m;
 }
 
-/** Opens a conversation by clicking its row. */
 async function open(app: App, subject: string): Promise<void> {
   await app.row(subject).first().click();
   await expect(app.conversationTitle).toHaveText(subject);
   await app.settle();
 }
 
-/** Runs `step` for each item, one after another. */
 async function inOrder<T>(
   items: readonly T[],
   step: (item: T, i: number) => Promise<void>,
@@ -55,7 +45,6 @@ async function inOrder<T>(
   );
 }
 
-/** Highlights a list row with `j` or `k` without opening it. */
 async function highlight(app: App, subject: string): Promise<void> {
   await expect(app.row(subject)).toHaveCount(1);
   const keys = await app.rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-row")));
@@ -69,7 +58,6 @@ async function highlight(app: App, subject: string): Promise<void> {
   await expect(app.highlighted).toContainText(subject);
 }
 
-/** Sends the composer on screen once its autosave has run, and lets the outbox send it. */
 async function send(app: App): Promise<void> {
   await app.settle();
   await app.press("Meta+Enter");
@@ -78,14 +66,12 @@ async function send(app: App): Promise<void> {
   await app.settle();
 }
 
-/** Closes the composer as two `Esc` presses do. */
 async function closeComposer(app: App): Promise<void> {
   await app.press("Escape", "Escape");
   await expect(app.editor).toHaveCount(0);
   await app.settle();
 }
 
-/** The composer's quote block, opened with `•••`; its text. */
 async function quoteText(app: App): Promise<string> {
   await app.page.getByTitle("Show quoted text").click();
   const body = app.page.locator('iframe[title="quoted"]').contentFrame().locator("body");
@@ -93,7 +79,6 @@ async function quoteText(app: App): Promise<string> {
   return (await body.innerText()).replace(/\s+/g, " ").trim();
 }
 
-/** The From button (shown only with more than one sendAs address). */
 function fromButton(app: App) {
   return app.page
     .locator("div")
@@ -102,27 +87,20 @@ function fromButton(app: App) {
     .getByRole("button");
 }
 
-/** Addresses of the chips in a field. */
 async function chipAddresses(app: App, field: "To" | "Cc" | "Bcc"): Promise<string[]> {
   return app.chips(field).evaluateAll((els) => els.map((el) => el.getAttribute("data-chip") ?? ""));
 }
 
-/** Draft stubs in the open conversation. */
 function stubs(app: App) {
   return app.conversation.getByRole("button", { name: /^Draft/ });
 }
-
-// ------------------------------------------------------------------ cases
 
 test("REP-01 r on the list opens the reply composer under the thread, in view below a long message, ready to type", async ({
   app,
   gmail,
 }) => {
-  // Short enough that the thread does not fit: the composer opens below the fold
-  // unless the view scrolls to it.
   await app.page.setViewportSize({ width: 1280, height: 500 });
   const s = await seeds.standard(gmail, app);
-  // The thread's latest message is long, taller than the window on its own.
   await gmail.deliver({
     account: A,
     from: "Dave Diaz <dave@corp.test>",
@@ -132,7 +110,6 @@ test("REP-01 r on the list opens the reply composer under the thread, in view be
     inReplyTo: s.latest("plan").messageId,
   });
   await app.settle();
-  // `r` on the list row.
   await highlight(app, "Q4 plan");
   await app.reply("r");
   await expect(app.conversationTitle).toHaveText("Q4 plan");
@@ -142,10 +119,7 @@ test("REP-01 r on the list opens the reply composer under the thread, in view be
     "xpath=ancestor::div[.//button[normalize-space(.)='Send']][1]",
   );
   await expect(app.editor).toHaveText("Thanks");
-  // Scrolled into view, it can sit a fraction of a pixel short: scroll offsets are
-  // whole pixels and the card's height is not.
   await expect(composer).toBeInViewport({ ratio: 0.99 });
-  // Below the long message, the last one.
   await expect(
     app.messages.last().locator("iframe[data-frame]").contentFrame().locator("body"),
   ).toContainText("Line 60 of a long read.");
@@ -153,7 +127,6 @@ test("REP-01 r on the list opens the reply composer under the thread, in view be
   const box = await composer.boundingBox();
   if (!last || !box) throw new Error("the last message or the composer has no box");
   expect(box.y).toBeGreaterThanOrEqual(last.y + last.height);
-  // The selection bar is on the last message, the target.
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
   await expect(app.selectedMessage).toHaveCount(1);
   expect(await chipAddresses(app, "To")).toEqual(["dave@corp.test"]);
@@ -161,7 +134,6 @@ test("REP-01 r on the list opens the reply composer under the thread, in view be
     app.page.getByText("⌘Enter to Send", { exact: true }).locator("xpath=../.."),
   ).toHaveText(/⌘Enter to Send\s*·\s*Esc to close\s*·\s*⌘K for commands/);
 
-  // The thread is still rendered above, and scrolling up shows it.
   await expect(app.conversationTitle).toHaveText("Q4 plan");
   await expect(app.messages.first()).toContainText("Carol Chen");
   const box2 = await composer.boundingBox();
@@ -174,7 +146,6 @@ test("REP-01 r on the list opens the reply composer under the thread, in view be
 test("REP-02 what r, Enter, and f do on the list and in a conversation", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
 
-  // On the list, with addr highlighted.
   await highlight(app, "Offsite venue");
   await app.reply("r");
   await expect(app.conversationTitle).toHaveText("Offsite venue");
@@ -198,7 +169,6 @@ test("REP-02 what r, Enter, and f do on the list and in a conversation", async (
   await closeComposer(app);
   await app.press("Escape");
 
-  // In a conversation, with m9 selected.
   await open(app, "Q4 plan");
   await app.press("p", "p", "p");
   await expect(app.selectedMessage).toContainText("Plan message 9");
@@ -210,8 +180,6 @@ test("REP-02 what r, Enter, and f do on the list and in a conversation", async (
   await closeComposer(app);
   await expect(app.selectedMessage).toContainText("Plan message 9");
 
-  // Enter is reply all. m9 went To Ana only, so its Cc has no one left once
-  // Ana's own addresses are left out (SPEC Addressing).
   await app.reply("Enter");
   await expect(app.selectedMessage).toContainText("Plan message 9");
   expect(await chipAddresses(app, "To")).toEqual(["carol@corp.test"]);
@@ -228,7 +196,6 @@ test("REP-02 what r, Enter, and f do on the list and in a conversation", async (
 test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
   test.slow();
   const s = await seeds.standard(gmail, app);
-  // Gus copies himself, so reply all's To (Gus) is also among the message's Cc.
   const selfCopy = await gmail.deliver({
     account: A,
     from: "Gus Grant <gus@guild.test>",
@@ -237,9 +204,6 @@ test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
     subject: "Self copy",
     text: "Copying myself.",
   });
-  // Sent to two of the account's addresses: To wins over Cc, then the first.
-  // The default address is listed first in sendAs, so a sendAs-order pick
-  // would answer both from ana@acme.test.
   const aliasInTo = await gmail.deliver({
     account: A,
     from: "Gus Grant <gus@guild.test>",
@@ -261,8 +225,6 @@ test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
     title: s.thread(key).subject,
     threadId: s.thread(key).threadId,
   });
-  // Subjects get `Re:` unless they already start with it (SPEC Addressing): own's latest
-  // message is "Re: Budget draft".
   const rows = [
     {
       ...seeded("addr"),
@@ -299,7 +261,6 @@ test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
       from: A_ALIAS,
       subject: "Re: Alias note",
     },
-    // SPEC Addressing puts the message's other To on Cc.
     {
       ...seeded("news1"),
       to: ["news@letters.test"],
@@ -307,7 +268,6 @@ test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
       from: A,
       subject: "Re: Digest: week 44",
     },
-    // Reply all leaves the To address off Cc.
     {
       key: "selfCopy",
       title: "Self copy",
@@ -317,7 +277,6 @@ test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
       from: A,
       subject: "Re: Self copy",
     },
-    // Two of the account's addresses: To before Cc, then the first in To.
     {
       key: "aliasInTo",
       title: "Alias in To",
@@ -380,7 +339,6 @@ test("REP-04 a sent reply stays on the thread and carries Gmail's quote", async 
   await app.reply("r");
   await app.type("Sounds good");
 
-  // The quote is a collapsed, read-only block outside the editable document.
   await expect(app.page.locator('iframe[title="quoted"]')).toHaveCount(0);
   const quote = await quoteText(app);
   expect(quote).toMatch(/^On .*Carol Chen.* wrote:.*Which venue should we book/);
@@ -406,7 +364,6 @@ test("REP-04 a sent reply stays on the thread and carries Gmail's quote", async 
     .trim();
   expect(quoted).toMatch(/^On .*Carol Chen.* wrote:.*Which venue should we book/);
 
-  // The reply is the latest message, and no Sending row is left.
   await expect(app.messages).toHaveCount(2);
   await expect(app.messages.last()).toContainText("Me to Carol");
   await expect(app.conversation.getByText("Sending", { exact: true })).toHaveCount(0);
@@ -422,13 +379,11 @@ test("REP-05 the reply follows the selected message", async ({ app, gmail }) => 
   await send(app);
   await expect(app.messages).toHaveCount(2);
 
-  // The forward is now the latest message: r answers Kim.
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
   await app.reply("r");
   expect(await chipAddresses(app, "To")).toEqual(["kim@kite.test"]);
   await closeComposer(app);
 
-  // `p` to Alice's message, then r, answers Alice.
   await app.press("p");
   await expect(app.selectedMessage).toContainText("Alice Adams");
   await app.reply("r");
@@ -482,26 +437,22 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   const atM12 = () => expect(m12).toHaveAttribute("aria-current", "true");
   const atM9 = () => expect(app.selectedMessage).toContainText("Plan message 9");
 
-  // R1, a reply aimed at m12.
   await app.reply("r");
   await app.type("R1 marker");
   await closeComposer(app);
   await expect(stubs(app)).toHaveCount(1);
 
-  // R1 | m12, r | R1 is resumed.
   await atM12();
   await app.reply("r");
   await atM12();
   await expect(app.editor).toHaveText("R1 marker");
   await closeComposer(app);
 
-  // R1 | m12, Enter | R1 is resumed: Enter is a reply.
   await app.reply("Enter");
   await atM12();
   await expect(app.editor).toHaveText("R1 marker");
   await closeComposer(app);
 
-  // R1 | m12, f | a new forward; R1 stays as a stub.
   await app.reply("f");
   await atM12();
   await expect(app.editor).toHaveText("");
@@ -510,7 +461,6 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   await expect(stubs(app)).toContainText("R1 marker");
   await app.type("F1 marker");
   await closeComposer(app);
-  // Every draft shows as a collapsed stub below the last message.
   await expect(stubs(app)).toHaveCount(2);
   const lastBox = await m12.boundingBox();
   if (!lastBox) throw new Error("m12 has no box");
@@ -519,11 +469,9 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   );
   for (const top of tops) expect(top).toBeGreaterThanOrEqual(lastBox.y + lastBox.height);
 
-  // R1 and F1 | m12, f | F1 is resumed.
   await app.reply("f");
   await atM12();
   await expect(app.editor).toHaveText("F1 marker");
-  // Clear the thread for the next rows: discard F1 and R1.
   await app.press("Meta+Shift+Comma");
   await expect(app.editor).toHaveCount(0);
   await app.reply("r");
@@ -533,7 +481,6 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   await app.settle();
   await expect(stubs(app)).toHaveCount(0);
 
-  // R2, a reply aimed at m9.
   await app.press("p", "p", "p");
   await atM9();
   await app.reply("r");
@@ -541,7 +488,6 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   await app.type("R2 marker");
   await closeComposer(app);
 
-  // R2 | m12, r | a new reply aimed at m12.
   await app.press("n", "n", "n");
   await atM12();
   await app.reply("r");
@@ -551,7 +497,6 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   await closeComposer(app);
   await expect(stubs(app)).toHaveCount(1);
 
-  // R2 | m9, r | R2 is resumed.
   await app.press("p", "p", "p");
   await atM9();
   await app.reply("r");
@@ -559,7 +504,6 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   await expect(app.editor).toHaveText("R2 marker");
   await closeComposer(app);
 
-  // R2 | click R2's stub | R2 is resumed, and m9 becomes selected.
   await app.press("n", "n", "n");
   await atM12();
   await stubs(app).filter({ hasText: "R2 marker" }).click();
@@ -569,14 +513,12 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   await expect(app.editor).toHaveCount(0);
   await app.settle();
 
-  // R1 (older) and R3 (newer), both aimed at m12 | m12, r | R3 is resumed.
   await app.press("n", "n", "n");
   await atM12();
   await app.reply("r");
   await app.type("R1 again");
   await closeComposer(app);
   await app.advance(60_000);
-  // A second reply aimed at m12 cannot be made with r (it resumes R1), so R3 comes from Gmail.
   await gmail.createDraft(
     A,
     {
@@ -620,7 +562,6 @@ test("REP-08 a half-written reply survives new replies", async ({ app, gmail }) 
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
   await app.reply("r");
   await expect(app.editor).toHaveText("half");
-  // Its target is m1, so m1 is selected.
   await expect(app.messages.first()).toHaveAttribute("aria-current", "true");
   await expect(app.selectedMessage).toContainText("Quin Quill");
 
@@ -634,7 +575,6 @@ test("REP-09 drafts from Gmail get a kind and a target", async ({ app, gmail }) 
   test.slow();
   const s = await seeds.drafts(gmail, app);
 
-  // dFwd: forward, aimed at Alice's message. f resumes it, r does not.
   await open(app, "Contract");
   await app.reply("r");
   await expect(app.editor).toHaveText("");
@@ -645,16 +585,12 @@ test("REP-09 drafts from Gmail get a kind and a target", async ({ app, gmail }) 
   await closeComposer(app);
   await app.press("Escape");
 
-  // dLatest: aimed at p4's latest, so r on the latest resumes it.
   await open(app, "Person 4");
   await app.reply("r");
   await expect(app.editor).toHaveText("My text");
   await closeComposer(app);
   await app.press("Escape");
 
-  // Started on the latest message, a Gmail draft is still resumed after a new
-  // arrival. The seed dates dLatest before its target (70 vs 40 minutes ago), so
-  // by SPEC it was not started on the latest; this draft is dated after it.
   await app.advance(60_000);
   await gmail.createDraft(
     A,
@@ -686,9 +622,6 @@ test("REP-09 drafts from Gmail get a kind and a target", async ({ app, gmail }) 
   await closeComposer(app);
   await app.press("Escape");
 
-  // The app first sees this draft after a newer message has arrived. It still
-  // counts as started on the latest: its target was the newest message older
-  // than the draft, though no longer the thread's latest.
   await gmail.deliver({
     account: A,
     from: PERSONS[2] ?? "",
@@ -722,7 +655,6 @@ test("REP-09 drafts from Gmail get a kind and a target", async ({ app, gmail }) 
   await closeComposer(app);
   await app.press("Escape");
 
-  // dEarly: aimed at plan's m3. r on m12 starts a new reply; r on m3 resumes it.
   await open(app, "Q4 plan");
   await app.reply("r");
   await expect(app.editor).toHaveText("");
@@ -734,14 +666,12 @@ test("REP-09 drafts from Gmail get a kind and a target", async ({ app, gmail }) 
   await closeComposer(app);
   await app.press("Escape");
 
-  // dUnknown: In-Reply-To matches nothing, so it is aimed at p6's latest.
   await open(app, "Person 6");
   await app.reply("r");
   await expect(app.editor).toHaveText("Aimed at nobody.");
   await closeComposer(app);
   await app.press("Escape");
 
-  // The kind sticks: without "Fwd:", dFwd is still a forward.
   const dFwd = s.draft("dFwd");
   await gmail.updateDraft(
     A,
@@ -772,12 +702,10 @@ test("REP-10 closing and sending the reply composer keep the conversation open",
   await app.reply("r");
   await app.type("Kept as a draft");
 
-  // The first Esc blurs the editor; the composer stays.
   await app.press("Escape");
   await expect(app.editor).not.toBeFocused();
   await expect(app.editor).toBeVisible();
 
-  // The second closes it; the conversation stays, with a stub and a Gmail draft.
   await app.press("Escape");
   await app.settle();
   await expect(app.editor).toHaveCount(0);
@@ -787,7 +715,6 @@ test("REP-10 closing and sending the reply composer keep the conversation open",
   expect(drafts).toHaveLength(1);
   expect(htmlOf(parseMime(drafts[0]?.message.raw ?? ""))).toContain("Kept as a draft");
 
-  // r resumes it; Cmd+Enter sends and keeps the conversation open.
   await app.reply("r");
   await expect(app.editor).toHaveText("Kept as a draft");
   await app.press("Meta+Enter");
@@ -798,7 +725,6 @@ test("REP-10 closing and sending the reply composer keep the conversation open",
   await expect(sending.locator("xpath=..")).toContainText("Me");
   await expect(stubs(app)).toHaveCount(0);
 
-  // n and p never select the Sending row.
   await app.press("n");
   await expect(app.selectedMessage).toHaveCount(1);
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
@@ -807,7 +733,6 @@ test("REP-10 closing and sending the reply composer keep the conversation open",
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
   await expect(app.messages).toHaveCount(1);
 
-  // After the send, the real message replaces the Sending row.
   await app.advance(10_000);
   await app.settle();
   await expect(sending).toHaveCount(0);
@@ -836,7 +761,6 @@ test("REP-12 a Gmail draft's attachments are downloaded before its first upsert"
 }) => {
   const s = await seeds.drafts(gmail, app);
 
-  /** The draft in Gmail, its HTML, and its spec.pdf part. */
   const inGmail = async (draftId: string) => {
     const d = (await gmail.gmail(A)).drafts.find((x) => x.id === draftId);
     const tree = parseMime(d?.message.raw ?? "");
@@ -845,7 +769,6 @@ test("REP-12 a Gmail draft's attachments are downloaded before its first upsert"
       pdf: attachments(tree).find((p) => p.filename === "spec.pdf"),
     };
   };
-  /** attachments.get for the draft's message comes before its first drafts.update. */
   const order = async (draftId: string, messageId: string) => {
     const log = await gmail.requests();
     const get = log.findIndex((r) => r.api === "attachments.get" && r.path.includes(messageId));
@@ -855,7 +778,6 @@ test("REP-12 a Gmail draft's attachments are downloaded before its first upsert"
     expect(get).toBeLessThan(update);
   };
 
-  // Online.
   const dLatest = s.draft("dLatest");
   await open(app, "Person 4");
   await app.reply("r");
@@ -872,7 +794,6 @@ test("REP-12 a Gmail draft's attachments are downloaded before its first upsert"
   await closeComposer(app);
   await app.press("Escape");
 
-  // Offline: the composer still opens; the downloads run before the queued upsert.
   const second = await gmail.createDraft(
     A,
     {
@@ -916,22 +837,17 @@ test("REP-13 reply keys pressed before the conversation loads open one composer"
 }) => {
   await seeds.standard(gmail, app);
   await highlight(app, "Offsite venue");
-  // Nothing reaches the core, so the conversation stays unloaded. Letters
-  // typed after r are the reply's text (REP-15); Enter is reply all.
   const release = await app.park("submit");
   await app.press("r", "Enter");
   await release();
   await app.settle();
   await expect(app.editor).toHaveCount(1);
-  // The later key wins: reply all puts Dave and Erin on Cc.
   expect(await chipAddresses(app, "Cc")).toEqual(["dave@corp.test", "erin@corp.test"]);
 
   await closeComposer(app);
   await expect(stubs(app)).toHaveCount(0);
   expect((await gmail.gmail(A)).drafts).toHaveLength(0);
 
-  // A reply key whose conversation was left before it loaded is dropped,
-  // even if the conversation is opened again.
   await app.press("Escape");
   await highlight(app, "Person 5");
   const again = await app.park("submit");
@@ -958,7 +874,6 @@ test("REP-14 compose keys work while focus is inside a message", async ({ app, g
 test("REP-15 text typed before the reply opens goes into the reply", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   await highlight(app, "Person 3");
-  // The conversation cannot load yet, so the editor is not there to type in.
   const release = await app.park("submit");
   await app.press("r");
   await app.type("thanks");
@@ -966,23 +881,17 @@ test("REP-15 text typed before the reply opens goes into the reply", async ({ ap
   await app.settle();
   await expect(app.editor).toHaveText("thanks");
   await expect(app.editor).toBeFocused();
-  // No key acted as a shortcut (h would have opened the snooze picker).
   await expect(app.page.getByRole("dialog")).toHaveCount(0);
   await expect(app.conversationTitle).toHaveText("Person 3");
 
-  // On a conversation that is loaded, the same (f: a fresh forward).
   await closeComposer(app);
   await app.press("f");
   await app.type("ok");
   await expect(app.editor).toHaveText("ok");
 });
 
-// ------------------------------------------- a target whose body downloads
-
-/** Text long enough that a marker after it is past the snippet. */
 const LONG = "This sentence pads the message well past the length of its snippet. ".repeat(4);
 
-/** Parks every body read, delivers a message, and waits until its body read is parked. */
 async function deliverWhileBodyHeld(
   gmail: Control,
   d: { subject: string; text: string; withContract?: boolean },
@@ -1001,13 +910,11 @@ async function deliverWhileBodyHeld(
   return body;
 }
 
-/** Opens a conversation whose body may still be downloading. */
 async function openDownloading(app: App, subject: string): Promise<void> {
   await app.row(subject).first().click();
   await expect(app.conversationTitle).toHaveText(subject);
 }
 
-/** The composer's quote block, opened once: it follows the draft's quote. */
 async function openQuote(app: App) {
   await app.page.getByTitle("Show quoted text").click();
   const body = app.page.locator('iframe[title="quoted"]').contentFrame().locator("body");
@@ -1037,7 +944,6 @@ test("REP-16 a reply started while the message's body downloads quotes all of it
   await send(app);
   expect(htmlOf(parseMime((await sentWith(gmail, A, "My answer")).raw))).toContain("TAILONE");
 
-  // Sent before the body arrives: the send waits for it.
   await app.press("Escape");
   const second = await deliverWhileBodyHeld(gmail, {
     subject: "Second long body",
@@ -1073,7 +979,6 @@ test("REP-17 a forward started while the message's body downloads carries all of
   const remove = app.page.getByRole("button", { name: "Remove contract.pdf" });
   await expect(remove).toHaveCount(0);
 
-  // A save based on the draft from before the body, parked until the body is in.
   const saves = await app.park("submit", (b) => b.includes('"saveDraft"'));
   await app.type("Forwarding the contract");
   await app.press("Meta+Shift+o");
@@ -1138,7 +1043,6 @@ test("REP-19 a reply discarded before its target's body or its own first load ar
 }) => {
   const s = await seeds.standard(gmail, app);
 
-  // The target's body is still downloading: the reply's upsert waits for it.
   const body = await deliverWhileBodyHeld(gmail, {
     subject: "Long body",
     text: `${LONG}The decision is TAILONE.`,
@@ -1159,7 +1063,6 @@ test("REP-19 a reply discarded before its target's body or its own first load ar
   expect(await gmail.requests("drafts.create")).toEqual([]);
   await app.press("Escape");
 
-  // The reply's own first load has not arrived.
   await highlight(app, "Person 3");
   await app.press("Enter");
   await expect(app.conversationTitle).toHaveText(s.thread("p3").subject);
@@ -1194,7 +1097,6 @@ test("REP-20 Cmd+Q before a reply's first load arrives keeps what was typed", as
   await expect(app.editor).toBeFocused();
   await app.type("Typed before it loaded");
   const quitting = app.quit();
-  // Cmd+Q takes the composer off screen at once; its close waits for the first load.
   await expect(app.editor).toHaveCount(0);
   await release();
   await quitting;

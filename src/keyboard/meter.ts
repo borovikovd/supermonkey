@@ -1,5 +1,3 @@
-// Debug builds: keydown-to-paint for each shortcut (SPEC Performance).
-
 import { launch, perfReport } from "../ipc/bridge";
 
 export const BUDGETS: Record<string, number> = {
@@ -25,12 +23,10 @@ export const BUDGETS: Record<string, number> = {
   search: 100,
 };
 
-/** Call on keydown; measures to the frame that shows the result. */
 export function measure(action: string, start: number) {
   if (!launch.debug) return;
   const budget = BUDGETS[action];
   if (budget === undefined) return;
-  // The frame after the next animation frame has been painted.
   requestAnimationFrame(() => {
     setTimeout(() => {
       const ms = performance.now() - start;

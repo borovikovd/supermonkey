@@ -1,18 +1,11 @@
-// Offline (SPEC §Offline): the cached mailbox stays usable,
-// actions queue in SQLite and replay per account, each queue in order, when the network
-// returns, and a rejection during replay rolls back only its own action.
 import type { App } from "./app.ts";
 import type { GmailMessage, GmailState, LoggedRequest } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A } from "./seeds.ts";
 
-// ------------------------------------------------------------------ helpers
-
-/** Moves the highlight to the row whose subject is exactly `subject`, with `j` / `k`. */
 async function highlight(app: App, subject: string): Promise<void> {
   await expect(app.rows.filter({ hasText: subject }).first()).toBeVisible();
-  // A view switch restores its highlight after the rows arrive.
   await app.settle();
   const { subjects, at } = await app.list.evaluate((list) => {
     const rows = Array.from(list.querySelectorAll("[data-row]"))
@@ -32,7 +25,6 @@ async function highlight(app: App, subject: string): Promise<void> {
   await expect(app.highlighted).toContainText(subject);
 }
 
-/** Opens a palette picker (`l`, `h`) and picks the first item matching `query`. */
 async function pick(app: App, key: string, query = ""): Promise<void> {
   await app.press(key);
   await expect(app.palette).toBeVisible();
@@ -45,7 +37,6 @@ async function pick(app: App, key: string, query = ""): Promise<void> {
 const messagesOf = (state: GmailState, threadId: string): GmailMessage[] =>
   state.messages.filter((m) => m.threadId === threadId);
 
-/** Gmail's "label on a thread": some message outside trash and spam carries it (§Views). */
 const threadHas = (state: GmailState, threadId: string, label: string): boolean =>
   messagesOf(state, threadId).some(
     (m) => m.labels.includes(label) && !m.labels.includes("TRASH") && !m.labels.includes("SPAM"),
@@ -61,7 +52,6 @@ const MUTATING = new Set([
   "messages.trash",
 ]);
 
-/** Mutating requests Gmail answered with success, after `afterSeq`, in arrival order. */
 async function applied(app: App, afterSeq: number): Promise<LoggedRequest[]> {
   const all = await app.gmail.requests();
   return all.filter(
@@ -74,7 +64,6 @@ async function applied(app: App, afterSeq: number): Promise<LoggedRequest[]> {
   );
 }
 
-/** Whether a request is in the draft writes' replay queue (the rest are mail changes). */
 const isDraftWrite = (r: LoggedRequest): boolean => r.api.startsWith("drafts.");
 
 async function lastSeq(app: App): Promise<number> {
@@ -88,12 +77,9 @@ function modifyBody(r: LoggedRequest | undefined): ModifyBody {
   if (typeof b !== "object" || b === null || !("ids" in b)) {
     throw new Error(`not a batchModify body: ${JSON.stringify(b)}`);
   }
-  // The request log holds the JSON body the app sent to messages.batchModify.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- shape checked above
   return b as ModifyBody;
 }
-
-// ------------------------------------------------------------------ cases
 
 test("OFF-01 airplane mode: read, search, autocomplete, and act; it all lands when the network returns", async ({
   app,
@@ -102,7 +88,6 @@ test("OFF-01 airplane mode: read, search, autocomplete, and act; it all lands wh
   const s = await seeds.standard(gmail, app);
   await gmail.offline(true);
 
-  // Read: the cached thread opens with its bodies.
   await highlight(app, "Q4 plan");
   await app.press("Enter");
   await expect(app.conversationTitle).toHaveText("Q4 plan");
@@ -111,7 +96,6 @@ test("OFF-01 airplane mode: read, search, autocomplete, and act; it all lands wh
   ).toContainText("Plan message 12");
   await app.press("Escape");
 
-  // Search: local results, with the offline note.
   await app.press("/");
   await app.type("venue");
   await app.advance(300);
@@ -119,7 +103,6 @@ test("OFF-01 airplane mode: read, search, autocomplete, and act; it all lands wh
   await expect(app.page.getByText("Results from this Mac")).toBeVisible();
   await app.press("Escape");
 
-  // Autocomplete from the local contacts.
   await app.compose();
   await app.type("car");
   await expect(app.suggestions("To").filter({ hasText: "carol@corp.test" })).toHaveCount(1);
@@ -127,7 +110,6 @@ test("OFF-01 airplane mode: read, search, autocomplete, and act; it all lands wh
   await expect(app.page.getByRole("heading", { name: "New Message" })).toHaveCount(0);
   await app.settle();
 
-  // Act: archive leaves Inbox with no toast.
   const toastsBefore = await app.toasts.count();
   await highlight(app, "Person 1");
   await app.press("e");
@@ -135,7 +117,6 @@ test("OFF-01 airplane mode: read, search, autocomplete, and act; it all lands wh
   await app.expectNoErrorToasts();
   expect(await app.toasts.count()).toBeLessThanOrEqual(toastsBefore);
 
-  // Send: the outbox waits; the send toast says it is delayed.
   await highlight(app, "Person 2");
   await app.reply("r");
   await app.type("Written on the plane");
@@ -162,8 +143,6 @@ test("OFF-02 every kind of queued action replays, mail changes and draft writes 
 }) => {
   const s = await seeds.standard(gmail, app);
 
-  // Online first: search caches archivedOld, ownAlias gets snoozed, and a
-  // Gmail draft arrives to be discarded later.
   await app.press("/");
   await app.type("Archived before");
   await app.advance(300);
@@ -181,7 +160,6 @@ test("OFF-02 every kind of queued action replays, mail changes and draft writes 
   const since = await lastSeq(app);
 
   await gmail.offline(true);
-  // 1–5: archive, trash, spam, star, mark unread.
   await highlight(app, "Person 1");
   await app.press("e");
   await highlight(app, "Person 2");
@@ -193,7 +171,6 @@ test("OFF-02 every kind of queued action replays, mail changes and draft writes 
   await highlight(app, "Person 6");
   await app.press("u");
   await expect(app.row("Person 6")).toHaveAttribute("data-unread");
-  // 6: return to inbox, on a search hit.
   await app.press("/");
   await app.type("Archived before");
   await expect(app.row("Archived before")).toHaveCount(1);
@@ -201,12 +178,10 @@ test("OFF-02 every kind of queued action replays, mail changes and draft writes 
   await highlight(app, "Archived before");
   await app.press("Shift+E");
   await app.settle();
-  // Back to Inbox through the field: Esc on the results is not under test here.
   await app.press("/");
   await expect(app.page.getByPlaceholder("Search")).toBeFocused();
   await app.press("Escape");
   await expect(app.row("Archived before")).toHaveCount(1);
-  // 7–8: add a label; create a label and apply it.
   await highlight(app, "Fold check");
   await pick(app, "l", "Travel");
   await highlight(app, "Guild meetup");
@@ -215,7 +190,6 @@ test("OFF-02 every kind of queued action replays, mail changes and draft writes 
   await expect(app.palette.getByText('Create label "NewL"')).toBeVisible();
   await app.press("Enter");
   await expect(app.palette).toHaveCount(0);
-  // 9–10: snooze; unsnooze from Snoozed.
   await highlight(app, "Budget draft");
   await pick(app, "h");
   await expect(app.row("Budget draft")).toHaveCount(0);
@@ -224,14 +198,12 @@ test("OFF-02 every kind of queued action replays, mail changes and draft writes 
   await app.press("Shift+E");
   await expect(app.row("Alias note")).toHaveCount(0);
   await app.press("g", "i");
-  // 11: a draft upsert.
   await highlight(app, "Ticket #42");
   await app.reply("r");
   await app.type("Queued draft text");
   await app.settle();
   await app.press("Escape", "Escape");
   await expect(app.editor).toHaveCount(0);
-  // 12: discard a draft that is already in Gmail.
   await app.press("Escape", "g", "d");
   await highlight(app, "Spare draft");
   await app.press("Enter");
@@ -265,8 +237,6 @@ test("OFF-02 every kind of queued action replays, mail changes and draft writes 
   expect(replyDraft?.message.raw).toContain("Queued draft text");
   expect(a.drafts.map((d) => d.id)).not.toContain(spare.id);
 
-  // The replay follows the action order: mail changes among themselves,
-  // and draft writes among themselves.
   const log = await applied(app, since);
   expect(log.filter((r) => !isDraftWrite(r)).map((r) => r.api)).toEqual([
     ...Array.from({ length: 7 }, () => "messages.batchModify"),
@@ -338,7 +308,6 @@ test("OFF-04 a queued action wins on the messages it recorded, without hiding ne
   await expect(app.row("Person 1")).toHaveCount(0);
   await app.settle();
 
-  // Another client stars m1 and moves it to Inbox; a reply arrives. No poll yet.
   await gmail.modify(A, m1.id, ["STARRED", "INBOX"], []);
   const m2 = await gmail.deliver({
     account: A,
@@ -360,7 +329,6 @@ test("OFF-04 a queued action wins on the messages it recorded, without hiding ne
   expect(g1?.labels).not.toContain("INBOX");
   expect(g1?.labels).toContain("STARRED");
   expect(g2?.labels).toContain("INBOX");
-  // The history sync reconciles: the thread is back for m2, starred and unread.
   const row = app.row("Person 1");
   await expect(row).toHaveCount(1);
   await expect(row).toHaveAttribute("data-starred");
@@ -378,9 +346,7 @@ test("OFF-09 a poll during the replay of a queued action keeps the action applie
   await app.press("e");
   await expect(app.row("Person 1")).toHaveCount(0);
   await app.settle();
-  // Another client stars m1, so the next history carries m1 with INBOX still on it.
   await gmail.modify(A, m1.id, ["STARRED"], []);
-  // The archive stays queued: Gmail keeps answering 503.
   await gmail.fault("messages.batchModify", { kind: "status", status: 503 });
   const since = await lastSeq(app);
 
@@ -399,7 +365,6 @@ test("OFF-09 a poll during the replay of a queued action keeps the action applie
   await expect(app.row("Person 1")).toHaveCount(0);
 });
 
-// Re-applying only queued actions let a stale answer undo an action that had left the queue (the snooze-at-launch bug).
 test("OFF-10 a draft write on its way to Gmail does not hold up an archive made after it", async ({
   app,
   gmail,
@@ -417,7 +382,6 @@ test("OFF-10 a draft write on its way to Gmail does not hold up an archive made 
     .poll(async () => (await gmail.requests("drafts.create")).some((r) => r.held))
     .toBe(true);
 
-  // The draft's write is still out when the archive is made.
   await highlight(app, "Person 1");
   await app.press("e");
   await app.settle();
@@ -437,8 +401,6 @@ test("OFF-07 a Gmail answer read before an action landed does not undo it", asyn
 }) => {
   const s = await seeds.standard(gmail, app);
   const m1 = s.message("p1", 1);
-  // The next history is read at once (m1 starred, INBOX still on it) but
-  // reaches the app only after the archive below has landed in Gmail.
   const history = await gmail.holdAnswer("history.list");
   await gmail.modify(A, m1.id, ["STARRED"], [], { poll: true });
   await expect
@@ -471,7 +433,6 @@ test("OFF-05 a rejection during replay rolls back that one action, and replay co
   await highlight(app, "Person 2");
   await app.press("s");
   await app.settle();
-  // The fake answers with Gmail's message "Injected fault"; the reason is "Invalid label".
   await gmail.fault(
     "messages.batchModify",
     { kind: "status", status: 400, reason: "Invalid label" },
@@ -488,7 +449,6 @@ test("OFF-05 a rejection during replay rolls back that one action, and replay co
   expect(threadHas(a, s.thread("p1").threadId, "INBOX")).toBe(true);
   expect(threadHas(a, s.thread("p2").threadId, "STARRED")).toBe(true);
 
-  // Nothing is left in the queue.
   await app.press("Meta+,");
   const settings = app.sheet("Settings");
   await settings.getByRole("button", { name: "Remove account" }).first().click();
@@ -540,7 +500,6 @@ test("OFF-08 conversations opened offline read only the bodies still on screen w
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  // New threads whose bodies the background sync drops (a 400 is not retried).
   const fullRead = { api: "threads.get", query: { format: "full" } } as const;
   await gmail.fault(fullRead, { kind: "status", status: 400, reason: "invalidArgument" });
   const subjects = ["Read 1", "Read 2", "Read 3", "Read 4", "Read 5", "Read 6"];
@@ -558,7 +517,6 @@ test("OFF-08 conversations opened offline read only the bodies still on screen w
   const keys = await Promise.all(subjects.map((subject) => app.rowKey(subject)));
   const gmailIds = new Map(keys.map((key, i) => [key, delivered[i]?.threadId ?? ""]));
 
-  // Offline: every open and prefetch asks for bodies that can't be read yet.
   await gmail.offline(true);
   await app.row("Read 6").click();
   await expect(app.conversationTitle).toHaveText("Read 6");
@@ -581,6 +539,5 @@ test("OFF-08 conversations opened offline read only the bodies still on screen w
   const reads = (await gmail.requests("threads.get"))
     .filter((r) => r.seq > since && r.params.format === "full")
     .map((r) => r.path.split("/").at(-1) ?? "");
-  // One read per thread still on screen; none for those left behind.
   expect(reads.toSorted()).toEqual(needed.toSorted());
 });

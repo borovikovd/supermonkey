@@ -1,6 +1,3 @@
-//! What each request is: its Gmail method, the account it acts for, and its
-//! entry in the request log. Also the requests a hold has parked.
-
 use axum::http::HeaderMap;
 use axum::http::request::Parts;
 use serde_json::Value;
@@ -8,8 +5,6 @@ use tokio::sync::oneshot;
 
 use crate::{Fault, World};
 
-/// The Gmail API method a request calls, e.g. `messages.batchModify`, or the
-/// OAuth endpoint it reaches (`oauth.authorize`, `oauth.token`, `oauth.revoke`).
 #[must_use]
 pub fn api_name(method: &str, path: &str) -> &'static str {
     let Some(rest) = path.strip_prefix("/gmail/v1/users/") else {
@@ -20,7 +15,6 @@ pub fn api_name(method: &str, path: &str) -> &'static str {
             _ => "unknown",
         };
     };
-    // The first segment is the user (`me` or an address).
     let segments: Vec<&str> = rest.split('/').skip(1).collect();
     match (method, segments.as_slice()) {
         ("GET", ["profile"]) => "getProfile",
@@ -48,19 +42,12 @@ pub fn api_name(method: &str, path: &str) -> &'static str {
     }
 }
 
-/// A request as faults and holds see it, before it is handled.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestInfo {
-    /// See [`api_name`].
     pub api: &'static str,
-    /// The HTTP method, in capitals.
     pub method: String,
-    /// The URL's path, without the query.
     pub path: String,
-    /// The raw query string, without `?`.
     pub query: String,
-    /// The account it acts for: the bearer token's user, or the user an OAuth
-    /// request names. `None` when the fake cannot tell.
     pub account: Option<String>,
 }
 
@@ -104,7 +91,6 @@ impl RequestInfo {
         }
     }
 
-    /// The query parameters, keeping repeated keys.
     #[must_use]
     pub fn query_pairs(&self) -> Vec<(String, String)> {
         url::form_urlencoded::parse(self.query.as_bytes())
@@ -113,35 +99,22 @@ impl RequestInfo {
     }
 }
 
-/// How the fake answered a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Answer {
-    /// An HTTP status: 2xx for success, else an error body.
     Status(u16),
-    /// The connection closed without an answer and without doing anything.
     Dropped,
-    /// The work was done, then the connection closed without an answer.
     NoResponse,
 }
 
-/// A request the fake received, in arrival order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoggedRequest {
-    /// 0-based position in the log.
     pub seq: usize,
-    /// The request as a matcher sees it.
     pub info: RequestInfo,
-    /// The body, when it is JSON.
     pub body: Option<Value>,
-    /// App time when it arrived (see [`crate::FakeGmail::set_clock`]), Unix ms.
     pub at_ms: u64,
-    /// The `Origin` header, if sent.
     pub origin: Option<String>,
-    /// The `User-Agent` header, if sent.
     pub user_agent: Option<String>,
-    /// Parked by a hold right now.
     pub held: bool,
-    /// `None` while it is still being handled.
     pub answer: Option<Answer>,
 }
 
@@ -172,14 +145,9 @@ impl LoggedRequest {
     }
 }
 
-/// A request a hold has parked, waiting for [`crate::FakeGmail::release`].
 pub(crate) struct Held {
     pub seq: usize,
-    /// The hold fault that parked it.
     pub hold: u64,
-    /// Waiting now. A [`Fault::HoldAnswer`] request is listed from when it chose the hold,
-    /// so a release during its work is not lost, but parks only once its answer is ready.
     pub parked: bool,
-    /// Receives what happens next: a fault to suffer, or `None` to be handled normally.
     pub release: oneshot::Sender<Option<Fault>>,
 }

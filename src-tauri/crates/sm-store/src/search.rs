@@ -1,6 +1,3 @@
-//! Local search (SPEC Search): the FTS5 index narrows, the query language
-//! decides, and Gmail's hits are merged in.
-
 use std::collections::{BTreeSet, HashSet};
 
 use sm_domain::query::MatchTarget;
@@ -12,14 +9,10 @@ use crate::db::Db;
 use crate::labels::LabelReads;
 use crate::messages::MessageReads;
 
-/// Most local matches a search lists. Gmail hits are always listed, even
-/// past it.
 pub const SEARCH_LIMIT: usize = 500;
 
-/// Most threads checked one by one when the index can't decide alone.
 const CANDIDATE_LIMIT: i64 = 5_000;
 
-/// Local search.
 #[derive(Debug, Clone, Copy)]
 pub struct SearchReads<'c> {
     db: Db<'c>,
@@ -30,12 +23,6 @@ impl<'c> SearchReads<'c> {
         Self { db }
     }
 
-    /// The threads a Search list holds, newest first: local matches (a
-    /// message the query looks at matches it), plus the Gmail hits for it
-    /// that have such a message. Like Gmail search, threads with no
-    /// message outside Trash and Spam are left out, unless the query names
-    /// Trash, Spam, or drafts ([`Query::scope`]). A query local search
-    /// can't evaluate ([`Query::needs_gmail`]) lists only Gmail's hits.
     pub fn threads(
         self,
         account: AccountId,
@@ -47,8 +34,6 @@ impl<'c> SearchReads<'c> {
         } else {
             Vec::new()
         };
-        // The newest local matches, then every Gmail hit, however old: the
-        // next Gmail page loads near the oldest hit (SPEC Search).
         matched.sort_unstable_by(|a, b| b.cmp(a));
         matched.truncate(SEARCH_LIMIT);
         let past_live = !query.scope().live_only();
@@ -82,7 +67,6 @@ impl<'c> SearchReads<'c> {
         if let Some(fts) = &fts
             && !query.needs_post_filter()
         {
-            // The index expresses the whole query: one lookup.
             return self.db.all(
                 "search the index",
                 "SELECT t.id, t.sort_time FROM threads t
@@ -98,7 +82,6 @@ impl<'c> SearchReads<'c> {
                 |r| Ok((r.get("sort_time")?, r.get("id")?)),
             );
         }
-        // The index narrows, or can't help; the query language decides.
         let scope = query.scope();
         let past_live = !scope.live_only();
         let candidates = self.candidates(account, fts.as_deref(), past_live)?;
@@ -115,7 +98,6 @@ impl<'c> SearchReads<'c> {
                 .iter()
                 .filter(|m| scope.admits(m))
                 .collect();
-            // User labels are the thread's, from the messages search looks at.
             let label_names: Vec<&str> = looked_at
                 .iter()
                 .flat_map(|m| m.labels.iter())
@@ -141,9 +123,6 @@ impl<'c> SearchReads<'c> {
         Ok(matched)
     }
 
-    /// The threads a search checks one by one, each with whether it is
-    /// snoozed: those the index narrows the search to, or the newest when the
-    /// index can't help.
     fn candidates(
         self,
         account: AccountId,

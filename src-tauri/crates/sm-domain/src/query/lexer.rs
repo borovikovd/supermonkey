@@ -1,21 +1,12 @@
-//! Splits a query into tokens that borrow the input.
-
-/// What a token is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TokKind<'a> {
-    /// `(`.
     LParen,
-    /// `)`.
     RParen,
-    /// A `-` right before a term, which it negates.
     Minus,
-    /// A bare `"quoted phrase"`.
     Phrase { text: &'a str, closed: bool },
-    /// Anything else, including `op:value` and `op:"quoted value"`.
     Word(&'a str),
 }
 
-/// A token and the byte range it covers.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Tok<'a> {
     pub(super) kind: TokKind<'a>,
@@ -24,13 +15,11 @@ pub(super) struct Tok<'a> {
 }
 
 impl Tok<'_> {
-    /// Whether this is the bare word `keyword` (`AND`, `OR`), ignoring case.
     pub(super) const fn is_keyword(&self, keyword: &str) -> bool {
         matches!(self.kind, TokKind::Word(w) if w.eq_ignore_ascii_case(keyword))
     }
 }
 
-/// The tokens of `s`, in order.
 pub(super) fn lex(s: &str) -> Vec<Tok<'_>> {
     let mut toks = Vec::new();
     let mut i = 0;
@@ -80,8 +69,6 @@ pub(super) fn lex(s: &str) -> Vec<Tok<'_>> {
     toks
 }
 
-/// Index just past the closing quote of the quote at `start`, and whether
-/// there was one.
 fn scan_quote(s: &str, start: usize) -> (usize, bool) {
     match s[start + 1..].find('"') {
         Some(j) => (start + 1 + j + 1, true),
@@ -89,7 +76,6 @@ fn scan_quote(s: &str, start: usize) -> (usize, bool) {
     }
 }
 
-/// Index just past the parenthesis matching the one at `start`, or the end.
 fn scan_group(s: &str, start: usize) -> usize {
     let mut depth = 0usize;
     for (i, c) in s[start..].char_indices() {
@@ -107,8 +93,6 @@ fn scan_group(s: &str, start: usize) -> usize {
     s.len()
 }
 
-/// Index just past the word at `start`. A quote or group right after `op:`
-/// belongs to the word.
 fn scan_word(s: &str, start: usize) -> usize {
     let mut i = start;
     while let Some(c) = s[i..].chars().next() {

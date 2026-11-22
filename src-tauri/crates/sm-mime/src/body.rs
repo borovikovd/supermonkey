@@ -1,6 +1,3 @@
-//! From decoded bodies to what the app stores: sanitized HTML split at its
-//! quoted history, and text for search.
-
 use std::borrow::Cow;
 
 use crate::cid::CidImages;
@@ -9,39 +6,27 @@ use crate::sanitize::sanitize_html;
 use crate::text::html_to_text;
 use crate::text_html::text_to_html;
 
-/// The decoded bodies of a message, not sanitized.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RawBody {
-    /// The `text/html` body.
     pub html: Option<String>,
-    /// The `text/plain` body.
     pub text: Option<String>,
 }
 
-/// A received message's body, ready to store (SPEC Reading).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Body {
-    /// Sanitized HTML above the quoted history.
     pub html: String,
-    /// Sanitized quoted history, shown behind the `•••` toggle.
     pub quote: Option<String>,
-    /// Text for search and snippets: the `text/plain` body, else the HTML's text.
     pub text: String,
-    /// The message had no HTML body, so `html` was made from its text.
     pub is_plain: bool,
 }
 
-/// A draft read from Gmail, split for the composer (SPEC Reply composer).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DraftBody {
-    /// Sanitized HTML for the editor: everything above the `gmail_quote`.
     pub editor_html: String,
-    /// The sanitized quote block, kept as it is.
     pub quote_html: Option<String>,
 }
 
 impl RawBody {
-    /// The HTML body, or the text body as HTML, and whether it came from text.
     fn into_html(self) -> (String, Option<String>, bool) {
         match (self.html, self.text) {
             (Some(html), text) => (html, text, false),
@@ -50,8 +35,6 @@ impl RawBody {
         }
     }
 
-    /// Sanitizes a received body for storage. `images` are its inline images,
-    /// which replace their `cid:` references (SPEC Reading).
     #[must_use]
     pub fn render(self, images: &CidImages) -> Body {
         let (html, text, is_plain) = self.into_html();
@@ -64,8 +47,6 @@ impl RawBody {
         }
     }
 
-    /// The HTML body, or the text body as HTML: the HTML [`RawBody::into_html`]
-    /// gives, borrowed when the message has an HTML body.
     fn html(&self) -> Cow<'_, str> {
         match (&self.html, &self.text) {
             (Some(html), _) => Cow::Borrowed(html),
@@ -74,9 +55,6 @@ impl RawBody {
         }
     }
 
-    /// Splits and sanitizes the body of a draft read from Gmail. Its inline
-    /// images stay `cid:` references, which the sanitizer drops. The body
-    /// is only read, so it can still be [rendered](RawBody::render).
     #[must_use]
     pub fn to_draft(&self) -> DraftBody {
         let html = self.html();

@@ -1,13 +1,3 @@
-//! Where refresh tokens live between launches (SPEC Accounts).
-//!
-//! The app keeps them in `tokens.json` in its data folder, only the user can
-//! read it, and it is replaced atomically on each change. Not the Keychain: an
-//! unsigned build has no stable identity, so macOS would ask for the login
-//! password after every update. Tests and demo mode point it at a temporary
-//! folder.
-//!
-//! The calls block on file I/O: run them off the async runtime.
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{self, Write as _};
@@ -17,46 +7,30 @@ use parking_lot::Mutex;
 
 use crate::oauth::RefreshToken;
 
-/// A token store that could not be read or written.
 #[derive(Debug, thiserror::Error)]
 pub enum TokenStoreError {
-    /// The file could not be read, written, or replaced.
     #[error("token file {path}: could not {what}: {source}")]
     Io {
-        /// The file or the temporary file next to it.
         path: PathBuf,
-        /// The step that failed.
         what: &'static str,
-        /// The error underneath.
         #[source]
         source: io::Error,
     },
-    /// The file is not the JSON object of tokens it should be. The serde
-    /// message is left out, since it could quote a token.
     #[error("token file {path} is damaged at line {line} column {column}")]
     Damaged {
-        /// The file.
         path: PathBuf,
-        /// Where parsing failed.
         line: usize,
-        /// Where parsing failed.
         column: usize,
     },
 }
 
-/// Refresh tokens in a JSON file, `{email: token}` keyed by account address,
-/// mode 0600, replaced atomically so a crash leaves the old file or the new
-/// one, whole. One per app.
 #[derive(Debug)]
 pub struct TokenFile {
     path: PathBuf,
-    /// Held across a read-modify-write, so two accounts saving at once both
-    /// keep their tokens. It guards the file, not memory.
     file: Mutex<()>,
 }
 
 impl TokenFile {
-    /// The store at `path`. The file is made on the first save.
     #[must_use]
     pub const fn new(path: PathBuf) -> Self {
         Self {
@@ -77,8 +51,6 @@ impl TokenFile {
         }
     }
 
-    /// Writes a temporary file only the user can read, flushes it to disk,
-    /// and renames it over the old one.
     fn write(&self, tokens: &BTreeMap<String, String>) -> Result<(), TokenStoreError> {
         let json = serde_json::to_vec(tokens).map_err(|source| {
             io_error(
@@ -94,14 +66,12 @@ impl TokenFile {
         let mut file = owner_only()
             .open(&tmp)
             .map_err(|source| io_error(&tmp, "create", source))?;
-        // A stale temporary file keeps its old mode through `open`.
         restrict(&file).map_err(|source| io_error(&tmp, "restrict", source))?;
         file.write_all(&json)
             .and_then(|()| file.sync_all())
             .map_err(|source| io_error(&tmp, "write", source))?;
         drop(file);
         fs::rename(&tmp, &self.path).map_err(|source| io_error(&self.path, "replace", source))?;
-        // Make the rename itself durable.
         if let Some(dir) = self.path.parent()
             && let Err(err) = fs::File::open(dir).and_then(|d| d.sync_all())
         {
@@ -124,7 +94,6 @@ impl TokenFile {
 }
 
 impl TokenFile {
-    /// Saves or replaces the account's refresh token.
     pub fn store(&self, email: String, token: RefreshToken) -> Result<(), TokenStoreError> {
         self.update(|tokens| {
             tokens.insert(email, token.into_secret());
@@ -132,18 +101,15 @@ impl TokenFile {
         })
     }
 
-    /// The account's refresh token, or `None` if there is none.
     pub fn load(&self, email: &str) -> Result<Option<RefreshToken>, TokenStoreError> {
         let _file = self.file.lock();
         Ok(self.read()?.remove(email).map(RefreshToken::new))
     }
 
-    /// Deletes the account's refresh token. A missing one is not an error.
     pub fn delete(&self, email: &str) -> Result<(), TokenStoreError> {
         self.update(|tokens| tokens.remove(email).is_some())
     }
 
-    /// Every stored account with its token, by address.
     pub fn entries(&self) -> Result<Vec<(String, RefreshToken)>, TokenStoreError> {
         let _file = self.file.lock();
         Ok(self

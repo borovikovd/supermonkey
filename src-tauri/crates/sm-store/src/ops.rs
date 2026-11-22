@@ -1,7 +1,3 @@
-//! The Gmail op queue (SPEC Offline): mutations waiting to run, replayed in
-//! id order per account. Payloads are the caller's JSON; the store keeps the
-//! columns it must query by.
-
 use std::fmt;
 use std::str::FromStr;
 
@@ -15,8 +11,6 @@ use crate::db::{Db, to_json};
 use crate::tx::WriteTx;
 use crate::{StoreError, Table};
 
-/// A queued op's id. Never reused: an op deleted while its runner works on
-/// it must not lend its id to a new op the runner would then delete.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct OpId(pub i64);
 
@@ -38,39 +32,26 @@ impl FromSql for OpId {
     }
 }
 
-/// What a queued op does at Gmail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OpKind {
-    /// `messages.batchModify`: labels added and removed.
     Modify,
-    /// `labels.create`.
     LabelCreate,
-    /// `drafts.create` or `drafts.update`.
     DraftUpsert,
-    /// `drafts.delete`.
     DraftDelete,
-    /// `messages.trash`, for undoing a send already sent.
     TrashMessage,
 }
 
-/// One of an account's two replay queues. Each replays in the order its ops
-/// were made, and neither waits for the other (SPEC Offline): a mail change
-/// names messages a draft write never touches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpQueue {
-    /// Label changes, label creates, and trashing a sent message.
     Mail,
-    /// Draft upserts and deletes.
     Drafts,
 }
 
 impl OpQueue {
-    /// Both queues.
     pub const ALL: [Self; 2] = [Self::Mail, Self::Drafts];
 }
 
 impl OpKind {
-    /// The queue ops of this kind replay in.
     #[must_use]
     pub const fn queue(self) -> OpQueue {
         match self {
@@ -79,7 +60,6 @@ impl OpKind {
         }
     }
 
-    /// The stored text.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -126,48 +106,30 @@ impl FromSql for OpKind {
     }
 }
 
-/// An op to queue.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewOp<'a, P> {
-    /// Its account.
     pub account: AccountId,
-    /// The UI action that queued it, if any.
     pub action: Option<ActionNo>,
-    /// What it does.
     pub kind: OpKind,
-    /// The local draft it concerns, so a send or a newer save can drop it.
     pub draft: Option<&'a DraftId>,
-    /// The Gmail draft it concerns.
     pub gmail_draft: Option<&'a GmailDraftId>,
-    /// The caller's payload, stored as JSON.
     pub payload: &'a P,
-    /// When it was queued.
     pub created_at: Millis,
 }
 
-/// A queued op.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpRecord {
-    /// Its id.
     pub id: OpId,
-    /// Its account.
     pub account: AccountId,
-    /// The UI action that queued it.
     pub action: Option<ActionNo>,
-    /// What it does.
     pub kind: OpKind,
-    /// The local draft it concerns.
     pub draft: Option<DraftId>,
-    /// The Gmail draft it concerns.
     pub gmail_draft: Option<GmailDraftId>,
-    /// The payload's JSON; [`OpRecord::payload`] decodes it.
     pub payload_json: String,
-    /// When it was queued.
     pub created_at: Millis,
 }
 
 impl OpRecord {
-    /// The payload as the type it was queued with.
     pub fn payload<P: DeserializeOwned>(&self) -> Result<P, serde_json::Error> {
         serde_json::from_str(&self.payload_json)
     }
@@ -186,7 +148,6 @@ fn op_row(r: &Row<'_>) -> rusqlite::Result<OpRecord> {
     })
 }
 
-/// Reads of the op queue.
 #[derive(Debug, Clone, Copy)]
 pub struct OpReads<'c> {
     db: Db<'c>,
@@ -197,7 +158,6 @@ impl<'c> OpReads<'c> {
         Self { db }
     }
 
-    /// The next op to run in one of the account's queues.
     pub fn next(self, account: AccountId, queue: OpQueue) -> Result<Option<OpRecord>, StoreError> {
         self.db.optional(
             "read the next op",
@@ -214,7 +174,6 @@ impl<'c> OpReads<'c> {
         )
     }
 
-    /// One op.
     pub fn get(self, id: OpId) -> Result<Option<OpRecord>, StoreError> {
         self.db.optional(
             "read an op",
@@ -226,7 +185,6 @@ impl<'c> OpReads<'c> {
         )
     }
 
-    /// The account's queued ops of one kind, in run order.
     pub fn of_kind(self, account: AccountId, kind: OpKind) -> Result<Vec<OpRecord>, StoreError> {
         self.db.all(
             "read queued ops",
@@ -238,7 +196,6 @@ impl<'c> OpReads<'c> {
         )
     }
 
-    /// How many ops the account has queued.
     pub fn count(self, account: AccountId) -> Result<u32, StoreError> {
         self.db.one(
             "count queued ops",
@@ -248,7 +205,6 @@ impl<'c> OpReads<'c> {
         )
     }
 
-    /// Whether a delete of this Gmail draft is queued.
     pub fn deletes_gmail_draft(
         self,
         account: AccountId,
@@ -264,9 +220,6 @@ impl<'c> OpReads<'c> {
         )
     }
 
-    /// Whether a delete of every Gmail copy of this local draft is queued: it
-    /// was discarded while a `drafts.create` of it had no answer, so Gmail
-    /// may hold a copy the app has no id for.
     pub fn deletes_copies_of(
         self,
         account: AccountId,
@@ -282,8 +235,6 @@ impl<'c> OpReads<'c> {
         )
     }
 
-    /// Whether an upsert of the local draft is queued: it holds an edit Gmail
-    /// has not confirmed, waiting to run or to retry.
     pub fn upserts_draft(self, draft: &DraftId) -> Result<bool, StoreError> {
         self.db.one(
             "check for a queued draft upsert",
@@ -294,8 +245,6 @@ impl<'c> OpReads<'c> {
         )
     }
 
-    /// The account's local drafts with a queued upsert (see
-    /// [`Self::upserts_draft`]).
     pub fn upserted_drafts(self, account: AccountId) -> Result<Vec<DraftId>, StoreError> {
         self.db.all(
             "read the drafts with a queued upsert",
@@ -308,7 +257,6 @@ impl<'c> OpReads<'c> {
     }
 }
 
-/// Writes to the op queue.
 #[derive(Debug)]
 pub struct OpWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
@@ -319,7 +267,6 @@ impl<'t, 'c> OpWrites<'t, 'c> {
         Self { tx }
     }
 
-    /// Queues an op last. Returns its id.
     pub fn push<P: Serialize>(&mut self, op: &NewOp<'_, P>) -> Result<OpId, StoreError> {
         let id = OpId(self.tx.db().insert(
             "queue an op",
@@ -336,7 +283,6 @@ impl<'t, 'c> OpWrites<'t, 'c> {
         Ok(id)
     }
 
-    /// Replaces an op's payload, as a runner drops ids Gmail no longer has.
     pub fn set_payload<P: Serialize>(&mut self, id: OpId, payload: &P) -> Result<(), StoreError> {
         let account: Option<AccountId> = self.tx.db().optional(
             "store an op's payload",
@@ -350,9 +296,6 @@ impl<'t, 'c> OpWrites<'t, 'c> {
         Ok(())
     }
 
-    /// Moves an op to the back of its queue, under a new id: it could not
-    /// finish yet, and the ops behind it should not wait for it. Unknown ids
-    /// are skipped.
     pub fn requeue(&mut self, id: OpId) -> Result<(), StoreError> {
         self.tx.db().execute(
             "queue an op again",
@@ -365,7 +308,6 @@ impl<'t, 'c> OpWrites<'t, 'c> {
         self.delete(id)
     }
 
-    /// Removes an op: done, rejected, or dropped. Unknown ids are skipped.
     pub fn delete(&mut self, id: OpId) -> Result<(), StoreError> {
         let account: Option<AccountId> = self.tx.db().optional(
             "remove an op",
@@ -379,8 +321,6 @@ impl<'t, 'c> OpWrites<'t, 'c> {
         Ok(())
     }
 
-    /// Drops a draft's queued upserts: a send or discard writes the final
-    /// version itself, and a newer save queues its own.
     pub fn delete_draft_upserts(&mut self, draft: &DraftId) -> Result<(), StoreError> {
         let accounts: Vec<AccountId> = self.tx.db().all(
             "drop a draft's queued upserts",

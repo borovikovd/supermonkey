@@ -1,5 +1,3 @@
-//! One action to its handler.
-
 use sm_domain::{ActionNo, Millis};
 use sm_ipc::Action;
 use sm_store::WriteTx;
@@ -9,20 +7,13 @@ use super::{
 };
 use crate::writer::WriterState;
 
-/// What a handler works with: the open transaction and the writer state.
-/// It never sees SQL or the channel.
 pub(crate) struct ActionCtx<'a, 'c> {
-    /// The batch's transaction, inside this action's savepoint.
     pub(crate) tx: &'a mut WriteTx<'c>,
-    /// Subscriptions and effects.
     pub(crate) state: &'a mut WriterState,
-    /// The action's number: the id of the undo entry it makes.
     pub(crate) n: ActionNo,
-    /// When its batch was submitted.
     pub(crate) now: Millis,
 }
 
-/// Applies one action.
 pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), ActionError> {
     match action {
         Action::Reset => subscriptions::reset(ctx),
@@ -62,7 +53,6 @@ pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), A
     }
 }
 
-/// The action's type, as the UI names it, for logs.
 pub(super) const fn kind(action: &Action) -> &'static str {
     match action {
         Action::Reset => "reset",

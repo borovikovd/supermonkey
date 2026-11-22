@@ -1,7 +1,3 @@
-//! The `Accounts` handle (ARCHITECTURE.md, section 8.1): Google sign-in for a
-//! new account or again for one that signed out, and waking the account
-//! workers. Removing an account is the `removeAccount` action.
-
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,24 +12,20 @@ use crate::workers::{AccountWorkers, Grant};
 use crate::writer::CoreWriter;
 use crate::{Error, Platform};
 
-/// Signing accounts in, and waking their workers.
 pub struct Accounts {
     writer: CoreWriter,
     workers: Arc<AccountWorkers>,
     platform: Arc<dyn Platform>,
-    /// The sign-in waiting in the browser, if any, by its number.
     waiting: Mutex<Option<(u64, CancellationToken)>>,
     next: AtomicU64,
 }
 
-/// Its name only: it holds the core's handles and the platform, none of them a value to print.
 impl fmt::Debug for Accounts {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Accounts").finish_non_exhaustive()
     }
 }
 
-/// A sign-in that finished: whose grant it is.
 struct SignedIn {
     email: String,
     tokens: Arc<Tokens>,
@@ -54,10 +46,6 @@ impl Accounts {
         }
     }
 
-    /// Signs a new account in with Google in the browser and adds it (SPEC
-    /// Accounts). An account the app already has is signed in again. A
-    /// newer sign-in cancels one still waiting in the browser, which then
-    /// fails with "Sign-in cancelled".
     pub async fn add(&self) -> Result<AccountId, Error> {
         let SignedIn { email, tokens } = self.sign_in().await?;
         self.keep_token(&email, tokens.refresh_token()).await?;
@@ -68,10 +56,6 @@ impl Accounts {
         Ok(id)
     }
 
-    /// Signs an account in again, to renew a refused grant or add a scope.
-    /// It must be the same Google account. An account removed while the
-    /// sign-in waited in the browser is added again, under a new id, as Add
-    /// account would (SPEC Accounts).
     pub async fn sign_in_again(&self, account: AccountId) -> Result<(), Error> {
         let expected = self
             .writer
@@ -87,40 +71,26 @@ impl Accounts {
             )));
         }
         self.keep_token(&expected, tokens.refresh_token()).await?;
-        // The row's id now, not `account`: a removal meanwhile deleted that
-        // row, and this sign-in made a new one.
         let (id, grant) = self.signed_in_row(&expected).await?;
         self.workers.signed_in(id, &expected, tokens, grant)?;
         tracing::info!(account = id.0, "signed in again");
         Ok(())
     }
 
-    /// Adds the account for `email`, whose refresh token is already in the
-    /// token store: how the E2E server seeds a signed-in account. An account
-    /// the app already has is marked signed in again. Its worker starts once
-    /// the core has launched. Returns its id.
     pub async fn register(&self, email: &str) -> Result<AccountId, Error> {
         let (id, grant) = self.signed_in_row(email).await?;
         self.workers.registered(id, email, grant).await?;
         Ok(id)
     }
 
-    /// Polls every account's Gmail history now: mail arrived, or a test
-    /// changed Gmail.
     pub fn poll_now(&self) {
         self.workers.poll_all();
     }
 
-    /// Retries every account's Gmail work now, without waiting out its
-    /// back-off: the network came back.
     pub fn retry_now(&self) {
         self.workers.retry_now();
     }
 
-    /// The account row for a finished sign-in: a new one, or the existing
-    /// one, no longer signed out. Its grant is renewed in the same job, so a
-    /// sign-out reported for the old grant, whenever its job runs, changes
-    /// nothing.
     async fn signed_in_row(&self, email: &str) -> Result<(AccountId, Grant), Error> {
         let (email, grants) = (email.to_owned(), Arc::clone(self.workers.grants()));
         let signed_in = self
@@ -139,9 +109,6 @@ impl Accounts {
         Ok(signed_in)
     }
 
-    /// Stores the account's refresh token for the next launch, once no
-    /// removed account is still being forgotten: its clean-up deletes the
-    /// token of its address.
     async fn keep_token(&self, email: &str, token: &RefreshToken) -> Result<(), Error> {
         self.workers.removals_done().await;
         let (store, email, token) = (
@@ -153,9 +120,6 @@ impl Accounts {
         Ok(())
     }
 
-    /// Runs a Google sign-in in the system browser, after any removal still
-    /// revoking (its revoke would end the new grant too). It replaces one
-    /// still waiting in the browser.
     async fn sign_in(&self) -> Result<SignedIn, Error> {
         self.workers.removals_done().await;
         let number = self.next.fetch_add(1, Ordering::SeqCst);
@@ -187,16 +151,12 @@ impl Accounts {
         let http = self.workers.http();
         let sign_in = SignIn::start(config.oauth.clone()).await?;
         self.platform.open_sign_in(sign_in.consent_url())?;
-        // A removal begun while the browser was open is still revoking: the
-        // code is traded only after it (SPEC Accounts).
         let grant = sign_in.finish(http, self.workers.removals_done()).await?;
         let tokens = Arc::new(Tokens::from_grant(
             config.oauth.clone(),
             http.clone(),
             grant,
         ));
-        // Its own scheduler: one request, for an address not known yet, and
-        // nothing left behind in the accounts' schedulers.
         let probe = Gmail::new(
             &config.base_url,
             http.clone(),

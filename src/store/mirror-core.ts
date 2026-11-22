@@ -1,10 +1,3 @@
-// The mirror's pure logic (SPEC UI state). The Zustand store in mirror.ts
-// wraps it. Kept free of React and Tauri so Vitest can drive it directly.
-//
-// The mirror holds the state Rust confirmed plus the actions after `ack`, and
-// shows those actions applied on top. A channel message replaces confirmed
-// state, drops actions up to its `ack`, and re-applies the rest.
-
 import type {
   AccountSummary,
   Action,
@@ -28,13 +21,9 @@ export type ListSub = {
   loaded: boolean;
   ids: ListEntry[];
   searching: boolean;
-  /** Search: the query has a term only Gmail can evaluate. */
   needsGmail: boolean;
-  /** Search: the query looks in Trash or Spam, so a conversation opened from it lists their messages. */
   looksInTrash: boolean;
-  /** Gmail has another page (Search, Label, Trash, Spam). */
   more: boolean;
-  /** The lowest row from Gmail's pages: the next page loads near it. */
   oldestHit: string | null;
 };
 export type ConversationSub = {
@@ -49,16 +38,13 @@ export type Sub = ListSub | ConversationSub | ComposerSub | AccountSub | AppSub;
 
 export type Pending = { n: number; action: Action };
 
-/** Rows removed from a list by an action made this session, for undo. */
 export type Removal = { sub: string; key: string; after: string | null };
 
 export type MirrorState = {
   ack: number;
   subs: Record<string, Sub>;
-  /** Confirmed rows by key, shared by every list. */
   rows: Record<string, ListRow>;
   pending: Pending[];
-  /** Per undo entry id (= action number): rows its action removed from lists. */
   removals: Record<number, Removal[]>;
 };
 
@@ -96,7 +82,6 @@ export function subForKey(key: SubKey): Sub {
   }
 }
 
-/** Keeps a row unless our copy has a newer `rev`. */
 export function mergeRow(rows: Record<string, ListRow>, row: ListRow): void {
   const have = rows[row.key];
   if (!have || have.rev <= row.rev) rows[row.key] = row;
@@ -114,7 +99,6 @@ export function applyListPatch(
   for (const m of moved) {
     let at = 0;
     if (m.after !== null) {
-      // Moves arrive in new-list order, so `after` is usually the last entry.
       const pos =
         out.at(-1)?.key === m.after ? out.length - 1 : out.findIndex((e) => e.key === m.after);
       at = pos >= 0 ? pos + 1 : out.length;
@@ -124,13 +108,6 @@ export function applyListPatch(
   return out;
 }
 
-/**
- * Drops the rows of `keys` that nothing holds any more: no list lists them, no
- * conversation is subscribed to them, no undo entry of this session removed
- * them, and they are not in `keep` (the selection). Patches only keep rows
- * fresh while a list holds them, so a row kept past that could later show
- * from an old copy. Mutates `rows`.
- */
 export function dropUnheldRows(
   rows: Record<string, ListRow>,
   subs: Record<string, Sub>,
@@ -156,23 +133,17 @@ function heldKeys(subs: Record<string, Sub>, removals: Record<number, Removal[]>
   return held;
 }
 
-/**
- * Applies one channel message to confirmed state and drops acked actions.
- * Rows that left every list are dropped unless `keep` (the selection) has them.
- */
 export function applyChannel(
   s: MirrorState,
   msg: ChannelMessage,
   keep: ReadonlySet<string>,
 ): MirrorState {
   const subs = { ...s.subs };
-  // Most messages carry no list rows: keep the row map as it is for them.
   const lists = msg.updates.some((u) => u.type === "list");
   const rows = lists ? { ...s.rows } : s.rows;
   const left: string[] = [];
   for (const u of msg.updates) {
     const sub = subs[u.sub];
-    // Ignore patches until the subscription's first load arrives.
     if (!sub) continue;
     switch (u.type) {
       case "list": {
@@ -223,9 +194,6 @@ export function applyChannel(
   };
 }
 
-// ------------------------------------------------------------ pending effects
-
-/** The Gmail label a view lists, if one label backs it. */
 export const viewLabel = (view: View): string | null => {
   switch (view.kind) {
     case "inbox":
@@ -240,7 +208,6 @@ export const viewLabel = (view: View): string | null => {
       return "SPAM";
     case "label":
       return view.label;
-    // Views not backed by one Gmail label.
     case "done":
     case "allMail":
     case "drafts":
@@ -249,7 +216,6 @@ export const viewLabel = (view: View): string | null => {
   }
 };
 
-/** Whether an action takes a row out of a view, per SPEC UI state → Actions. */
 export function removesFrom(m: ModifyAction, key: SubKey): boolean {
   if (key.type === "search") {
     return m.kind === "trash" || m.kind === "spam";
@@ -273,7 +239,6 @@ export function removesFrom(m: ModifyAction, key: SubKey): boolean {
       const label = viewLabel(key.view);
       return label !== null && m.remove.includes(label);
     }
-    // Read state, stars, and added labels keep a row where it is.
     case "label":
     case "read":
     case "star":
@@ -282,14 +247,12 @@ export function removesFrom(m: ModifyAction, key: SubKey): boolean {
   }
 }
 
-/** The mail change an action makes, if any. */
 function modifyOf(a: Action): ModifyAction | null {
   if (a.type === "modify") return a;
   if (a.type === "createLabel") return a.apply;
   return null;
 }
 
-/** A row flag after an action that may add or remove its label. */
 function flag(m: ModifyAction, label: string, current: boolean): boolean {
   if (m.add.includes(label)) return true;
   if (m.remove.includes(label)) return false;
@@ -319,13 +282,11 @@ function patchRow(row: ListRow, m: ModifyAction): ListRow {
   };
 }
 
-/** The app-wide state, once its subscription has loaded. */
 export function appState(s: MirrorState): AppState | null {
   for (const sub of Object.values(s.subs)) if (sub.type === "app") return sub.state;
   return null;
 }
 
-/** An account's summary, once its subscription has loaded. */
 export function accountSummary(s: MirrorState, account: number): AccountSummary | null {
   for (const sub of Object.values(s.subs)) {
     if (sub.type === "account" && sub.key.account === account) return sub.summary;
@@ -333,7 +294,6 @@ export function accountSummary(s: MirrorState, account: number): AccountSummary 
   return null;
 }
 
-/** The newest undo entry for an account with pending actions applied. */
 export function undoTarget(s: MirrorState, account: number): number | null {
   const entries = (accountSummary(s, account)?.undo ?? []).map((e) => e.id);
   for (const { n, action: a } of s.pending) {
@@ -342,7 +302,6 @@ export function undoTarget(s: MirrorState, account: number): number | null {
       if (i >= 0) entries.splice(i, 1);
       continue;
     }
-    // An undoable action adds an entry whose id is its action number.
     const addsEntry = (a.type === "modify" && a.undoable) || a.type === "pin";
     if (addsEntry && a.account === account) entries.push(n);
   }
@@ -351,11 +310,6 @@ export function undoTarget(s: MirrorState, account: number): number | null {
 
 export type ListView = { ids: ListEntry[]; rows: Record<string, ListRow> };
 
-/**
- * A list as shown: confirmed ids and rows with pending actions applied.
- * Row field changes apply to every pending modify; removals follow the table;
- * a pending undo of an entry made this session puts its removed rows back.
- */
 export function viewList(s: MirrorState, subId: string): ListView {
   const sub = s.subs[subId];
   if (!sub || sub.type !== "list") return { ids: [], rows: s.rows };
@@ -402,7 +356,6 @@ export function viewList(s: MirrorState, subId: string): ListView {
   return { ids, rows };
 }
 
-/** Records, for undo, the rows an action removes from each open list. */
 export function recordRemovals(s: MirrorState, p: Pending): Removal[] {
   const m = modifyOf(p.action);
   if (!m?.undoable) return [];
@@ -420,7 +373,6 @@ export function recordRemovals(s: MirrorState, p: Pending): Removal[] {
   return out;
 }
 
-/** Adds a pending action; returns the new state. */
 export function addPending(s: MirrorState, p: Pending): MirrorState {
   const removed = recordRemovals(s, p);
   const removals = removed.length > 0 ? { ...s.removals, [p.n]: removed } : s.removals;

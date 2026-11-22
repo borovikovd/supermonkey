@@ -1,8 +1,3 @@
-//! Demo mode (`vp run demo`): the app against an in-process fake Gmail with
-//! demo mail and two signed-in accounts. Every launch starts from fresh demo
-//! data in its own folder, never the user's (AGENTS.md: every way to run the
-//! app starts from a known state).
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -10,14 +5,10 @@ use sm_core::{App, Config, GmailConfig};
 use sm_fake_gmail::{FakeGmail, FakeUser, NewAttachment, NewMessage};
 use sm_gmail::{OAuthConfig, QuotaConfig, RefreshToken, TokenFile};
 
-/// The demo accounts, in rail order.
 const ACCOUNTS: [&str; 2] = ["alex@demo.dev", "sam@demo.dev"];
 
-/// The demo's data folder's name in the system's temporary folder.
 const DATA_DIR: &str = "supermonkey-demo";
 
-/// A running demo: the fake Gmail with its seeded users. Keep it for as long
-/// as the app runs; dropping it stops the fake.
 #[derive(Debug)]
 pub struct Demo {
     fake: FakeGmail,
@@ -26,8 +17,6 @@ pub struct Demo {
 }
 
 impl Demo {
-    /// Starts the fake Gmail inside the current tokio runtime, seeds the demo
-    /// mail, and empties the demo's data folder.
     pub fn start() -> anyhow::Result<Self> {
         let data_dir = std::env::temp_dir().join(DATA_DIR);
         fresh_dir(&data_dir)?;
@@ -47,13 +36,11 @@ impl Demo {
         })
     }
 
-    /// The demo's data folder, empty at start.
     #[must_use]
     pub fn data_dir(&self) -> &Path {
         &self.data_dir
     }
 
-    /// The fake's endpoints, with Google's request budget.
     #[must_use]
     pub fn gmail_config(&self) -> GmailConfig {
         GmailConfig {
@@ -69,13 +56,11 @@ impl Demo {
         }
     }
 
-    /// The demo accounts' refresh tokens, in the demo's data folder.
     #[must_use]
     pub fn tokens(&self) -> Arc<TokenFile> {
         Arc::clone(&self.tokens)
     }
 
-    /// Signs the demo accounts in on `app`, before it launches.
     pub async fn register(&self, app: &App) -> anyhow::Result<()> {
         for email in ACCOUNTS {
             app.accounts().register(email).await?;
@@ -84,7 +69,6 @@ impl Demo {
     }
 }
 
-/// Empties the demo's data folder, or makes it. Only ever this folder.
 fn fresh_dir(dir: &Path) -> std::io::Result<()> {
     match std::fs::remove_dir_all(dir) {
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
@@ -93,7 +77,6 @@ fn fresh_dir(dir: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)
 }
 
-/// People who write to the demo accounts.
 const PEOPLE: [(&str, &str); 8] = [
     ("Ada Lovelace", "ada@analytical.io"),
     ("Grace Hopper", "grace@navy.mil"),
@@ -119,7 +102,6 @@ const LINES: [&str; 4] = [
     "Two items left before we ship.",
 ];
 
-/// A one-pixel PNG, for an inline image.
 const PNG: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 0x49, 0x48, 0x44, 0x52, 0, 0, 0,
     1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1F, 0x15, 0xC4, 0x89, 0, 0, 0, 0x0D, 0x49, 0x44, 0x41, 0x54,
@@ -131,14 +113,11 @@ fn labels(ids: &[&str]) -> Vec<String> {
     ids.iter().map(|&l| l.to_owned()).collect()
 }
 
-/// The demo mail of the account `me`.
 fn seed(user: &FakeUser, me: &str) -> anyhow::Result<()> {
     seed_people(user, me);
     seed_the_rest(user, me)
 }
 
-/// Conversations with people, every other one with a reply from `me`
-/// and an answer with an inline image and attachments.
 fn seed_people(user: &FakeUser, me: &str) {
     for (i, (name, email)) in PEOPLE.iter().enumerate() {
         let from = format!("{name} <{email}>");
@@ -161,7 +140,6 @@ fn seed_people(user: &FakeUser, me: &str) {
         if i % 2 != 0 {
             continue;
         }
-        // A reply from the account, then theirs: a three-message thread.
         let reply_subject = format!("Re: {subject}");
         let mine = user.add_message(NewMessage {
             from: me.to_owned(),
@@ -176,7 +154,6 @@ fn seed_people(user: &FakeUser, me: &str) {
         let cc = PEOPLE
             .get((i + 1) % PEOPLE.len())
             .map(|(_, e)| (*e).to_owned());
-        // The last of the thread: nothing replies to it, so its ids go unused.
         _ = user.add_message(NewMessage {
             from,
             to: vec![me.to_owned()],
@@ -215,12 +192,9 @@ fn seed_people(user: &FakeUser, me: &str) {
     }
 }
 
-/// Newsletters, a receipt and a trip under user labels, and a hostile
-/// message the sanitizer must defuse.
 fn seed_the_rest(user: &FakeUser, me: &str) -> anyhow::Result<()> {
     let receipts = demo_label(user, "Receipts")?;
     let travel = demo_label(user, "Travel")?;
-    // Nothing replies to these messages, so their ids go unused.
     for issue in 100..106 {
         _ = user.add_message(NewMessage {
             from: "Weekly Digest <digest@news.example>".into(),
@@ -272,7 +246,6 @@ fn seed_the_rest(user: &FakeUser, me: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Creates one of the demo's user labels and returns its id.
 fn demo_label(user: &FakeUser, name: &str) -> anyhow::Result<String> {
     user.add_label(name)
         .ok_or_else(|| anyhow::anyhow!("the demo label {name} exists already"))

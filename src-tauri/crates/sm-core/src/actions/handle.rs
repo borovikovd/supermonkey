@@ -1,5 +1,3 @@
-//! The `Actions` handle: numbered UI actions into writer jobs.
-
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -15,7 +13,6 @@ use crate::activity::Tasks;
 use crate::clock::Clock;
 use crate::writer::CoreWriter;
 
-/// The highest action number received, applied or still queued.
 #[derive(Debug, Default)]
 pub(crate) struct Received(AtomicI64);
 
@@ -29,7 +26,6 @@ impl Received {
     }
 }
 
-/// Takes the UI's numbered actions (SPEC UI state, Actions).
 pub struct Actions {
     writer: CoreWriter,
     received: Arc<Received>,
@@ -37,7 +33,6 @@ pub struct Actions {
     tasks: Tasks,
 }
 
-/// The last action number received; the rest is the core's handles.
 impl fmt::Debug for Actions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Actions")
@@ -61,15 +56,6 @@ impl Actions {
         }
     }
 
-    /// Queues actions as one writer job at UI priority, ahead of sync work,
-    /// and returns as soon as they are queued. The job applies each action
-    /// numbered above the last applied one, in order; the commit's channel
-    /// message carries the new `ack`.
-    ///
-    /// If the job's commit fails, every action in it is rejected: a second
-    /// job moves `ack` past them, so the mirror drops them and falls back to
-    /// Rust's state. An action the page sent that the core couldn't read is
-    /// refused alone.
     pub fn submit<A: Into<Submitted>>(&self, actions: Vec<A>) {
         let actions: Vec<Submitted> = actions.into_iter().map(Into::into).collect();
         let Some(last) = actions.iter().map(|a| a.n).max() else {
@@ -95,15 +81,11 @@ impl Actions {
         });
     }
 
-    /// The last action number received, applied or still queued: where a
-    /// reloaded page continues, so it never reuses a number still queued.
     #[cfg(test)]
     pub(crate) fn last_received(&self) -> ActionNo {
         self.received.last()
     }
 
-    /// Queues a job that only reads the writer state, for tests to wait on
-    /// everything queued before it.
     #[cfg(test)]
     pub(crate) async fn drained(&self) -> Result<(), StoreError> {
         self.writer

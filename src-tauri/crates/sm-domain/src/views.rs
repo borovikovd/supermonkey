@@ -1,11 +1,6 @@
-//! Which threads each view lists, and what Gmail listing backs it (SPEC Views).
-
 use crate::{LabelId, SystemLabel, ThreadDigest, View, query};
 
 impl View {
-    /// Whether the view lists a thread with this digest. `snoozed` is whether
-    /// the thread has `snooze_until` set, due or not. Drafts lists drafts,
-    /// never threads.
     #[must_use]
     pub fn lists(&self, thread: &ThreadDigest<'_>, snoozed: bool) -> bool {
         match self {
@@ -20,8 +15,6 @@ impl View {
         }
     }
 
-    /// The thread label that alone decides membership: Starred, Sent, Trash,
-    /// Spam, and label views. `None` for the others.
     #[must_use]
     pub fn label(&self) -> Option<&str> {
         match self {
@@ -34,8 +27,6 @@ impl View {
         }
     }
 
-    /// The Gmail `threads.list` the view also runs while online, since most
-    /// archived, labeled, trashed, and spam mail is older than the first sync.
     #[must_use]
     pub fn gmail_listing(&self) -> Option<GmailListing> {
         match self {
@@ -49,24 +40,16 @@ impl View {
     }
 }
 
-/// A Gmail `threads.list` request a list merges into its local results.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GmailListing {
-    /// A `q=` search, as Gmail should get it.
     Query(String),
-    /// Threads with a label (by local id; the caller maps it to Gmail's).
     Label {
-        /// The label's local id.
         label: LabelId,
-        /// Set `includeSpamTrash=true`.
         include_spam_trash: bool,
     },
 }
 
 impl GmailListing {
-    /// The listing for a search box query, or `None` when it is blank. Gmail
-    /// gets the query without `is:list`, which it does not know, and none when
-    /// that leaves it blank: Gmail would list every thread (SPEC Search).
     #[must_use]
     pub fn search(raw: &str) -> Option<Self> {
         let q = query::gmail_query(raw);

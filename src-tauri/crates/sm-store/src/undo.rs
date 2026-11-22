@@ -1,6 +1,3 @@
-//! The undo history (SPEC Undo): the last 50 entries per account, each keyed
-//! by the number of the action that made it.
-
 use rusqlite::{Row, named_params};
 use serde::{Deserialize, Serialize};
 use sm_domain::{
@@ -11,39 +8,26 @@ use crate::db::{Db, json_column, to_json};
 use crate::tx::WriteTx;
 use crate::{StoreError, Table};
 
-/// How many entries each account keeps.
 pub const UNDO_KEPT: u32 = 50;
 
-/// What undoing an entry reverts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum UndoAction {
-    /// A mail action: the labels and snooze times it changed, with their
-    /// values from before it.
     Mail {
-        /// One entry per thread it touched.
         threads: Vec<ThreadChange>,
     },
-    /// A send: its outbox row.
     Send {
-        /// The row.
         outbox: OutboxId,
     },
-    /// A pin: the one it set and the split it replaced.
     Pin {
-        /// What the pin matches.
         pin_kind: PinKind,
-        /// The lowercased sender, domain, or label name.
         value: String,
-        /// The split it pinned to.
         split: SplitId,
-        /// The split the same pin had before, if any.
         replaced: Option<SplitId>,
     },
 }
 
 impl UndoAction {
-    /// The entry's kind.
     #[must_use]
     pub const fn kind(&self) -> UndoKind {
         match self {
@@ -53,7 +37,6 @@ impl UndoAction {
         }
     }
 
-    /// The threads a mail entry changed.
     #[must_use]
     pub fn threads(&self) -> Vec<ThreadId> {
         match self {
@@ -62,7 +45,6 @@ impl UndoAction {
         }
     }
 
-    /// A send entry's outbox row.
     #[must_use]
     pub const fn outbox(&self) -> Option<OutboxId> {
         match self {
@@ -72,16 +54,11 @@ impl UndoAction {
     }
 }
 
-/// One stored entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UndoRecord {
-    /// The number of the action that made it.
     pub id: UndoEntryId,
-    /// Its account.
     pub account: AccountId,
-    /// What the toast and history call it.
     pub label: String,
-    /// What undoing it reverts.
     pub action: UndoAction,
 }
 
@@ -94,7 +71,6 @@ fn undo_row(r: &Row<'_>) -> rusqlite::Result<UndoRecord> {
     })
 }
 
-/// Reads of the undo history.
 #[derive(Debug, Clone, Copy)]
 pub struct UndoReads<'c> {
     db: Db<'c>,
@@ -105,7 +81,6 @@ impl<'c> UndoReads<'c> {
         Self { db }
     }
 
-    /// The account's entries, oldest first.
     pub fn entries(self, account: AccountId) -> Result<Vec<UndoRecord>, StoreError> {
         self.db.all(
             "read the undo history",
@@ -116,8 +91,6 @@ impl<'c> UndoReads<'c> {
         )
     }
 
-    /// One entry of the account; `None` when it is gone, so an undo of it is
-    /// refused.
     pub fn get(
         self,
         account: AccountId,
@@ -132,8 +105,6 @@ impl<'c> UndoReads<'c> {
         )
     }
 
-    /// The entries of sends whose row is already sent: dropped on launch, so
-    /// a stray `z` never trashes delivered mail.
     pub fn for_sent_rows(self) -> Result<Vec<UndoEntryId>, StoreError> {
         self.db.all(
             "read the sent sends' undo entries",
@@ -145,7 +116,6 @@ impl<'c> UndoReads<'c> {
     }
 }
 
-/// Writes to the undo history.
 #[derive(Debug)]
 pub struct UndoWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
@@ -156,8 +126,6 @@ impl<'t, 'c> UndoWrites<'t, 'c> {
         Self { tx }
     }
 
-    /// Adds an entry, replacing one with the same id, and drops the account's
-    /// entries beyond the newest [`UNDO_KEPT`].
     pub fn record(
         &mut self,
         account: AccountId,
@@ -185,7 +153,6 @@ impl<'t, 'c> UndoWrites<'t, 'c> {
         Ok(())
     }
 
-    /// Removes an entry, as undoing it does. Unknown ids are skipped.
     pub fn delete(&mut self, id: UndoEntryId) -> Result<(), StoreError> {
         let account: Option<AccountId> = self.tx.db().optional(
             "remove an undo entry",
@@ -199,7 +166,6 @@ impl<'t, 'c> UndoWrites<'t, 'c> {
         Ok(())
     }
 
-    /// Removes a send's entry, once it is sent and its toast is gone.
     pub fn delete_for_outbox(&mut self, outbox: OutboxId) -> Result<(), StoreError> {
         let accounts: Vec<AccountId> = self.tx.db().all(
             "remove a send's undo entry",

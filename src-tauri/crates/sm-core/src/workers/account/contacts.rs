@@ -1,7 +1,3 @@
-//! Recipient autocomplete upkeep (SPEC Recipients and autocomplete): what
-//! each message adds to the contact counts, and the backfill from the last
-//! year of sent mail.
-
 use sm_domain::{Addr, Identity, SystemLabel};
 use sm_gmail::{Format, GmailError, Outcome, PageToken, Priority, ThreadQuery};
 use sm_store::{NewMessage, Priority as WritePriority, Sighting};
@@ -10,18 +6,10 @@ use super::ctx::AccountCtx;
 use super::queue::{BACKFILL, Work};
 use super::read::{new_message, parse};
 
-/// The backfill's Gmail query.
 const BACKFILL_QUERY: &str = "in:sent newer_than:1y";
-/// Threads per backfill page.
 const BACKFILL_PAGE: u32 = 100;
-/// The headers the backfill reads.
 const BACKFILL_HEADERS: &[&str] = &["From", "To", "Cc", "Date"];
 
-/// What one message adds to the account's contacts. On mail this account
-/// sent, every recipient gains a sent count. On other mail only the sender
-/// gains a received count; co-recipients are stored with no count, unless
-/// it is list mail, which adds nothing for them. The account's own
-/// addresses are never contacts.
 pub(crate) fn sightings<'m>(m: &'m NewMessage, me: &Identity) -> Vec<Sighting<'m>> {
     let seen = |a: &'m Addr, sent: u32, received: u32, on_list: bool| {
         let email = a.email.trim();
@@ -54,8 +42,6 @@ pub(crate) fn sightings<'m>(m: &'m NewMessage, me: &Identity) -> Vec<Sighting<'m
     }
 }
 
-/// One page of the backfill at priority 6: the recipients of each sent
-/// message, counted once. The next page queues behind it.
 pub(crate) async fn backfill_page(
     ctx: &AccountCtx,
     page: Option<&PageToken>,

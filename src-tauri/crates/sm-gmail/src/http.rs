@@ -1,19 +1,3 @@
-//! The HTTP client every call shares, and how a response or a transport
-//! failure becomes an [`Outcome`].
-//!
-//! ## Offline or no response
-//!
-//! A transport failure (no HTTP status at all) is:
-//! - **Offline** when reqwest reports a connect error: DNS failure, connection
-//!   refused, no route, a failed TLS handshake, a connect timeout. Not one byte
-//!   reached the server, so the call is safe to queue and replay.
-//! - **No response** otherwise. The connection was up, so the request may have
-//!   been written and acted on: a read timeout, a connection closed or reset
-//!   before the answer, a broken body.
-//!
-//! A stale pooled connection that fails while writing looks to hyper like one
-//! that died after the write, so it counts as no response: the safe side.
-
 use std::time::Duration;
 
 use reqwest::StatusCode;
@@ -22,30 +6,20 @@ use serde::Deserialize;
 
 use crate::outcome::{GmailError, Outcome};
 
-/// The HTTP client for Gmail, Google's OAuth endpoints, and one-click
-/// unsubscribe. Cheap to clone: clones share the connection pools.
 #[derive(Debug, Clone)]
 pub struct HttpClient {
-    /// Google's endpoints.
     google: reqwest::Client,
-    /// A list's unsubscribe URL, which comes from mail anyone can send: it
-    /// follows no redirects, so an `https` URL can't bounce the POST to a
-    /// plain `http` or local address.
     lists: reqwest::Client,
 }
 
-/// The HTTP client could not start (its TLS backend failed to load).
 #[derive(Debug, thiserror::Error)]
 #[error("could not start the HTTP client: {0}")]
 pub struct HttpClientError(#[source] reqwest::Error);
 
-/// How long connecting may take before the call counts as offline.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// How long the server may go quiet mid-answer before it counts as no response.
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 impl HttpClient {
-    /// A client with the connect and read timeouts the outcome rule relies on.
     pub fn new() -> Result<Self, HttpClientError> {
         let builder = || {
             reqwest::Client::builder()
@@ -61,26 +35,21 @@ impl HttpClient {
         })
     }
 
-    /// The client for Google's endpoints.
     pub(crate) const fn inner(&self) -> &reqwest::Client {
         &self.google
     }
 
-    /// The client for a mailing list's one-click unsubscribe URL.
     pub(crate) const fn lists(&self) -> &reqwest::Client {
         &self.lists
     }
 }
 
-/// Sends a request, classifying a transport failure.
 pub(crate) async fn send(
     request: reqwest::RequestBuilder,
 ) -> Result<reqwest::Response, GmailError> {
     request.send().await.map_err(|e| from_transport(&e))
 }
 
-/// Classifies a transport failure by the rule in the module docs. The detail
-/// leaves out the URL, which can carry ids and search queries.
 pub(crate) fn from_transport(err: &reqwest::Error) -> GmailError {
     let (outcome, what) = if err.is_connect() {
         (Outcome::Offline, "connect")
@@ -103,7 +72,6 @@ pub(crate) fn from_transport(err: &reqwest::Error) -> GmailError {
     GmailError::with_detail(outcome, what)
 }
 
-/// A response read to its end.
 pub(crate) struct ReadResponse {
     pub(crate) status: StatusCode,
     retry_after: Option<Duration>,
@@ -111,7 +79,6 @@ pub(crate) struct ReadResponse {
 }
 
 impl ReadResponse {
-    /// Reads the whole body.
     pub(crate) async fn read(response: reqwest::Response) -> Result<Self, GmailError> {
         let status = response.status();
         let retry_after = retry_after(&response);
@@ -123,8 +90,6 @@ impl ReadResponse {
         })
     }
 
-    /// A response's status and `Retry-After`, its body unread: for a server
-    /// that is not Google's, whose body is neither needed nor trusted.
     pub(crate) fn status_only(response: &reqwest::Response) -> Self {
         Self {
             status: response.status(),
@@ -133,12 +98,10 @@ impl ReadResponse {
         }
     }
 
-    /// Parses a 2xx body. One that does not parse is no clear answer.
     pub(crate) fn json<T: for<'de> Deserialize<'de>>(&self, what: &str) -> Result<T, GmailError> {
         serde_json::from_slice(&self.body).map_err(|e| parse_error(what, &e))
     }
 
-    /// Classifies a status that is not a success, with its Google error body.
     pub(crate) fn to_error(&self) -> GmailError {
         let code = self.status.as_u16();
         let retry_after = self.retry_after;
@@ -166,7 +129,6 @@ impl ReadResponse {
     }
 }
 
-/// A response's `Retry-After` in seconds.
 fn retry_after(response: &reqwest::Response) -> Option<Duration> {
     response
         .headers()
@@ -176,8 +138,6 @@ fn retry_after(response: &reqwest::Response) -> Option<Duration> {
         .map(Duration::from_secs)
 }
 
-/// A body that did not parse, described without quoting it: serde's message
-/// can repeat a value from the body, which may be mail content or a token.
 pub(crate) fn parse_error(what: &str, err: &serde_json::Error) -> GmailError {
     GmailError::with_detail(
         Outcome::NoResponse,
@@ -190,7 +150,6 @@ pub(crate) fn parse_error(what: &str, err: &serde_json::Error) -> GmailError {
     )
 }
 
-/// `error.message` and the first `error.errors[].reason` of a Google API error.
 fn google_error(body: &[u8]) -> (Option<String>, Option<String>) {
     #[derive(Deserialize)]
     struct Body {

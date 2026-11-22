@@ -1,5 +1,3 @@
-//! Opening the database: the schema, its version guard, and connection tuning.
-
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -7,29 +5,14 @@ use rusqlite::{Connection, OpenFlags};
 
 use crate::StoreError;
 
-/// The `user_version` of a database made by this `schema.sql`. Change it with
-/// any change to the schema, or to what stored rows mean, so they are read
-/// from Gmail again: a file with another version is moved aside and a fresh
-/// one created, since there are no migrations (ARCHITECTURE.md, section 6).
-/// 5: only images are inline parts, so files sent `inline` are listed.
-/// 6: an image is inline only when the HTML body shows it, so a photo sent
-/// `inline` with no Content-ID is listed, and stored inside an attached
-/// message.
 pub const SCHEMA_VERSION: i32 = 7;
 
 const SCHEMA: &str = include_str!("schema.sql");
 
-/// Statements kept prepared per connection. The repositories have about a
-/// hundred; a smaller cache would re-prepare the hot ones.
 const STATEMENT_CACHE: usize = 256;
 
-/// How long a connection waits for a lock before failing. Only a checkpoint
-/// ever holds one against the single writer, so this is a backstop.
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Opens the write connection, creating the database when there is none and
-/// moving aside one with another schema version, or a file that is not a
-/// database. Any other error reading the file fails, and leaves it in place.
 pub(crate) fn open_writer(path: &Path) -> Result<Connection, StoreError> {
     if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(dir).map_err(|source| StoreError::Io {
@@ -57,16 +40,12 @@ pub(crate) fn open_writer(path: &Path) -> Result<Connection, StoreError> {
                     "database file is not a database or is corrupt; starting a fresh one",
                 );
             }
-            // Locked, unreadable, or out of space: the mail is still there,
-            // so startup fails rather than throw it away.
             Err(e) => return Err(StoreError::sql("read the database's schema version")(e)),
         }
     }
     create(path)
 }
 
-/// Opens a read-only connection for the read pool. The writer must have
-/// created the database first.
 pub(crate) fn open_reader(path: &Path) -> Result<Connection, StoreError> {
     let conn = Connection::open_with_flags(
         path,
@@ -92,8 +71,6 @@ fn stored_version(path: &Path) -> rusqlite::Result<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
 }
 
-/// Whether SQLite found the file is no database it can use, the one error
-/// that moves it aside.
 fn is_not_a_database(e: &rusqlite::Error) -> bool {
     matches!(
         e.sqlite_error_code(),
@@ -110,8 +87,6 @@ fn open_existing(path: &Path) -> Result<Connection, StoreError> {
 fn create(path: &Path) -> Result<Connection, StoreError> {
     let mut conn = Connection::open(path).map_err(StoreError::sql("create the database"))?;
     tune_writer(&conn)?;
-    // One transaction, version included: a crash part way leaves version 0,
-    // and the next start moves that file aside too.
     let tx = conn
         .transaction()
         .map_err(StoreError::sql("begin creating the schema"))?;
@@ -139,8 +114,6 @@ fn tune_writer(conn: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// Renames the file, and its WAL and shared-memory files, to the first free
-/// `<name>.old-<n>`. Returns the new path.
 fn move_aside(path: &Path) -> Result<PathBuf, StoreError> {
     let mut n = 1_u32;
     let aside = loop {
@@ -160,7 +133,6 @@ fn move_aside(path: &Path) -> Result<PathBuf, StoreError> {
     Ok(aside)
 }
 
-/// `path` with `suffix` appended to its file name.
 fn sibling(path: &Path, suffix: &str) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(suffix);
@@ -194,11 +166,9 @@ mod tests {
                  CREATE TABLE old (x); INSERT INTO old VALUES (7); PRAGMA user_version = 99;",
             )
             .unwrap();
-            // Keep the WAL file: closing the last connection would checkpoint it.
             let _never_closed = std::mem::ManuallyDrop::new(conn);
         }
         assert!(sibling(&path, "-wal").exists());
-        // An earlier move-aside is kept, not overwritten.
         std::fs::write(sibling(&path, ".old-1"), b"older").unwrap();
 
         drop(open_writer(&path).unwrap());
@@ -240,7 +210,6 @@ mod tests {
             let conn = open_writer(&path).unwrap();
             conn.execute("UPDATE meta SET rev = 41", []).unwrap();
         }
-        // Another connection holds the file's lock throughout.
         let holder = Connection::open(&path).unwrap();
         holder
             .execute_batch("PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE;")
@@ -259,7 +228,6 @@ mod tests {
     #[test]
     fn a_database_that_cannot_be_opened_is_left_in_place() {
         let dir = tempfile::tempdir().unwrap();
-        // Something SQLite can't open, though it is no corrupt database.
         let path = dir.path().join("mail.db");
         std::fs::create_dir_all(&path).unwrap();
 

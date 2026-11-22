@@ -20,7 +20,6 @@ import { SearchTips } from "./ui/SearchTips";
 import { SignInAgain } from "./ui/SignInAgain";
 import { TopBar } from "./ui/TopBar";
 
-/** Keeps each account's summary and last list subscribed, so switching back paints at once. */
 function AccountSubs({ account }: { account: number }) {
   useSubscription({ type: "account", account });
   const where = useChrome((s) => s.perAccount[account]?.where ?? null);
@@ -35,12 +34,10 @@ export function App() {
     s.account === null ? null : (s.perAccount[s.account]?.screen ?? null),
   );
   const composer = useComposeState(composerKind);
-  /** The `c` composer replaces the screen while it is open. */
   const composing = useComposeState((s) => (s.onScreen?.thread === null ? s.onScreen.draft : null));
   const signedOut = useNeedsSignin(account);
   const searchOpen = useChrome((s) => s.search !== null);
 
-  // Pick an account on screen; follow removals.
   useEffect(() => {
     if (app) followAccounts(app.accounts.map((a) => a.id));
   }, [app]);
@@ -53,15 +50,11 @@ export function App() {
       {app.accounts.map((a) => (
         <AccountSubs key={a.id} account={a.id} />
       ))}
-      {/* The traffic lights sit in this strip; content starts below it. */}
       <div data-tauri-drag-region className="h-titlebar shrink-0" />
       <div className="flex min-h-0 flex-1">
         <Rail accounts={app.accounts} />
-        {/* The white panel on the off-white canvas, as in Superhuman. */}
         <div className="relative mr-2 mb-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-border-2 bg-bg shadow-panel">
           {signedOut && composer === null ? (
-            // A composer already open stays, a reply with its conversation,
-            // so nothing typed is lost; closing it shows this screen.
             <main className="relative flex min-h-0 min-w-0 flex-1 flex-col">
               <SignInAgain
                 account={account ?? 0}

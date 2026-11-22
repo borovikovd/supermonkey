@@ -1,18 +1,11 @@
-// Sync (SPEC §Sync): the connect sync, catching up after the
-// app was closed, polls on app time and on focus, the full resync after
-// history expires, and refreshing sendAs and labels on focus.
 import type { App } from "./app.ts";
 import type { GmailMessage, GmailState } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A, A_ALIAS, B } from "./seeds.ts";
 
-// ------------------------------------------------------------------ helpers
-
-/** Moves the highlight to the row whose subject is exactly `subject`, with `j` / `k`. */
 async function highlight(app: App, subject: string): Promise<void> {
   await expect(app.rows.filter({ hasText: subject }).first()).toBeVisible();
-  // A view switch restores its highlight after the rows arrive.
   await app.settle();
   const { subjects, at } = await app.list.evaluate((list) => {
     const rows = Array.from(list.querySelectorAll("[data-row]"))
@@ -32,7 +25,6 @@ async function highlight(app: App, subject: string): Promise<void> {
   await expect(app.highlighted).toContainText(subject);
 }
 
-/** Opens a palette picker (`l`, `h`) and picks the first item matching `query`. */
 async function pick(app: App, key: string, query = ""): Promise<void> {
   await app.press(key);
   await expect(app.palette).toBeVisible();
@@ -42,7 +34,6 @@ async function pick(app: App, key: string, query = ""): Promise<void> {
   await expect(app.palette).toHaveCount(0);
 }
 
-/** Opens a label's view with `g l`. */
 async function goToLabel(app: App, name: string): Promise<void> {
   await app.press("g", "l");
   await expect(app.palette).toBeVisible();
@@ -55,13 +46,8 @@ async function goToLabel(app: App, name: string): Promise<void> {
 
 const live = (m: GmailMessage) => !m.labels.includes("TRASH") && !m.labels.includes("SPAM");
 
-/** A thread's subject without reply prefixes. */
 const bare = (subject: string) => subject.replace(/^((re|fwd?):\s*)+/i, "");
 
-/**
- * Gmail's Inbox for an account, newest first: each thread with a live
- * `INBOX` message (§Views), with its subject and its latest live message's date.
- */
 function gmailInbox(state: GmailState): { subject: string; date: number }[] {
   const threads = new Map<string, GmailMessage[]>();
   for (const m of state.messages.filter((x) => !x.labels.includes("DRAFT")))
@@ -76,10 +62,6 @@ function gmailInbox(state: GmailState): { subject: string; date: number }[] {
     .toSorted((a, b) => b.date - a.date);
 }
 
-/**
- * The app's Inbox equals Gmail's: the same threads, newest first within each
- * split, and the split counts add up.
- */
 async function expectInboxMatchesGmail(app: App, email: string): Promise<void> {
   const gmail = gmailInbox(await app.gmail.gmail(email));
   const dates = new Map(gmail.map((t) => [t.subject, t.date]));
@@ -94,17 +76,12 @@ async function expectInboxMatchesGmail(app: App, email: string): Promise<void> {
   expect(counts.reduce((a, b) => a + b, 0)).toBe(gmail.length);
 }
 
-// ------------------------------------------------------------------ cases
-
 test("SYN-01 the connect sync matches Gmail", async ({ app, gmail, page }) => {
-  // Tall enough that the whole Inbox renders at once.
   await page.setViewportSize({ width: 1280, height: 2000 });
   const s = await seeds.drafts(gmail, app);
 
-  // Inbox: exactly Gmail's Inbox threads, newest first.
   await expectInboxMatchesGmail(app, A);
 
-  // User labels: all in the `l` picker.
   await app.press("l");
   await expect(app.palette).toBeVisible();
   await expect(app.palette.locator("[cmdk-item]")).toHaveCount(4);
@@ -116,7 +93,6 @@ test("SYN-01 the connect sync matches Gmail", async ({ app, gmail, page }) => {
   ]);
   await app.press("Escape");
 
-  // sendAs: the From picker lists both of A's addresses; B's name comes from sendAs.
   await app.compose();
   await app.press("Meta+Shift+F");
   await expect(app.palette).toBeVisible();
@@ -128,7 +104,6 @@ test("SYN-01 the connect sync matches Gmail", async ({ app, gmail, page }) => {
   await expect(app.page.getByRole("heading", { name: "New Message" })).toHaveCount(0);
   await expect(app.account(B)).toContainText("Z");
 
-  // Drafts: each Gmail draft is listed.
   await app.press("g", "d");
   await app.settle();
   await expect(app.rows).toHaveCount(s.drafts.size);
@@ -136,19 +111,16 @@ test("SYN-01 the connect sync matches Gmail", async ({ app, gmail, page }) => {
   await expect(app.row("Fwd: Contract")).toHaveCount(1);
   await expect(app.row("Re: Person 2")).toHaveCount(2);
 
-  // Sent: the last 90 days.
   await app.press("g", "t");
   await app.settle();
   await expect(app.row("Sent 10 days ago")).toHaveCount(1);
   await expect(app.row("Sent 89 days ago")).toHaveCount(1);
   await expect(app.row("Sent 91 days ago")).toHaveCount(0);
 
-  // Starred.
   await app.press("g", "s");
   await app.settle();
   await expect(app.row("Trip ideas")).toHaveCount(1);
 
-  // The connect sync fetched no older mail.
   const fetchedThreads = (await gmail.requests("threads.get", { account: A })).map((r) => r.path);
   for (const key of ["archivedOld", "projOld1", "invoiceOld"]) {
     const id = s.thread(key).threadId;
@@ -158,9 +130,6 @@ test("SYN-01 the connect sync matches Gmail", async ({ app, gmail, page }) => {
     ).toEqual([]);
   }
 
-  // The connect sync downloads no attachments. Inline `cid:` images are
-  // fetched with the body (§Reading), so fwd's logo is the one fetch allowed;
-  // contract.pdf and the drafts' spec.pdf stay on Gmail.
   const fetched = (await gmail.requests("attachments.get")).map((r) => r.path);
   expect(fetched).toEqual([
     expect.stringContaining(`/messages/${s.message("fwd", 1).id}/attachments/`),
@@ -265,7 +234,6 @@ test("SYN-03 polls bring in changes made elsewhere", async ({ app, gmail }) => {
   await app.press("g", "i");
   await app.settle();
 
-  // Focus polls at once, without the clock moving.
   const now = await app.now();
   await app.focus(false);
   await gmail.modify(A, m("p2"), [], ["STARRED"]);
@@ -284,7 +252,6 @@ test("SYN-04 history too old: a full resync that sends no notifications", async 
   await page.setViewportSize({ width: 1280, height: 2000 });
   const s = await seeds.standard(gmail, app);
 
-  // p6 is snoozed here.
   await highlight(app, "Person 6");
   await pick(app, "h");
   await expect(app.row("Person 6")).toHaveCount(0);
@@ -336,7 +303,6 @@ test("SYN-04 history too old: a full resync that sends no notifications", async 
   await app.settle();
   expect((await gmail.platform()).notifications).toEqual([]);
 
-  // Polling resumed: the next new message is notified as usual.
   const next = await gmail.deliver({
     account: A,
     from: "Pat Poll <pat@poll.test>",
@@ -405,8 +371,6 @@ test("SYN-07 an opened thread fetches its bodies right away", async ({ app, gmai
   await page.setViewportSize({ width: 1280, height: 2600 });
   await gmail.quota(true);
   await seeds.bulk(gmail, app, { open: false });
-  // Opened by hand: at the production budget the connect sync takes minutes
-  // of real time, so `app.open()` (which settles) would wait for all of it.
   await gmail.start();
   const now = await gmail.now();
   await page.clock.install({ time: now });
@@ -416,7 +380,6 @@ test("SYN-07 an opened thread fetches its bodies right away", async ({ app, gmai
 
   const bodies = async () =>
     (await gmail.requests("threads.get", { account: A })).filter((r) => r.params.format === "full");
-  // The 50th row: the 10th of Other.
   const row = app.row("Offer 10");
   await expect(row).toHaveCount(1, { timeout: 60_000 });
   const before = await bodies();
@@ -426,7 +389,6 @@ test("SYN-07 an opened thread fetches its bodies right away", async ({ app, gmai
   await expect(
     app.conversation.locator("iframe[data-frame]").last().contentFrame().locator("body"),
   ).toContainText("Promotion 10.", { timeout: 5_000 });
-  // Other Inbox bodies are still pending.
   expect((await bodies()).filter((r) => r.answer === 200).length).toBeLessThan(60);
 });
 
@@ -436,11 +398,9 @@ test("SYN-08 a slower thread fetch never undoes a newer one", async ({ app, gmai
   const bodyFetch = { api: "threads.get", query: { format: "full" } } as const;
   const from = seeds.PERSONS[0] ?? "";
 
-  // A new thread's body fetch reads Gmail now, but its answer comes late.
   let slow = await gmail.holdAnswer(bodyFetch, { times: 1 });
   const first = await gmail.deliver({ account: A, from, subject: "Race", text: "First." });
   await expect.poll(held).toBe(true);
-  // Meanwhile a reply arrives, and a poll stores it.
   await gmail.deliver({
     account: A,
     from,
@@ -458,7 +418,6 @@ test("SYN-08 a slower thread fetch never undoes a newer one", async ({ app, gmai
   await app.press("Escape");
   await app.settle();
 
-  // A label change a poll brought in stays too.
   slow = await gmail.holdAnswer(bodyFetch, { times: 1 });
   const other = await gmail.deliver({ account: A, from, subject: "Late read", text: "Hi." });
   await expect.poll(held).toBe(true);
@@ -477,14 +436,10 @@ test("SYN-09 a connect sync retried after a failure misses no change made in bet
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app, { open: false });
-  // The connect sync lists Inbox, then fails at the drafts: rate-limited, the
-  // account can't reach Gmail, so the connect sync is tried again. (A draft
-  // Gmail fails to read only defers the drafts to the first poll.)
   await gmail.fault("drafts.list", { kind: "status", status: 429 }, { account: A, times: 1 });
   await app.open();
   await expect(app.row("Person 1")).toHaveCount(1);
 
-  // Archived elsewhere before the connect sync is retried.
   await gmail.modify(A, s.message("p1", 1).id, [], ["INBOX"]);
   await app.advance(10_000);
   await app.settle();
@@ -497,7 +452,6 @@ test("SYN-12 a quit during the first sync loses none of it: starred and recent s
   gmail,
 }) => {
   await seeds.drafts(gmail, app, { open: false });
-  // The Starred and Sent listings are still out when the app quits.
   const starred = await gmail.hold("threads.list", { account: A, query: { labelIds: "STARRED" } });
   const sent = await gmail.hold("threads.list", {
     account: A,
@@ -580,7 +534,6 @@ test("SYN-11 a slower label or sendAs read never undoes a newer one", async ({ a
     return count;
   };
 
-  // A refresh reads the labels now and answers late; a later one sees a new label.
   const list = await gmail.holdAnswer("labels.list", { account: A, times: 1 });
   await refresh();
   await expect.poll(() => held("labels.list")).toBe(true);
@@ -597,7 +550,6 @@ test("SYN-11 a slower label or sendAs read never undoes a newer one", async ({ a
   await app.press("Escape");
   await expect(app.palette).toHaveCount(0);
 
-  // The same for sendAs: an alias added between the two reads stays.
   const sendAs = await gmail.holdAnswer("sendAs.list", { account: A, times: 1 });
   await refresh();
   await expect.poll(() => held("sendAs.list")).toBe(true);

@@ -1,9 +1,3 @@
-//! Store records to IPC read models, in one place: first loads, patches,
-//! and queries all build what the UI reads here, and later slices reuse it.
-//!
-//! Each function reads through [`sm_store::Reads`], so it works the same on
-//! the writer's snapshot, a read-pool transaction, and inside a write.
-
 mod account;
 mod composer;
 mod conversation;

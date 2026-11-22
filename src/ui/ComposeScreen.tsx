@@ -1,6 +1,5 @@
 import { Composer } from "../compose/Composer";
 
-/** `c`: a new message that replaces the screen. */
 export function ComposeScreen({ draft }: { draft: string }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">

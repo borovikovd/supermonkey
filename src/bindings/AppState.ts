@@ -2,20 +2,4 @@
 import type { AccountInfo } from "./AccountInfo";
 import type { GlobalSettings } from "./GlobalSettings";
 
-/**
- * The app subscription's data.
- */
-export type AppState = { 
-/**
- * Every account, in rail order.
- */
-accounts: Array<AccountInfo>, 
-/**
- * The settings that apply to every account.
- */
-settings: GlobalSettings, 
-/**
- * Gmail can be reached: false from a call that finds no connection
- * until the next answer from Gmail.
- */
-online: boolean, };
+export type AppState = { accounts: Array<AccountInfo>, settings: GlobalSettings, online: boolean, };

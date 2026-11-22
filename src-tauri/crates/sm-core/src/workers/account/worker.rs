@@ -1,6 +1,3 @@
-//! The account worker handle: built from its parts, started after the
-//! worker it replaces has stopped, and what the core asks of it.
-
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -18,41 +15,25 @@ use crate::workers::ops::{self, OpsLane};
 use crate::workers::runs::Runs;
 use crate::workers::{drafts, outbox};
 
-/// What the registry builds a worker from.
 pub(crate) struct WorkerParts {
     pub(crate) deps: Arc<WorkerDeps>,
     pub(crate) account: AccountId,
     pub(crate) id: WorkerId,
-    /// The account's Gmail client, on the grant the worker runs on.
     pub(crate) gmail: Gmail,
-    /// The worker's own task group.
     pub(crate) tasks: Tasks,
-    /// The account's op lane: an op an older worker had sent finishes there
-    /// before this one's runner goes on.
     pub(crate) lane: Arc<OpsLane>,
     pub(crate) sign_out: SignOutSender,
 }
 
-/// A running account worker.
 #[derive(Clone)]
 pub(crate) struct AccountWorker {
     ctx: Arc<AccountCtx>,
-    /// Reads of conversations' bodies in flight (SPEC Sync, priority 2): at
-    /// most one per thread, each stopped once no subscription shows its
-    /// thread. Offline, a read waits for the network; without this, every
-    /// open and prefetch would leave a read of its own waiting, and all of
-    /// them would go out when the network came back.
     opened: Arc<Runs<ThreadId>>,
-    /// The sign-in whose grant it runs on.
     grant: Grant,
-    /// The worker it replaced, until that one has stopped: stopping this
-    /// one waits for it too, so no two of an account's workers ever run at
-    /// once, however quickly they replace each other.
     replaced: Arc<Mutex<Option<Self>>>,
 }
 
 impl AccountWorker {
-    /// A worker on `grant` whose tasks have not started.
     pub(crate) fn new(parts: WorkerParts, grant: Grant) -> Self {
         let health = Health::new(
             parts.account,
@@ -70,11 +51,8 @@ impl AccountWorker {
         }
     }
 
-    /// Starts the worker's tasks. With `replaced`, they start only once that
-    /// worker has stopped, so the two never poll or replay at once.
     pub(crate) fn start(self, replaced: Option<Self>) {
         self.replaced.lock().clone_from(&replaced);
-        // The task keeps the worker; this handle is only to spawn it on.
         let ctx = Arc::clone(&self.ctx);
         ctx.tasks.spawn("account start", async move {
             if let Some(old) = replaced {
@@ -93,41 +71,32 @@ impl AccountWorker {
         });
     }
 
-    /// The state its tasks share, for work started from outside: an opened
-    /// thread, a Gmail listing, an attachment download.
     pub(crate) const fn ctx(&self) -> &Arc<AccountCtx> {
         &self.ctx
     }
 
-    /// The worker's id.
     pub(crate) fn id(&self) -> WorkerId {
         self.ctx.id
     }
 
-    /// The sign-in whose grant it runs on.
     pub(crate) const fn grant(&self) -> Grant {
         self.grant
     }
 
-    /// Polls history now.
     pub(crate) fn poll_now(&self) {
         self.ctx.poll.kick();
     }
 
-    /// Wakes the ops runners: ops were queued.
     pub(crate) fn kick_ops(&self) {
         for queue in OpQueue::ALL {
             self.ctx.ops(queue).kick();
         }
     }
 
-    /// Wakes the outbox runner: a send was queued or undone.
     pub(crate) fn kick_outbox(&self) {
         self.ctx.outbox.kick();
     }
 
-    /// Downloads the parts of a draft read from Gmail, now open in a
-    /// composer (SPEC Addressing).
     pub(crate) fn download_parts(&self, draft: DraftId) {
         let ctx = Arc::clone(&self.ctx);
         self.ctx.tasks.spawn("draft parts", async move {
@@ -137,8 +106,6 @@ impl AccountWorker {
         });
     }
 
-    /// Reads a Gmail change to a draft that was skipped while a composer
-    /// had it open (SPEC Drafts).
     pub(crate) fn read_draft(&self, draft: DraftId) {
         let ctx = Arc::clone(&self.ctx);
         self.ctx.tasks.spawn("read draft", async move {
@@ -146,7 +113,6 @@ impl AccountWorker {
         });
     }
 
-    /// Reads `sendAs` and the labels again (SPEC Sync: on focus).
     pub(crate) fn refresh_profile(&self) {
         let ctx = Arc::clone(&self.ctx);
         self.ctx.tasks.spawn("refresh profile", async move {
@@ -159,7 +125,6 @@ impl AccountWorker {
         });
     }
 
-    /// Reads the labels again: a message named a label the app does not know.
     pub(crate) fn refresh_labels(&self) {
         let ctx = Arc::clone(&self.ctx);
         self.ctx.tasks.spawn("refresh labels", async move {
@@ -168,9 +133,6 @@ impl AccountWorker {
         });
     }
 
-    /// Reads an opened or prefetched thread's missing bodies at priority 2,
-    /// unless a read of them is in flight already. The read stops once no
-    /// subscription shows the thread ([`AccountWorker::release_opened`]).
     pub(crate) fn fetch_opened(&self, thread: ThreadId) {
         let Some(read) = self.opened.begin(thread) else {
             return;
@@ -186,19 +148,14 @@ impl AccountWorker {
         });
     }
 
-    /// Stops the read of `thread`'s bodies for a conversation: no
-    /// subscription shows it any more.
     pub(crate) fn release_opened(&self, thread: ThreadId) {
         self.opened.stop(&thread);
     }
 
-    /// Cancels every task without waiting.
     pub(crate) fn cancel(&self) {
         self.ctx.tasks.cancel();
     }
 
-    /// Cancels every task and waits until they have ended, and until the
-    /// worker it replaced has stopped too.
     pub(crate) async fn stop(&self) {
         self.ctx.tasks.stop().await;
         let replaced = self.replaced.lock().take();

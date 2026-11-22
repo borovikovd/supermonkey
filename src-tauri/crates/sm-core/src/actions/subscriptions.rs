@@ -1,7 +1,3 @@
-//! Opening and closing subscriptions (SPEC UI state, Subscriptions). These
-//! are actions, so the writer sees them in order with the others; the first
-//! load goes out with the commit.
-
 use sm_domain::{AccountId, GmailListing, SubId};
 use sm_ipc::SubKey;
 use sm_store::{Reads, StoreError};
@@ -10,9 +6,6 @@ use super::{ActionCtx, ActionError};
 use crate::drafts::lifecycle;
 use crate::effects::{Effect, GmailQuery};
 
-/// A reloaded page's first action: closes every subscription of the
-/// previous page. An open composer among them closes first, as a second
-/// `Esc` would close it (SPEC UI state, Subscriptions).
 pub(super) fn reset(ctx: &mut ActionCtx<'_, '_>) -> Result<(), ActionError> {
     for draft in ctx.state.subs.composer_drafts() {
         crate::drafts::close(ctx.tx, ctx.state, &draft, ctx.now)?;
@@ -24,20 +17,15 @@ pub(super) fn reset(ctx: &mut ActionCtx<'_, '_>) -> Result<(), ActionError> {
     Ok(())
 }
 
-/// Opens a subscription, and asks for the work that showing it needs: the
-/// thread's bodies, a draft's parts, a Gmail listing.
 pub(super) fn subscribe(
     ctx: &mut ActionCtx<'_, '_>,
     sub: SubId,
     key: SubKey,
 ) -> Result<(), ActionError> {
-    // Every read first, so a failed one records nothing.
     let reads = ctx.tx.read();
     let mut effects = Vec::new();
     match &key {
         SubKey::Conversation { thread, .. } => {
-            // Requests of different accounts never wait on each other, so
-            // the account on screen needs no head start (SPEC Sync).
             if let Some(account) = reads.threads().account_of(*thread)? {
                 effects.push(Effect::FetchThread {
                     account,
@@ -58,8 +46,6 @@ pub(super) fn subscribe(
         SubKey::List { .. } | SubKey::Search { .. } | SubKey::App | SubKey::Account { .. } => {}
     }
     let gmail = gmail_query(reads, &key)?;
-    // Offline, the listing waits for Gmail, and the list does not show it
-    // searching meanwhile (SPEC Search).
     let online = ctx.state.online();
     let searching = online && gmail.is_some();
     if let Some((account, query)) = gmail {
@@ -79,7 +65,6 @@ pub(super) fn subscribe(
     Ok(())
 }
 
-/// Closes a subscription and cancels its queued Gmail work.
 pub(super) fn unsubscribe(ctx: &mut ActionCtx<'_, '_>, sub: SubId) {
     let closed = ctx.state.subs.close(&sub);
     ctx.state.sub_effect(Effect::CancelSub(sub));
@@ -88,9 +73,6 @@ pub(super) fn unsubscribe(ctx: &mut ActionCtx<'_, '_>, sub: SubId) {
     }
 }
 
-/// A subscription watching `key` closed: a conversation's thread no other
-/// subscription shows no longer needs its bodies read, so a read of them
-/// still waiting (offline, backing off) stops.
 fn released(ctx: &mut ActionCtx<'_, '_>, key: &SubKey) {
     if let SubKey::Conversation { thread, .. } = *key
         && !ctx.state.subs.watches_thread(thread)
@@ -99,9 +81,6 @@ fn released(ctx: &mut ActionCtx<'_, '_>, key: &SubKey) {
     }
 }
 
-/// Asks Gmail for a list's next page. The page token is taken, so asking
-/// again while the page loads does nothing instead of restarting it; the
-/// page brings the next token.
 pub(super) fn more_results(ctx: &mut ActionCtx<'_, '_>, sub: SubId) -> Result<(), ActionError> {
     let Some(open) = ctx.state.subs.get(&sub) else {
         return Ok(());
@@ -126,9 +105,6 @@ pub(super) fn more_results(ctx: &mut ActionCtx<'_, '_>, sub: SubId) -> Result<()
     Ok(())
 }
 
-/// The Gmail listing a subscription merges in: Search, and the
-/// Done, All Mail, label, Trash, and Spam views (SPEC Views). A label Gmail
-/// has no id for yet has none.
 fn gmail_query(
     reads: Reads<'_>,
     key: &SubKey,

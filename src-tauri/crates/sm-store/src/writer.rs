@@ -1,14 +1,3 @@
-//! The writer actor (ARCHITECTURE.md, sections 4 and 6; SPEC UI state,
-//! Ordering): one OS thread owns the only write connection and runs jobs one
-//! at a time, highest priority first and in arrival order within a priority.
-//! Each job is one transaction.
-//!
-//! The queue is a mutex over three lanes plus a condvar, not a channel: a
-//! channel can't take the highest lane first, and a bounded one would block
-//! an async caller's thread when full. It is unbounded: a caller that awaits
-//! its reply has one job queued at a time, and the core's fire-and-forget
-//! writes are a fixed few per Gmail answer.
-
 use std::any::Any;
 use std::collections::VecDeque;
 use std::fmt;
@@ -26,14 +15,10 @@ use crate::reply::{self, Pending};
 use crate::tx::WriteTx;
 use crate::{Commit, Snapshot, StoreError};
 
-/// Which jobs run first (SPEC UI state, Ordering).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Priority {
-    /// UI actions and first loads.
     Ui,
-    /// Sync and queue results.
     Sync,
-    /// Everything else: contacts backfill, cleanup.
     Background,
 }
 
@@ -47,10 +32,7 @@ impl Priority {
     }
 }
 
-/// A queued job: it runs on the writer thread, in its own transaction.
 type Job<S> = dyn FnOnce(&mut Runner<S>) + Send;
-/// Runs after every commit, on the writer thread, with the caller's state,
-/// the committed database, and what the commit changed.
 type OnCommit<S> = dyn FnMut(&mut S, &Snapshot<'_>, &Commit) + Send;
 
 enum Entry<S> {
@@ -60,7 +42,6 @@ enum Entry<S> {
 
 struct Queue<S> {
     lanes: [VecDeque<Entry<S>>; 3],
-    /// No more jobs are taken: every handle is gone, or `stop` ran.
     closed: bool,
 }
 
@@ -76,7 +57,6 @@ struct Shared<S> {
 }
 
 impl<S> Shared<S> {
-    /// Queues an entry; gives it back when the writer has stopped.
     fn push(&self, priority: Priority, entry: Entry<S>) -> Result<(), Entry<S>> {
         {
             let mut queue = self.queue.lock();
@@ -97,8 +77,6 @@ impl<S> Shared<S> {
     }
 }
 
-/// Closes the queue when the last [`Writer`] clone goes. The thread then runs
-/// what is queued and exits.
 struct Handle<S> {
     shared: Arc<Shared<S>>,
     thread: ThreadId,
@@ -110,17 +88,10 @@ impl<S> Drop for Handle<S> {
     }
 }
 
-/// The handle to the writer thread. Clones share one thread.
-///
-/// `S` is the caller's writer-side state (core's subscription registry and
-/// effect buffer). It lives on the writer thread, so jobs and `on_commit`
-/// reach it without a lock.
 pub struct Writer<S> {
     handle: Arc<Handle<S>>,
 }
 
-/// The writer thread's id only: the queue holds closures, and `S` need not be
-/// `Debug`.
 impl<S> fmt::Debug for Writer<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Writer")
@@ -138,15 +109,6 @@ impl<S> Clone for Writer<S> {
 }
 
 impl<S: Send + 'static> Writer<S> {
-    /// Opens the database at `path` (creating it, or moving aside one with
-    /// another schema version) and starts the writer thread with `state`.
-    ///
-    /// After each commit, `on_commit` runs on the writer thread with the
-    /// state, a [`Snapshot`] of what was just committed, and the [`Commit`],
-    /// before the next job starts and before the job's caller gets its
-    /// result. After each job whose transaction rolled back (it returned
-    /// `Err`, panicked, or its commit failed), `on_rollback` runs instead,
-    /// so the state can drop what it buffered for that job.
     pub fn start(
         path: &Path,
         state: S,
@@ -186,10 +148,6 @@ impl<S: Send + 'static> Writer<S> {
         })
     }
 
-    /// Queues a job and returns its result to await. The job runs in its own
-    /// transaction: on `Ok` it commits, on `Err` or a panic it rolls back.
-    /// The result arrives once the commit and `on_commit` are done, so a
-    /// read after it sees the job's writes.
     pub fn call<T, E, F>(&self, priority: Priority, job: F) -> Pending<T, E>
     where
         T: Send + 'static,
@@ -200,15 +158,10 @@ impl<S: Send + 'static> Writer<S> {
         let entry = Entry::Job(Box::new(move |runner: &mut Runner<S>| {
             tx.send(runner.transact(job));
         }));
-        // Refused: dropping the job drops its sender, so the reply reads as
-        // "the writer has stopped".
         drop(self.handle.shared.push(priority, entry));
         Pending::new(rx)
     }
 
-    /// [`Writer::call`] for a thread that may block. Fails with
-    /// [`StoreError::Reentrant`] on the writer thread itself, where waiting
-    /// would never end.
     pub fn call_blocking<T, E, F>(&self, priority: Priority, job: F) -> Result<T, E>
     where
         T: Send + 'static,
@@ -221,33 +174,24 @@ impl<S: Send + 'static> Writer<S> {
         self.call(priority, job).wait()
     }
 
-    /// Stops the writer after the UI jobs queued before this call. Queued
-    /// sync and background jobs are dropped, and their callers get
-    /// [`StoreError::WriterStopped`], as does every later call. Resolves
-    /// once the database is closed.
     pub fn stop(&self) -> Pending<(), StoreError> {
         let (tx, rx) = reply::channel();
         if let Err(Entry::Stop(tx)) = self.handle.shared.push(Priority::Ui, Entry::Stop(tx)) {
-            // Already stopped: done.
             tx.send(Ok(()));
         }
         Pending::new(rx)
     }
 }
 
-/// The writer thread's own state.
 struct Runner<S> {
     conn: Connection,
-    /// The last committed `rev`.
     rev: Rev,
     state: S,
     on_commit: Box<OnCommit<S>>,
-    /// Runs after every rolled-back job.
     on_rollback: Box<dyn FnMut(&mut S) + Send>,
 }
 
 impl<S> Runner<S> {
-    /// Runs one job in one transaction.
     fn transact<T, E: From<StoreError>>(
         &mut self,
         job: impl FnOnce(&mut WriteTx<'_>, &mut S) -> Result<T, E>,
@@ -336,8 +280,6 @@ fn panic_message(panic: &(dyn Any + Send)) -> String {
         .unwrap_or_else(|| "a panic with no message".to_owned())
 }
 
-/// The writer thread: runs entries until the queue closes and empties, or a
-/// stop arrives.
 fn run<S>(shared: &Shared<S>, mut runner: Runner<S>) {
     loop {
         let entry = {
@@ -360,8 +302,6 @@ fn run<S>(shared: &Shared<S>, mut runner: Runner<S>) {
                     queue.closed = true;
                     queue.lanes.iter_mut().flat_map(std::mem::take).collect()
                 };
-                // Outside the lock: dropping a job drops its reply sender,
-                // which wakes its caller.
                 drop(dropped);
                 drop(runner);
                 reply.send(Ok(()));
@@ -375,8 +315,6 @@ fn run<S>(shared: &Shared<S>, mut runner: Runner<S>) {
 mod tests {
     use super::*;
 
-    /// Subscriptions waiting for their first load and the first loads sent,
-    /// as core's registry keeps them.
     #[derive(Default)]
     struct Registry {
         waiting: Vec<&'static str>,
@@ -423,7 +361,6 @@ mod tests {
         assert_eq!(accounts, 0, "the failed commit's write is gone");
         assert_eq!(rollbacks, 1);
         assert!(sent.is_empty(), "nothing went out with the failed commit");
-        // That read job's commit sent the first load the failed one lost.
         let sent = writer
             .call_blocking(Priority::Ui, |_, registry| {
                 Ok::<_, StoreError>(registry.sent.clone())

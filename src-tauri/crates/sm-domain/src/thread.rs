@@ -1,42 +1,31 @@
-//! A thread, derived from its messages (SPEC Views): the latest message, the
-//! labels that put it in views, and the values its list row shows.
-
 use crate::{Identity, LabelSet, MessageFacts, Millis, SystemLabel};
 
-/// A thread's stored messages, oldest first (by date, then row id).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Thread {
     messages: Vec<MessageFacts>,
 }
 
 impl Thread {
-    /// The thread holding these messages, in any order.
     #[must_use]
     pub fn new(mut messages: Vec<MessageFacts>) -> Self {
         messages.sort_by_key(|m| (m.date, m.id));
         Self { messages }
     }
 
-    /// Every message, drafts included, oldest first.
     #[must_use]
     pub fn messages(&self) -> &[MessageFacts] {
         &self.messages
     }
 
-    /// The messages that are not drafts, oldest first.
     pub fn non_drafts(&self) -> impl DoubleEndedIterator<Item = &MessageFacts> + '_ {
         self.messages.iter().filter(|m| !m.is_draft)
     }
 
-    /// The newest live message (not a draft, not in Trash or Spam).
     #[must_use]
     pub fn latest_live(&self) -> Option<&MessageFacts> {
         self.messages.iter().rev().find(|m| m.is_live())
     }
 
-    /// The thread's latest message (SPEC Views): the newest live message,
-    /// else the newest non-draft, else the newest draft. `None` only for a
-    /// thread with no messages.
     #[must_use]
     pub fn latest(&self) -> Option<&MessageFacts> {
         self.latest_live()
@@ -44,10 +33,6 @@ impl Thread {
             .or_else(|| self.messages.last())
     }
 
-    /// The message split rules and pins read (SPEC Where a conversation
-    /// lands): the newest live message not sent from this account, or the
-    /// latest message when every one is from this account. So your own
-    /// reply never moves a thread.
     #[must_use]
     pub fn latest_from_someone_else(&self, me: &Identity) -> Option<&MessageFacts> {
         self.messages
@@ -57,8 +42,6 @@ impl Thread {
             .or_else(|| self.latest())
     }
 
-    /// The labels the thread is in (SPEC Views): every label of a live
-    /// message, plus `TRASH` or `SPAM` when any message has it. `DRAFT` never.
     #[must_use]
     pub fn labels(&self) -> LabelSet {
         let mut set = LabelSet::new();
@@ -80,8 +63,6 @@ impl Thread {
         set
     }
 
-    /// The thread's derived row, or `None` when it has no messages left and
-    /// its row should go.
     #[must_use]
     pub fn digest(&self) -> Option<ThreadDigest<'_>> {
         let latest = self.latest()?;
@@ -115,11 +96,6 @@ impl Thread {
         })
     }
 
-    /// The snooze rule after a history batch (SPEC Snooze): a snoozed thread
-    /// that has gained `INBOX` from outside this app loses its snooze. True
-    /// when a live message has `INBOX`, skipping messages for which
-    /// `has_pending_op` is true, since their labels are this app's own
-    /// change still on its way to Gmail.
     pub fn gained_inbox(&self, has_pending_op: impl Fn(&MessageFacts) -> bool) -> bool {
         self.messages
             .iter()
@@ -127,47 +103,31 @@ impl Thread {
     }
 }
 
-/// A thread's list row values, derived from its messages by [`Thread::digest`]
-/// and borrowing their text: it lives for the one derive that reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadDigest<'a> {
-    /// The first non-draft message's subject that is not empty, else the
-    /// latest message's.
     pub subject: &'a str,
-    /// The latest message's snippet.
     pub snippet: &'a str,
-    /// The latest message's sender name, or address when it has no name.
     pub sender: &'a str,
-    /// The latest message's sender address.
     pub sender_email: &'a str,
-    /// The latest message's date; lists sort by it.
     pub sort_time: Millis,
-    /// Live messages, or when there are none the non-drafts, at least 1.
     pub message_count: u32,
-    /// A live message is unread, or with none live, a non-draft one is.
     pub unread: bool,
-    /// A non-draft message has an attachment.
     pub has_attachments: bool,
-    /// A message is live.
     pub has_live: bool,
-    /// The thread's labels, by [`Thread::labels`].
     pub labels: LabelSet,
 }
 
 impl ThreadDigest<'_> {
-    /// In the Inbox (snoozed or not).
     #[must_use]
     pub fn in_inbox(&self) -> bool {
         self.labels.has(SystemLabel::Inbox)
     }
 
-    /// In Trash.
     #[must_use]
     pub fn in_trash(&self) -> bool {
         self.labels.has(SystemLabel::Trash)
     }
 
-    /// In Spam.
     #[must_use]
     pub fn in_spam(&self) -> bool {
         self.labels.has(SystemLabel::Spam)

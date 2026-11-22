@@ -1,7 +1,3 @@
-// Toasts for sends (Sending · Undo, then Sent; SPEC Send and undo) and for
-// account notices. They read the account summaries, so they work across
-// conversations and account switches.
-
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 
@@ -12,7 +8,6 @@ import { useMirror } from "../store/mirror";
 
 type AccountNotice = { account: number; notice: Notice };
 
-/** Outbox rows and notices across accounts. A notice persists until shown and acked. */
 function useSummaries(): { outbox: OutboxRow[]; notices: AccountNotice[] } {
   const subs = useMirror((s) => s.subs);
   const outbox: OutboxRow[] = [];
@@ -36,10 +31,8 @@ export function SendToasts() {
   const { outbox, notices } = useSummaries();
   const closing = useRef(new Set<number>());
   const shown = useRef(new Set<number>());
-  /** Outbox rows with a toast up. */
   const open = useRef(new Set<number>());
 
-  // One toast per outbox row whose toast is still open.
   useEffect(() => {
     const live = new Set(outbox.map((r) => r.id));
     for (const r of outbox) {
@@ -58,8 +51,6 @@ export function SendToasts() {
             ? {
                 label: "Undo",
                 onClick: (e) => {
-                  // The toast stays: a held undo shows Undoing…, and a row
-                  // that leaves the outbox takes its toast with it.
                   e.preventDefault();
                   undoSend(r);
                 },
@@ -75,7 +66,6 @@ export function SendToasts() {
         }, 4000);
       }
     }
-    // A row that left the outbox (undone, or rejected) takes its toast with it.
     for (const id of open.current) {
       if (!live.has(id)) {
         open.current.delete(id);
@@ -84,8 +74,6 @@ export function SendToasts() {
     }
   }, [outbox]);
 
-  // A rejected send, or a held undo that resolved as not sent, puts the draft
-  // back in a composer; while the user types in one, its toast offers it.
   useEffect(() => {
     for (const { account, notice: n } of notices) {
       if (!isSendNotice(n) || !n.draft || shown.current.has(n.id)) continue;
@@ -95,7 +83,6 @@ export function SendToasts() {
     }
   }, [notices]);
 
-  // Every other notice is a plain toast.
   useEffect(() => {
     for (const { notice: n } of notices) {
       if (isSendNotice(n) || shown.current.has(n.id)) continue;

@@ -1,35 +1,3 @@
-//! A local HTTP fake of the Gmail API and Google's OAuth endpoints, for tests.
-//!
-//! ```no_run
-//! # async fn demo() {
-//! use sm_fake_gmail::*;
-//! let fake = FakeGmail::start();
-//! let me = fake.add_user("me@example.com");
-//! me.add_message(NewMessage::inbox("Ann <ann@example.com>", "Hello", "Hi there"));
-//! fake.inject(Matcher::new("POST", "*/drafts/send").once(), Fault::NoResponse);
-//! // Point the client at fake.base_url(), fake.token_url(), fake.revoke_url(), fake.auth_url().
-//! # }
-//! ```
-//!
-//! Every Gmail route needs a bearer token the fake issued and that has not expired.
-//! Each mutation appends history records and bumps the mailbox's `historyId`.
-//!
-//! ## Faults
-//!
-//! [`FakeGmail::inject`] makes matching requests misbehave: [`Fault::Status`] answers with a
-//! Google-shaped error, [`Fault::Drop`] closes the connection
-//! without doing anything, and [`Fault::NoResponse`] does the work and then closes the
-//! connection without answering. To the client both closes look like "sent, no response".
-//! A real "offline" (connection refused, nothing sent) cannot depend on a request the server
-//! has not read yet, so it is server-wide: [`FakeGmail::set_offline`].
-//!
-//! [`Fault::Hold`] parks matching requests until [`FakeGmail::release`], so a test can look at
-//! the client while a request is in flight. [`Fault::HoldAnswer`] does the work first and parks
-//! only the answer, so the client gets a reply that is stale by the time it arrives.
-//!
-//! Every request is logged ([`FakeGmail::requests`]) with its Gmail method name, account,
-//! body, and answer.
-
 #![expect(
     clippy::expect_used,
     reason = "A test double: a broken invariant is a test failure."
@@ -65,14 +33,10 @@ use crate::mailbox::{Mailbox, Msg, SendAsEntry};
 use crate::traffic::Held;
 pub use crate::traffic::{Answer, LoggedRequest, RequestInfo, api_name};
 
-/// How long an issued access token lives.
 pub(crate) const TOKEN_LIFETIME: Duration = Duration::from_secs(3600);
 
-/// App time for the fake: what Gmail's own clock reads (dates of new messages,
-/// `newer_than:`) and when requests arrive.
 type ClockFn = dyn Fn() -> u64 + Send + Sync;
 
-/// The fake Gmail server. Dropping it stops accepting connections.
 pub struct FakeGmail {
     addr: SocketAddr,
     shared: Arc<Shared>,
@@ -81,7 +45,6 @@ pub struct FakeGmail {
     server: JoinHandle<()>,
 }
 
-/// Where it listens only: its state holds every mailbox and token.
 impl fmt::Debug for FakeGmail {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FakeGmail")
@@ -95,53 +58,38 @@ pub(crate) struct Shared {
     traffic: Mutex<Traffic>,
     log: Mutex<Vec<LoggedRequest>>,
     in_flight: AtomicUsize,
-    /// Shared so a reader can take it out and call it with the lock released.
     clock: Mutex<Option<Arc<ClockFn>>>,
 }
 
-/// Faults and the requests holds have parked, under one lock: a release must never fall
-/// between a request choosing a hold and joining the held list, or nothing releases it.
-/// The log's `held` flag goes on only under this lock, while the request is listed, so a
-/// release cannot leave it on. Lock order: `traffic`, then `log`.
 #[derive(Default)]
 struct Traffic {
     faults: Vec<FaultEntry>,
-    /// The last fault id handed out.
     next_fault: u64,
     held: Vec<Held>,
 }
 
 #[derive(Default)]
 pub(crate) struct World {
-    /// Users in the order they were added.
     pub users: Vec<String>,
     pub mailboxes: HashMap<String, Mailbox>,
-    /// Refresh token to email.
     pub refresh_tokens: HashMap<String, String>,
-    /// Access token to email and expiry.
     pub access_tokens: HashMap<String, (String, Instant)>,
     pub auth_codes: HashMap<String, AuthCode>,
     pub invalid_grant: HashSet<String>,
-    /// Users whose grant lacks `gmail.settings.basic`.
     pub no_settings_scope: HashSet<String>,
-    /// The next consent page answers `access_denied`.
     pub deny_next_auth: bool,
     pub revocations: Vec<Revocation>,
     counter: u64,
 }
 
-/// A token revoked at the revoke endpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Revocation {
-    /// The token the client sent.
     pub token: String,
-    /// The user the token was issued to.
     pub email: String,
 }
 
 pub(crate) struct AuthCode {
     pub email: String,
-    /// The space-separated scopes the consent page granted.
     pub scope: String,
     pub redirect_uri: String,
     pub code_challenge: String,
@@ -167,7 +115,6 @@ impl World {
         token
     }
 
-    /// Whose refresh or access token this is.
     pub(crate) fn token_owner(&self, token: &str) -> Option<String> {
         self.refresh_tokens
             .get(token)
@@ -181,7 +128,6 @@ impl Shared {
         self.world.lock()
     }
 
-    /// App time, if a clock was set; otherwise mailboxes keep their own dates.
     pub(crate) fn clock_ms(&self) -> Option<u64> {
         let clock = self.clock.lock().clone();
         clock.map(|now| now())
@@ -195,9 +141,7 @@ impl Shared {
         })
     }
 
-    /// Adds a request to the log as it arrives. Returns its place there.
     fn log_request(&self, info: RequestInfo, headers: &HeaderMap, body: &[u8]) -> usize {
-        // The clock is the caller's code: never run it under the log lock.
         let at_ms = self.now_ms();
         let mut log = self.log.lock();
         let seq = log.len();
@@ -205,13 +149,6 @@ impl Shared {
         seq
     }
 
-    /// What the first fault that applies to this request does to it. Every matching entry
-    /// counts the request, applied or not, so `nth` and `times` count from injection.
-    ///
-    /// A hold puts the request on the held list in the same critical section, so a release
-    /// either removes the hold first or finds the request there. A [`Fault::HoldAnswer`]
-    /// request joins the list before its work, unparked: a release during the work lets
-    /// its answer through as soon as it is ready.
     fn fault_for(&self, seq: usize, request: &RequestInfo) -> Option<Plan<'_>> {
         let mut traffic = self.traffic.lock();
         let mut chosen = None;
@@ -263,7 +200,6 @@ impl Shared {
         }
     }
 
-    /// Parks a request's answer, unless a release has taken it off the held list already.
     fn park(&self, seq: usize) {
         let mut traffic = self.traffic.lock();
         if let Some(held) = traffic.held.iter_mut().find(|h| h.seq == seq && !h.parked) {
@@ -279,25 +215,18 @@ impl Shared {
     }
 }
 
-/// What a request suffers, as [`Shared::fault_for`] chose it.
 enum Plan<'a> {
     Fault(Fault),
-    /// Parked now; handled once released.
     Hold(Ticket<'a>),
-    /// Handled now; the answer parks once ready.
     HoldAnswer(Ticket<'a>),
 }
 
-/// A request on the held list.
 struct Ticket<'a> {
     released: oneshot::Receiver<Option<Fault>>,
-    // If the client goes away first, the request leaves the held list.
     unhold: Unhold<'a>,
 }
 
 impl Ticket<'_> {
-    /// Waits until released (at once if it was already), then returns what the request
-    /// suffers next.
     async fn park(self) -> Option<Fault> {
         let Ticket { released, unhold } = self;
         unhold.shared.park(unhold.seq);
@@ -307,7 +236,6 @@ impl Ticket<'_> {
     }
 }
 
-/// Takes a request off the held list when its handler ends.
 struct Unhold<'a> {
     shared: &'a Shared,
     seq: usize,
@@ -324,7 +252,6 @@ impl Drop for Unhold<'_> {
     }
 }
 
-/// Counts a request in flight while its handler runs.
 struct InFlight<'a>(&'a AtomicUsize);
 
 impl<'a> InFlight<'a> {
@@ -340,8 +267,6 @@ impl Drop for InFlight<'_> {
     }
 }
 
-/// Picks requests by method and path, and optionally by Gmail method name, account, and
-/// query parameters.
 #[derive(Debug, Clone)]
 pub struct Matcher {
     method: Option<String>,
@@ -354,8 +279,6 @@ pub struct Matcher {
 }
 
 impl Matcher {
-    /// Requests with `method` (`"*"` for any) whose path matches `path_glob`, where `*`
-    /// matches any run of characters, e.g. `"*/drafts/send"` or `"/token"`.
     #[must_use]
     pub fn new(method: &str, path_glob: &str) -> Self {
         Self {
@@ -369,54 +292,46 @@ impl Matcher {
         }
     }
 
-    /// Requests to a Gmail method by name (see [`api_name`]), e.g. `messages.batchModify`.
     #[must_use]
     pub fn api(name: &str) -> Self {
         Self::new("*", "*").for_api(name)
     }
 
-    /// Only requests to this Gmail method (see [`api_name`]).
     #[must_use]
     pub fn for_api(mut self, name: &str) -> Self {
         self.api = Some(name.to_owned());
         self
     }
 
-    /// Only requests acting for this account.
     #[must_use]
     pub fn account(mut self, email: &str) -> Self {
         self.account = Some(email.to_lowercase());
         self
     }
 
-    /// Only requests whose query has `name=value` (one of them, for repeated keys).
     #[must_use]
     pub fn query(mut self, name: &str, value: &str) -> Self {
         self.query.push((name.to_owned(), value.to_owned()));
         self
     }
 
-    /// Only the `n`th matching request (1-based, counted from injection).
     #[must_use]
     pub const fn nth(mut self, n: usize) -> Self {
         self.nth = Some(n);
         self
     }
 
-    /// Only the first `n` matching requests.
     #[must_use]
     pub const fn times(mut self, n: usize) -> Self {
         self.times = Some(n);
         self
     }
 
-    /// Only the next matching request.
     #[must_use]
     pub const fn once(self) -> Self {
         self.times(1)
     }
 
-    /// Whether this picks `request` (ignoring `nth` and `times`).
     #[must_use]
     pub fn matches(&self, request: &RequestInfo) -> bool {
         self.method.as_deref().is_none_or(|m| m == request.method)
@@ -449,36 +364,21 @@ fn glob(pattern: &str, text: &str) -> bool {
     }
 }
 
-/// What a matched request suffers.
 #[derive(Debug, Clone)]
 pub enum Fault {
-    /// Close the connection without doing anything or answering.
     Drop,
-    /// Do the request's work, then close the connection without answering.
     NoResponse,
-    /// Answer with this status and a Google-shaped error body, without doing anything.
     Status {
-        /// The HTTP status.
         status: u16,
-        /// The `errors[0].reason`, e.g. `rateLimitExceeded`.
         reason: String,
-        /// The `Retry-After` header, in seconds. `None` sends no such header.
         retry_after_secs: Option<u64>,
     },
-    /// Park the request until [`FakeGmail::release`] lets it go.
     Hold,
-    /// Do the request's work now, then park the answer until [`FakeGmail::release`]:
-    /// the client hears what Gmail had before anything that lands in between. A release
-    /// that comes during the work lets the answer go as soon as it is ready.
     HoldAnswer,
-    /// Do the request's work, then answer with this error: done, but the client hears otherwise.
     StatusAfterApply {
-        /// The HTTP status.
         status: u16,
-        /// The `errors[0].reason`.
         reason: String,
     },
-    /// Handle the request, then leave these thread ids out of a `threads.list` page.
     OmitThreads(Vec<String>),
 }
 
@@ -486,7 +386,6 @@ struct FaultEntry {
     id: u64,
     matcher: Matcher,
     fault: Fault,
-    /// Matching requests so far, this one included.
     seen: usize,
 }
 
@@ -500,49 +399,27 @@ impl FaultEntry {
     }
 }
 
-/// Simple fields for a message added with [`FakeUser::add_message`].
 #[derive(Debug, Clone, Default)]
 pub struct NewMessage {
-    /// The `From` header, as written: `Ann <ann@example.com>`.
     pub from: String,
-    /// The `To` mailboxes, each written as `from` is. Empty leaves the
-    /// header out.
     pub to: Vec<String>,
-    /// The `Cc` mailboxes. Empty leaves the header out.
     pub cc: Vec<String>,
-    /// The subject as text; the fake encodes it for the header.
     pub subject: String,
-    /// The `text/plain` body. With `html` too, the body is
-    /// `multipart/alternative`; with neither, an empty text part.
     pub text: Option<String>,
-    /// The `text/html` body.
     pub html: Option<String>,
-    /// The charset the text parts' `Content-Type` names; default `utf-8`. Their
-    /// bytes stay UTF-8, as Gmail's `format=full` can serve a `koi8-r` part.
     pub charset: Option<String>,
-    /// Label ids, e.g. `INBOX`, `UNREAD`, or a user label's id.
     pub labels: Vec<String>,
-    /// Joins this thread; otherwise the message starts a new one.
     pub thread_id: Option<String>,
-    /// Defaults to a generated `<...@fake.example>`.
     pub message_id: Option<String>,
-    /// The `In-Reply-To` header. `None` leaves it out.
     pub in_reply_to: Option<String>,
-    /// The `References` header. `None` leaves it out.
     pub references: Option<String>,
-    /// The `List-Id` header, which makes the message list mail. `None`
-    /// leaves it out.
     pub list_id: Option<String>,
-    /// More headers, as name and value, written after the ones above.
     pub extra_headers: Vec<(String, String)>,
-    /// Its files, each a part beside the body.
     pub attachments: Vec<NewAttachment>,
-    /// Milliseconds since the epoch. Defaults to a clock a minute past the previous message.
     pub internal_date: Option<u64>,
 }
 
 impl NewMessage {
-    /// An unread inbox message to `me@example.com` with a text body.
     #[must_use]
     pub fn inbox(from: &str, subject: &str, text: &str) -> Self {
         Self {
@@ -556,64 +433,37 @@ impl NewMessage {
     }
 }
 
-/// An attachment for [`NewMessage`]. With a content id it is an inline part.
 #[derive(Debug, Clone, Default)]
 pub struct NewAttachment {
-    /// The file name, in the part's `Content-Disposition` and
-    /// `Content-Type`.
     pub filename: String,
-    /// The part's MIME type.
     pub mime_type: String,
-    /// The file's bytes.
     pub data: Vec<u8>,
-    /// The `Content-ID`, without angle brackets. Set, the part is inline, in
-    /// `multipart/related` with the body.
     pub content_id: Option<String>,
-    /// `Content-Disposition: inline` with no content id, beside the body, as
-    /// Apple Mail sends every file.
     pub inline: bool,
-    /// Served in the message's payload (`body.data`) with no attachment id,
-    /// as Gmail serves some small parts.
     pub served_inline: bool,
 }
 
-/// Ids of a message the fake stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddedMessage {
-    /// Gmail's id of the message.
     pub id: String,
-    /// Gmail's id of the thread it joined or started.
     pub thread_id: String,
-    /// The `Message-ID` header.
     pub rfc822_message_id: String,
 }
 
-/// A snapshot of a stored message.
 #[derive(Debug, Clone)]
 pub struct FakeMessage {
-    /// Gmail's id of the message.
     pub id: String,
-    /// Gmail's id of its thread.
     pub thread_id: String,
-    /// Its label ids when the snapshot was taken.
     pub label_ids: Vec<String>,
-    /// Gmail's `internalDate`: milliseconds since the epoch.
     pub internal_date: u64,
-    /// The snippet the fake made from its text.
     pub snippet: String,
-    /// Its top-level headers in order, as name and value.
     pub headers: Vec<(String, String)>,
-    /// Its RFC 822 bytes, as `format=raw` serves them.
     pub raw: Vec<u8>,
 }
 
-/// A snapshot of a stored draft.
 #[derive(Debug, Clone)]
 pub struct FakeDraft {
-    /// Gmail's id of the draft, which an update keeps.
     pub id: String,
-    /// The draft's message. Every update replaces it with one under a new
-    /// id.
     pub message: FakeMessage,
 }
 
@@ -632,8 +482,6 @@ impl From<&Msg> for FakeMessage {
 }
 
 impl FakeGmail {
-    /// Starts the fake on `127.0.0.1` on a free port.
-    /// Must be called inside a Tokio runtime: the server task is spawned on it.
     #[must_use]
     pub fn start() -> Self {
         let listener = bind(SocketAddr::from(([127, 0, 0, 1], 0))).expect("bind the fake");
@@ -663,32 +511,26 @@ impl FakeGmail {
         }
     }
 
-    /// The Gmail API base URL, e.g. `http://127.0.0.1:PORT`.
     #[must_use]
     pub fn base_url(&self) -> String {
         format!("http://{}", self.addr)
     }
 
-    /// The OAuth token endpoint.
     #[must_use]
     pub fn token_url(&self) -> String {
         format!("http://{}/token", self.addr)
     }
 
-    /// The OAuth revoke endpoint.
     #[must_use]
     pub fn revoke_url(&self) -> String {
         format!("http://{}/revoke", self.addr)
     }
 
-    /// The consent page. A GET redirects straight to `redirect_uri` with a code for the user
-    /// named by `login_hint`, or the first user added.
     #[must_use]
     pub fn auth_url(&self) -> String {
         format!("http://{}/auth", self.addr)
     }
 
-    /// Adds a user with an empty mailbox (system labels only) and a refresh token.
     #[must_use]
     pub fn add_user(&self, email: &str) -> FakeUser {
         let mut world = self.shared.world();
@@ -704,17 +546,13 @@ impl FakeGmail {
         }
     }
 
-    /// Expires every access token issued so far, so the next Gmail call gets a 401.
     pub fn expire_access_tokens(&self) {
-        // A token lives while its expiry is after now, so now is already too late.
         let now = Instant::now();
         for (_, expiry) in self.shared.world().access_tokens.values_mut() {
             *expiry = now;
         }
     }
 
-    /// Adds a fault for matching requests. The first applicable fault wins. Returns its id,
-    /// which [`FakeGmail::release`] takes for a hold.
     #[must_use]
     pub fn inject(&self, matcher: Matcher, fault: Fault) -> u64 {
         let mut traffic = self.shared.traffic.lock();
@@ -729,14 +567,10 @@ impl FakeGmail {
         id
     }
 
-    /// Removes every fault, holds included. Requests already held stay held.
     pub fn clear_faults(&self) {
         self.shared.traffic.lock().faults.clear();
     }
 
-    /// Ends hold `id` and lets the requests it parked go on: handled normally, or suffering
-    /// `then`. Returns how many requests it released, answers of [`Fault::HoldAnswer`]
-    /// still being worked on included.
     #[must_use]
     pub fn release(&self, id: u64, then: Option<&Fault>) -> usize {
         let mut traffic = self.shared.traffic.lock();
@@ -748,14 +582,11 @@ impl FakeGmail {
         let n = released.len();
         for h in released {
             self.shared.set_held(h.seq, false);
-            // The handler may be gone already (its connection closed).
             _ = h.release.send(then.cloned());
         }
         n
     }
 
-    /// Requests parked by a hold now. A [`Fault::HoldAnswer`] request counts once its work
-    /// is done and its answer waits.
     #[must_use]
     pub fn held(&self) -> usize {
         self.shared
@@ -767,7 +598,6 @@ impl FakeGmail {
             .count()
     }
 
-    /// Requests parked now by hold `id`.
     #[must_use]
     pub fn held_by(&self, id: u64) -> usize {
         self.shared
@@ -779,19 +609,16 @@ impl FakeGmail {
             .count()
     }
 
-    /// Requests being handled now, held ones included.
     #[must_use]
     pub fn in_flight(&self) -> usize {
         self.shared.in_flight.load(Ordering::Acquire)
     }
 
-    /// Every request received so far.
     #[must_use]
     pub fn requests(&self) -> Vec<LoggedRequest> {
         self.shared.log.lock().clone()
     }
 
-    /// How many requests matched `method` (`"*"` for any) and `path_glob`.
     #[must_use]
     pub fn count(&self, method: &str, path_glob: &str) -> usize {
         let matcher = Matcher::new(method, path_glob);
@@ -803,26 +630,19 @@ impl FakeGmail {
             .count()
     }
 
-    /// Sets the fake's clock (Unix ms): the date of messages Gmail creates (sends, drafts),
-    /// what `newer_than:` counts from, and when requests are logged. Default: the system
-    /// clock, with new messages a minute apart.
     pub fn set_clock(&self, now_ms: impl Fn() -> u64 + Send + Sync + 'static) {
         *self.shared.clock.lock() = Some(Arc::new(now_ms));
     }
 
-    /// The next consent page answers Google's `access_denied` instead of a code.
     pub fn deny_next_sign_in(&self) {
         self.shared.world().deny_next_auth = true;
     }
 
-    /// Tokens revoked at Google so far, oldest first.
     #[must_use]
     pub fn revocations(&self) -> Vec<Revocation> {
         self.shared.world().revocations.clone()
     }
 
-    /// Takes the server off the network or back. Offline, the port refuses connections and
-    /// open connections are closed, so clients see a connect error. Returns once that holds.
     pub async fn set_offline(&self, offline: bool) {
         self.offline.send_replace(offline);
         let mut listening = self.listening.clone();
@@ -830,7 +650,6 @@ impl FakeGmail {
             .wait_for(|&l| l != offline)
             .await
             .expect("fake server running");
-        // Let clients notice their pooled connections closed.
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
@@ -842,7 +661,6 @@ impl Drop for FakeGmail {
     }
 }
 
-/// A handle on one user's mailbox and tokens.
 #[derive(Clone)]
 pub struct FakeUser {
     shared: Arc<Shared>,
@@ -850,7 +668,6 @@ pub struct FakeUser {
     refresh_token: String,
 }
 
-/// The user's address only, never the refresh token.
 impl fmt::Debug for FakeUser {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FakeUser")
@@ -865,21 +682,17 @@ impl FakeUser {
         f(world.mailboxes.get_mut(&self.email).expect("user exists"))
     }
 
-    /// The user's address.
     #[must_use]
     pub fn email(&self) -> &str {
         &self.email
     }
 
-    /// The refresh token issued when the user was added.
     #[must_use]
     pub fn refresh_token(&self) -> &str {
         &self.refresh_token
     }
 
-    /// Expires every access token of this user, so its next Gmail call gets a 401.
     pub fn expire_access_tokens(&self) {
-        // A token lives while its expiry is after now, so now is already too late.
         let now = Instant::now();
         for (email, expiry) in self.shared.world().access_tokens.values_mut() {
             if *email == self.email {
@@ -888,15 +701,11 @@ impl FakeUser {
         }
     }
 
-    /// The user's Gmail filters, oldest first.
     #[must_use]
     pub fn filters(&self) -> Vec<Filter> {
         self.with(|mb| mb.filters.clone())
     }
 
-    /// Whether the user's grant includes `gmail.settings.basic`. Off, as for an
-    /// account signed in before the app asked for it, filter calls answer 403
-    /// until a sign-in grants it.
     pub fn set_settings_scope(&self, granted: bool) {
         let mut world = self.shared.world();
         if granted {
@@ -906,7 +715,6 @@ impl FakeUser {
         }
     }
 
-    /// While set, refreshing any of this user's tokens answers `invalid_grant`.
     pub fn set_invalid_grant(&self, invalid: bool) {
         let mut world = self.shared.world();
         if invalid {
@@ -916,12 +724,10 @@ impl FakeUser {
         }
     }
 
-    /// Sets the primary send-as display name.
     pub fn set_display_name(&self, name: &str) {
         self.with(|mb| name.clone_into(&mut mb.send_as[0].display_name));
     }
 
-    /// Every send-as address: email, display name, and whether it is the primary one.
     #[must_use]
     pub fn send_as(&self) -> Vec<(String, String, bool)> {
         self.with(|mb| {
@@ -932,7 +738,6 @@ impl FakeUser {
         })
     }
 
-    /// Adds a send-as alias.
     pub fn add_send_as(&self, email: String, display_name: String) {
         self.with(|mb| {
             mb.send_as.push(SendAsEntry {
@@ -943,13 +748,11 @@ impl FakeUser {
         });
     }
 
-    /// Creates a user label and returns its id, or `None` if the name is taken.
     #[must_use]
     pub fn add_label(&self, name: &str) -> Option<String> {
         self.with(|mb| mb.create_label(name))
     }
 
-    /// Label ids and names.
     #[must_use]
     pub fn labels(&self) -> Vec<(String, String)> {
         self.with(|mb| {
@@ -960,7 +763,6 @@ impl FakeUser {
         })
     }
 
-    /// Stores a message as if it arrived, recording `messagesAdded`.
     #[must_use]
     pub fn add_message(&self, mut msg: NewMessage) -> AddedMessage {
         let now = self.shared.clock_ms();
@@ -978,7 +780,6 @@ impl FakeUser {
         })
     }
 
-    /// A draft made by another client (Gmail on the web, a phone). Labels are ignored.
     #[must_use]
     pub fn add_draft(&self, mut msg: NewMessage) -> AddedDraft {
         let now = self.shared.clock_ms();
@@ -997,7 +798,6 @@ impl FakeUser {
         })
     }
 
-    /// Replaces a draft's message, as another client editing it. `None` if it is gone.
     #[must_use]
     pub fn update_draft(&self, draft_id: &str, mut msg: NewMessage) -> Option<AddedDraft> {
         let now = self.shared.clock_ms();
@@ -1017,14 +817,11 @@ impl FakeUser {
         })
     }
 
-    /// Deletes a draft, as another client. Returns false if it was gone.
     #[must_use]
     pub fn delete_draft(&self, draft_id: &str) -> bool {
         self.with(|mb| mb.delete_draft(draft_id).is_ok())
     }
 
-    /// Sends a draft from another client (a phone). Returns the sent message, or `None` if
-    /// the draft was gone.
     #[must_use]
     pub fn send_draft(&self, draft_id: &str) -> Option<AddedMessage> {
         let now = self.shared.clock_ms();
@@ -1043,7 +840,6 @@ impl FakeUser {
         })
     }
 
-    /// Deletes every message of a thread (and drafts in it), recording `messagesDeleted`.
     pub fn delete_thread(&self, thread_id: &str) {
         self.with(|mb| {
             let ids: Vec<String> = mb
@@ -1058,15 +854,11 @@ impl FakeUser {
         });
     }
 
-    /// Changes a message's labels as another client would, recording history.
-    /// Returns false if the message is gone.
     #[must_use]
     pub fn modify_labels<L: AsRef<str>>(&self, message_id: &str, add: &[L], remove: &[L]) -> bool {
         self.with(|mb| mb.modify(message_id, add, remove).is_ok())
     }
 
-    /// Deletes a message (and any draft holding it), recording `messagesDeleted`.
-    /// Returns false if it was gone.
     #[must_use]
     pub fn delete_message(&self, message_id: &str) -> bool {
         self.with(|mb| {
@@ -1078,13 +870,11 @@ impl FakeUser {
         })
     }
 
-    /// Every stored message, in id order.
     #[must_use]
     pub fn messages(&self) -> Vec<FakeMessage> {
         self.with(|mb| mb.messages.values().map(FakeMessage::from).collect())
     }
 
-    /// Every draft.
     #[must_use]
     pub fn drafts(&self) -> Vec<FakeDraft> {
         self.with(|mb| {
@@ -1098,14 +888,11 @@ impl FakeUser {
         })
     }
 
-    /// The mailbox's current history id.
     #[must_use]
     pub fn history_id(&self) -> u64 {
         self.with(|mb| mb.history_id)
     }
 
-    /// Expires all history so far, as Gmail does after about a week: any `history.list`
-    /// from an older cursor answers 404, and `getProfile` gives a cursor that works.
     pub fn expire_history(&self) {
         self.with(|mb| {
             mb.history_id += 1;
@@ -1114,20 +901,14 @@ impl FakeUser {
     }
 }
 
-/// Ids of a draft the fake stored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddedDraft {
-    /// Gmail's id of the draft.
     pub id: String,
-    /// Gmail's id of the draft's message.
     pub message_id: String,
-    /// Gmail's id of the thread the draft is on.
     pub thread_id: String,
-    /// The `Message-ID` header.
     pub rfc822_message_id: String,
 }
 
-/// RFC 822 bytes for `msg` and its `Message-ID`, taken from `msg`.
 fn built(mb: &mut Mailbox, msg: &mut NewMessage, date: u64) -> (Vec<u8>, String) {
     let rfc822_message_id = msg
         .message_id
@@ -1146,14 +927,12 @@ fn bind(addr: SocketAddr) -> std::io::Result<TcpListener> {
     socket.listen(1024)
 }
 
-/// What answers a request: the fake's state and the routes over it. Cheap to clone.
 #[derive(Clone)]
 struct Backend {
     shared: Arc<Shared>,
     router: Router,
 }
 
-/// Accepts connections until the fake goes offline, then waits and rebinds the same port.
 async fn serve(
     listener: TcpListener,
     addr: SocketAddr,
@@ -1186,7 +965,6 @@ async fn serve(
     }
 }
 
-/// Serves one connection until the client closes it, a fault kills it, or the fake goes offline.
 async fn connection(
     stream: tokio::net::TcpStream,
     backend: Backend,
@@ -1203,7 +981,6 @@ async fn connection(
     }
 }
 
-/// Answers one request: logs it, applies the fault or hold that matches it, and routes it.
 async fn handle(
     backend: &Backend,
     kill: &Notify,
@@ -1246,7 +1023,6 @@ async fn handle(
             let response = route(req).await.unwrap_or_else(|e| match e {});
             omit_threads(response, &ids).await
         }
-        // Never answer; the connection task drops the connection on `kill`.
         Some(Fault::Drop) => {
             shared.answered(seq, Answer::Dropped);
             kill.notify_one();
@@ -1260,14 +1036,12 @@ async fn handle(
         }
     };
     if let Some(ticket) = hold_answer {
-        // The release's outcome does not apply: the work is already done.
         let _ = ticket.park().await;
     }
     shared.answered(seq, Answer::Status(response.status().as_u16()));
     Ok(response)
 }
 
-/// A `threads.list` answer without the threads `ids`.
 async fn omit_threads(response: Response, ids: &[String]) -> Response {
     let (parts, body) = response.into_parts();
     let bytes = axum::body::to_bytes(body, usize::MAX)
@@ -1285,7 +1059,6 @@ async fn omit_threads(response: Response, ids: &[String]) -> Response {
     (parts.status, axum::Json(json)).into_response()
 }
 
-/// The address in a `From` value: inside angle brackets, or the whole value.
 fn sender_email(from: &str) -> &str {
     from.rsplit_once('<')
         .and_then(|(_, rest)| rest.split_once('>'))

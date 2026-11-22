@@ -1,6 +1,3 @@
-// Drafts (SPEC §Drafts, §Reading, §UI state): autosave and
-// upsert, `Enter` in Drafts, Gmail-side edits and deletes, offline, reload
-// and crash, and the app's own drafts read back.
 import type { App } from "./app.ts";
 import type { Control, GmailState } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
@@ -10,21 +7,17 @@ import { A } from "./seeds.ts";
 
 type Draft = GmailState["drafts"][number];
 
-/** A's Gmail drafts on one Gmail thread. */
 async function draftsIn(gmail: Control, threadId: string): Promise<Draft[]> {
   return (await gmail.gmail(A)).drafts.filter((d) => d.message.threadId === threadId);
 }
 
-/** The HTML body of a draft. */
 const bodyOf = (d: Draft | undefined) => htmlOf(parseMime(d?.message.raw ?? ""));
 
-/** Opens a conversation from the list by clicking its row. */
 async function openThread(app: App, subject: string): Promise<void> {
   await app.row(subject).first().click();
   await expect(app.conversationTitle).toContainText(subject);
 }
 
-/** Moves the highlight with `j` / `k` until it is on the row containing `text`. */
 async function highlight(app: App, text: string | RegExp, left = 40): Promise<void> {
   if ((await app.highlighted.filter({ hasText: text }).count()) > 0) return;
   if (left === 0) throw new Error(`no row ${String(text)} reached with j and k`);
@@ -36,13 +29,11 @@ async function highlight(app: App, text: string | RegExp, left = 40): Promise<vo
   await highlight(app, text, left - 1);
 }
 
-/** Opens the Drafts view. */
 async function goDrafts(app: App): Promise<void> {
   await app.press("g", "d");
   await app.settle();
 }
 
-/** A draft stub in the open conversation. */
 const stub = (app: App, text: string) =>
   app.conversation.getByRole("button", { name: /Draft/ }).filter({ hasText: text });
 
@@ -77,7 +68,6 @@ test("DRF-01 drafts autosave and update a single Gmail draft", async ({ app, gma
   await goDrafts(app);
   await expect(app.rows).toHaveCount(1);
   await expect(app.rows.first()).toContainText("one two");
-  // The Drafts list is keyed by the local draft id, the one the header carries.
   expect(await app.rows.first().getAttribute("data-row")).toBe(local);
 });
 
@@ -95,7 +85,6 @@ test("DRF-12 an edit saved while the draft's upsert is in flight still reaches G
   const write = await gmail.hold("drafts.update");
   await app.type(" two");
   await expect.poll(async () => (await updates(gmail)).some((r) => r.held)).toBe(true);
-  // Saved while the write of "one two" is in flight.
   await app.type(" three");
   await app.settle();
   await write.release();
@@ -121,8 +110,6 @@ test("DRF-13 a draft discarded while its first upsert is in flight stays gone", 
   await expect(app.editor).toHaveCount(0);
   await app.settle();
 
-  // The create lands after the discard. A poll reconciles drafts before the
-  // copy it made is deleted, and again after.
   const del = await gmail.hold("drafts.delete");
   await create.release();
   await app.settle();
@@ -156,8 +143,6 @@ test("DRF-14 a second Gmail draft carrying a local draft's id is deleted as an e
   const local = mine?.message.headers["x-supermonkey-draft"] ?? "";
   expect(local).toMatch(/\S/);
 
-  // Another Gmail draft turns up with the same local id, for example from a
-  // create whose answer was lost.
   await gmail.createDraft(
     A,
     {
@@ -183,8 +168,6 @@ test("DRF-15 a draft reconcile on a stale list keeps a draft written meanwhile",
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app);
-  // Another client's draft makes the next poll reconcile drafts; the list's
-  // answer is taken now and arrives late.
   await gmail.createDraft(A, {
     subject: "From the web",
     to: ["kim@kite.test"],
@@ -194,7 +177,6 @@ test("DRF-15 a draft reconcile on a stale list keeps a draft written meanwhile",
   await gmail.poll();
   await app.settle();
 
-  // Meanwhile a reply is written to Gmail and closed.
   await openThread(app, "Person 4");
   await app.reply();
   await app.type("written meanwhile");
@@ -218,7 +200,6 @@ test("DRF-16 a Gmail edit read back after the draft was reopened and edited does
 }) => {
   const s = await seeds.drafts(gmail, app);
   const p6 = s.thread("p6");
-  // Edited in Gmail web while closed; reading that edit back is slow.
   await gmail.updateDraft(A, s.draft("dUnknown").id, {
     subject: `Re: ${p6.subject}`,
     threadId: p6.threadId,
@@ -229,7 +210,6 @@ test("DRF-16 a Gmail edit read back after the draft was reopened and edited does
   await gmail.poll();
   await app.settle();
 
-  // Meanwhile the draft is reopened and edited.
   await openThread(app, "Person 6");
   await app.reply("r");
   await expect(app.editor).toContainText("Aimed at nobody.");
@@ -241,7 +221,6 @@ test("DRF-16 a Gmail edit read back after the draft was reopened and edited does
   await app.settle();
   await app.press("Escape", "Escape");
   await app.settle();
-  // The app's edit wins, as the last writer (SPEC Drafts): locally and in Gmail.
   await app.reply("r");
   await expect(app.editor).toContainText("Aimed at nobody. Mine.");
   await expect(app.editor).not.toContainText("from web");
@@ -255,7 +234,6 @@ test("DRF-18 a crash after drafts.create reached Gmail, before its ids were stor
 }) => {
   const s = await seeds.standard(gmail, app);
   const thread = s.thread("p3").threadId;
-  // Gmail makes the draft, and its answer is still on the way when the app dies.
   const create = await gmail.holdAnswer("drafts.create");
   await openThread(app, "Person 3");
   await app.reply();
@@ -264,12 +242,10 @@ test("DRF-18 a crash after drafts.create reached Gmail, before its ids were stor
   const [made] = await draftsIn(gmail, thread);
   expect(made).toBeDefined();
   await app.crashAndRelaunch(async () => {
-    // The crash dropped the parked answer; end the hold.
     await create.release(undefined, { min: 0 });
   });
   await app.settle();
 
-  // The replayed upsert found the draft by its header instead of making another.
   expect(await creates(gmail)).toHaveLength(1);
   const now = await draftsIn(gmail, thread);
   expect(now.map((d) => d.id)).toEqual([made?.id]);
@@ -284,7 +260,6 @@ test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app,
   await goDrafts(app);
   const count = await app.rows.count();
 
-  // A new-message draft opens the `c` screen; Esc Esc returns to Drafts.
   await highlight(app, "Idea");
   await app.press("Enter");
   await expect(app.page.getByRole("heading", { name: "New Message" })).toBeVisible();
@@ -296,7 +271,6 @@ test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app,
   await expect(app.rows).toHaveCount(count);
   await expect(app.highlighted).toContainText("Idea");
 
-  // A reply draft opens its thread with the inline composer; its target is selected.
   await highlight(app, "Person 4");
   await app.press("Enter");
   await expect(app.conversationTitle).toContainText("Person 4");
@@ -305,8 +279,6 @@ test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app,
   await app.press("Escape", "Escape");
   await goDrafts(app);
 
-  // A reply aimed at an older message of an unread thread: that message is
-  // selected, not the latest one the conversation would select on its own.
   await highlight(app, "About message three.");
   await app.press("Enter");
   await expect(app.conversationTitle).toContainText("Q4 plan");
@@ -315,7 +287,6 @@ test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app,
   await app.press("Escape", "Escape");
   await goDrafts(app);
 
-  // A forward draft opens its thread in the same reply composer (SPEC Reading).
   await highlight(app, "Fwd: Contract");
   await app.press("Enter");
   await expect(app.conversationTitle).toContainText("Contract");
@@ -327,7 +298,6 @@ test("DRF-03 edits made to a draft in Gmail, with the draft closed or open", asy
   gmail,
 }) => {
   const s = await seeds.drafts(gmail, app);
-  /** The draft edited in Gmail web: its message is replaced. */
   const webEdit = (key: string, thread: string, text: string) =>
     gmail.updateDraft(
       A,
@@ -341,15 +311,12 @@ test("DRF-03 edits made to a draft in Gmail, with the draft closed or open", asy
       { poll: true },
     );
 
-  // Closed: resuming shows Gmail's version.
   await webEdit("dLatest", "p4", "from web");
   await app.settle();
   await openThread(app, "Person 4");
   await app.reply("r");
   await expect(app.editor).toContainText("from web");
 
-  // Open, and the user types: the editor keeps the user's text, and the
-  // app's next upsert overwrites Gmail's version (SPEC Drafts: the last writer wins).
   await webEdit("dLatest", "p4", "from web 3");
   await app.settle();
   await expect(app.editor).not.toContainText("from web 3");
@@ -364,7 +331,6 @@ test("DRF-03 edits made to a draft in Gmail, with the draft closed or open", asy
   expect(bodyOf(p4Draft)).not.toContain("from web 3");
   await app.press("Escape");
 
-  // Open, no edits: not overwritten while open; read once it closes.
   await openThread(app, "Person 2");
   await app.reply("r");
   await expect(app.editor).toContainText("dTwoB");
@@ -378,8 +344,6 @@ test("DRF-03 edits made to a draft in Gmail, with the draft closed or open", asy
   await expect(app.editor).toContainText("from web 2");
   await app.press("Escape", "Escape", "Escape");
 
-  // Open, no edits, then sent: the send carries the text on screen, so the
-  // local draft was not replaced with Gmail's version behind the editor.
   await openThread(app, "Person 6");
   await app.reply("r");
   await expect(app.editor).toContainText("Aimed at nobody.");
@@ -399,7 +363,6 @@ test("DRF-04 a draft deleted or sent elsewhere", async ({ app, gmail }) => {
   const s = await seeds.drafts(gmail, app);
   const gone = app.toast("Draft was sent or deleted elsewhere");
 
-  /** Composer closed: the stub and the Drafts row disappear. */
   const closed = async (key: string, thread: string, text: string, how: "delete" | "send") => {
     await goDrafts(app);
     await expect(app.row(text)).toHaveCount(1);
@@ -414,10 +377,6 @@ test("DRF-04 a draft deleted or sent elsewhere", async ({ app, gmail }) => {
     await app.press("Escape");
   };
 
-  /**
-   * Composer open: it stays with its text, a toast says so, and the next
-   * keystroke makes a new Gmail draft with `drafts.create`.
-   */
   const open = async (key: string, thread: string, text: string, how: "delete" | "send") => {
     const gmailThread = s.thread(thread).threadId;
     await app.press("g", "i");
@@ -444,7 +403,6 @@ test("DRF-04 a draft deleted or sent elsewhere", async ({ app, gmail }) => {
     expect(now[0]?.id).not.toBe(s.draft(key).id);
     expect(bodyOf(now[0])).toContain(`${how} again`);
     await app.press("Escape", "Escape", "Escape");
-    // The next toast must be a new one.
     await expect(gone).toHaveCount(0, { timeout: 10_000 });
   };
 
@@ -463,11 +421,9 @@ test("DRF-05 discarding while offline is queued and replayed in order", async ({
   await expect(app.editor).toContainText("My text");
   await app.press("Meta+Shift+m");
   await app.type(" and more");
-  // The upsert is queued while offline.
   await app.settle();
   await app.press("Meta+Shift+Comma");
 
-  // Gone locally at once.
   await expect(app.editor).toHaveCount(0);
   await expect(stub(app, "My text")).toHaveCount(0);
   await app.press("Escape");
@@ -536,9 +492,6 @@ test("DRF-07 sending cancels a queued upsert", async ({ app, gmail }) => {
   expect(sent).toHaveLength(1);
   expect(htmlOf(parseMime(sent[0]?.raw ?? ""))).toContain("final");
 
-  // Requests made offline never reach the fake, so the log holds only what ran
-  // after reconnecting: the outbox's own write, then the send. A queued upsert
-  // that survived the send would add a second `drafts.update`.
   const log = await gmail.requests(undefined, { account: A });
   const writes = log.filter((r) => r.api === "drafts.update" || r.api === "drafts.send");
   expect(writes.map((r) => r.api)).toEqual(["drafts.update", "drafts.send"]);
@@ -548,7 +501,6 @@ test("DRF-07 sending cancels a queued upsert", async ({ app, gmail }) => {
 test("DRF-08 a webview reload or a crash with a composer open", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
 
-  // `r`, touched, then a reload: kept, as a stub and as a Gmail draft.
   await openThread(app, "Person 3");
   await app.reply();
   await app.type("keep after reload");
@@ -561,7 +513,6 @@ test("DRF-08 a webview reload or a crash with a composer open", async ({ app, gm
   await expect(stub(app, "keep after reload")).toHaveCount(1);
   await app.press("Escape");
 
-  // After the reload, actions still reach Gmail.
   await app.press("g", "i");
   await highlight(app, "Person 1");
   await app.press("e");
@@ -569,7 +520,6 @@ test("DRF-08 a webview reload or a crash with a composer open", async ({ app, gm
   const p1 = (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p1", 1).id);
   expect(p1?.labels).not.toContain("INBOX");
 
-  // `r`, untouched, then a reload: discarded.
   await openThread(app, "Person 5");
   await app.reply();
   await app.reload();
@@ -578,7 +528,6 @@ test("DRF-08 a webview reload or a crash with a composer open", async ({ app, gm
   await goDrafts(app);
   await expect(app.row("Person 5")).toHaveCount(0);
 
-  // `c`, touched, then a crash: kept.
   await app.compose();
   await app.subject.fill("Crash kept");
   await app.settle();
@@ -586,7 +535,6 @@ test("DRF-08 a webview reload or a crash with a composer open", async ({ app, gm
   await goDrafts(app);
   await expect(app.row("Crash kept")).toHaveCount(1);
 
-  // `c`, untouched, then a crash: discarded on launch.
   await app.compose();
   await app.crashAndRelaunch();
   await goDrafts(app);
@@ -608,7 +556,6 @@ test("DRF-09 the app's own drafts are read back after the account is re-added", 
   await app.press("Escape", "Escape", "Escape");
   await app.settle();
 
-  // Remove A, then add it again.
   await app.press("Meta+,");
   const settings = app.sheet("Settings");
   await settings.getByRole("button", { name: "Remove account" }).first().click();
@@ -632,13 +579,11 @@ test("DRF-09 the app's own drafts are read back after the account is re-added", 
   await app.press("Enter");
   await expect(app.conversationTitle).toContainText("Offsite venue");
   await expect(app.editor).toContainText("keep me");
-  // The quote is its own block, not part of the editor.
   await expect(app.editor).not.toContainText("Which venue");
   await expect(app.page.getByTitle("Show quoted text")).toBeVisible();
   expect((await gmail.gmail(A)).drafts).toHaveLength(1);
 });
 
-/** The open composer's body as Rust last sent it (the mirror's copy). A string: `__sm` is the app's hook. */
 const MIRROR_BODY = `Object.values(window.__sm.useMirror.getState().subs)
   .find((s) => s.type === "composer")?.draft?.bodyHtml ?? null`;
 
@@ -648,16 +593,13 @@ test("DRF-10 text deleted while its save is on the way stays deleted", async ({ 
   await app.reply();
   await app.type("Hello");
   const release = await app.park("submit");
-  // The autosave fires; its submit is parked.
   await app.page.clock.runFor(500);
   await app.press("Meta+a", "Backspace");
   await expect(app.editor).toHaveText("");
   await release();
-  // The parked save's echo arrives with "Hello".
   await expect.poll(() => app.page.evaluate<string | null>(MIRROR_BODY)).toContain("Hello");
   await expect(app.editor).toHaveText("");
 
-  // An empty draft is not upserted, so a new word shows what Gmail keeps.
   await app.type("Bye");
   await app.page.clock.runFor(500);
   await app.settle();
@@ -673,7 +615,6 @@ test("DRF-11 typing before a reply's first load keeps its filled fields", async 
 }) => {
   const s = await seeds.standard(gmail, app);
   await openThread(app, "Offsite venue");
-  // The composer's subscribe is parked, so its first load waits.
   const release = await app.park("submit", (body) => body.includes('"type":"composer"'));
   await app.press("r");
   await expect(app.editor).toBeFocused();
@@ -691,8 +632,6 @@ test("DRF-11 typing before a reply's first load keeps its filled fields", async 
   expect(draft?.message.headers.subject).toBe("Re: Offsite venue");
   expect(bodyOf(draft)).toContain("Early words");
 
-  // Resumed with its load parked, then closed at once: the text typed
-  // meanwhile follows the saved body.
   await app.press("Escape", "Escape");
   await app.settle();
   const again = await app.park("submit", (body) => body.includes('"type":"composer"'));
@@ -721,7 +660,6 @@ test("DRF-19 an edit still waiting to reach Gmail is not replaced by an older Gm
   await app.settle();
   expect(bodyOf((await draftsIn(gmail, p3.threadId))[0])).toContain("one");
 
-  // Gmail applies the next update, but its answer is lost: the save waits to retry.
   await gmail.fault("drafts.update", { kind: "noResponse" }, { times: 1 });
   await app.type(" two");
   await app.settle();
@@ -731,7 +669,6 @@ test("DRF-19 an edit still waiting to reach Gmail is not replaced by an older Gm
   await app.settle();
   await expect(stub(app, "one two three")).toHaveCount(1);
 
-  // A poll sees the draft's new Gmail message: the app's own lost write.
   await gmail.poll();
   await app.settle();
   await expect(stub(app, "one two three")).toHaveCount(1);
@@ -740,7 +677,6 @@ test("DRF-19 an edit still waiting to reach Gmail is not replaced by an older Gm
   const [draft] = await draftsIn(gmail, p3.threadId);
   expect(bodyOf(draft)).toContain("one two three");
 
-  // Another client edits the draft while a save waits to retry after a 503.
   await gmail.fault("drafts.update", { kind: "status", status: 503 }, { times: 1 });
   await app.reply("r");
   await expect(app.editor).toHaveText("one two three");
@@ -782,12 +718,9 @@ test("DRF-20 j and k in a conversation opened from Drafts open the other drafts'
   await expect(app.editor).toHaveCount(0);
   await app.settle();
 
-  // Drafts, latest edit first: … Q4 plan, Person 4, Contract (a forward), Idea
-  // (a new message). `j` opens the next draft's thread.
   await app.press("j");
   await expect(app.conversationTitle).toContainText("Contract");
   await app.settle();
-  // A new message has no thread: `j` passes it over, and no draft follows it.
   await app.press("j");
   await app.settle();
   await expect(app.conversationTitle).toContainText("Contract");
@@ -797,7 +730,6 @@ test("DRF-20 j and k in a conversation opened from Drafts open the other drafts'
   await expect(app.conversationTitle).toContainText("Q4 plan");
   await app.settle();
 
-  // Back in Drafts, the highlight is on the draft whose thread was open.
   await app.press("Escape");
   await expect(app.highlighted).toContainText("About message three.");
   await app.press("Enter");
@@ -819,8 +751,6 @@ test("DRF-21 a draft deleted on Gmail while an edit waits to reach Gmail is writ
   await app.press("Escape", "Escape");
   await app.settle();
 
-  // Another draft's first write waits on Gmail, so the edit's upsert queues
-  // behind it: draft writes reach Gmail one at a time.
   const create = await gmail.hold("drafts.create");
   await app.compose();
   await app.subject.fill("In the way");
@@ -834,7 +764,6 @@ test("DRF-21 a draft deleted on Gmail while an edit waits to reach Gmail is writ
   await app.settle();
   await expect(stub(app, "one two")).toHaveCount(1);
 
-  // Meanwhile the draft is deleted in another client, and a poll sees it.
   await gmail.deleteDraft(A, first?.id ?? "", { poll: true });
   await app.settle();
   await expect(stub(app, "one two")).toHaveCount(1);
@@ -862,7 +791,6 @@ test("DRF-24 a reply emptied again after it reached Gmail is emptied in Gmail to
   await app.press("Escape", "Escape");
   await app.settle();
 
-  // Reopened, and its text deleted: the draft is as a new reply starts.
   await app.reply("r");
   await expect(app.editor).toHaveText("one");
   await app.press("Meta+A", "Backspace");
@@ -882,8 +810,6 @@ test("DRF-23 a draft discarded after a create with no answer stays gone across a
 }) => {
   const s = await seeds.standard(gmail, app);
   const thread = s.thread("p3").threadId;
-  // Gmail makes the draft, but its answer is lost, and the look for the copy
-  // it made fails too: the app has no id for it.
   await gmail.fault("drafts.create", { kind: "noResponse" }, { times: 1 });
   await gmail.fault("drafts.list", { kind: "status", status: 503 }, { times: 1 });
   await openThread(app, "Person 3");
@@ -892,7 +818,6 @@ test("DRF-23 a draft discarded after a create with no answer stays gone across a
   await app.settle();
   expect(await draftsIn(gmail, thread)).toHaveLength(1);
 
-  // The discard looks for the copy by its header, and Gmail fails to read it.
   await gmail.fault("drafts.get", { kind: "status", status: 500 }, { times: 2 });
   await app.press("Meta+Shift+Comma");
   await expect(app.editor).toHaveCount(0);
@@ -901,7 +826,6 @@ test("DRF-23 a draft discarded after a create with no answer stays gone across a
     true,
   );
 
-  // A restart forgets what was discarded in the last run.
   await app.restart();
   await gmail.poll();
   await app.advance(120_000, { stepwise: true });
@@ -918,8 +842,6 @@ test("DRF-22 a draft deleted elsewhere just before its composer loads leaves the
   const heading = app.page.getByRole("heading", { name: "New Message" });
   await goDrafts(app);
   await highlight(app, "Idea");
-  // The composer's subscription reaches the core only after a poll has seen
-  // the draft deleted in another client, so no composer had it open.
   const release = await app.park("submit", (body) => body.includes('"composer"'));
   await app.press("Enter");
   await expect(heading).toBeVisible();
@@ -931,7 +853,6 @@ test("DRF-22 a draft deleted elsewhere just before its composer loads leaves the
   await expect(app.toast("Draft was sent or deleted elsewhere")).toBeVisible();
   await expect(heading).toHaveCount(0);
   await expect(app.editor).toHaveCount(0);
-  // Back on Drafts, where it is gone too, with the list's keys.
   await expect(app.row("Idea")).toHaveCount(0);
   await expect(app.hintBar).toHaveText(
     /Enter to open draft\s*·\s*C to compose\s*·\s*⌘K for commands/,

@@ -1,10 +1,5 @@
-// Key bindings, written as `e`, `Shift+E`, `Meta+Shift+,`, `Control+1…9`, or
-// a sequence such as `g e`: matched against keydown events, and shown as
-// palette chips or as text for the shortcut sheet, hints, and titles.
-
 type Chord = { key: string; meta: boolean; shift: boolean; ctrl: boolean; alt: boolean };
 
-/** One chord, or two pressed one after the other. */
 export type Binding = readonly Chord[];
 
 export function parseBinding(spec: string): Binding {
@@ -22,10 +17,8 @@ export function parseBinding(spec: string): Binding {
   });
 }
 
-/** Keys named by `KeyboardEvent.key` rather than typed. */
 const NAMED = new Set(["Enter", "Escape", "Tab", "ArrowDown", "ArrowUp", "Backspace"]);
 
-/** What a US layout types for a symbol with Shift held, which WebKit reports with Cmd. */
 const SHIFTED: Record<string, string> = { ",": "<" };
 
 export function chordMatches(c: Chord, e: KeyboardEvent): boolean {
@@ -36,10 +29,8 @@ export function chordMatches(c: Chord, e: KeyboardEvent): boolean {
   if (/^[a-z]$/i.test(c.key)) {
     const k = c.key.toLowerCase();
     if (modified) return e.key.toLowerCase() === k && e.shiftKey === c.shift;
-    // A letter alone: Shift makes it a capital, and so does Caps Lock.
     return e.key === (c.shift ? k.toUpperCase() : k);
   }
-  // A symbol is the character typed, whatever Shift took to type it.
   if (modified && e.shiftKey !== c.shift) return false;
   return e.key === c.key || (c.shift && e.key === SHIFTED[c.key]);
 }
@@ -70,12 +61,10 @@ function keyName(key: string, chip: boolean): string {
   return key.toUpperCase();
 }
 
-/** The palette's chips: one per modifier and key, e.g. `⌘ ⇧ A` or `G E`. */
 export function bindingChips(b: Binding): string[] {
   return b.flatMap((c) => [...mods(c), keyName(c.key, true)]);
 }
 
-/** As text: `E`, `⇧E`, `⌘Enter`, `⌃1…9`, or a sequence as typed, `g e`. */
 export function bindingText(b: Binding): string {
   if (b.length > 1) return b.map((c) => c.key.toLowerCase()).join(" ");
   return b.map((c) => mods(c).join("") + keyName(c.key, false)).join("");

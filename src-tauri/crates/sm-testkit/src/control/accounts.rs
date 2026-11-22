@@ -1,6 +1,3 @@
-//! Gmail users, accounts, the request budget, and OAuth: sign-ins, the
-//! token file, revocations, and grants.
-
 use std::os::unix::fs::PermissionsExt as _;
 use std::sync::Arc;
 
@@ -21,7 +18,6 @@ pub(crate) struct UserReq {
     name: Option<String>,
 }
 
-/// Adds a Gmail user to the fake and returns its refresh token.
 fn create_user(s: &Server, req: &UserReq) -> RefreshToken {
     let user = s.fake.add_user(&req.email);
     if let Some(name) = &req.name {
@@ -32,7 +28,6 @@ fn create_user(s: &Server, req: &UserReq) -> RefreshToken {
     token
 }
 
-/// Runs a token-file call off the async threads.
 async fn token_file<T: Send + 'static>(
     s: &Server,
     call: impl FnOnce(&TokenFile) -> Result<T, TokenStoreError> + Send + 'static,
@@ -41,14 +36,11 @@ async fn token_file<T: Send + 'static>(
     Ok(tokio::task::spawn_blocking(move || call(&tokens)).await??)
 }
 
-/// A Gmail user that exists in the fake but not in the app (for Add account).
 pub(crate) async fn add_user(State(s): State<Arc<Server>>, Json(req): Json<UserReq>) -> Ctl {
     create_user(&s, &req);
     Ok(done())
 }
 
-/// A Gmail user already signed in to the app: its refresh token is in the
-/// token file and the app has the account.
 pub(crate) async fn add_account(State(s): State<Arc<Server>>, Json(req): Json<UserReq>) -> Ctl {
     let app = match &*s.core.lock().await {
         Core::Ready { app, .. } | Core::Running(app) => Arc::clone(app),
@@ -66,8 +58,6 @@ pub(crate) struct QuotaReq {
     production: bool,
 }
 
-/// The request budget from the next start on: production's, or one that
-/// never waits.
 pub(crate) async fn quota(State(s): State<Arc<Server>>, Json(req): Json<QuotaReq>) -> Ctl {
     *s.quota.lock() = if req.production {
         sm_gmail::QuotaConfig::default()
@@ -87,7 +77,6 @@ pub(crate) struct SignInReq {
     deny: bool,
 }
 
-/// How the next sign-in in the browser goes: as a user, abandoned, or denied.
 pub(crate) async fn next_sign_in(State(s): State<Arc<Server>>, Json(req): Json<SignInReq>) -> Ctl {
     if req.deny {
         s.fake.deny_next_sign_in();
@@ -100,7 +89,6 @@ pub(crate) async fn next_sign_in(State(s): State<Arc<Server>>, Json(req): Json<S
     Ok(done())
 }
 
-/// The token file's entries, as stored on disk.
 pub(crate) async fn tokens(State(s): State<Arc<Server>>) -> Ctl {
     let entries = token_file(&s, TokenFile::entries).await?;
     let items: Vec<Value> = entries
@@ -110,8 +98,6 @@ pub(crate) async fn tokens(State(s): State<Arc<Server>>) -> Ctl {
     Ok(Json(json!(items)))
 }
 
-/// The token file's permission bits, such as "600", or null before the
-/// first save.
 pub(crate) async fn tokens_mode(State(s): State<Arc<Server>>) -> Ctl {
     let mode = tokio::fs::metadata(s.data_dir.join(Config::TOKEN_FILE))
         .await
@@ -125,13 +111,11 @@ pub(crate) struct EmailReq {
     email: String,
 }
 
-/// Deletes an account's token from the file, as if it was never saved.
 pub(crate) async fn forget_token(State(s): State<Arc<Server>>, Json(req): Json<EmailReq>) -> Ctl {
     token_file(&s, move |tokens| tokens.delete(&req.email)).await?;
     Ok(done())
 }
 
-/// Tokens revoked at Google, oldest first.
 pub(crate) async fn revocations(State(s): State<Arc<Server>>) -> Ctl {
     let list: Vec<Value> = s
         .fake
@@ -148,7 +132,6 @@ pub(crate) struct InvalidGrantReq {
     on: bool,
 }
 
-/// Google revokes (or restores) the account's refresh token.
 pub(crate) async fn invalid_grant(
     State(s): State<Arc<Server>>,
     Json(req): Json<InvalidGrantReq>,
@@ -167,8 +150,6 @@ pub(crate) struct SettingsScopeReq {
     granted: bool,
 }
 
-/// Whether the user's grant includes Gmail filters, until the next sign-in
-/// decides.
 pub(crate) async fn settings_scope(
     State(s): State<Arc<Server>>,
     Json(req): Json<SettingsScopeReq>,
@@ -177,7 +158,6 @@ pub(crate) async fn settings_scope(
     Ok(done())
 }
 
-/// The user's Gmail filters, as `{id, from, add, remove}`.
 pub(crate) async fn filters(State(s): State<Arc<Server>>, Path(email): Path<String>) -> Ctl {
     let filters: Vec<Value> = s
         .user(&email)?

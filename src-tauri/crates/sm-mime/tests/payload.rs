@@ -1,6 +1,3 @@
-//! Gmail payloads: bodies in their charset, and the parts a message lists
-//! (e2e/COVERAGE.md, kept unit tests).
-
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::{Value, json};
@@ -17,8 +14,6 @@ fn plain(charset: &str, bytes: &[u8]) -> Value {
 
 #[test]
 fn a_charset_with_no_decoder_reads_as_undeclared_text() {
-    // encoding_rs maps these labels to its "replacement" encoding, which turns
-    // a whole body into one U+FFFD.
     for charset in [
         "iso-2022-kr",
         "csiso2022kr",
@@ -46,9 +41,6 @@ fn data(text: &str) -> Value {
     json!({ "size": text.len(), "data": URL_SAFE_NO_PAD.encode(text) })
 }
 
-/// A message forwarded as an attachment, as Gmail's `format=full` serves it:
-/// the attached message's parts sit under its `message/rfc822` part, which
-/// gets `eml_body`.
 fn forwarded_as_attachment(eml_body: &Value) -> Value {
     json!({
         "partId": "",
@@ -129,7 +121,6 @@ fn forwarded_as_attachment(eml_body: &Value) -> Value {
 fn an_attached_message_lists_the_attachments_inside_it() {
     let parsed = parse_message(&forwarded_as_attachment(&json!({ "size": 0 }))).unwrap();
 
-    // The attached message's body is not this message's body.
     assert_eq!(parsed.body.text.as_deref(), Some("See the message below."));
     assert_eq!(parsed.body.html, None);
     let listed: Vec<(&str, &str, Option<&str>)> = parsed
@@ -143,7 +134,6 @@ fn an_attached_message_lists_the_attachments_inside_it() {
             )
         })
         .collect();
-    // Not its inline image, nor the .eml, which has no attachment id.
     assert_eq!(
         listed,
         [
@@ -165,8 +155,6 @@ fn an_attached_message_with_an_attachment_id_is_listed_before_its_attachments() 
     assert_eq!(parsed.parts[0].mime_type, "message/rfc822");
 }
 
-/// A message as Apple Mail sends it: every attachment `inline`, a PDF and a
-/// photo; and a message forwarded as an attachment holding one of each.
 fn apple_mail() -> Value {
     let pdf = |id: &str, name: &str| {
         json!({
@@ -223,7 +211,6 @@ fn apple_mail() -> Value {
     })
 }
 
-/// Each listed part's filename, and whether it is inline.
 fn listed(parsed: ParsedMessage) -> Vec<(String, bool)> {
     parsed
         .parts
@@ -238,10 +225,6 @@ fn named(parts: &[(&str, bool)]) -> Vec<(String, bool)> {
 
 #[test]
 fn a_file_sent_inline_is_an_attachment() {
-    // A PDF sent inline is an attachment, here and inside the attached
-    // message. The photo the HTML shows is an inline image of this
-    // message's body; the attached message's photo is an attachment, since
-    // its plain-text body can't show it.
     assert_eq!(
         listed(parse_message(&apple_mail()).unwrap()),
         named(&[
@@ -253,7 +236,6 @@ fn a_file_sent_inline_is_an_attachment() {
     );
 }
 
-/// A photo sent `inline`, as Apple Mail sends one, with this Content-ID if any.
 fn photo(id: &str, name: &str, content_id: Option<&str>) -> Value {
     let mut headers = vec![header(
         "Content-Disposition",
@@ -273,8 +255,6 @@ fn photo(id: &str, name: &str, content_id: Option<&str>) -> Value {
 
 #[test]
 fn an_image_is_inline_only_when_the_html_body_shows_it() {
-    // Apple Mail with a plain-text body: the photo goes `inline` with no
-    // Content-ID.
     let plain_text = json!({
         "partId": "",
         "mimeType": "multipart/mixed",
@@ -288,8 +268,6 @@ fn an_image_is_inline_only_when_the_html_body_shows_it() {
         named(&[("IMG_0001.jpeg", false)])
     );
 
-    // HTML that shows one image, by a percent-encoded reference, but not a
-    // second one with a Content-ID, nor a photo with none.
     let html = json!({
         "partId": "",
         "mimeType": "multipart/related",
@@ -312,7 +290,6 @@ fn an_image_is_inline_only_when_the_html_body_shows_it() {
             ("IMG_0002.jpeg", false),
         ])
     );
-    // Only the image the body shows is fetched for it.
     let parsed = parse_message(&html).unwrap();
     let fetched: Vec<&str> = parsed
         .inline_images_to_fetch()

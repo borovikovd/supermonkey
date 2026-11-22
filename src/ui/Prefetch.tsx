@@ -6,11 +6,6 @@ import { later, subscribe, unsubscribe } from "../ipc/bridge";
 import type { SubKey } from "../ipc/types";
 import { useChrome } from "../store/chrome";
 
-/**
- * Subscribes the highlighted conversation and its neighbors once the
- * highlight rests for 100 ms (in an open conversation, its neighbors once it
- * has been open 100 ms), so opening one paints from the mirror.
- */
 export function Prefetch() {
   const { thread, openTrashMode, row } = useChrome(
     useShallow((s) => {
@@ -20,7 +15,6 @@ export function Prefetch() {
         : { thread: null, openTrashMode: false, row: cur?.highlight || null };
     }),
   );
-  /** The subscriptions held now. */
   const held = useRef<SubKey[]>([]);
 
   useEffect(() => {
@@ -29,9 +23,7 @@ export function Prefetch() {
     return later(() => {
       const ids = visibleIds();
       const at = ids.indexOf(center);
-      // As the conversation will open (SPEC Reading).
       const trashMode = openTrashMode || listShowsTrash();
-      // An open conversation is subscribed already; a highlighted row is not.
       const around = [ids[at - 1], thread === null ? center : undefined, ids[at + 1]].filter(
         (x): x is string => x !== undefined && !Number.isNaN(Number(x)),
       );
@@ -41,8 +33,6 @@ export function Prefetch() {
         trashMode,
         open: false,
       }));
-      // New ones first: a neighbor kept across the move keeps its
-      // subscription and data instead of being dropped and loaded again.
       for (const k of next) subscribe(k);
       for (const k of held.current) unsubscribe(k);
       held.current = next;

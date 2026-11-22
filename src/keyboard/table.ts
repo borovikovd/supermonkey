@@ -1,8 +1,3 @@
-// The command table (SPEC Keyboard): every command once, with its label, key
-// binding, where it works (`when`), and what it does (`run`). The key
-// dispatcher, the palette, the shortcut sheet, the hint bar, and the buttons
-// that share a shortcut all read it.
-
 import {
   markDone,
   removeViewLabel,
@@ -67,41 +62,25 @@ import {
 } from "./nav";
 import { measure } from "./meter";
 
-// ------------------------------------------------------------ context
-
-/** What decides where a command works, read from the stores. */
 export type Ctx = {
   account: number | null;
-  /** The account on screen needs Sign in again: its mail is not on screen. */
   signedOut: boolean;
   screen: "list" | "conversation";
-  /** A composer on screen: a reply in the conversation, or the `c` screen. */
   composer: "inline" | "screen" | null;
   composeBlurred: boolean;
-  /** The list's view; null for search results. */
   view: View | null;
-  /** A sheet (Settings, Split Inbox settings, the shortcut sheet) is open. */
   sheet: boolean;
   searchOpen: boolean;
-  /** The search field has focus. */
   searchField: boolean;
-  /** Mail on screen to act on: the selection shown, the open conversation, or the highlighted row. */
   targets: boolean;
-  /** The list on screen has rows. */
   rows: boolean;
-  /** The highlighted row is shown. */
   highlight: boolean;
-  /** Visible splits in a split Inbox. */
   splits: number;
-  /** A link in the open conversation was reached with Tab. */
   link: boolean;
   selection: boolean;
-  /** The open conversation has loaded. */
   loaded: boolean;
-  /** The open conversation has loaded, and its thread is gone. */
   gone: boolean;
   undo: boolean;
-  /** The account has user labels. */
   labels: boolean;
   accounts: number;
   muted: boolean;
@@ -112,7 +91,6 @@ type ChromeState = ReturnType<typeof useChrome.getState>;
 let cached: { chrome: ChromeState; mirror: MirrorState; compose: ComposeState; ctx: Ctx } | null =
   null;
 
-/** The context for these store states. */
 function contextOf(chrome: ChromeState, mirror: MirrorState, compose: ComposeState): Ctx {
   if (cached?.chrome === chrome && cached.mirror === mirror && cached.compose === compose) {
     return cached.ctx;
@@ -164,12 +142,10 @@ function contextOf(chrome: ChromeState, mirror: MirrorState, compose: ComposeSta
   return ctx;
 }
 
-/** The context now, outside React. */
 export function context(): Ctx {
   return contextOf(useChrome.getState(), useMirror.getState(), composeState());
 }
 
-/** The context, kept current in a component. */
 export function useCtx(): Ctx {
   const chrome = useChrome((s) => s);
   const mirror = useMirror((s) => s);
@@ -177,60 +153,37 @@ export function useCtx(): Ctx {
   return contextOf(chrome, mirror, compose);
 }
 
-// ------------------------------------------------------------ where commands work
-
-/** Mail is on screen: an account signed in, no composer over it. */
 const mailScreen = (c: Ctx) => c.account !== null && !c.signedOut && c.composer === null;
 const onList = (c: Ctx) => mailScreen(c) && c.screen === "list";
 const inConversation = (c: Ctx) => mailScreen(c) && c.screen === "conversation";
-/** A reply can be aimed here: an open conversation that is not gone (it may still be loading). */
 const replies = (c: Ctx) => inConversation(c) && !c.gone;
-/** A mail action has something to act on (SPEC Keyboard). */
 const acts = (c: Ctx) => mailScreen(c) && c.targets;
-/** Views and settings of the account on screen, also from the rail while composing. */
 const accountScreen = (c: Ctx) => c.account !== null && !c.signedOut;
 const anyScreen = (c: Ctx) => c.account !== null;
 const composing = (c: Ctx) => c.composer !== null;
 
 const isView = (c: Ctx, kind: View["kind"]) => c.view?.kind === kind;
 
-// ------------------------------------------------------------ the table
-
-/**
- * Where a key is looked up (src/keyboard/dispatch.ts): keys that work
- * everywhere, an open sheet, the composer, the search field, and the
- * shortcut table, which applies only on mail.
- */
 export type Scope = "global" | "sheet" | "compose" | "search" | "mail";
 
-/** The shortcut sheet's sections, in order. */
 export const GROUPS = ["Navigate", "Act", "Write", "Go to"] as const;
 
 type Def = {
   label: string;
-  /** The label when it depends on state (Mute / Unmute). */
   dynamicLabel?: (c: Ctx) => string;
-  /** A button's name, when shorter than the label. */
   button?: string;
-  /** Key bindings; the first is the one shown. */
   keys?: string | readonly string[];
   scope?: Scope;
-  /** The shortcut sheet's section; every command with keys has one. */
   group?: (typeof GROUPS)[number];
-  /** Listed in the palette; a function runs there instead of `run` (a picker for a key that acts at once). */
   palette?: true | (() => void);
-  /** The hint bar's words after the key, e.g. `to Mark Done`. */
   hint?: string;
   when: (c: Ctx) => boolean;
-  /** Runs the command; a key passes its event. */
   run: (c: Ctx, e?: KeyboardEvent) => void;
-  /** The performance budget the key is measured against (SPEC Performance). */
   meter?: string | ((c: Ctx) => string);
 };
 
 const view = (kind: Exclude<View["kind"], "label">) => () => goTo({ kind });
 
-/** Esc on mail closes the innermost thing: a link, the conversation, the selection, then search. */
 function escape(c: Ctx) {
   if (c.link) clearLink();
   else if (c.screen === "conversation") closeConversation();
@@ -239,7 +192,6 @@ function escape(c: Ctx) {
 }
 
 const DEFS = {
-  // An open sheet.
   "close-sheet": {
     label: "Close the sheet",
     keys: "Escape",
@@ -248,7 +200,6 @@ const DEFS = {
     run: closeSheet,
   },
 
-  // The sign-in screen.
   signin: {
     label: "Sign in again",
     keys: "Enter",
@@ -259,7 +210,6 @@ const DEFS = {
     run: signInAgainOnScreen,
   },
 
-  // Mail actions, in the palette's order.
   done: {
     label: "Mark done",
     button: "Mark Done",
@@ -302,7 +252,6 @@ const DEFS = {
     label: "Mark as spam",
     keys: "!",
     group: "Act",
-    // The palette offers spam with a block; `!` marks spam at once.
     palette: () => openPalette({ kind: "spam" }),
     when: (c) => acts(c) && !isView(c, "spam"),
     run: () => spam(),
@@ -377,7 +326,6 @@ const DEFS = {
     keys: "y",
     group: "Act",
     palette: true,
-    // Gmail does not let SENT be removed.
     when: (c) => acts(c) && c.view !== null && c.view.kind !== "sent" && viewLabel(c.view) !== null,
     run: removeViewLabel,
     meter: "e",
@@ -392,7 +340,6 @@ const DEFS = {
     meter: "z",
   },
 
-  // Writing.
   reply: {
     label: "Reply",
     keys: "r",
@@ -441,7 +388,6 @@ const DEFS = {
     meter: "search",
   },
 
-  // Views.
   "g-inbox": {
     label: "Go to Inbox",
     button: "Inbox",
@@ -554,7 +500,6 @@ const DEFS = {
     run: () => openPalette({ kind: "goLabel" }),
   },
 
-  // Split Inbox, accounts, and the app.
   "split-add": {
     label: "Add to split",
     palette: true,
@@ -639,7 +584,6 @@ const DEFS = {
     meter: "palette",
   },
 
-  // Moving around the list and the conversation; not in the palette.
   next: {
     label: "Next conversation",
     keys: "j",
@@ -779,7 +723,6 @@ const DEFS = {
     meter: "x",
   },
 
-  // The search field.
   "search-results": {
     label: "See results",
     keys: ["Enter", "ArrowDown"],
@@ -799,7 +742,6 @@ const DEFS = {
     run: closeSearch,
   },
 
-  // The composer (SPEC Compose); the palette's draft actions first.
   send: {
     label: "Send",
     keys: "Meta+Enter",
@@ -900,7 +842,6 @@ const DEFS = {
     when: composing,
     run: (c) => {
       if (mountedComposer()?.closeLink()) return;
-      // The first Esc blurs the editor and leaves compose on screen.
       if (!c.composeBlurred) blurComposer();
       else closeComposerOnScreen();
     },
@@ -935,7 +876,6 @@ function toCommand(id: string, def: Def): Command {
   return { ...def, id, scope: def.scope ?? "mail", bindings: keys.map(parseBinding) };
 }
 
-/** Every command, in table order. */
 export const COMMANDS: readonly Command[] = Object.entries(DEFS).map(([id, def]: [string, Def]) =>
   toCommand(id, def),
 );
@@ -950,31 +890,22 @@ export function command(id: CommandId): Command {
 
 export const labelOf = (cmd: Command, c: Ctx) => cmd.dynamicLabel?.(c) ?? cmd.label;
 
-/** The shortcut as text, `⌘K`; empty without one. */
 export const keyText = (cmd: Command) => (cmd.bindings[0] ? bindingText(cmd.bindings[0]) : "");
 
-/** The palette's chips for the shortcut. */
 export const keyChips = (cmd: Command) => (cmd.bindings[0] ? bindingChips(cmd.bindings[0]) : []);
 
-/** The `⌃ n` chips of the n-th account in the switcher. */
 export const accountChips = (n: number) => bindingChips(parseBinding(`Control+${n}`));
 
-/** A button's title: its name and shortcut, e.g. `Mark Done (E)`. */
 export function titleOf(cmd: Command): string {
   const name = cmd.button ?? cmd.label;
   const keys = keyText(cmd);
   return keys ? `${name} (${keys})` : name;
 }
 
-/** A hint as the hint bar shows it, e.g. `E to Mark Done`. */
 export const hintOf = (cmd: Command) => `${keyText(cmd)} ${cmd.hint ?? cmd.label}`;
 
-/** A hint in key symbols, e.g. `⌘↵ to Send`, as the composer's footer shows it. */
 export const shortHintOf = (cmd: Command) => `${keyChips(cmd).join("")} ${cmd.hint ?? cmd.label}`;
 
-// ------------------------------------------------------------ readers
-
-/** The palette's commands where it opened: the draft actions while a composer is on screen. */
 export function paletteCommands(c: Ctx): Command[] {
   return COMMANDS.filter(
     (cmd) =>
@@ -984,13 +915,11 @@ export function paletteCommands(c: Ctx): Command[] {
   );
 }
 
-/** Choosing a command in the palette. */
 export function runFromPalette(cmd: Command) {
   if (typeof cmd.palette === "function") cmd.palette();
   else cmd.run(context());
 }
 
-/** The hint bar on this screen (SPEC Layout), leaving out hints whose key would do nothing. */
 export function hints(c: Ctx): Command[] {
   const ids: CommandId[] =
     c.composer !== null
@@ -1007,7 +936,6 @@ export function hints(c: Ctx): Command[] {
   return ids.map(command).filter((cmd) => cmd.when(c));
 }
 
-/** The shortcut sheet: every command with a shortcut, by section. */
 export function sheet(): { group: (typeof GROUPS)[number]; commands: Command[] }[] {
   return GROUPS.map((group) => ({
     group,
@@ -1015,18 +943,14 @@ export function sheet(): { group: (typeof GROUPS)[number]; commands: Command[] }
   }));
 }
 
-/** A command for a button: its title, whether it works now, and how to run it. */
 export function useCommand(id: CommandId) {
   const c = useCtx();
   const cmd = command(id);
   return { title: titleOf(cmd), enabled: cmd.when(c), run: () => cmd.run(context()) };
 }
 
-// ------------------------------------------------------------ keys
-
 type Chord = Binding[number];
 
-/** `g` was pressed: the first chord of a sequence, waiting for its second. */
 let prefix: Chord | null = null;
 let prefixTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -1043,15 +967,9 @@ function runCommand(cmd: Command, c: Ctx, e: KeyboardEvent, start: number) {
   if (meter) measure(meter, start);
 }
 
-/**
- * Looks a key up in one scope's commands and runs the first that works now.
- * True when the key was taken: run, or on mail a plain key of the shortcut
- * table that does nothing here, which no browser default should get.
- */
 export function runKey(scope: Scope, e: KeyboardEvent, c: Ctx, start: number): boolean {
   const inScope = COMMANDS.filter((cmd) => cmd.scope === scope);
   if (prefix !== null && scope === "mail") {
-    // A held key repeating, `g` itself most likely, is not the second key.
     if (e.repeat) {
       e.preventDefault();
       return true;
@@ -1070,7 +988,6 @@ export function runKey(scope: Scope, e: KeyboardEvent, c: Ctx, start: number): b
     if (cmd) runCommand(cmd, c, e, start);
     return true;
   }
-  // The first key of a sequence some command here would take.
   const starts = inScope.flatMap((x) =>
     x.when(c) ? x.bindings.filter((b) => b.length === 2 && b[0] && chordMatches(b[0], e)) : [],
   );
@@ -1078,7 +995,6 @@ export function runKey(scope: Scope, e: KeyboardEvent, c: Ctx, start: number): b
   if (opener) {
     e.preventDefault();
     prefix = opener;
-    // A new prefix restarts the wait; an older timer must not end it.
     clearTimeout(prefixTimer);
     prefixTimer = setTimeout(() => {
       prefix = null;
@@ -1094,8 +1010,6 @@ export function runKey(scope: Scope, e: KeyboardEvent, c: Ctx, start: number): b
     runCommand(cmd, c, e, start);
     return true;
   }
-  // A plain key: chords with Cmd stay with the browser, so `Cmd+A` in a
-  // conversation still selects its text.
   if (scope === "mail" && matching.length > 0 && !e.metaKey && !e.ctrlKey && !e.altKey) {
     e.preventDefault();
     return true;

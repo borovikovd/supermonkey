@@ -1,6 +1,3 @@
-//! Split Inbox splits and pins (SPEC Split Inbox). Every write re-routes the
-//! account's Inbox in the same transaction.
-
 use rusqlite::{Row, named_params};
 use sm_domain::{AccountId, Pin, PinKind, Router, Split, SplitId, SplitKind, split_position};
 
@@ -9,41 +6,25 @@ use crate::routing;
 use crate::tx::WriteTx;
 use crate::{StoreError, Table};
 
-/// One split.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitRecord {
-    /// Its id, never reused.
     pub id: SplitId,
-    /// Its account.
     pub account: AccountId,
-    /// Its name.
     pub name: String,
-    /// Custom, Important, or Other.
     pub kind: SplitKind,
-    /// A custom split's rule.
     pub query: String,
-    /// Turned on; Other always is.
     pub enabled: bool,
-    /// Hidden while empty.
     pub hide_when_empty: bool,
-    /// Its place: custom splits, then Important, then Other.
     pub position: i32,
 }
 
-/// One split as the settings sheet saves it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SplitEdit {
-    /// Its id; one below 1 is a new custom split.
     pub id: SplitId,
-    /// Its name.
     pub name: String,
-    /// Its kind; only custom splits can be new.
     pub kind: SplitKind,
-    /// A custom split's rule, already checked with `Query::parse_rule`.
     pub query: String,
-    /// Turned on.
     pub enabled: bool,
-    /// Hidden while empty.
     pub hide_when_empty: bool,
 }
 
@@ -60,7 +41,6 @@ fn split_row(r: &Row<'_>) -> rusqlite::Result<SplitRecord> {
     })
 }
 
-/// Reads of splits and pins.
 #[derive(Debug, Clone, Copy)]
 pub struct SplitReads<'c> {
     db: Db<'c>,
@@ -71,7 +51,6 @@ impl<'c> SplitReads<'c> {
         Self { db }
     }
 
-    /// The account's splits, in order.
     pub fn all(self, account: AccountId) -> Result<Vec<SplitRecord>, StoreError> {
         self.db.all(
             "read the splits",
@@ -82,7 +61,6 @@ impl<'c> SplitReads<'c> {
         )
     }
 
-    /// One split.
     pub fn get(self, id: SplitId) -> Result<Option<SplitRecord>, StoreError> {
         self.db.optional(
             "read a split",
@@ -93,7 +71,6 @@ impl<'c> SplitReads<'c> {
         )
     }
 
-    /// The account's pins, by kind and value.
     pub fn pins(self, account: AccountId) -> Result<Vec<Pin>, StoreError> {
         let rows: Vec<(PinKind, String, SplitId)> = self.db.all(
             "read the pins",
@@ -108,7 +85,6 @@ impl<'c> SplitReads<'c> {
             .collect())
     }
 
-    /// The split a pin of this kind and value sends mail to.
     pub fn pin(
         self,
         account: AccountId,
@@ -123,7 +99,6 @@ impl<'c> SplitReads<'c> {
         )
     }
 
-    /// The account's router over its splits and pins.
     pub fn router(self, account: AccountId) -> Result<Router, StoreError> {
         let splits = self.all(account)?.into_iter().map(|s| Split {
             id: s.id,
@@ -135,7 +110,6 @@ impl<'c> SplitReads<'c> {
     }
 }
 
-/// Writes to splits and pins.
 #[derive(Debug)]
 pub struct SplitWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
@@ -146,11 +120,6 @@ impl<'t, 'c> SplitWrites<'t, 'c> {
         Self { tx }
     }
 
-    /// The settings sheet's save: deletes the custom splits in `deleted`
-    /// (Important and Other can't be), updates saved ones, adds new custom
-    /// ones, and places them in the order given: custom splits, then
-    /// Important, then Other. Other stays on. Returns each edit's id, new
-    /// ones included, in order.
     pub fn save(
         &mut self,
         account: AccountId,
@@ -212,8 +181,6 @@ impl<'t, 'c> SplitWrites<'t, 'c> {
         Ok(ids)
     }
 
-    /// Pins a sender, domain, or label name to a split, replacing any pin
-    /// of the same kind and value. Returns the split it replaced.
     pub fn set_pin(
         &mut self,
         account: AccountId,
@@ -238,7 +205,6 @@ impl<'t, 'c> SplitWrites<'t, 'c> {
         Ok(replaced)
     }
 
-    /// Removes a pin, as undoing a new one does.
     pub fn remove_pin(
         &mut self,
         account: AccountId,

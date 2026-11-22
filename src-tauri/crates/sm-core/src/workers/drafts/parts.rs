@@ -1,8 +1,3 @@
-//! A draft read from Gmail gets its attachments downloaded before its first
-//! upsert (SPEC Addressing): `drafts.update` replaces the whole message, so
-//! the upsert must carry them. Offline, the composer opens anyway, and the
-//! downloads run before the queued upsert or the send.
-
 use std::collections::HashMap;
 
 use sm_domain::DraftId;
@@ -13,8 +8,6 @@ use super::write::{download, load};
 use crate::drafts::lifecycle;
 use crate::workers::account::AccountCtx;
 
-/// Downloads every attachment the draft carries that has no file yet, and
-/// stores their paths on it.
 pub(crate) async fn download_parts(ctx: &AccountCtx, id: DraftId) -> Result<(), WriteFailure> {
     let Some(draft) = load(&ctx.deps.pool, id.clone()).await? else {
         return Ok(());

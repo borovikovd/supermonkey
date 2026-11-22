@@ -1,35 +1,19 @@
-//! Draft rules (SPEC Reply composer, Drafts): the untouched check, and the
-//! kind and target a draft first read from Gmail gets.
-
 use serde::{Deserialize, Serialize};
 
 use crate::{Addr, DraftKind, MessageId, Millis, Thread};
 
-/// The fields of a draft that the untouched rule compares, stored as a
-/// draft's defaults when its composer starts.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DraftContent {
-    /// The From mailbox.
     pub from: Option<Addr>,
-    /// The `To` mailboxes.
     pub to: Vec<Addr>,
-    /// The `Cc` mailboxes.
     pub cc: Vec<Addr>,
-    /// The `Bcc` mailboxes.
     pub bcc: Vec<Addr>,
-    /// The subject.
     pub subject: String,
-    /// The editor's HTML.
     pub body_html: String,
-    /// The attachments' ids within the draft, in order.
     pub attachments: Vec<String>,
 }
 
 impl DraftContent {
-    /// Whether a draft that started as `self` is untouched at `now`: the
-    /// same From, recipients, subject, and attachments, and a body that is
-    /// the same or blank. `body_is_blank` is whether `now`'s body has no
-    /// text and no image, which only HTML parsing can tell.
     pub fn is_untouched_by<'a>(
         &self,
         now: DraftContentRef<'a, impl IntoIterator<Item = &'a str>>,
@@ -49,29 +33,18 @@ impl DraftContent {
     }
 }
 
-/// A draft's [`DraftContent`] as it is now, borrowed from the draft so the
-/// untouched rule compares without copying the body. `A` gives the
-/// attachments' ids within the draft, in order.
 #[derive(Debug, Clone)]
 pub struct DraftContentRef<'a, A> {
-    /// The From mailbox.
     pub from: Option<&'a Addr>,
-    /// The `To` mailboxes.
     pub to: &'a [Addr],
-    /// The `Cc` mailboxes.
     pub cc: &'a [Addr],
-    /// The `Bcc` mailboxes.
     pub bcc: &'a [Addr],
-    /// The subject.
     pub subject: &'a str,
-    /// The editor's HTML.
     pub body_html: &'a str,
-    /// The attachments' ids within the draft, in order.
     pub attachments: A,
 }
 
 impl<'a, A: IntoIterator<Item = &'a str>> DraftContentRef<'a, A> {
-    /// This content, owned, with `body_html` for its body.
     pub fn with_body(self, body_html: String) -> DraftContent {
         DraftContent {
             from: self.from.cloned(),
@@ -85,9 +58,6 @@ impl<'a, A: IntoIterator<Item = &'a str>> DraftContentRef<'a, A> {
     }
 }
 
-/// The kind a draft gets when it first appears from Gmail, kept from then
-/// on: new when it is alone in its thread with no `In-Reply-To`, forward when
-/// its subject starts with `Fwd:` (any case), reply otherwise.
 #[must_use]
 pub fn gmail_draft_kind(alone_in_thread: bool, has_in_reply_to: bool, subject: &str) -> DraftKind {
     let is_forward = subject
@@ -103,20 +73,12 @@ pub fn gmail_draft_kind(alone_in_thread: bool, has_in_reply_to: bool, subject: &
     }
 }
 
-/// Where a draft read from Gmail is aimed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DraftAim {
-    /// The message it answers.
     pub target: Option<MessageId>,
-    /// Counts as started on the thread's latest message, so `r` on the latest
-    /// message resumes it.
     pub started_on_latest: bool,
 }
 
-/// A Gmail draft's target (SPEC Reply composer): the message its
-/// `In-Reply-To` names (`by_in_reply_to`, resolved by the caller), else the
-/// thread's latest message. It counts as started on the latest message when
-/// its target is the newest non-draft message no newer than the draft.
 #[must_use]
 pub fn gmail_draft_aim(
     thread: &Thread,

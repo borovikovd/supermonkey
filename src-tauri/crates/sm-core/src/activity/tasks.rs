@@ -1,6 +1,3 @@
-//! Spawned tasks: each belongs to a cancellation token, and each counts as
-//! busy unless it is parked on a wait whose wake-up carries its own activity.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -11,7 +8,6 @@ use tokio_util::task::task_tracker::TaskTrackerToken;
 
 use super::Activity;
 
-/// A task's own activity: busy unless it is parked.
 struct TaskActivity {
     activity: Arc<Activity>,
     label: &'static str,
@@ -49,8 +45,6 @@ impl Drop for TaskActivity {
     }
 }
 
-/// The running task's activity mark, in a module of its own so the lint
-/// exception covers the macro's expansion and nothing else.
 #[expect(
     clippy::disallowed_types,
     reason = "`tokio::task_local!` keeps its value in a `RefCell`, which no code here touches"
@@ -64,23 +58,16 @@ mod local {
 }
 use local::TASK;
 
-/// A group of tasks under one cancellation token: the core's root group, or
-/// an account worker's. Cancelling it ends every task in it at its next
-/// `.await`; [`Tasks::stop`] also waits for them to end, and for the tasks
-/// of every group inside it.
 #[derive(Debug, Clone)]
 pub struct Tasks {
     runtime: Handle,
     activity: Arc<Activity>,
     cancel: CancellationToken,
     tracker: TaskTracker,
-    /// The trackers of the groups this one is inside, innermost first: each
-    /// counts this group's tasks too, so stopping it waits for them.
     outer: Arc<[TaskTracker]>,
 }
 
 impl Tasks {
-    /// A root group on `runtime`, counting its tasks in `activity`.
     pub fn new(runtime: Handle, activity: Arc<Activity>) -> Self {
         Self {
             runtime,
@@ -91,8 +78,6 @@ impl Tasks {
         }
     }
 
-    /// A group inside this one: cancelled with it, or on its own. Stopping
-    /// this one waits for the new group's tasks too.
     #[must_use]
     pub fn child(&self) -> Self {
         let outer: Vec<TaskTracker> = std::iter::once(self.tracker.clone())
@@ -107,21 +92,16 @@ impl Tasks {
         }
     }
 
-    /// The activity tracker the group counts its tasks in.
     #[must_use]
     pub const fn activity(&self) -> &Arc<Activity> {
         &self.activity
     }
 
-    /// The group's token: cancelled once the group stops.
     #[must_use]
     pub const fn token(&self) -> &CancellationToken {
         &self.cancel
     }
 
-    /// Spawns `task`, busy as `label` until it ends or parks. It ends early,
-    /// dropped at its next `.await`, when the group is cancelled. After that
-    /// nothing new starts.
     pub fn spawn<F>(&self, label: &'static str, task: F)
     where
         F: Future<Output = ()> + Send + 'static,
@@ -131,7 +111,6 @@ impl Tasks {
             return;
         }
         let cancel = self.cancel.clone();
-        // Counted by every outer group until the task has ended.
         let counted: Vec<TaskTrackerToken> = self.outer.iter().map(TaskTracker::token).collect();
         let scoped = TASK.scope(
             TaskActivity::new(Arc::clone(&self.activity), label),
@@ -150,12 +129,10 @@ impl Tasks {
         self.tracker.spawn_on(task, &self.runtime);
     }
 
-    /// Cancels every task of the group without waiting for them.
     pub fn cancel(&self) {
         self.cancel.cancel();
     }
 
-    /// Cancels every task of the group and waits until they have ended.
     pub async fn stop(&self) {
         self.cancel.cancel();
         self.tracker.close();
@@ -163,10 +140,6 @@ impl Tasks {
     }
 }
 
-/// Runs `fut` in the current task, busy as `label` until it ends or parks:
-/// for work that runs outside the core's tasks but must count, such as a
-/// debug web bridge command. Inside it, `parked` and [`waiting_on_person`]
-/// work as in a spawned task.
 pub async fn busy_scope<F: Future>(
     activity: &Arc<Activity>,
     label: &'static str,
@@ -176,14 +149,6 @@ pub async fn busy_scope<F: Future>(
         .await
 }
 
-/// Awaits `fut` without counting the current task as busy. Only for waits
-/// whose wake-up carries its own activity: a [`Kick`](super::Kick), a timer,
-/// a [`Tracked`](super::Tracked) item.
-///
-/// The task parks only once `fut` has been polled and is pending, so the
-/// wait is registered (a timer with the clock, a waiter with its signal)
-/// before the core can look idle: a test that advances the clock to the
-/// next timer once the core is idle then always finds it.
 pub(crate) async fn parked<F: Future>(fut: F) -> F::Output {
     let mut wait = Wait {
         task: TASK.try_with(Arc::clone).ok(),
@@ -200,12 +165,8 @@ pub(crate) async fn parked<F: Future>(fut: F) -> F::Output {
     .await
 }
 
-/// One [`parked`] wait: it parks its task once, at the wait's first pending
-/// poll, and unparks it when the wait ends or is dropped.
 struct Wait {
-    /// The task's activity mark; `None` outside a core task.
     task: Option<Arc<TaskActivity>>,
-    /// Whether this wait has parked the task.
     parked: bool,
 }
 
@@ -230,8 +191,6 @@ impl Drop for Wait {
     }
 }
 
-/// From now until it ends, the current task waits on the person, not on the
-/// core: a sign-in they may never finish in the browser.
 pub fn waiting_on_person() {
     if TASK.try_with(|task| task.park()).is_err() {
         tracing::debug!("waiting_on_person outside a core task");

@@ -1,10 +1,7 @@
-//! Points in time.
-
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-/// Milliseconds since the Unix epoch. TypeScript sees `number`.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize,
 )]
@@ -12,13 +9,11 @@ use serde::{Deserialize, Serialize};
 pub struct Millis(pub i64);
 
 impl Millis {
-    /// `ms` milliseconds later.
     #[must_use]
     pub const fn plus(self, ms: i64) -> Self {
         Self(self.0.saturating_add(ms))
     }
 
-    /// Milliseconds from `earlier` to `self`, negative if `earlier` is later.
     #[must_use]
     pub const fn since(self, earlier: Self) -> i64 {
         self.0.saturating_sub(earlier.0)

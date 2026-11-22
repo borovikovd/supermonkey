@@ -29,7 +29,7 @@ The rewrite is judged against these, which it may not change without a decision:
 
 | Surface      | What is fixed                                                                                                                                                                                                                                                             | Checked by                                                                            |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| IPC types    | The files in `src/bindings`: field names, tags, optionality, and doc comments                                                                                                                                                                                             | The gate's bindings step: generated TS must be byte-identical                         |
+| IPC types    | The files in `src/bindings`: field names, tags, and optionality                                                                                                                                                                                                           | The gate's bindings step: generated TS must be byte-identical                         |
 | Commands     | `sm_ipc::Command`, one list of every command's name, arguments, and reply; the UI's `invoke` is typed from its bindings; the Tauri `dispatch` command and the web bridge run the same `bridge::dispatch`; error strings where the UI reads them                           | Compiler (exhaustive match, typed replies), bindings step, E2E through the web bridge |
 | Channel      | One `ChannelMessage { rev, ack, rejected, updates }` per commit, each refused action listed in or before the first message whose `ack` covers it; the update types `list`, `conversation`, `composer`, `account`, `app`; first loads as their own message (SPEC UI state) | E2E, and the writer/channel property test                                             |
 | Actions      | The 17 `Action` types (`reset` … `moreResults`) and their semantics                                                                                                                                                                                                       | E2E                                                                                   |
@@ -221,7 +221,7 @@ Every task, timer, kick, and queued job counts in one `Activity`, so the E2E ser
   - every spawned task belongs to a `CancellationToken`;
   - `select!` arms are cancellation-safe or documented.
 - **Ids and units** are newtypes (`AccountId`, `ThreadId`, `GmailThreadId`, `Millis`, `Rev`, `ActionNo`). They convert to raw values only at SQL, serde, and IPC.
-- **Docs:** every public item has a one-line doc saying what it is. Comments say why, not what.
+- **No comments.** Code carries no comments and no doc comments (`missing_docs` is off); names say what a thing is. Only lint directives remain, with their reason inline.
 
 ## 12. Order of work
 

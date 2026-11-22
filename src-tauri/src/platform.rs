@@ -1,7 +1,3 @@
-//! The Tauri [`Platform`] (ARCHITECTURE.md, section 8.3): links and files
-//! through the opener plugin, notifications, the Dock badge, and the main
-//! window's focus.
-
 use std::path::Path;
 
 use sm_core::{Notification, Platform, PlatformError};
@@ -9,7 +5,6 @@ use tauri::{AppHandle, Manager as _};
 use tauri_plugin_notification::NotificationExt as _;
 use tauri_plugin_opener::OpenerExt as _;
 
-/// The operating system, through Tauri and its plugins.
 pub(crate) struct TauriPlatform(pub(crate) AppHandle);
 
 impl TauriPlatform {

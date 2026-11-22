@@ -1,5 +1,3 @@
-//! A wake-up for every task waiting at once: the network came back.
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,11 +8,6 @@ use tokio::sync::Notify;
 use super::{Activity, Busy, parked};
 use crate::clock::Clock;
 
-/// Wakes every task waiting in [`Signal::wait`] when it fires; a task that
-/// starts waiting later waits for the next firing. Unlike a
-/// [`Kick`](super::Kick), it keeps nothing for later. Each task it wakes counts as
-/// busy until it has resumed, so the core never looks idle between the
-/// firing and the work it starts.
 #[derive(Debug)]
 pub(crate) struct Signal {
     activity: Arc<Activity>,
@@ -29,13 +22,11 @@ struct Waiters {
 
 #[derive(Debug, Default)]
 struct Waiter {
-    /// Set when the signal fires; taken by the waiting task.
     fired: Mutex<Option<Busy>>,
     notify: Notify,
 }
 
 impl Signal {
-    /// A signal whose wake-ups count in `activity`.
     pub(crate) fn new(activity: Arc<Activity>) -> Self {
         Self {
             activity,
@@ -43,7 +34,6 @@ impl Signal {
         }
     }
 
-    /// Wakes every task waiting now.
     pub(crate) fn fire(&self) {
         let woken: Vec<Arc<Waiter>> = {
             let mut state = self.state.lock();
@@ -55,14 +45,10 @@ impl Signal {
         }
     }
 
-    /// Waits until the signal fires, or for `timeout` of app time on `clock`.
-    /// The task is not busy while it waits.
     pub(crate) async fn wait(&self, clock: &dyn Clock, timeout: Duration) {
         self.wait_unless(clock, timeout, || false).await;
     }
 
-    /// Waits as [`Signal::wait`] does, unless `ready` holds once the wait is
-    /// in place: a firing that makes it hold is never missed in between.
     pub(crate) async fn wait_unless(
         &self,
         clock: &dyn Clock,
@@ -81,7 +67,6 @@ impl Signal {
         if ready() {
             return;
         }
-        // Held until the task has resumed, so activity never drops to zero between.
         let _woken = parked(async {
             tokio::select! {
                 woken = fired(&waiter) => Some(woken),
@@ -92,11 +77,8 @@ impl Signal {
     }
 }
 
-/// Resolves once `waiter` has fired, with the firing's activity.
 async fn fired(waiter: &Waiter) -> Busy {
     loop {
-        // `fire` stores a permit, so a firing between the check and the wait
-        // is not lost.
         let notified = waiter.notify.notified();
         let fired = waiter.fired.lock().take();
         if let Some(busy) = fired {
@@ -106,7 +88,6 @@ async fn fired(waiter: &Waiter) -> Busy {
     }
 }
 
-/// Removes a waiter from its signal when its wait ends or is dropped.
 struct Registered<'a> {
     signal: &'a Signal,
     id: u64,

@@ -1,6 +1,3 @@
-//! The started core the tests drive, a platform that does nothing, and the
-//! fixture mailbox.
-
 use std::path::Path;
 use std::sync::Arc;
 
@@ -15,7 +12,6 @@ use crate::activity::Activity;
 use crate::clock::{Clock, SystemClock};
 use crate::{App, Config, Deps, GmailConfig, Notification, Platform, PlatformError};
 
-/// A platform that does nothing.
 pub(crate) struct Recorder;
 
 impl Platform for Recorder {
@@ -38,8 +34,6 @@ impl Platform for Recorder {
     fn focus_window(&self) {}
 }
 
-/// A started core on a temporary database, with a page connected whose
-/// channel messages are kept in order.
 pub(crate) struct Harness {
     pub(crate) dir: TempDir,
     pub(crate) app: App,
@@ -57,7 +51,6 @@ impl Harness {
         Self::start_with(dir, Activity::new(), Arc::new(SystemClock)).await
     }
 
-    /// A core on `clock`, whose timers count in `activity`.
     pub(crate) async fn start_with(
         dir: TempDir,
         activity: Arc<Activity>,
@@ -93,7 +86,6 @@ impl Harness {
         }
     }
 
-    /// Runs a job as sync would, and waits for its commit.
     pub(crate) async fn write<T: Send + 'static>(
         &self,
         job: impl FnOnce(&mut WriteTx<'_>) -> Result<T, StoreError> + Send + 'static,
@@ -105,8 +97,6 @@ impl Harness {
             .unwrap()
     }
 
-    /// Numbers actions as the UI does, submits them in one invoke, and
-    /// waits until they have committed. Returns their numbers.
     pub(crate) async fn act(&mut self, actions: Vec<Action>) -> Vec<i64> {
         let numbered: Vec<NumberedAction> = actions
             .into_iter()
@@ -124,14 +114,11 @@ impl Harness {
         ns
     }
 
-    /// The channel messages since the last call.
     pub(crate) fn take(&self) -> Vec<ChannelMessage> {
         std::mem::take(&mut *self.messages.lock())
     }
 }
 
-/// Polls `done` until it holds, failing after a few seconds: for what the
-/// core does on its own tasks after a commit.
 pub(crate) async fn eventually(what: &str, done: impl Fn() -> bool) {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
     while !done() {
@@ -143,7 +130,6 @@ pub(crate) async fn eventually(what: &str, done: impl Fn() -> bool) {
     }
 }
 
-/// A message from `from` to the fixture account at `date`, with `labels`.
 pub(crate) fn message(gmail_id: &str, date: i64, from: &str, labels: &[&str]) -> NewMessage {
     NewMessage {
         gmail_id: GmailMessageId::from(gmail_id),
@@ -166,15 +152,10 @@ pub(crate) fn message(gmail_id: &str, date: i64, from: &str, labels: &[&str]) ->
     }
 }
 
-/// The fixture account's address.
 pub(crate) const ACCOUNT_EMAIL: &str = "a@example.com";
 
-/// The fixture's newest message date; later writes go after it.
 pub(crate) const NEWEST: i64 = 1_800_000_000_000;
 
-/// The fixture: one account with 40 threads, newest first by index. The
-/// first 25 are in the Inbox; some are starred, some promotions, two each
-/// in Trash and Spam, and threads with a reply carry one from the account.
 pub(crate) fn seed(tx: &mut WriteTx<'_>) -> Result<(AccountId, Vec<ThreadId>), StoreError> {
     let account = tx.accounts().create(ACCOUNT_EMAIL, "A")?;
     let mut threads = Vec::new();

@@ -1,7 +1,6 @@
 import { SignInStatus } from "./FirstRun";
 import { startSignInAgain, useSignInAgainStatus } from "./signIn";
 
-/** In place of a signed-out account's mail: it looks signed out until it signs in again. */
 export function SignInAgain({ account, email }: { account: number; email: string }) {
   const { busy, error } = useSignInAgainStatus(account);
   return (

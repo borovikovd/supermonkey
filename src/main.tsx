@@ -19,8 +19,6 @@ import { showRefusal } from "./ui/refusals";
 import { useChrome } from "./store/chrome";
 import { useMirror } from "./store/mirror";
 
-// Debug builds and the web bridge: the stores, for inspection and the E2E
-// harness. `pending` is what the UI still owes the core (see `settle()`).
 if (import.meta.env.DEV || !inTauri)
   Object.assign(window, { __sm: { useChrome, useMirror, pending: pendingWork } });
 
@@ -29,16 +27,12 @@ trackFocus();
 closeGoneReplies();
 onRefusal(showRefusal);
 
-// App renders once the app state, subscribed after connecting, arrives.
 void connect().then(() => subscribe({ type: "app" }));
 
 onEvent("notification-open", ({ account, thread }) => openNotification(account, thread));
 
-/** How long Cmd+Q waits for the page's last actions, in all. */
 const QUIT_WAIT_MS = 5_000;
 
-// Cmd+Q: close an open composer as a second Esc would, then quit once every
-// close is sent and committed, or after QUIT_WAIT_MS (SPEC UI state, Actions).
 onEvent("quit-requested", () => {
   const start = Date.now();
   const bound = new Promise<void>((resolve) => setTimeout(resolve, QUIT_WAIT_MS));

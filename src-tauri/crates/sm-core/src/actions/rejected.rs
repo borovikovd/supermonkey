@@ -1,8 +1,3 @@
-//! Telling the page why the core refused an action (SPEC UI state,
-//! Actions): the commit's channel message lists the action's number with a
-//! sentence for the user. A send refused because its draft can't go as it
-//! is keeps the draft, which the page brings back in a composer.
-
 use sm_domain::{ActionNo, DraftId};
 use sm_ipc::{Action, Rejection};
 use sm_store::{StoreError, WriteTx};
@@ -11,8 +6,6 @@ use super::ActionError;
 use crate::drafts::lifecycle;
 use crate::writer::WriterState;
 
-/// The draft `action` sends, taken before the action runs, since running it
-/// consumes it.
 pub(super) fn sent_draft(action: &Action) -> Option<DraftId> {
     if let Action::SendDraft { draft } = action {
         Some(draft.clone())
@@ -21,9 +14,6 @@ pub(super) fn sent_draft(action: &Action) -> Option<DraftId> {
     }
 }
 
-/// Records action `n`'s refusal for the commit's channel message, in the
-/// batch's transaction after the action's own writes rolled back. A refused
-/// send's draft is kept: it is never discarded as untouched.
 pub(super) fn refuse(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,

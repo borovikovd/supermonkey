@@ -1,5 +1,3 @@
-// To, Cc, and Bcc as chips with autocomplete (SPEC Recipients and autocomplete).
-
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 
 import { autocomplete, later } from "../ipc/bridge";
@@ -9,17 +7,9 @@ import { measure } from "../keyboard/meter";
 
 const utf8 = new TextEncoder();
 const byteLength = (s: string) => utf8.encode(s).length;
-// Rust's `char::is_whitespace`, `is_control`, and `is_alphanumeric`.
 const BAD_LOCAL = /[\p{White_Space}\p{Cc}<>()[\],;:\\"@]/u;
 const LABEL = /^[\p{Alphabetic}\p{N}-]+$/u;
 
-/**
- * Whether the core would send to this address: `sm_mime::is_valid_email`,
- * ported rule for rule, so a chip shows in `danger` exactly when Send would
- * be refused. It runs on every chip and keystroke, so it can't wait on a
- * command. Both are held to one table of cases
- * (`src-tauri/crates/sm-mime/tests/fixtures/email-addresses.json`, RCP-11).
- */
 export function isValidEmail(s: string): boolean {
   const at = s.lastIndexOf("@");
   if (at < 0) return false;
@@ -47,13 +37,11 @@ export function isValidEmail(s: string): boolean {
         !label.endsWith("-") &&
         LABEL.test(label),
     ) &&
-    // At least two characters (code points, as Rust counts them).
     /^.{2,}$/su.test(tld) &&
     !/^[0-9]*$/.test(tld)
   );
 }
 
-/** Parses `Name <a@b.c>` or a bare address. */
 export function parseAddr(text: string): Addr | null {
   const t = text.trim().replace(/[,;]+$/, "");
   if (!t) return null;
@@ -63,10 +51,8 @@ export function parseAddr(text: string): Addr | null {
   return { name: null, email: t };
 }
 
-/** `Name <a@b.c>`, or the bare address when there is no name. */
 export const formatAddr = (a: Addr) => (a.name ? `${a.name} <${a.email}>` : a.email);
 
-/** Splits pasted text into addresses (commas, semicolons, newlines). */
 export function splitAddrs(text: string): Addr[] {
   const parts = text.split(/[\n;]+|,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
   return parts.map(parseAddr).filter((a): a is Addr => a !== null);
@@ -75,7 +61,6 @@ export function splitAddrs(text: string): Addr[] {
 export type RecipientHandle = { focus: () => void; commit: () => Addr[] };
 
 function Highlight({ text, start, end }: { text: string; start: number; end: number }) {
-  // Offsets are byte offsets from Rust; map through UTF-8.
   const bytes = new TextEncoder().encode(text);
   const dec = new TextDecoder();
   const a = dec.decode(bytes.slice(0, start));
@@ -105,7 +90,6 @@ export function RecipientField({
   value: Addr[];
   onChange: (v: Addr[]) => void;
   onTab?: (shift: boolean) => void;
-  /** Controls at the right end of the row (e.g. the Cc/Bcc toggle). */
   right?: React.ReactNode;
 }) {
   const [text, setText] = useState("");
@@ -128,13 +112,11 @@ export function RecipientField({
   };
 
   const clearInput = () => {
-    // Suggestions still on their way are for text that is gone.
     seq.current++;
     setText("");
     setSuggestions([]);
   };
 
-  /** Turns typed text into a chip; returns the full list. */
   const commit = (): Addr[] => {
     const a = parseAddr(text);
     clearInput();
@@ -148,7 +130,6 @@ export function RecipientField({
 
   useImperativeHandle(ref, () => ({ focus: () => input.current?.focus(), commit }));
 
-  /** What leaving the field does, as of the latest render: a click that blurred it may change the chips first. */
   const onLeft = useRef(() => {});
   useLayoutEffect(() => {
     onLeft.current = () => {
@@ -156,7 +137,6 @@ export function RecipientField({
       setSuggestions([]);
     };
   });
-  /** Cancels the pending `onLeft`. */
   const leaving = useRef<(() => void) | null>(null);
   useEffect(() => () => leaving.current?.(), []);
 
@@ -181,9 +161,6 @@ export function RecipientField({
   };
 
   const open = suggestions.length > 0;
-  // While the list is open and its field has focus, its keys come before the
-  // composer's (src/keyboard/dispatch.ts). A field just left keeps its list a
-  // moment for a click, but not the keys: they belong to where focus went.
   const [focused, setFocused] = useState(false);
   useEffect(() => {
     if (!open || !focused) return;
@@ -195,7 +172,6 @@ export function RecipientField({
         const pick = suggestions[active];
         if (pick) accept(pick);
       } else if (e.key === "Escape") {
-        // Closes the list without leaving the field.
         setSuggestions([]);
       } else return false;
       e.preventDefault();
@@ -243,7 +219,6 @@ export function RecipientField({
         onChange={(e) => {
           const v = e.target.value;
           setSelectedChip(null);
-          // A comma, or a space after a complete address, makes a chip.
           if (/[,;]$/.test(v) || (/\s$/.test(v) && isValidEmail(v.trim()))) {
             const a = parseAddr(v);
             if (a) addAll([a]);
@@ -268,7 +243,6 @@ export function RecipientField({
         }}
         onBlur={() => {
           setFocused(false);
-          // Leaving the field turns typed text into a chip.
           leaving.current?.();
           leaving.current = later(() => {
             leaving.current = null;
@@ -300,8 +274,6 @@ export function RecipientField({
       />
       {right && <div className="ml-auto flex items-center gap-1 self-start pt-1">{right}</div>}
       {open && (
-        // The combobox pattern: focus stays in the input (aria-activedescendant),
-        // and suggestions show name and address, which a native <datalist> cannot.
         <div
           // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- rich rows; native elements cannot render them
           role="listbox"

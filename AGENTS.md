@@ -321,6 +321,7 @@ The only section that changes from project to project.
   Only the user merges it. The build reads the OAuth client from the
   `GOOGLE_OAUTH_CLIENT_JSON` secret. Versions live in `package.json` and
   `src-tauri/Cargo.toml`.
+- **No comments.** Code and tests carry no comments, doc comments included (`missing_docs` is off). Lint directives stay, with the reason inline after `--` or in `reason = "..."`.
 - **Secrets.** `google-oauth-client.json` is git-ignored;
   `src-tauri/lint/oauth-client.json` is the gate's placeholder. Refresh tokens are in
   `tokens.json` (mode 0600) in the app's data folder.

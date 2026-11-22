@@ -1,11 +1,3 @@
-//! Writes the perf fixture (SPEC Performance) into a new database file,
-//! through the store, as sync would leave it:
-//!
-//! `cargo run --features fake --bin perf-fixture -- <db path>`
-//!
-//! Point the app at it with `SUPERMONKEY_DB=<db path>`, or the search bench
-//! with `SUPERMONKEY_PERF_DB=<db path>`.
-
 use std::path::Path;
 use std::time::Instant;
 
@@ -13,7 +5,6 @@ use anyhow::Context as _;
 use sm_core::clock::{Clock as _, SystemClock};
 use sm_testkit::fixture::{PERF, generate};
 
-/// The fixture's accounts.
 const ACCOUNTS: [&str; 2] = ["alex@example.com", "sam@example.com"];
 
 fn main() -> anyhow::Result<()> {

@@ -1,7 +1,3 @@
-//! App time (ARCHITECTURE.md, section 8.3): the system clock in the app, a
-//! manual one the E2E server moves. Every time check and every sleep in the
-//! core goes through a [`Clock`].
-
 use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -13,24 +9,16 @@ use tokio::sync::Notify;
 
 use crate::activity::{Activity, Busy, parked};
 
-/// The core's time: the wall clock and the timers that run on it.
 pub trait Clock: Send + Sync {
-    /// App time.
     fn now(&self) -> Millis;
 
-    /// Resolves after `duration` of app time, with the activity of the
-    /// timer's firing, on a clock that has one, for the caller to drop once
-    /// resumed. Prefer [`sleep`], which also parks the task while it waits.
     fn timer(&self, duration: Duration) -> Pin<Box<dyn Future<Output = Option<Busy>> + Send + '_>>;
 }
 
-/// Waits `duration` of app time. The task is not busy while it waits.
 pub async fn sleep(clock: &dyn Clock, duration: Duration) {
-    // Held until the task has resumed, so its activity never drops to zero between.
     let _fired = parked(clock.timer(duration)).await;
 }
 
-/// The system clock and tokio's timers: the app's time.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemClock;
 
@@ -50,10 +38,6 @@ impl Clock for SystemClock {
     }
 }
 
-/// A clock that moves only when told to, for the E2E server and tests. App
-/// time (the wall clock) and the time timers count against move together,
-/// except in [`ManualClock::jump`], which is the Mac asleep: the wall clock
-/// moves and no timer notices.
 #[derive(Debug)]
 pub struct ManualClock {
     activity: Arc<Activity>,
@@ -62,24 +46,19 @@ pub struct ManualClock {
 
 #[derive(Debug)]
 struct ManualState {
-    /// App time.
     wall: Millis,
-    /// Elapsed time for timers, ms.
     mono: u64,
     next_id: u64,
-    /// By deadline, then by start order.
     sleepers: BTreeMap<(u64, u64), Arc<Sleeper>>,
 }
 
 #[derive(Debug, Default)]
 struct Sleeper {
-    /// Set when the timer fires; taken by the sleeping task.
     fired: Mutex<Option<Busy>>,
     notify: Notify,
 }
 
 impl ManualClock {
-    /// A clock standing at `wall`, whose fired timers count in `activity`.
     pub const fn new(activity: Arc<Activity>, wall: Millis) -> Self {
         Self {
             activity,
@@ -92,8 +71,6 @@ impl ManualClock {
         }
     }
 
-    /// Moves time forward by `ms` and fires every timer due by then, each
-    /// once, as Playwright's `clock.fastForward` does. Returns how many fired.
     pub fn advance(&self, ms: u64) -> usize {
         let due = {
             let mut s = self.state.lock();
@@ -111,7 +88,6 @@ impl ManualClock {
         due.len()
     }
 
-    /// How long until the next timer is due, if one is due within `ms`.
     pub fn next_due_within(&self, ms: u64) -> Option<u64> {
         let s = self.state.lock();
         let (&(deadline, _), _) = s.sleepers.first_key_value()?;
@@ -119,8 +95,6 @@ impl ManualClock {
         (wait <= ms).then_some(wait)
     }
 
-    /// Moves the wall clock without firing anything: the Mac was asleep for
-    /// `ms`. Timers resume where they were, as monotonic timers do.
     pub fn jump(&self, ms: u64) {
         let mut s = self.state.lock();
         s.wall = s.wall.plus(i64::try_from(ms).unwrap_or(i64::MAX));
@@ -142,8 +116,6 @@ impl ManualClock {
         };
         let _registered = Registered { clock: self, key };
         loop {
-            // `advance` stores a permit, so a firing between the check and
-            // the wait is not lost.
             let notified = sleeper.notify.notified();
             let fired = sleeper.fired.lock().take();
             if let Some(fired) = fired {
@@ -169,7 +141,6 @@ impl Clock for ManualClock {
     }
 }
 
-/// Removes a timer from the clock when it ends or is dropped.
 struct Registered<'a> {
     clock: &'a ManualClock,
     key: (u64, u64),

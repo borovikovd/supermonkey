@@ -1,6 +1,3 @@
-//! The `Lifecycle` handle: connecting a page, launch, focus, the online
-//! flag, and quitting (ARCHITECTURE.md, sections 4 and 8.1).
-
 use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,17 +14,14 @@ use crate::workers::{AccountWorkers, Notifier, snooze};
 use crate::writer::CoreWriter;
 use crate::{Error, Notification};
 
-/// How long quitting waits for work the user already did to commit.
 pub(crate) const QUIT_DEADLINE: Duration = Duration::from_secs(5);
 
-/// Connecting pages, the online flag, and quitting.
 pub struct Lifecycle {
     deps: Arc<LifecycleDeps>,
     launched: AtomicBool,
     debug: bool,
 }
 
-/// Its flags; the rest is the core's handles.
 impl fmt::Debug for Lifecycle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Lifecycle")
@@ -37,7 +31,6 @@ impl fmt::Debug for Lifecycle {
     }
 }
 
-/// What the lifecycle handle starts and stops.
 pub(crate) struct LifecycleDeps {
     pub(crate) writer: CoreWriter,
     pub(crate) pool: Arc<ReadPool>,
@@ -46,7 +39,6 @@ pub(crate) struct LifecycleDeps {
     pub(crate) tasks: Tasks,
     pub(crate) workers: Arc<AccountWorkers>,
     pub(crate) notifier: Arc<Notifier>,
-    /// Wakes the snooze timer.
     pub(crate) snoozes: Arc<Kick>,
 }
 
@@ -59,10 +51,6 @@ impl Lifecycle {
         }
     }
 
-    /// A page's first call: channel messages go to `sink` from now on, in
-    /// order after every UI job queued before. Returns where the page's
-    /// action numbers continue: after the last one received, so a reload
-    /// never reuses a number still queued.
     pub async fn connect(
         &self,
         sink: Box<dyn FnMut(ChannelMessage) + Send>,
@@ -77,10 +65,6 @@ impl Lifecycle {
         Ok(self.launch_info())
     }
 
-    /// Where a page's action numbers continue, whether this is a debug
-    /// build, and the attachment limit: what [`Lifecycle::connect`] returns,
-    /// for a page whose channel was connected apart from its first call (the
-    /// debug web bridge's event stream).
     pub fn launch_info(&self) -> LaunchInfo {
         LaunchInfo {
             last_action: self.deps.received.last(),
@@ -89,16 +73,6 @@ impl Lifecycle {
         }
     }
 
-    /// Starts the work that talks to Gmail, once, after
-    /// [`App::start`](crate::App::start). First, in one job queued ahead of
-    /// any page's first load, due snoozes wake (SPEC Snooze: before the list
-    /// is shown), the outbox is settled (sends already sent lose their undo
-    /// entries, sends that missed their time show `Email delayed`), and the
-    /// untouched rule runs for drafts whose first composer never closed.
-    /// Then the snooze timer and each signed-in account's worker start
-    /// (SPEC Accounts: one with no stored token shows Sign in again). The
-    /// E2E server seeds accounts between the two. Only the first call does
-    /// anything.
     pub fn launch(&self) {
         if self.launched.swap(true, Ordering::SeqCst) {
             return;
@@ -130,10 +104,6 @@ impl Lifecycle {
         });
     }
 
-    /// The main window gained or lost focus. Focus polls every account and
-    /// reads its `sendAs` and labels again (SPEC Sync). On focus, returns
-    /// the notification the focus counts as a click on, if any: the shell
-    /// then shows that account's Inbox on its thread.
     pub fn focus(&self, focused: bool) -> Option<Notification> {
         tracing::debug!(focused, "window focus changed");
         if focused {
@@ -142,11 +112,6 @@ impl Lifecycle {
         self.deps.notifier.focus(focused)
     }
 
-    /// Quits: nothing new starts, the writer commits the UI jobs already
-    /// queued (the user's last actions) and drops queued sync work, then
-    /// every task ends. Gives up after five seconds (`QUIT_DEADLINE`) and
-    /// returns anyway.
-    /// The E2E server restarts the core in-process this way.
     pub async fn quit(&self) {
         let deadline = tokio::time::Instant::now() + QUIT_DEADLINE;
         self.deps.tasks.cancel();
@@ -154,8 +119,6 @@ impl Lifecycle {
         self.stop_tasks(deadline).await;
     }
 
-    /// Waits until `deadline` for the writer to commit the UI jobs already
-    /// queued and stop.
     async fn stop_writer(&self, deadline: tokio::time::Instant) {
         match tokio::time::timeout_at(deadline, self.deps.writer.stop()).await {
             Ok(Ok(())) => {}
@@ -164,7 +127,6 @@ impl Lifecycle {
         }
     }
 
-    /// Waits until `deadline` for every task to end.
     async fn stop_tasks(&self, deadline: tokio::time::Instant) {
         if tokio::time::timeout_at(deadline, self.deps.tasks.stop())
             .await

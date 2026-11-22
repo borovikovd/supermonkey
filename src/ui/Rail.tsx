@@ -6,7 +6,6 @@ import { openSheet, switchAccount } from "../navigation";
 import { useCurrent } from "../store/hooks";
 import { countLabel } from "./format";
 
-/** The rail's views, each the command that goes there. */
 const VIEWS: { kind: View["kind"]; icon: typeof Inbox; command: CommandId }[] = [
   { kind: "inbox", icon: Inbox, command: "g-inbox" },
   { kind: "done", icon: Archive, command: "g-done" },
@@ -40,7 +39,6 @@ function ViewButton({
   );
 }
 
-/** What the avatar's tooltip adds: sign in again, or the quiet sync status (SPEC Gmail errors). */
 function status(a: AccountInfo): string {
   if (a.needsSignin) return " · Sign in again";
   if (a.syncStatus === "retrying") return " · Can't reach Gmail";
@@ -64,7 +62,6 @@ export function Rail({ accounts }: { accounts: AccountInfo[] }) {
   const active = cur?.where.kind === "view" ? cur.where.view.kind : null;
   return (
     <nav className="flex w-rail shrink-0 flex-col items-center pt-1 pb-4">
-      {/* View icons in one quiet pill, as Superhuman groups them. */}
       <div className="flex flex-col items-center gap-1 rounded-2xl bg-fill/70 p-1">
         {VIEWS.map(({ kind, icon: Icon, command }) => (
           <ViewButton key={kind} command={command} active={active === kind}>
@@ -78,7 +75,6 @@ export function Rail({ accounts }: { accounts: AccountInfo[] }) {
           <button
             key={a.id}
             title={`${a.email} (Ctrl+${i + 1})${status(a)}`}
-            // The account on screen opens its settings; another one switches to it.
             onClick={() => (a.id === account ? openSheet("settings") : switchAccount(a.id))}
             className={`relative rounded-full p-0.5 ${
               a.id === account ? "ring-avatar ring-accent" : "hover:ring-avatar hover:ring-border"

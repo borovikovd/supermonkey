@@ -1,5 +1,3 @@
-//! Google's token and revoke endpoints.
-
 use reqwest::StatusCode;
 use serde::Deserialize;
 
@@ -7,7 +5,6 @@ use super::{AccessToken, OAuthConfig, RefreshToken};
 use crate::http::{self, HttpClient, ReadResponse};
 use crate::outcome::{GmailError, Outcome};
 
-/// A token endpoint's answer.
 #[derive(Deserialize)]
 pub(super) struct TokenAnswer {
     pub(super) access_token: String,
@@ -15,16 +12,12 @@ pub(super) struct TokenAnswer {
     pub(super) refresh_token: Option<String>,
 }
 
-/// An OAuth error body: `{"error": "...", "error_description": "..."}`, not a
-/// Google API error.
 #[derive(Deserialize)]
 struct OAuthErrorBody {
     error: String,
     error_description: Option<String>,
 }
 
-/// Trades the refresh token for a new access token. Google rejecting the
-/// grant is [`Outcome::InvalidGrant`].
 pub(super) async fn refresh(
     config: &OAuthConfig,
     http: &HttpClient,
@@ -41,7 +34,6 @@ pub(super) async fn refresh(
     Ok(AccessToken::issued(answer.access_token, answer.expires_in))
 }
 
-/// Posts a token request and reads the answer.
 pub(super) async fn token_request(
     config: &OAuthConfig,
     http: &HttpClient,
@@ -70,8 +62,6 @@ pub(super) async fn token_request(
     Err(response.to_error())
 }
 
-/// Revokes the grant behind `token` with Google: every token of the grant
-/// stops working. A token Google already considers invalid counts as revoked.
 pub async fn revoke(
     config: &OAuthConfig,
     http: &HttpClient,

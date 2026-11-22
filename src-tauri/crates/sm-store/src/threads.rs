@@ -1,6 +1,3 @@
-//! Threads: their derived rows, the view lists, conversations, and the
-//! writes that store fetched threads.
-
 use std::collections::BTreeSet;
 
 use rusqlite::Row;
@@ -17,102 +14,64 @@ use crate::routing;
 use crate::tx::{WriteTx, require};
 use crate::{StoreError, Table};
 
-/// A thread's row: the values its list row shows, derived from its messages.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "independent derived flags of one thread"
 )]
 pub struct ThreadRow {
-    /// Its row.
     pub id: ThreadId,
-    /// Its account.
     pub account: AccountId,
-    /// Gmail's id.
     pub gmail_id: GmailThreadId,
-    /// The first non-draft message's subject that is not empty.
     pub subject: String,
-    /// The latest message's snippet.
     pub snippet: String,
-    /// The latest message's sender name, or address.
     pub sender: String,
-    /// The latest message's sender address.
     pub sender_email: String,
-    /// The latest message's date.
     pub sort_time: Millis,
-    /// The messages the row counts.
     pub message_count: u32,
-    /// Unread, by the rule in `ThreadDigest`.
     pub unread: bool,
-    /// A non-draft message has an attachment.
     pub has_attachments: bool,
-    /// A message is not a draft and not in Trash or Spam.
     pub has_live: bool,
-    /// In the Inbox, snoozed or not.
     pub in_inbox: bool,
-    /// The labels the thread is in (SPEC Views).
     pub labels: LabelSet,
-    /// When its snooze ends; set means Snoozed.
     pub snooze_until: Option<Millis>,
-    /// Its Split Inbox split while in the Inbox.
     pub split: Option<SplitId>,
-    /// Gmail's `historyId` at the last fetch.
     pub history_id: Option<HistoryId>,
-    /// The `rev` of its last change.
     pub rev: Rev,
 }
 
 impl ThreadRow {
-    /// Starred.
     #[must_use]
     pub fn starred(&self) -> bool {
         self.labels.has(SystemLabel::Starred)
     }
 }
 
-/// One thread in a view list, in order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ListedThread {
-    /// The thread.
     pub thread: ThreadId,
-    /// Its split, in the Inbox only.
     pub split: Option<SplitId>,
 }
 
-/// What a sync needs to reconcile a cached thread with Gmail's list.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadSyncState {
-    /// The thread.
     pub id: ThreadId,
-    /// Gmail's id.
     pub gmail_id: GmailThreadId,
-    /// Gmail's `historyId` at the last fetch.
     pub history_id: Option<HistoryId>,
-    /// The `rev` of its last change: a full resync drops a thread only when
-    /// it has not changed since the resync began.
     pub rev: Rev,
 }
 
-/// A message of a conversation with its attachments.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversationMessage {
-    /// The message.
     pub message: MessageRecord,
-    /// Its attachments, inline parts included.
     pub attachments: Vec<AttachmentRecord>,
 }
 
-/// Everything a conversation shows (SPEC UI state, Subscriptions).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConversationRows {
-    /// The thread.
     pub thread: ThreadRow,
-    /// Its non-draft messages, oldest first. Outside Trash and Spam views,
-    /// messages in Trash or Spam are left out (SPEC Reading).
     pub messages: Vec<ConversationMessage>,
-    /// Its reply and forward drafts not in the outbox, oldest edit first.
     pub drafts: Vec<DraftRecord>,
-    /// Its outbox rows, less sent ones whose message the thread now holds.
     pub outbox: Vec<OutboxRecord>,
 }
 
@@ -146,7 +105,6 @@ fn listed(r: &Row<'_>) -> rusqlite::Result<ListedThread> {
     })
 }
 
-/// Reads of threads.
 #[derive(Debug, Clone, Copy)]
 pub struct ThreadReads<'c> {
     db: Db<'c>,
@@ -157,7 +115,6 @@ impl<'c> ThreadReads<'c> {
         Self { db }
     }
 
-    /// One thread's row.
     pub fn row(self, id: ThreadId) -> Result<Option<ThreadRow>, StoreError> {
         self.db.optional(
             "read a thread",
@@ -172,7 +129,6 @@ impl<'c> ThreadReads<'c> {
         )
     }
 
-    /// Rows for these threads, in the order asked; unknown ids are left out.
     pub fn rows(self, ids: &[ThreadId]) -> Result<Vec<ThreadRow>, StoreError> {
         self.db.all(
             "read threads",
@@ -187,10 +143,6 @@ impl<'c> ThreadReads<'c> {
         )
     }
 
-    /// A view's threads in list order (SPEC Views): the Inbox by split, then
-    /// newest first; Snoozed by wake time, soonest first; every other view
-    /// newest first. Drafts lists drafts, not threads: empty here, see
-    /// `DraftReads::list`. Membership follows `View::lists`.
     pub fn list(self, account: AccountId, view: &View) -> Result<Vec<ListedThread>, StoreError> {
         let db = self.db;
         match view {
@@ -243,7 +195,6 @@ impl<'c> ThreadReads<'c> {
         }
     }
 
-    /// The thread Gmail knows as `gmail_id`.
     pub fn by_gmail_id(
         self,
         account: AccountId,
@@ -257,7 +208,6 @@ impl<'c> ThreadReads<'c> {
         )
     }
 
-    /// The thread's account, if the thread exists.
     pub fn account_of(self, id: ThreadId) -> Result<Option<AccountId>, StoreError> {
         self.db.optional(
             "find a thread's account",
@@ -267,7 +217,6 @@ impl<'c> ThreadReads<'c> {
         )
     }
 
-    /// Inbox threads, snoozed ones included, with their stored split.
     pub(crate) fn inbox_splits(
         self,
         account: AccountId,
@@ -280,8 +229,6 @@ impl<'c> ThreadReads<'c> {
         )
     }
 
-    /// Inbox threads with a message from the sender of `thread`'s latest
-    /// non-draft message, for unsubscribe's "all" choices.
     pub fn sender_inbox_threads(
         self,
         account: AccountId,
@@ -302,7 +249,6 @@ impl<'c> ThreadReads<'c> {
         )
     }
 
-    /// Snoozed threads whose time has come, by wake time.
     pub fn snoozes_due(self, now: Millis) -> Result<Vec<(AccountId, ThreadId)>, StoreError> {
         self.db.all(
             "read the due snoozes",
@@ -314,7 +260,6 @@ impl<'c> ThreadReads<'c> {
         )
     }
 
-    /// The soonest snooze end, for the wake timer.
     pub fn next_snooze(self) -> Result<Option<Millis>, StoreError> {
         self.db.one(
             "read the next snooze",
@@ -324,8 +269,6 @@ impl<'c> ThreadReads<'c> {
         )
     }
 
-    /// The account's threads with no history id: a full resync found them
-    /// changed and owes them a metadata read, which writes it back.
     pub fn owed_reads(self, account: AccountId) -> Result<Vec<GmailThreadId>, StoreError> {
         self.db.all(
             "read the threads owed a read",
@@ -335,7 +278,6 @@ impl<'c> ThreadReads<'c> {
         )
     }
 
-    /// Every cached thread's Gmail id, history id, and `rev`, for a full resync.
     pub fn sync_states(self, account: AccountId) -> Result<Vec<ThreadSyncState>, StoreError> {
         self.db.all(
             "read the threads' sync state",
@@ -352,9 +294,6 @@ impl<'c> ThreadReads<'c> {
         )
     }
 
-    /// A conversation's rows, or `None` when the thread is gone.
-    /// `trash_view` keeps messages in Trash or Spam, for a conversation
-    /// opened from those views.
     pub fn conversation(
         self,
         id: ThreadId,
@@ -386,35 +325,22 @@ impl<'c> ThreadReads<'c> {
     }
 }
 
-/// A thread as a Gmail fetch gives it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FetchedThread {
-    /// Its account.
     pub account: AccountId,
-    /// Gmail's id.
     pub gmail_id: GmailThreadId,
-    /// Gmail's `historyId` for it.
     pub history_id: Option<HistoryId>,
-    /// Its messages.
     pub messages: Vec<NewMessage>,
-    /// The fetch listed every message the thread has, so stored ones it
-    /// left out are gone and get deleted.
     pub complete: bool,
 }
 
-/// What storing a fetched thread did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StoredThread {
-    /// The thread, or `None` when it ended with no message and its row went.
     pub thread: Option<ThreadId>,
-    /// Messages added that were not stored before.
     pub added: Vec<MessageId>,
-    /// Messages deleted because the fetch no longer had them.
     pub removed: Vec<MessageId>,
 }
 
-/// Writes to threads. A thread's derived columns are written only by its
-/// message writes; these change what is not derived.
 #[derive(Debug)]
 pub struct ThreadWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
@@ -425,9 +351,6 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
         Self { tx }
     }
 
-    /// Stores a fetched thread: adds its row if new, upserts every message,
-    /// deletes stored messages a complete fetch left out, and re-derives the
-    /// row once.
     pub fn store(&mut self, fetched: &FetchedThread) -> Result<StoredThread, StoreError> {
         let account = fetched.account;
         let rev = self.tx.stamp();
@@ -485,7 +408,6 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
         })
     }
 
-    /// Sets or clears the snooze time.
     pub fn set_snooze(&mut self, id: ThreadId, until: Option<Millis>) -> Result<(), StoreError> {
         let account = require(self.tx.read().threads().account_of(id)?, "thread", &id)?;
         let rev = self.tx.stamp();
@@ -498,7 +420,6 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
         Ok(())
     }
 
-    /// Marks threads as owed a metadata read (see [`ThreadReads::owed_reads`]).
     pub fn clear_history_ids(&self, ids: &[ThreadId]) -> Result<(), StoreError> {
         for &id in ids {
             self.tx.db().execute(
@@ -510,7 +431,6 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
         Ok(())
     }
 
-    /// Stores Gmail's `historyId` for the thread, as a history batch moves it.
     pub fn set_history_id(
         &mut self,
         id: ThreadId,
@@ -528,8 +448,6 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
         Ok(())
     }
 
-    /// Deletes a thread and its messages, as a full resync drops one Gmail
-    /// no longer has. Its drafts and outbox rows stay, unlinked.
     pub fn delete(&mut self, id: ThreadId) -> Result<(), StoreError> {
         let Some(account) = self.tx.read().threads().account_of(id)? else {
             return Ok(());

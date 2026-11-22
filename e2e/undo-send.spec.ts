@@ -1,5 +1,3 @@
-// Send and undo (SPEC §Send and undo, §Undo): the outbox
-// state machine, held undo, rejection, no clear answer, and restart.
 import type { Locator, Route } from "@playwright/test";
 
 import type { App } from "./app.ts";
@@ -9,10 +7,8 @@ import { htmlOf, parseMime } from "./mime.ts";
 import * as seeds from "./seeds.ts";
 import { A } from "./seeds.ts";
 
-/** The send delay (SPEC: a fixed ten seconds). */
 const DELAY = 10_000;
 
-/** A's messages on a Gmail thread that carry SENT. */
 async function sentIn(gmail: Control, threadId: string): Promise<GmailMessage[]> {
   return (await gmail.gmail(A)).messages.filter(
     (m) => m.threadId === threadId && m.labels.includes("SENT"),
@@ -21,13 +17,11 @@ async function sentIn(gmail: Control, threadId: string): Promise<GmailMessage[]>
 
 const count = async (gmail: Control, api: ApiMethod) => (await gmail.requests(api)).length;
 
-/** Opens a conversation from the list by clicking its row. */
 async function openThread(app: App, subject: string): Promise<void> {
   await app.row(subject).first().click();
   await expect(app.conversationTitle).toContainText(subject);
 }
 
-/** Moves the highlight with `j` / `k` until it is on the row containing `text`. */
 async function highlight(app: App, text: string | RegExp, left = 40): Promise<void> {
   if ((await app.highlighted.filter({ hasText: text }).count()) > 0) return;
   if (left === 0) throw new Error(`no row ${String(text)} reached with j and k`);
@@ -39,7 +33,6 @@ async function highlight(app: App, text: string | RegExp, left = 40): Promise<vo
   await highlight(app, text, left - 1);
 }
 
-/** From the list: opens the thread, replies with `text`, and sends. */
 async function sendReply(app: App, subject: string, text: string): Promise<void> {
   await openThread(app, subject);
   await app.reply();
@@ -49,7 +42,6 @@ async function sendReply(app: App, subject: string, text: string): Promise<void>
   await expect(app.editor).toHaveCount(0);
 }
 
-/** `c`, to Kim, with a subject and body, then send. */
 async function sendNew(app: App, subject: string, body: string): Promise<void> {
   await app.compose();
   await app.type("kim@kite.test,");
@@ -61,27 +53,20 @@ async function sendNew(app: App, subject: string, body: string): Promise<void> {
   await expect(newMessage(app)).toHaveCount(0);
 }
 
-/** The send toast for a subject (its description). */
 const sendToast = (app: App, subject: string): Locator => app.toast(subject);
 const undoOn = (toast: Locator): Locator => toast.getByRole("button", { name: "Undo" });
 
-/**
- * Moves past `send_after` without firing the page's 4 s Sent-toast timer,
- * so the toast is still open afterwards.
- */
 async function passSendAfter(app: App): Promise<void> {
   await app.advance(DELAY - 1);
   await app.advance(1);
 }
 
-/** The `c` screen's heading. */
 const newMessage = (app: App): Locator => app.page.getByRole("heading", { name: "New Message" });
 
 test("SND-01 the send waits ten seconds, then goes out once", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
   const p6Labels = async () =>
     (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p6", 1).id)?.labels ?? [];
-  // An older entry: once the send's entry leaves the history, `z` reaches it.
   await highlight(app, "Person 6");
   await app.press("e");
   await app.settle();
@@ -106,8 +91,6 @@ test("SND-01 the send waits ten seconds, then goes out once", async ({ app, gmai
   await app.press("g", "t");
   await expect(app.row("Ten seconds")).toHaveCount(1);
 
-  // The toast closes; a stray `z` then never trashes delivered mail, and
-  // undoes the entry before the send instead.
   await app.advance(5_000);
   await expect(toast).toHaveCount(0);
   await app.press("z");
@@ -125,7 +108,6 @@ test("SND-02 undo while waiting cancels the send and reopens the composer", asyn
   const s = await seeds.standard(gmail, app);
   const p3 = s.thread("p3").threadId;
 
-  // The toast's Undo, on a reply whose thread has left the view.
   await sendReply(app, "Person 3", "undo me");
   await app.press("e");
   await app.press("g", "i");
@@ -134,7 +116,6 @@ test("SND-02 undo while waiting cancels the send and reopens the composer", asyn
   await expect(app.conversationTitle).toContainText("Person 3");
   await expect(app.editor).toContainText("undo me");
 
-  // `z`, on a new message, while the send is the newest entry.
   await app.press("Escape", "Escape", "Escape");
   await expect(app.editor).toHaveCount(0);
   await sendNew(app, "Undo by z", "z body");
@@ -143,7 +124,6 @@ test("SND-02 undo while waiting cancels the send and reopens the composer", asyn
   await expect(app.subject).toHaveValue("Undo by z");
   await expect(app.editor).toContainText("z body");
 
-  // Nothing is ever sent, and Esc Esc keeps both drafts.
   await app.advance(60_000);
   await app.settle();
   expect(await gmail.requests("drafts.send")).toEqual([]);
@@ -153,7 +133,6 @@ test("SND-02 undo while waiting cancels the send and reopens the composer", asyn
   await expect(app.row("undo me")).toHaveCount(1);
   await expect(app.row("Undo by z")).toHaveCount(1);
 
-  // Sending again works, for both.
   await highlight(app, "undo me");
   await app.press("Enter");
   await expect(app.editor).toContainText("undo me");
@@ -185,7 +164,6 @@ test("SND-03 z reaches a send only while it is the newest entry; the toast's Und
   const inbox = async (key: string) =>
     (await gmail.gmail(A)).messages.find((m) => m.id === s.message(key, 1).id)?.labels ?? [];
 
-  // `z` after a newer `e` undoes the `e`; the send stays waiting and goes out.
   await sendReply(app, "Person 3", "first send");
   await app.press("Escape");
   await highlight(app, "Person 4");
@@ -200,7 +178,6 @@ test("SND-03 z reaches a send only while it is the newest entry; the toast's Und
   await app.settle();
   expect(await sentIn(gmail, s.thread("p3").threadId)).toHaveLength(1);
 
-  // The toast's Undo on a send behind a newer `e` undoes the send only.
   await sendReply(app, "Person 5", "second send");
   await app.press("Escape");
   await highlight(app, "Person 6");
@@ -250,13 +227,11 @@ test("SND-05 undo while sending is held until the send resolves", async ({ app, 
   const p6Labels = async () =>
     (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p6", 1).id)?.labels ?? [];
 
-  // An older entry, for `z` to reach.
   await highlight(app, "Person 6");
   await app.press("e");
   await app.settle();
   expect(await p6Labels()).not.toContain("INBOX");
 
-  // 200: the send went out, so the app trashes it; no composer opens.
   let hold = await gmail.hold("drafts.send");
   await sendReply(app, "Person 3", "held then sent");
   await app.advance(DELAY);
@@ -272,7 +247,6 @@ test("SND-05 undo while sending is held until the send resolves", async ({ app, 
   expect(sent3?.labels).toContain("TRASH");
   await expect(app.editor).toHaveCount(0);
 
-  // 400: not sent; a notice, and the draft is back in a composer on its thread.
   await app.press("Escape", "g", "i");
   hold = await gmail.hold("drafts.send");
   await sendReply(app, "Person 5", "held then rejected");
@@ -288,8 +262,6 @@ test("SND-05 undo while sending is held until the send resolves", async ({ app, 
   await expect(app.editor).toContainText("held then rejected");
   expect(await sentIn(gmail, s.thread("p5").threadId)).toEqual([]);
 
-  // drop: not sent, and drafts.get finds the draft. The held undo wins (SPEC Send and undo):
-  // no second drafts.send, and the draft is back in a composer.
   await app.press("Escape", "Escape", "Escape", "g", "i");
   hold = await gmail.hold("drafts.send");
   await sendReply(app, "Person 1", "held then dropped");
@@ -314,14 +286,12 @@ test("SND-06 a rejected send brings the draft back", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
   await gmail.fault("drafts.send", { kind: "status", status: 400, reason: "Invalid To header" });
 
-  // B on screen: the app switches to A and reopens p3 with the reply composer.
   await sendReply(app, "Person 3", "rejected reply");
   await app.press("Control+2");
   await expect(app.row("B 2")).toHaveCount(1);
   await app.advance(DELAY);
   await expect(app.conversationTitle).toContainText("Person 3");
   await expect(app.editor).toContainText("rejected reply");
-  // Shown during the advance, so its own 4 s may have run out: count it even on its way out.
   await expect(
     app.page
       .locator('[data-sonner-toast][data-type="error"]')
@@ -329,7 +299,6 @@ test("SND-06 a rejected send brings the draft back", async ({ app, gmail }) => {
   ).not.toHaveCount(0);
   await app.press("Escape", "Escape", "Escape");
 
-  // Typing in another composer: no takeover; Open draft swaps composers.
   await sendReply(app, "Person 5", "rejected while typing");
   await app.compose();
   await app.editor.click();
@@ -347,7 +316,6 @@ test("SND-06 a rejected send brings the draft back", async ({ app, gmail }) => {
   await app.press("Escape", "Escape", "Escape", "g", "d");
   await expect(app.row("typing here")).toHaveCount(1);
 
-  // Idle, and the draft is a new message: the `c` screen opens with it.
   await app.press("g", "i");
   await sendNew(app, "Idle new", "rejected new message");
   await app.advance(DELAY);
@@ -363,7 +331,6 @@ test("SND-07 offline at send time: Email delayed, then sent once online", async 
 }) => {
   const s = await seeds.standard(gmail, app);
 
-  // Unreachable when the timer passes: Email delayed, then sent once online.
   await sendReply(app, "Person 3", "sent late");
   await gmail.offline(true);
   await app.advance(DELAY);
@@ -376,7 +343,6 @@ test("SND-07 offline at send time: Email delayed, then sent once online", async 
   expect(await sentIn(gmail, s.thread("p3").threadId)).toHaveLength(1);
   await app.press("Escape");
 
-  // Undo after the timer passed while offline: the composer reopens; nothing is sent.
   await sendReply(app, "Person 5", "never sent");
   await gmail.offline(true);
   await app.advance(DELAY);
@@ -391,7 +357,6 @@ test("SND-07 offline at send time: Email delayed, then sent once online", async 
   expect(await sentIn(gmail, s.thread("p5").threadId)).toEqual([]);
   await app.press("Escape", "Escape", "Escape");
 
-  // The build step's drafts.create fails: back to waiting, retried, sent once.
   await gmail.offline(true);
   await openThread(app, "Person 6");
   await app.reply();
@@ -436,7 +401,6 @@ test("SND-08 drafts.send with no clear answer never sends twice", async ({ app, 
     expect(sent, row.key).toHaveLength(1);
     expect(await count(gmail, "drafts.send"), row.key).toBe(sendsBefore + row.sends);
     expect(await count(gmail, "drafts.get"), row.key).toBeGreaterThan(getsBefore);
-    // The row is sent: the conversation shows the message, not a Sending row.
     await expect(app.messages).toHaveCount(2);
     await expect(app.conversation.getByText(/^(Sending|Email delayed)$/)).toHaveCount(0);
     await app.press("Escape");
@@ -448,7 +412,6 @@ test("SND-08 drafts.send with no clear answer never sends twice", async ({ app, 
 test("SND-09 outbox rows across a quit and relaunch", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
 
-  // Waiting, 3 s in; the clock moves a minute while the app is down.
   await sendReply(app, "Person 3", "across a quit");
   await app.advance(3_000);
   const hold = await gmail.hold("drafts.send");
@@ -462,7 +425,6 @@ test("SND-09 outbox rows across a quit and relaunch", async ({ app, gmail }) => 
   expect(await sentIn(gmail, s.thread("p3").threadId)).toHaveLength(1);
   expect(await gmail.requests("drafts.send")).toHaveLength(1);
 
-  // Waiting, offline at relaunch: Undo reopens the composer; nothing is sent.
   await sendReply(app, "Person 5", "undone after relaunch");
   await app.restart(async () => {
     await gmail.offline(true);
@@ -476,7 +438,6 @@ test("SND-09 outbox rows across a quit and relaunch", async ({ app, gmail }) => 
   expect(await sentIn(gmail, s.thread("p5").threadId)).toEqual([]);
   await app.press("Escape", "Escape", "Escape");
 
-  // Sending with no answer (Gmail sent it), then a crash: settled on launch.
   await gmail.fault("drafts.send", { kind: "noResponse" }, { times: 1 });
   await sendReply(app, "Person 6", "sent before the crash");
   await app.advance(DELAY);
@@ -487,8 +448,6 @@ test("SND-09 outbox rows across a quit and relaunch", async ({ app, gmail }) => 
   expect(await count(gmail, "drafts.get")).toBeGreaterThan(getsBefore);
   expect(await sentIn(gmail, s.thread("p6").threadId)).toHaveLength(1);
 
-  // Sent, toast still open, then a quit: the send entry is dropped on launch,
-  // so `z` reaches the entry before it.
   const p2Labels = async () =>
     (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p2", 1).id)?.labels ?? [];
   await highlight(app, "Person 2");
@@ -526,7 +485,6 @@ test("SND-10 send toasts stay across accounts", async ({ app, gmail }) => {
 test("SND-11 undoing a waiting send while another composer is open", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
 
-  // The other composer is touched: kept in Drafts.
   await sendReply(app, "Person 3", "send S");
   await app.compose();
   await app.subject.fill("Other touched");
@@ -536,7 +494,6 @@ test("SND-11 undoing a waiting send while another composer is open", async ({ ap
   await expect(app.editor).toContainText("send S");
   await expect(newMessage(app)).toHaveCount(0);
 
-  // The other composer is untouched: discarded.
   await app.press("Escape");
   await app.press("Meta+Enter");
   await expect(app.editor).toHaveCount(0);
@@ -556,11 +513,6 @@ test("SND-11 undoing a waiting send while another composer is open", async ({ ap
   expect((await gmail.gmail(A)).drafts).toHaveLength(2);
 });
 
-/**
- * From the list: opens the thread and replies "one", which autosaves to
- * Gmail. Then " two" is typed, but its upsert fails, so Gmail keeps "one"
- * while the local draft says "one two". Returns with the composer open.
- */
 async function replyAheadOfGmail(app: App, gmail: Control, subject: string): Promise<void> {
   await openThread(app, subject);
   await app.reply();
@@ -571,7 +523,6 @@ async function replyAheadOfGmail(app: App, gmail: Control, subject: string): Pro
   await app.settle();
 }
 
-/** The HTML body of the one message A sent on a Gmail thread. */
 async function sentBody(gmail: Control, threadId: string): Promise<string> {
   const sent = await sentIn(gmail, threadId);
   expect(sent).toHaveLength(1);
@@ -587,7 +538,6 @@ test("SND-13 a draft reconcile in the undo window keeps the version that was sen
   await app.press("Meta+Enter");
   await expect(app.editor).toHaveCount(0);
   await gmail.clearFaults();
-  // A poll in the undo window reconciles drafts while Gmail still holds "one".
   await gmail.poll();
   await app.settle();
   await app.advance(DELAY);
@@ -605,11 +555,9 @@ test("SND-14 a crash while the send writes the draft still sends the final versi
   await app.press("Meta+Enter");
   await expect(app.editor).toHaveCount(0);
   await gmail.clearFaults();
-  // The row is sending, and its write of "one two" is in flight when the app dies.
   const write = await gmail.hold("drafts.update");
   await app.advance(DELAY);
   await app.crashAndRelaunch(async () => {
-    // The crash dropped the parked write; end the hold.
     await write.release({ kind: "drop" }, { min: 0 });
   });
   await app.settle();
@@ -624,13 +572,11 @@ test("SND-15 a held undo resolves at once when the send could not reach Gmail", 
   const s = await seeds.standard(gmail, app);
   await sendReply(app, "Person 3", "held, never written");
   await app.press("Escape");
-  // The row is sending, and its write of the Gmail draft is in flight.
   const write = await gmail.hold("drafts.update");
   await app.advance(DELAY);
   const toast = sendToast(app, "Person 3");
   await undoOn(toast).click();
   await expect(toast).toContainText("Undoing…");
-  // The write fails, so Gmail never got the send: it resolved as not sent.
   await write.release({ kind: "status", status: 503 });
   await app.settle();
   await expect(app.conversationTitle).toContainText("Person 3");
@@ -642,19 +588,15 @@ test("SND-15 a held undo resolves at once when the send could not reach Gmail", 
   expect(await sentIn(gmail, s.thread("p3").threadId)).toEqual([]);
 });
 
-/** Swipes a toast down and away, as a person closes one. */
 async function swipeAway(app: App, toast: Locator): Promise<void> {
   const box = await toast.boundingBox();
   if (!box) throw new Error("the toast is not on screen");
   const { mouse } = app.page;
-  // Its top left corner: clear of the Undo button, and on screen while the
-  // toast is still sliding in.
   const x = box.x + 12;
   const y = box.y + 12;
   await mouse.move(x, y);
   await mouse.down();
   await expect(toast).toHaveAttribute("data-swiping", "true");
-  // The first move picks the direction; the toast follows once it has rendered.
   let dy = 4;
   await mouse.move(x, y + dy);
   await expect
@@ -674,7 +616,6 @@ test("SND-16 a send toast closed before the send went out takes its undo entry w
   const s = await seeds.standard(gmail, app);
   const p6Labels = async () =>
     (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p6", 1).id)?.labels ?? [];
-  // An older entry: once the send's entry leaves the history, `z` reaches it.
   await highlight(app, "Person 6");
   await app.press("e");
   await app.settle();
@@ -685,7 +626,6 @@ test("SND-16 a send toast closed before the send went out takes its undo entry w
   await expect(toast).toContainText("Sending…");
   await swipeAway(app, toast);
   await expect(toast).toHaveCount(0);
-  // The sent message is not stored at once, so the outbox row stays.
   await gmail.fault("threads.get", { kind: "status", status: 503 });
   await app.advance(DELAY);
   await app.settle();
@@ -695,7 +635,6 @@ test("SND-16 a send toast closed before the send went out takes its undo entry w
   );
   expect(sent).toHaveLength(1);
 
-  // A stray `z` never trashes delivered mail; it undoes the entry before.
   await app.press("z");
   await app.settle();
   const after = (await gmail.gmail(A)).messages.find((m) => m.id === sent[0]?.id);
@@ -714,7 +653,6 @@ test("SND-17 an Undo that reaches the core only after the send went out opens no
   const toast = sendToast(app, "Person 3");
   await expect(toast).toContainText("Sending…");
 
-  // The Undo leaves the page while the row is waiting, but its invoke is slow.
   const parked: Route[] = [];
   await app.page.route("**/invoke/submit", async (route) => {
     if (parked.length === 0) parked.push(route);
@@ -723,14 +661,11 @@ test("SND-17 an Undo that reaches the core only after the send went out opens no
   await undoOn(toast).click();
   await expect.poll(() => parked.length).toBe(1);
 
-  // Meanwhile the send goes out. (`app.advance` would wait for the invoke.)
   const send = await gmail.hold("drafts.send");
   await gmail.advanceServerClock(DELAY);
   await send.release();
   await expect(toast).toContainText("Sent");
 
-  // The Undo arrives: the row is sent, so it trashes the message. No
-  // composer opens on the draft the send used up.
   await parked[0]?.continue();
   await app.settle();
   await app.page.unroute("**/invoke/submit");
@@ -755,12 +690,10 @@ test("SND-18 a send while the draft's first upsert is in flight goes out once an
     .toBe(true);
   await app.press("Meta+Enter");
   await expect(app.editor).toHaveCount(0);
-  // The send's time comes while the autosave's create is still in flight.
   await passSendAfter(app);
   await create.release();
   await app.settle();
   await expect(sendToast(app, "Person 3")).toContainText("Sent");
-  // The toast closes, and a poll reconciles drafts.
   await app.advance(5_000);
   await gmail.poll();
   await app.settle();
@@ -776,8 +709,6 @@ test("SND-19 a send the core refuses says it was not sent and brings the draft b
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  // The core stores an address the composer took for valid, as a UI out of
-  // step with the core's check would.
   const submit = /\/invoke\/submit$/;
   await app.page.route(submit, (route) =>
     route.continue({
@@ -797,7 +728,6 @@ test("SND-19 a send the core refuses says it was not sent and brings the draft b
   await expect(
     app.errorToasts.filter({ hasText: "Not sent: kim@kite.c isn't a valid email address" }),
   ).toHaveCount(1);
-  // Idle, and the draft is a new message: the `c` screen opens with it.
   await expect(newMessage(app)).toBeVisible();
   await expect(app.subject).toHaveValue("Refused");
   await expect(app.editor).toContainText("Kept for later");
@@ -813,8 +743,6 @@ test("SND-20 an Undo the core refuses says why and opens no composer", async ({ 
   await sendReply(app, "Person 3", "kept sending");
   await app.press("Escape");
   await app.settle();
-  // The Undo names an entry the core no longer has, as a UI out of step
-  // with the core would.
   const submit = /\/invoke\/submit$/;
   await app.page.route(submit, (route) =>
     route.continue({
@@ -832,7 +760,6 @@ test("SND-20 an Undo the core refuses says why and opens no composer", async ({ 
     app.errorToasts.filter({ hasText: "That change can no longer be undone" }),
   ).toHaveCount(1);
   await expect(app.editor).toHaveCount(0);
-  // The send goes out as if no Undo was pressed.
   await app.advance(DELAY);
   await app.settle();
   const [sent] = await sentIn(gmail, s.thread("p3").threadId);
@@ -847,7 +774,6 @@ test("SND-21 a held undo resolves at once when the access token could not be ref
   const s = await seeds.standard(gmail, app);
   await sendReply(app, "Person 3", "never sent, token refused");
   await app.press("Escape");
-  // `drafts.send` gets a 401, and the token refresh it needs is in flight.
   await gmail.fault("drafts.send", { kind: "status", status: 401 }, { times: 1 });
   const refresh = await gmail.hold("oauth.token");
   await app.advance(DELAY);
@@ -857,8 +783,6 @@ test("SND-21 a held undo resolves at once when the access token could not be ref
   const toast = sendToast(app, "Person 3");
   await undoOn(toast).click();
   await expect(toast).toContainText("Undoing…");
-  // The refresh gets no answer: `drafts.send` never went out again, so Gmail
-  // never got the send, and the undo resolves as not sent at once.
   await refresh.release({ kind: "noResponse" });
   await app.settle();
   await expect(app.conversationTitle).toContainText("Person 3");
@@ -870,8 +794,6 @@ test("SND-21 a held undo resolves at once when the access token could not be ref
   expect(await sentIn(gmail, s.thread("p3").threadId)).toEqual([]);
 });
 
-// The conversation hid a sent row itself, so a reply Gmail had accepted left
-// the thread until its message landed.
 test("SND-22 a sent reply stays on the thread, marked Sent, until its message lands without waiting for a poll", async ({
   app,
   gmail,
@@ -880,7 +802,6 @@ test("SND-22 a sent reply stays on the thread, marked Sent, until its message la
   const p3 = s.thread("p3").threadId;
   await sendReply(app, "Person 3", "on its way");
   await expect(app.conversation.getByText("Sending", { exact: true })).toBeVisible();
-  // Gmail accepts the send; fetching its message is held.
   const fetch = await gmail.hold({ api: "threads.get", path: `*/threads/${p3}` });
   await app.advance(DELAY);
   await app.settle();
@@ -890,13 +811,11 @@ test("SND-22 a sent reply stays on the thread, marked Sent, until its message la
   await expect(app.conversation.getByText("on its way")).toBeVisible();
   await expect(app.messages).toHaveCount(1);
 
-  // The message lands and takes the row's place.
   await fetch.release();
   await app.settle();
   await expect(app.messages).toHaveCount(2);
   await expect(sentRow).toHaveCount(0);
   await expect(app.conversation.getByText("Sending", { exact: true })).toHaveCount(0);
-  // It landed without waiting for a poll.
   const log = await gmail.requests(undefined, { account: A });
   const send = log.findIndex((r) => r.api === "drafts.send");
   expect(send).toBeGreaterThanOrEqual(0);
@@ -909,12 +828,6 @@ test("SND-23 a send settled as sent with no message to show leaves the thread on
 }) => {
   const s = await seeds.standard(gmail, app);
   const lines = /^(Sending|Sent|Email delayed)$/;
-  /**
-   * Sends a reply whose drafts.send gets no clear answer, Gmail never having
-   * sent it. `whileSending` runs once the send is out; then the draft is
-   * deleted from a phone, so Gmail no longer has it and the thread holds no
-   * message this account sent, and the next try settles it.
-   */
   const lostSend = async (key: string, subject: string, whileSending: () => Promise<void>) => {
     const thread = s.thread(key).threadId;
     await gmail.fault("drafts.send", { kind: "drop" }, { times: 1 });
@@ -932,7 +845,6 @@ test("SND-23 a send settled as sent with no message to show leaves the thread on
     expect(await sentIn(gmail, thread), key).toEqual([]);
   };
 
-  // Its toast closes after it settles: the thread shows its one message.
   await lostSend("p1", "Person 1", () => Promise.resolve());
   await app.advance(5_000);
   await expect(sendToast(app, "Person 1")).toHaveCount(0);
@@ -942,7 +854,6 @@ test("SND-23 a send settled as sent with no message to show leaves the thread on
   await expect(app.conversation.getByText(lines)).toHaveCount(0);
   await app.press("Escape");
 
-  // Its toast was closed while it was sending.
   await lostSend("p3", "Person 3", async () => {
     await swipeAway(app, sendToast(app, "Person 3"));
     await expect(sendToast(app, "Person 3")).toHaveCount(0);
@@ -952,8 +863,6 @@ test("SND-23 a send settled as sent with no message to show leaves the thread on
   await expect(app.conversation.getByText(lines)).toHaveCount(0);
 });
 
-// A 401 on drafts.send whose refresh got invalid_grant left the row sending,
-// so an Undo held on it stayed at "Undoing…" until the account signed in again.
 test("SND-24 a send whose account signs out or is removed while drafts.send is on its way", async ({
   app,
   gmail,
@@ -961,9 +870,6 @@ test("SND-24 a send whose account signs out or is removed while drafts.send is o
   const s = await seeds.standard(gmail, app);
   const errors = (await app.errorToastsShown()).length;
 
-  // drafts.send is on its way when the user undoes it; Gmail answers 401
-  // and Google refuses the refresh: the account signs out, and the send was
-  // never taken, so the undo resolves at once as not sent.
   let send = await gmail.hold("drafts.send");
   await sendReply(app, "Person 3", "never sent, signed out");
   await app.press("Escape");
@@ -988,7 +894,6 @@ test("SND-24 a send whose account signs out or is removed while drafts.send is o
   expect(await sentIn(gmail, s.thread("p3").threadId)).toEqual([]);
   await app.expectNoErrorToasts(errors);
 
-  // drafts.send is on its way when the account is removed: nothing is left of it.
   await app.press("Escape");
   await expect(app.list).toBeVisible();
   send = await gmail.hold("drafts.send");
@@ -999,7 +904,6 @@ test("SND-24 a send whose account signs out or is removed while drafts.send is o
     .poll(async () => (await gmail.requests("drafts.send")).some((r) => r.held))
     .toBe(true);
   await app.removeAccount(A);
-  // The removal stopped the account's requests: the held one may be gone already.
   await gmail.release({ id: send.id });
   await app.advance(60_000, { stepwise: true });
   await app.settle();
@@ -1047,7 +951,6 @@ test("SND-26 a reply key on a thread whose reply is waiting or sending starts a 
   const s = await seeds.standard(gmail, app);
   const draftsOn = async (thread: string) =>
     (await gmail.gmail(A)).drafts.filter((d) => d.message.threadId === thread);
-  /** `r` on the open thread, a new reply typed and closed. */
   const replyAgain = async (text: string) => {
     await app.reply();
     await expect(app.editor).toHaveText("");
@@ -1057,7 +960,6 @@ test("SND-26 a reply key on a thread whose reply is waiting or sending starts a 
     await expect(app.conversation.getByText("Sending", { exact: true })).toBeVisible();
   };
 
-  // While the send waits.
   const p3 = s.thread("p3").threadId;
   await sendReply(app, "Person 3", "The waiting reply");
   await replyAgain("A second thought");
@@ -1072,7 +974,6 @@ test("SND-26 a reply key on a thread whose reply is waiting or sending starts a 
   expect(kept[0]?.message.raw).toContain("A second thought");
   await app.press("Escape");
 
-  // While drafts.send is on its way.
   const p5 = s.thread("p5").threadId;
   const send = await gmail.hold("drafts.send");
   await sendReply(app, "Person 5", "The sending reply");
@@ -1103,7 +1004,6 @@ test("SND-27 a send whose Gmail draft is edited or deleted elsewhere in the undo
     return found;
   };
 
-  // Edited in Gmail web while the send waits.
   const p3 = s.thread("p3").threadId;
   await sendReply(app, "Person 3", "Sent from here");
   const edited = await gmailDraft(p3);
@@ -1127,7 +1027,6 @@ test("SND-27 a send whose Gmail draft is edited or deleted elsewhere in the undo
   expect(fromHere[0]?.raw).not.toContain("Edited elsewhere");
   await app.press("Escape");
 
-  // Deleted in Gmail web while the send waits.
   const p5 = s.thread("p5").threadId;
   await sendReply(app, "Person 5", "Sent though deleted");
   await gmail.deleteDraft(A, (await gmailDraft(p5)).id, { poll: true });

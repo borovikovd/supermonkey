@@ -1,6 +1,3 @@
-//! The `meta` row: the last committed `rev` and the last action number. Both
-//! survive restarts and never go back (SPEC UI state, Actions).
-
 use rusqlite::Connection;
 use sm_domain::{ActionNo, Rev};
 
@@ -8,7 +5,6 @@ use crate::StoreError;
 use crate::db::Db;
 use crate::tx::WriteTx;
 
-/// Reads of the `meta` row.
 #[derive(Debug, Clone, Copy)]
 pub struct MetaReads<'c> {
     db: Db<'c>,
@@ -19,7 +15,6 @@ impl<'c> MetaReads<'c> {
         Self { db }
     }
 
-    /// The `rev` of the last commit that wrote.
     pub fn rev(self) -> Result<Rev, StoreError> {
         self.db.one(
             "read the rev",
@@ -29,7 +24,6 @@ impl<'c> MetaReads<'c> {
         )
     }
 
-    /// The highest action number applied.
     pub fn last_action(self) -> Result<ActionNo, StoreError> {
         self.db.one(
             "read the last action number",
@@ -40,7 +34,6 @@ impl<'c> MetaReads<'c> {
     }
 }
 
-/// Writes to the `meta` row.
 #[derive(Debug)]
 pub struct MetaWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
@@ -51,9 +44,6 @@ impl<'t, 'c> MetaWrites<'t, 'c> {
         Self { tx }
     }
 
-    /// Records that actions up to `n` are applied. It never goes back: a
-    /// lower number is ignored. Not a row change, so on its own it does not
-    /// move `rev`.
     pub fn set_last_action(&self, n: ActionNo) -> Result<(), StoreError> {
         self.tx.db().execute(
             "store the last action number",
@@ -64,12 +54,10 @@ impl<'t, 'c> MetaWrites<'t, 'c> {
     }
 }
 
-/// The stored `rev`, read when the writer starts.
 pub(crate) fn stored_rev(conn: &Connection) -> Result<Rev, StoreError> {
     MetaReads::new(Db::new(conn)).rev()
 }
 
-/// Stores the `rev` of the transaction about to commit.
 pub(crate) fn store_rev(conn: &Connection, rev: Rev) -> Result<(), StoreError> {
     Db::new(conn).execute(
         "store the rev",
@@ -79,8 +67,6 @@ pub(crate) fn store_rev(conn: &Connection, rev: Rev) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// Leaves a deferred foreign key broken, so the coming `COMMIT` fails as a
-/// real constraint or I/O failure would.
 #[cfg(any(test, feature = "test-hooks"))]
 pub(crate) fn break_commit(conn: &Connection) -> Result<(), StoreError> {
     conn.execute_batch(

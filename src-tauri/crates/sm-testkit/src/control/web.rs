@@ -1,7 +1,3 @@
-//! The web around the app: the built UI, the remote image host, the sink
-//! for hostile destinations, and a look inside the database files and the
-//! draft folders.
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -15,12 +11,8 @@ use serde_json::{Value, json};
 
 use crate::server::{Ctl, Fail, Hit, Server, done};
 
-/// The app's Tauri config, for the CSP the release app runs the UI under.
 const TAURI_CONF: &str = include_str!("../../../../tauri.conf.json");
 
-/// The release app's CSP (`app.security.csp`), so the suite runs the UI
-/// under it (SPEC Testing). The page talks to this server instead of
-/// Tauri's IPC, so `connect-src` also allows the server's own origin.
 fn release_csp() -> Result<String, String> {
     let conf: Value = serde_json::from_str(TAURI_CONF).map_err(|e| e.to_string())?;
     let csp = conf
@@ -42,7 +34,6 @@ fn release_csp() -> Result<String, String> {
     Ok(directives.join("; "))
 }
 
-/// A 1×1 PNG.
 const PIXEL: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 0x49, 0x48, 0x44, 0x52, 0, 0, 0,
     1, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0x1F, 0x15, 0xC4, 0x89, 0, 0, 0, 0x0D, 0x49, 0x44, 0x41, 0x54,
@@ -60,8 +51,6 @@ fn hit(s: &Server, method: &Method, uri: &Uri, body: &[u8]) {
     });
 }
 
-/// The remote image host: any `/img/<name>` is a pixel, and every fetch is
-/// logged.
 pub(crate) async fn remote_image(
     State(s): State<Arc<Server>>,
     method: Method,
@@ -78,8 +67,6 @@ pub(crate) async fn remote_image(
         .into_response()
 }
 
-/// A sink for hostile destinations (`/sink/evil.test/...`): logs and
-/// answers blank.
 pub(crate) async fn sink(
     State(s): State<Arc<Server>>,
     method: Method,
@@ -97,7 +84,6 @@ pub(crate) async fn sink(
         .into_response()
 }
 
-/// Fetches of the image host and the sink, oldest first.
 pub(crate) async fn hits(State(s): State<Arc<Server>>) -> Ctl {
     Ok(Json(json!(&*s.hits.lock())))
 }
@@ -107,8 +93,6 @@ pub(crate) struct ContainsReq {
     text: String,
 }
 
-/// Whether the database files hold `text` anywhere (SPEC Security: no
-/// tokens in SQLite).
 pub(crate) async fn db_contains(State(s): State<Arc<Server>>, Query(q): Query<ContainsReq>) -> Ctl {
     let needle = q.text.as_bytes();
     if needle.is_empty() {
@@ -127,9 +111,6 @@ pub(crate) async fn db_contains(State(s): State<Arc<Server>>, Query(q): Query<Co
     Ok(Json(json!({ "found": found })))
 }
 
-/// The drafts whose added files are in the data folder (`drafts/<draft>`),
-/// sorted: SPEC Drafts says the folder goes with the draft, with nothing on
-/// screen to show it.
 pub(crate) async fn draft_folders(State(s): State<Arc<Server>>) -> Ctl {
     let mut names = Vec::new();
     match tokio::fs::read_dir(s.data_dir.join("drafts")).await {
@@ -145,16 +126,11 @@ pub(crate) async fn draft_folders(State(s): State<Arc<Server>>) -> Ctl {
     Ok(Json(json!(names)))
 }
 
-/// What `/__test/draft-folders` takes to leave a folder behind.
 #[derive(Deserialize)]
 pub(crate) struct LeftFolderReq {
-    /// The folder's name, as a draft id.
     name: String,
 }
 
-/// Leaves a draft's folder of added files in the data folder with no draft
-/// to go with it, as a quit between a discard and its clean-up does. Call it
-/// while the core is down.
 pub(crate) async fn leave_draft_folder(
     State(s): State<Arc<Server>>,
     Json(req): Json<LeftFolderReq>,
@@ -168,7 +144,6 @@ pub(crate) async fn leave_draft_folder(
     Ok(done())
 }
 
-/// Serves the built UI; unknown paths get `index.html`.
 pub(crate) async fn static_file(State(s): State<Arc<Server>>, uri: Uri) -> Response {
     let rel = uri.path().trim_start_matches('/');
     let safe = !rel.split('/').any(|segment| segment == "..");

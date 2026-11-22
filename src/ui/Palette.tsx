@@ -46,9 +46,7 @@ function Chip({ keys }: { keys: string[] }) {
 type Commands = {
   items: Item[];
   placeholder: string;
-  /** Snooze: the options on screen are for an earlier query. */
   stale?: boolean;
-  /** Snooze: snoozes what the palette opened on until `at`. */
   snoozeAt?: (at: number) => void;
 };
 
@@ -60,10 +58,6 @@ function useCommands(mode: PaletteMode, query: string): Commands {
   const [blocked, setBlocked] = useState<
     BlockedSenders | { kind: "error"; message: string } | null
   >(null);
-  // What the palette acts on, read once when it opens: keys go to the palette
-  // while it is open, so the selection cannot move under it. Opened from a
-  // palette, it is bound to what that one opened on; opened by a toast about
-  // one conversation, to that conversation, on its own account.
   const [opened] = useState(() => {
     const threads =
       mode.kind === "block" && mode.of
@@ -102,12 +96,9 @@ function useCommands(mode: PaletteMode, query: string): Commands {
   }, [mode.kind, account]);
 
   const userLabels = (summary?.labels ?? []).filter((l) => !l.system);
-  // A choice acts on what the palette opened on (see `withFixedTargets`).
   const bound = (run: () => void) => () => withFixedTargets(opened.threads, opened.highlight, run);
   switch (mode.kind) {
     case "commands": {
-      // The commands that work where the palette opened; while a composer is
-      // on screen, its draft actions (SPEC Keyboard).
       const composing = opened.ctx.composer !== null;
       return {
         items: paletteCommands(opened.ctx).map((cmd) => ({
@@ -140,7 +131,6 @@ function useCommands(mode: PaletteMode, query: string): Commands {
           label: `Create label "${q}"`,
           run: () => {
             const id = `local-${crypto.randomUUID()}`;
-            // Made either way; applied only to what is still shown.
             const threads = stillShown(opened.threads);
             act({
               type: "createLabel",
@@ -331,13 +321,10 @@ const itemValue = (it: Item) => `${it.label} ${it.id}`;
 function PaletteBody({ mode }: { mode: PaletteMode }) {
   const [query, setQuery] = useState("");
   const { items, placeholder, stale, snoozeAt } = useCommands(mode, query);
-  // Snooze options arrive from Rust, already filtered, after each keystroke:
-  // keep the first one selected so Enter always picks something.
   const fromRust = mode.kind === "snooze";
   const [picked, setPicked] = useState("");
   const firstValue = items[0] ? itemValue(items[0]) : "";
 
-  // Keys reach the palette first (src/keyboard/dispatch.ts); the rest go to cmdk.
   useEffect(
     () =>
       registerKeys("palette", (e) => {
@@ -348,8 +335,6 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
           return true;
         }
         if (e.key === "Enter" && stale) {
-          // The options on screen are for an earlier query: Enter takes the
-          // first option for what is typed now, once it arrives.
           e.preventDefault();
           void snoozeOptions(query).then(([first]) => {
             if (!first || useChrome.getState().palette !== mode) return;
@@ -365,7 +350,6 @@ function PaletteBody({ mode }: { mode: PaletteMode }) {
   );
   const selected = items.some((it) => itemValue(it) === picked) ? picked : firstValue;
   return (
-    // The backdrop closes on a click outside the palette; Esc closes from the keyboard.
     <div
       role="presentation"
       className="fixed inset-0 z-40"

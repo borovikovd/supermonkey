@@ -1,7 +1,3 @@
-//! Deriving a thread's row from its messages, and the split it lands in
-//! (SPEC Views; Split Inbox, Where a conversation lands). Every write that
-//! changes a thread's messages ends here, so the derived row can't drift.
-
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
@@ -12,7 +8,6 @@ use crate::StoreError;
 use crate::changes::Table;
 use crate::tx::{Reads, WriteTx, require};
 
-/// What routing an account's threads needs, read once per transaction.
 pub(crate) struct Routing {
     router: Router,
     identity: Identity,
@@ -56,8 +51,6 @@ fn split_for(
     Ok(routing.place(thread, digest))
 }
 
-/// Re-derives a thread's row and labels from its messages, and its split;
-/// deletes the row when no message is left. Stamps and records it either way.
 pub(crate) fn derive_thread(tx: &mut WriteTx<'_>, thread: ThreadId) -> Result<(), StoreError> {
     let reads = tx.read();
     let Some(account) = reads.threads().account_of(thread)? else {
@@ -109,8 +102,6 @@ pub(crate) fn derive_thread(tx: &mut WriteTx<'_>, thread: ThreadId) -> Result<()
     Ok(())
 }
 
-/// Deletes a thread row whose messages are gone. Its drafts and outbox rows
-/// stay, unlinked from it and stamped.
 pub(crate) fn delete_thread_row(
     tx: &mut WriteTx<'_>,
     account: AccountId,
@@ -150,9 +141,6 @@ pub(crate) fn delete_thread_row(
     Ok(())
 }
 
-/// Re-routes every Inbox thread of the account, stamping and recording the
-/// ones whose split moves (SPEC UI state, Ordering). The caller records what
-/// it changed that made routing change.
 pub(crate) fn reroute_inbox(tx: &mut WriteTx<'_>, account: AccountId) -> Result<(), StoreError> {
     tx.forget_routing(account);
     let placed = tx.read().threads().inbox_splits(account)?;

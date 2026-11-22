@@ -1,7 +1,3 @@
-//! Which new mail notifies (SPEC Notifications), decided on the writer in
-//! the poll's own transaction, so the open conversations and the stored
-//! messages agree with what the poll wrote.
-
 use std::collections::BTreeSet;
 
 use sm_domain::{
@@ -13,23 +9,14 @@ use crate::Notification;
 use crate::effects::Effect;
 use crate::writer::WriterState;
 
-/// More new messages than this for one account in one poll become one
-/// summary.
 const SUMMARY_OVER: usize = 3;
 
-/// What a poll brought.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Arrivals<'a> {
-    /// The messages the poll stored.
     pub(crate) stored: &'a [MessageId],
-    /// The messages history reported added.
     pub(crate) reported: &'a BTreeSet<GmailMessageId>,
 }
 
-/// Records a notification for each message a poll stored that history
-/// reported added, in the Inbox and unread, for any account. Not for a
-/// muted account, mail from any connected account's address, or a thread
-/// the focused window shows open. More than three become one summary.
 pub(crate) fn new_mail(
     reads: Reads<'_>,
     state: &mut WriterState,
@@ -89,7 +76,6 @@ pub(crate) fn new_mail(
     Ok(())
 }
 
-/// One message's notification: the sender, then the subject and snippet.
 fn notification(
     account: AccountId,
     email: &str,

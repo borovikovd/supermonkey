@@ -1,26 +1,17 @@
-//! Testing a query against one message.
-
 use super::{Expr, Field, Query, Term};
 use crate::labels::is_system_label_id;
 use crate::{Addr, Identity, MessageFacts};
 
-/// A message as a rule or a search sees it.
 #[derive(Debug, Clone, Copy)]
 pub struct MatchTarget<'a> {
     message: &'a MessageFacts,
     thread_label_names: &'a [&'a str],
-    /// The plain body, in search only.
     body: Option<&'a str>,
-    /// The thread is snoozed, in search only.
     snoozed: bool,
-    /// Whose `me` is, in search only.
     me: Option<&'a Identity>,
 }
 
 impl<'a> MatchTarget<'a> {
-    /// For a split rule: bare words match the sender's name or address, or
-    /// the subject. `thread_label_names` are the names of the thread's user
-    /// labels, since Gmail does not copy them onto later messages.
     #[must_use]
     pub const fn rule(message: &'a MessageFacts, thread_label_names: &'a [&'a str]) -> Self {
         Self {
@@ -32,9 +23,6 @@ impl<'a> MatchTarget<'a> {
         }
     }
 
-    /// For local search: bare words also match the plain `body`. Only
-    /// queries that [`Query::reads_body`] look at it. `from:me` and the like
-    /// match `me`'s addresses, and `in:snoozed` matches when `snoozed`.
     #[must_use]
     pub const fn search(
         message: &'a MessageFacts,
@@ -54,7 +42,6 @@ impl<'a> MatchTarget<'a> {
 }
 
 impl Query {
-    /// Whether the message matches. Substrings, ignoring case.
     #[must_use]
     pub fn matches(&self, target: &MatchTarget<'_>) -> bool {
         expr_matches(self.expr(), target)
@@ -86,7 +73,6 @@ fn term_matches(term: &Term, t: &MatchTarget<'_>) -> bool {
             Field::To => mine(&m.to),
             Field::Cc => mine(&m.cc),
             Field::Bcc => mine(&m.bcc),
-            // `is_me` is only ever true for the address fields.
             Field::Any | Field::Subject | Field::Label => false,
         };
     }
@@ -130,7 +116,6 @@ fn addr_contains(addr: &Addr, needle_lower: &str) -> bool {
         || contains(&addr.email, needle_lower)
 }
 
-/// Gmail writes `Work/Projects` and `Work Projects` as `label:work-projects`.
 fn label_key(name: &str) -> String {
     name.trim()
         .chars()

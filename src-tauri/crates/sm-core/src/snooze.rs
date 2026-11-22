@@ -1,6 +1,3 @@
-//! Waking snoozed threads (SPEC Snooze): on the writer, as the timer, launch,
-//! and wake from sleep ask.
-
 use std::collections::BTreeMap;
 
 use sm_domain::{AccountId, LabelDelta, Millis, ModifyKind, SnoozeEdit};
@@ -9,10 +6,6 @@ use sm_store::WriteTx;
 use crate::actions::{ActionError, ThreadsChange, change_threads};
 use crate::writer::WriterState;
 
-/// Wakes every snooze due by `now`: the thread gets `INBOX` back and loses
-/// its snooze here at once, and the label change is queued for Gmail, where
-/// it waits while Gmail can't be reached. A wake is not an undo entry.
-/// Returns how many woke.
 pub(crate) fn wake_due(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,

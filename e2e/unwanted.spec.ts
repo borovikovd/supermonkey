@@ -6,12 +6,10 @@ import { A, B } from "./seeds.ts";
 
 const NEWS = "News Co <news@news.test>";
 
-/** A newsletter from News Co with these list headers. */
 function newsletter(subject: string, headers: [string, string][]): Delivery {
   return { account: A, from: NEWS, subject, text: `${subject} body.`, headers };
 }
 
-/** Opens the ⌘U menu on the highlighted row and runs the choice that matches `choice`. */
 async function unsubscribe(app: App, choice: string): Promise<void> {
   await app.press("Meta+u");
   await expect(app.palette).toBeVisible();
@@ -21,7 +19,6 @@ async function unsubscribe(app: App, choice: string): Promise<void> {
   await expect(app.palette).toHaveCount(0);
 }
 
-/** Moves the highlight onto the row containing `text` with j / k. */
 async function highlight(app: App, text: string): Promise<void> {
   const { at, to } = await app.rows.evaluateAll(
     (rows, t) => ({
@@ -36,7 +33,6 @@ async function highlight(app: App, text: string): Promise<void> {
   await expect(app.highlighted).toContainText(text);
 }
 
-/** Opens the palette, runs the command matching `name`, then the choice matching `choice`. */
 async function choose(app: App, name: string, choice: string): Promise<void> {
   await app.press("Meta+k");
   await expect(app.palette).toBeVisible();
@@ -68,7 +64,6 @@ test("UNW-01 Cmd+U unsubscribes with one click when the list offers it", async (
   await expect(app.page.getByText("Unsubscribed from News Co")).toBeVisible();
   const posts = (await gmail.hits()).filter((h) => h.path === "/sink/unsub-1");
   expect(posts.map((h) => [h.method, h.body])).toEqual([["POST", "List-Unsubscribe=One-Click"]]);
-  // One click is enough: no email to the list, and the mail stays where it is.
   expect(await gmail.requests("messages.send")).toEqual([]);
   await app.settle();
   expect(await labelsOf(gmail, news.id)).toContain("INBOX");
@@ -105,7 +100,6 @@ test("UNW-02 an email unsubscribes, and mark done all archives the sender's Inbo
   expect(await labelsOf(gmail, newer?.id ?? "")).not.toContain("INBOX");
   expect(await labelsOf(gmail, other?.id ?? "")).toContain("INBOX");
 
-  // The archive is an ordinary action: z brings both back.
   await app.press("z");
   await expect(app.row("News one")).toHaveCount(1);
   await expect(app.row("News two")).toHaveCount(1);
@@ -146,7 +140,6 @@ test("UNW-04 no unsubscribe link, or no network, says so; the archive still happ
   expect(await labelsOf(gmail, plain.id)).toContain("INBOX");
   expect(await gmail.requests("messages.send")).toEqual([]);
 
-  // Offline: the local archive goes ahead, and the unsubscribe reports it failed.
   await gmail.offline(true);
   await unsubscribe(app, "Unsubscribe, and mark done all");
   await expect(app.row("No link here")).toHaveCount(0);
@@ -169,13 +162,11 @@ test("UNW-05 Block makes a Gmail filter to Trash, trashes the conversation, and 
   ]);
   expect(await labelsOf(gmail, promo.id)).toContain("TRASH");
 
-  // Gmail applies the filter: new mail from the sender lands in Trash, not the Inbox.
   const next = await gmail.deliver({ account: A, from: NEWS, subject: "Another sale" });
   await app.settle();
   expect(await labelsOf(gmail, next.id)).toEqual(expect.arrayContaining(["TRASH"]));
   await expect(app.row("Another sale")).toHaveCount(0);
 
-  // Blocking a domain filters on @domain.
   await gmail.deliver({ account: A, from: "Deals <deals@shop.test>", subject: "Deal" });
   await app.settle();
   await expect(app.highlighted).toContainText("Deal");
@@ -218,11 +209,9 @@ test("UNW-07 an account signed in before filters were asked for is offered Sign 
     hasText: "Blocking needs one more Google permission",
   });
   await expect(toast).toBeVisible();
-  // Nothing was blocked, so the conversation stays.
   await expect(app.row("Big sale")).toHaveCount(1);
   expect(await gmail.filters(A)).toEqual([]);
 
-  // Sign in again grants it, and Block then works.
   await gmail.nextSignIn({ email: A });
   await toast.getByRole("button", { name: "Sign in again" }).click();
   await app.settle();
@@ -250,7 +239,6 @@ test("UNW-09 unsubscribe, block, and unblock act only on the account's own threa
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  /** Runs a command as the webview would, with any arguments it likes. */
   const invoke = (cmd: string, args: Record<string, unknown>) =>
     app.page.evaluate(
       async ([c, a]) => {
@@ -269,7 +257,6 @@ test("UNW-09 unsubscribe, block, and unblock act only on the account's own threa
   const others = Number(await app.rowKey("B 2"));
   await app.press("Control+1");
 
-  // B's thread, named with A's account: refused, nothing filtered or trashed.
   expect(await invoke("block", { account: a, thread: others, domain: false })).toBe(400);
   expect(await invoke("unsubscribe", { account: a, thread: others })).toBe(400);
   await app.settle();
@@ -277,7 +264,6 @@ test("UNW-09 unsubscribe, block, and unblock act only on the account's own threa
   const bState = await gmail.gmail(B);
   expect(bState.messages.filter((m) => m.labels.includes("TRASH"))).toEqual([]);
 
-  // A block of A's own sender works; only that filter can be unblocked, and only by A.
   expect(await invoke("block", { account: a, thread: own, domain: false })).toBe(200);
   await app.settle();
   const [filter] = await gmail.filters(A);
@@ -306,7 +292,6 @@ test("UNW-10 block and unsubscribe act on their own account when another one is 
   await app.settle();
   await highlight(app, "Flash deal");
 
-  // Block: the filter is made while B is on screen.
   const filter = await gmail.hold("filters.create");
   await choose(app, "Block", "Block promo@pal.test");
   await app.press("Control+2");
@@ -319,7 +304,6 @@ test("UNW-10 block and unsubscribe act on their own account when another one is 
   await app.expectNoErrorToasts();
   await expect(app.highlighted).toContainText("Bea Blue");
 
-  // Mark done all: the sender's mail is listed while B is on screen.
   await app.press("Control+1");
   const header: [string, string][] = [["List-Unsubscribe", "<mailto:leave@news.test>"]];
   const [one, two] = await gmail.deliverMany([

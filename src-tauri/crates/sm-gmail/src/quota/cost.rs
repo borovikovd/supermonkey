@@ -1,5 +1,3 @@
-//! Quota units per Gmail method, from Google's published table (SPEC Sync).
-
 use super::Units;
 use crate::wire::Format;
 
@@ -22,7 +20,6 @@ pub(crate) const FILTERS_LIST: Units = Units(1);
 pub(crate) const FILTERS_CREATE: Units = Units(5);
 pub(crate) const FILTERS_DELETE: Units = Units(5);
 
-/// `threads.get`: 40, or 120 with `format=full`.
 pub(crate) const fn threads_get(format: Format) -> Units {
     if format.is_full() {
         Units(120)
@@ -31,7 +28,6 @@ pub(crate) const fn threads_get(format: Format) -> Units {
     }
 }
 
-/// `messages.get` and `drafts.get`: 20, or 60 with `format=full` or `raw`.
 pub(crate) const fn messages_get(format: Format) -> Units {
     if format.is_full() {
         Units(60)

@@ -1,6 +1,3 @@
-//! The core's root (ARCHITECTURE.md, section 8.1): starts the writer, the
-//! read pool, and the effect router, and hands out narrow handles.
-
 use std::fmt;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -22,34 +19,23 @@ use crate::workers::{AccountWorkers, Network, Notifier, Searches, WorkerDeps, ba
 use crate::writer::CoreWriter;
 use crate::{Error, Platform};
 
-/// Read-only connections for window fetches, bodies, and autocomplete.
 const READ_CONNECTIONS: NonZeroUsize = match NonZeroUsize::new(4) {
     Some(n) => n,
     None => NonZeroUsize::MIN,
 };
 
-/// Where the core keeps its data, how it runs, and which Gmail it talks to.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// The app's data folder: the database, and the files of attachments
-    /// and drafts.
     pub data_dir: PathBuf,
-    /// The SQLite file. Created, or moved aside for a new one, if needed.
     pub db_path: PathBuf,
-    /// A debug build: the UI shows its keydown-to-paint meter.
     pub debug: bool,
-    /// Gmail's endpoints, the OAuth client, and the request budget.
     pub gmail: GmailConfig,
 }
 
 impl Config {
-    /// The database's name in the app's data folder.
     pub const DB_FILE: &str = "supermonkey.db";
-    /// The refresh-token file's name in the app's data folder, for a
-    /// [`sm_gmail::TokenFile`].
     pub const TOKEN_FILE: &str = "tokens.json";
 
-    /// The app's database in `data_dir`.
     #[must_use]
     pub fn in_data_dir(data_dir: &Path, debug: bool, gmail: GmailConfig) -> Self {
         Self {
@@ -61,20 +47,14 @@ impl Config {
     }
 }
 
-/// Which Gmail the core talks to: Google's, or the fake in tests and demo
-/// mode, and how fast it may.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GmailConfig {
-    /// The REST API's base URL.
     pub base_url: String,
-    /// The OAuth client and its endpoints.
     pub oauth: OAuthConfig,
-    /// The request budget per account.
     pub quota: QuotaConfig,
 }
 
 impl GmailConfig {
-    /// Google's Gmail with this OAuth client and budget.
     #[must_use]
     pub fn google(oauth: OAuthConfig, quota: QuotaConfig) -> Self {
         Self {
@@ -85,22 +65,13 @@ impl GmailConfig {
     }
 }
 
-/// The ports the core runs on (ARCHITECTURE.md, section 8.3), made by
-/// whoever starts it: the Tauri shell, or the E2E server with a manual clock
-/// and a recording platform.
 pub struct Deps {
-    /// The operating system.
     pub platform: Arc<dyn Platform>,
-    /// App time.
     pub clock: Arc<dyn Clock>,
-    /// Where refresh tokens live.
     pub tokens: Arc<TokenFile>,
-    /// Counts the core's work in progress; the same one a manual clock counts
-    /// its fired timers in.
     pub activity: Arc<Activity>,
 }
 
-/// The activity only: the other ports are trait objects.
 impl fmt::Debug for Deps {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Deps")
@@ -109,7 +80,6 @@ impl fmt::Debug for Deps {
     }
 }
 
-/// A running core.
 pub struct App {
     actions: Actions,
     queries: Queries,
@@ -120,7 +90,6 @@ pub struct App {
     writer: CoreWriter,
 }
 
-/// Its name only: it is the core's handles.
 impl fmt::Debug for App {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("App").finish_non_exhaustive()
@@ -128,10 +97,6 @@ impl fmt::Debug for App {
 }
 
 impl App {
-    /// Opens the database and starts the core: the writer thread, the read
-    /// pool, and the effect router. Call it inside a tokio runtime; the
-    /// core's tasks run on it. Nothing talks to Gmail until
-    /// [`Lifecycle::launch`], so the E2E server can seed accounts first.
     pub fn start(config: Config, deps: Deps) -> Result<Self, Error> {
         let runtime = tokio::runtime::Handle::try_current()?;
         let Deps {
@@ -177,7 +142,6 @@ impl App {
         };
         tasks.spawn("effects", router.run(from_writers));
         show_badge(&tasks, badge, &pool, &platform, &clock);
-        // The tests' copy, taken before the writer moves into the handles.
         #[cfg(test)]
         let tests_writer = writer.clone();
         Ok(Self {
@@ -208,45 +172,36 @@ impl App {
         })
     }
 
-    /// UI actions.
     pub const fn actions(&self) -> &Actions {
         &self.actions
     }
 
-    /// The UI's lookups.
     pub const fn queries(&self) -> &Queries {
         &self.queries
     }
 
-    /// Connecting pages, launch, focus, the online flag, and quitting.
     pub const fn lifecycle(&self) -> &Lifecycle {
         &self.lifecycle
     }
 
-    /// Signing accounts in, and waking their workers.
     pub const fn accounts(&self) -> &Accounts {
         &self.accounts
     }
 
-    /// Links, attachments, unsubscribe, and block.
     pub const fn mail(&self) -> &Mail {
         &self.mail
     }
 
-    /// The writer, for tests that write as sync would.
     #[cfg(test)]
     pub(crate) const fn writer(&self) -> &CoreWriter {
         &self.writer
     }
 }
 
-/// Picks action numbers up where the database left them: the last one the
-/// core has received, and, as the writer's first job, the `ack` it sends.
 fn resume_numbering(pool: &ReadPool, writer: &CoreWriter) -> Result<Arc<Received>, Error> {
     let last = pool.with(|r| r.meta().last_action())?;
     let received = Arc::new(Received::default());
     received.note(last);
-    // The first job: the writer's `ack` starts where the database is.
     drop(writer.call(Priority::Ui, move |_, state| {
         state.sent_ack = last;
         Ok::<_, StoreError>(())
@@ -254,8 +209,6 @@ fn resume_numbering(pool: &ReadPool, writer: &CoreWriter) -> Result<Arc<Received
     Ok(received)
 }
 
-/// Shows the Dock badge as the database has it at launch, and starts the
-/// task that keeps it so.
 fn show_badge(
     tasks: &Tasks,
     badge: Arc<Kick>,

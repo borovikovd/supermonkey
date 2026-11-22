@@ -1,4 +1,3 @@
-// Re-exports of the types generated from Rust by ts-rs. No IPC type is written by hand.
 export type { AccountInfo } from "../bindings/AccountInfo";
 export type { Unsubscribed } from "../bindings/Unsubscribed";
 export type { BlockedSenders } from "../bindings/BlockedSenders";

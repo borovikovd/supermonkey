@@ -1,5 +1,3 @@
-//! Gmail label ids: the system ones by name, and sets of them.
-
 use std::collections::BTreeSet;
 use std::fmt;
 
@@ -7,44 +5,27 @@ use serde::{Deserialize, Serialize};
 
 use crate::LabelId;
 
-/// Gmail's prefix for category labels (`CATEGORY_SOCIAL`, ...).
 const CATEGORY_PREFIX: &str = "CATEGORY_";
 
-/// A Gmail system or category label this app knows by name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SystemLabel {
-    /// `INBOX`.
     Inbox,
-    /// `SENT`.
     Sent,
-    /// `DRAFT`.
     Draft,
-    /// `STARRED`.
     Starred,
-    /// `UNREAD`.
     Unread,
-    /// `IMPORTANT`, Gmail's own importance marker (not the Important split).
     Important,
-    /// `TRASH`.
     Trash,
-    /// `SPAM`.
     Spam,
-    /// `CHAT`.
     Chat,
-    /// `CATEGORY_PERSONAL`.
     CategoryPersonal,
-    /// `CATEGORY_SOCIAL`.
     CategorySocial,
-    /// `CATEGORY_PROMOTIONS`.
     CategoryPromotions,
-    /// `CATEGORY_UPDATES`.
     CategoryUpdates,
-    /// `CATEGORY_FORUMS`.
     CategoryForums,
 }
 
 impl SystemLabel {
-    /// Every system label, in declaration order.
     pub const ALL: [Self; 14] = [
         Self::Inbox,
         Self::Sent,
@@ -62,8 +43,6 @@ impl SystemLabel {
         Self::CategoryForums,
     ];
 
-    /// The labels a new account's label table starts with, with their
-    /// display names. Gmail's `labels.list` adds the rest on first sync.
     pub const SEEDED: [(Self, &'static str); 10] = [
         (Self::Inbox, "Inbox"),
         (Self::Sent, "Sent"),
@@ -77,7 +56,6 @@ impl SystemLabel {
         (Self::CategoryPromotions, "Promotions"),
     ];
 
-    /// Gmail's id for the label, which is also its local id.
     #[must_use]
     pub const fn id(self) -> &'static str {
         match self {
@@ -98,7 +76,6 @@ impl SystemLabel {
         }
     }
 
-    /// The label as a [`LabelId`].
     #[must_use]
     pub fn label_id(self) -> LabelId {
         LabelId::from(self.id())
@@ -111,14 +88,11 @@ impl fmt::Display for SystemLabel {
     }
 }
 
-/// Whether `id` starts with `CATEGORY_`, ignoring ASCII case.
 pub(crate) fn is_category_id(id: &str) -> bool {
     id.get(..CATEGORY_PREFIX.len())
         .is_some_and(|p| p.eq_ignore_ascii_case(CATEGORY_PREFIX))
 }
 
-/// Whether `id` names a Gmail system label or any category, ignoring case and
-/// surrounding spaces. Everything else is a user label's id or name.
 pub(crate) fn is_system_label_id(id: &str) -> bool {
     let id = id.trim();
     is_category_id(id)
@@ -128,65 +102,53 @@ pub(crate) fn is_system_label_id(id: &str) -> bool {
             .any(|l| l.id().eq_ignore_ascii_case(id))
 }
 
-/// A set of label ids, as on a message or a thread. Ordered, so it stores
-/// and compares the same however it was built. Serializes as an array.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct LabelSet(BTreeSet<LabelId>);
 
 impl LabelSet {
-    /// The empty set.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Whether the set holds the label with this id.
     #[must_use]
     pub fn contains(&self, id: &str) -> bool {
         self.0.contains(id)
     }
 
-    /// Whether the set holds this system label.
     #[must_use]
     pub fn has(&self, label: SystemLabel) -> bool {
         self.contains(label.id())
     }
 
-    /// Adds a label; false when it was already there.
     pub fn insert(&mut self, id: LabelId) -> bool {
         self.0.insert(id)
     }
 
-    /// Removes a label; false when it was not there.
     pub fn remove(&mut self, id: &str) -> bool {
         self.0.remove(id)
     }
 
-    /// The labels, in order.
     pub fn iter(&self) -> impl Iterator<Item = &LabelId> + '_ {
         self.0.iter()
     }
 
-    /// How many labels the set holds.
     #[must_use]
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
-    /// Whether the set is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    /// The labels of `self` that are not in `other`.
     #[must_use]
     pub fn without(&self, other: &Self) -> Self {
         self.0.difference(&other.0).cloned().collect()
     }
 
-    /// The labels in both `self` and `other`.
     #[must_use]
     pub fn and(&self, other: &Self) -> Self {
         self.0.intersection(&other.0).cloned().collect()

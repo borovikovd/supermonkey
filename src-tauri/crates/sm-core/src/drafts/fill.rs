@@ -1,9 +1,3 @@
-//! A fresh composer's first save (SPEC UI state, Actions; Addressing): it
-//! carries only its kind and target, and Rust fills the rest. A reply or
-//! forward started before its target's body was stored quotes the snippet,
-//! and gets the whole quote, and a forward its attachments, once the body
-//! lands (SPEC Addressing).
-
 use sm_domain::{
     AccountId, DraftId, DraftKind, MessageId, Millis, ReplyTarget, ThreadId, addressing,
 };
@@ -15,7 +9,6 @@ use super::save::message_attachments;
 use super::text::{escape_text, local_offset};
 use crate::actions::ActionError;
 
-/// What a fresh composer's first save says.
 #[derive(Debug, Clone)]
 pub(crate) struct NewDraft {
     pub(crate) id: DraftId,
@@ -27,10 +20,6 @@ pub(crate) struct NewDraft {
     pub(crate) started_on_latest: bool,
 }
 
-/// Creates the draft a fresh composer saves first: From, To, Cc, Subject,
-/// and the quote by the rules in Addressing, and for a forward its target's
-/// attachments. Those are its defaults for the untouched check. A draft that
-/// exists already is left alone: the save came twice.
 pub(crate) fn create(tx: &mut WriteTx<'_>, new: NewDraft, now: Millis) -> Result<(), ActionError> {
     let reads = tx.read();
     if reads.drafts().get(&new.id)?.is_some() {
@@ -102,8 +91,6 @@ pub(crate) fn create(tx: &mut WriteTx<'_>, new: NewDraft, now: Millis) -> Result
     Ok(())
 }
 
-/// The body of `message` landed: each draft aimed at it that quotes its
-/// snippet gets the whole quote, and a forward the message's attachments.
 pub(crate) fn complete(tx: &mut WriteTx<'_>, message: MessageId) -> Result<(), StoreError> {
     for id in tx.read().drafts().awaiting_body(message)? {
         complete_draft(tx, &id)?;
@@ -111,9 +98,6 @@ pub(crate) fn complete(tx: &mut WriteTx<'_>, message: MessageId) -> Result<(), S
     Ok(())
 }
 
-/// Ends the draft's wait for its target's body before a write to Gmail: the
-/// whole quote when the body is stored now, else the snippet's quote stays
-/// (Gmail no longer has the target). Returns the draft as it is then.
 pub(crate) fn settle(tx: &mut WriteTx<'_>, id: &DraftId) -> Result<Option<Draft>, StoreError> {
     if !complete_draft(tx, id)?
         && let Some(record) = tx.read().drafts().get(id)?
@@ -126,10 +110,6 @@ pub(crate) fn settle(tx: &mut WriteTx<'_>, id: &DraftId) -> Result<Option<Draft>
     Ok(tx.read().drafts().get(id)?.map(|r| r.draft))
 }
 
-/// Fills a draft that waits for its target's body, if that body is stored.
-/// Attachments it adds count as defaults, so an untouched forward stays
-/// untouched, and are marked with this `rev`, so a save from a composer
-/// that has not seen them yet keeps them. Returns whether it filled it.
 fn complete_draft(tx: &mut WriteTx<'_>, id: &DraftId) -> Result<bool, StoreError> {
     let reads = tx.read();
     let Some(record) = reads.drafts().get(id)? else {
@@ -165,9 +145,6 @@ fn complete_draft(tx: &mut WriteTx<'_>, id: &DraftId) -> Result<bool, StoreError
     Ok(true)
 }
 
-/// Sets the draft's quote of `target` by its kind: from the stored body, or
-/// from the snippet when none is stored yet. Returns whether the body was
-/// stored.
 fn quote(reads: Reads<'_>, draft: &mut Draft, target: &MessageRecord) -> Result<bool, StoreError> {
     let body = reads.messages().bodies(&[target.id])?.into_iter().next();
     let whole = body.is_some();
@@ -196,8 +173,6 @@ fn quote(reads: Reads<'_>, draft: &mut Draft, target: &MessageRecord) -> Result<
     Ok(whole)
 }
 
-/// The attachments a forward of `target` carries: the target's. None for a
-/// reply.
 fn forwarded(
     reads: Reads<'_>,
     draft: &Draft,
@@ -209,7 +184,6 @@ fn forwarded(
     }
 }
 
-/// The `References` a reply to `target` sends: the target's, then its own id.
 fn references(target: &MessageRecord) -> String {
     let own = target.message_id_header.as_deref().unwrap_or_default();
     format!("{} {own}", target.references).trim().to_owned()

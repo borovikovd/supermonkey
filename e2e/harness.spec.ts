@@ -1,7 +1,3 @@
-// Checks the harness itself: seeds, settle, holds and faults, the request log,
-// the clock, restart and crash, focus, links and remote images, Gmail-side
-// drafts, OAuth, introspection, and the UI helpers. Each case is short; the
-// product's behavior is covered by the other specs.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -18,13 +14,11 @@ test("standard seed: splits, sendAs, and keyed handles", async ({ app, gmail }) 
   expect(sections.map((x) => x.name)).toEqual(["Important", "Other"]);
   expect(sections[0]?.subjects.slice(0, 3)).toEqual(["Person 1", "Person 2", "Person 3"]);
   await expect(app.unread).toHaveCount(9);
-  // B's avatar initial comes from its primary sendAs name, "Zed Bolt".
   await expect(app.account(B)).toContainText("Z");
   const a = await gmail.gmail(A);
   expect(a.sendAs.map((x) => x.email)).toEqual([A, seeds.A_ALIAS]);
   expect(s.thread("collide").threadId).toBe(s.thread("p1").threadId);
   expect(s.thread("plan").messages).toHaveLength(12);
-  // Browser and core agree on the time: the anchor.
   expect(await app.page.evaluate(() => Date.now())).toBe(seeds.ANCHOR);
   expect(await app.now()).toBe(seeds.ANCHOR);
 });
@@ -71,12 +65,10 @@ test("settle skips a held request with a second action queued behind it", async 
 test("a held request can be released with a fault", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   const hold = await gmail.hold("messages.batchModify");
-  // Called before the request exists: it waits until the hold has parked it.
   const released = hold.release({ kind: "status", status: 400, reason: "invalidArgument" });
   await app.press("j", "e");
   expect(await released).toBe(1);
   await app.settle();
-  // A rejection rolls the action back and says so.
   await expect(app.row("Person 2")).toHaveCount(1);
   await expect(app.errorToasts).toHaveCount(1);
 });
@@ -93,18 +85,14 @@ test("an error toast that has already left by itself still counts", async ({ app
   const [shown] = await app.errorToastsShown();
   expect(shown).toBeTruthy();
 
-  // Sonner dismisses it 4 s after it shows; `advance` fires that timer now.
   await app.advance(5_000);
-  // A count of the toasts on screen can no longer tell it was there; the log can.
   await expect(app.errorToasts).toHaveCount(0);
   expect(await app.errorToastsShown()).toEqual([shown]);
   await expect(app.expectNoErrorToasts()).rejects.toThrow("error toasts shown");
-  // From a mark taken after it, there are none.
   await app.expectNoErrorToasts(1);
 });
 
 test("no spec checks that no error toast showed by counting the ones on screen", () => {
-  // The count passes once a toast has left by itself; `expectNoErrorToasts` reads the log.
   const onScreen =
     /expect\(\s*app\.errorToasts\b[^;]*\)\.(?:toHaveCount\(0\)|not\.toBeVisible\(\))/;
   const dir = import.meta.dirname;
@@ -116,7 +104,6 @@ test("no spec checks that no error toast showed by counting the ones on screen",
 
 test("faults match by account and apply after the work is done", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
-  // Only B's requests: A's archive is unaffected.
   await gmail.fault({ api: "messages.batchModify", account: B }, { kind: "status", status: 503 });
   await gmail.fault(
     "messages.batchModify",
@@ -125,7 +112,6 @@ test("faults match by account and apply after the work is done", async ({ app, g
   );
   await app.press("e");
   await app.settle();
-  // Gmail applied it, though the app heard 500 and is backing off.
   const p1 = (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p1", 1).id);
   expect(p1?.labels).not.toContain("INBOX");
   await app.advance(2_000);
@@ -154,7 +140,6 @@ test("polls run on app time; stepwise advance runs every retry", async ({ app, g
   const tries = await gmail.requests("messages.batchModify");
   expect(tries.map((r) => r.answer)).toEqual([503, 503, 503, 204]);
   const gaps = tries.slice(1).map((r, i) => r.at - (tries[i]?.at ?? 0));
-  // 1 s doubling, with ±20% jitter.
   expect(gaps[0]).toBeGreaterThanOrEqual(800);
   expect(gaps[1]).toBeGreaterThan(gaps[0] ?? 0);
   expect(gaps[2]).toBeGreaterThan(gaps[1] ?? 0);
@@ -180,7 +165,6 @@ test("a quit closes the composer first; Gmail and the clock change while down", 
     });
     await app.advance(60_000);
   });
-  // The page answered quit-requested: the core did not wait out its 10 s fallback.
   expect(quitMs).toBeLessThan(5_000);
   expect(await app.now()).toBe(seeds.ANCHOR + 60_000);
   await expect(app.row("While down")).toHaveCount(1);
@@ -250,7 +234,6 @@ test("links open through the core's open_url; remote images hit the image host",
   await expect
     .poll(async () => (await gmail.hits()).map((h) => h.path))
     .toEqual(expect.arrayContaining(["/img/pixel.png", "/img/bg.png"]));
-  // What MessageFrame sends for a link click in web mode.
   const open = (url: string) =>
     app.page.evaluate(
       async (u) =>
@@ -266,7 +249,6 @@ test("links open through the core's open_url; remote images hit the image host",
   expect(await open("https://example.org/a")).toBe(200);
   expect(await open("javascript:alert(1)")).toBe(400);
   expect((await gmail.platform()).openedUrls).toEqual(["https://example.org/a"]);
-  // Requests to evil.test reach the sink instead of failing DNS.
   await app.page.evaluate(() => {
     new Image().src = "http://evil.test/probe.png";
   });
@@ -318,7 +300,6 @@ for (const [name, seed] of Object.entries(OTHER_SEEDS)) {
     const t0 = Date.now();
     await seed(gmail, app);
     test.info().annotations.push({ type: "open", description: `${Date.now() - t0} ms` });
-    // Read once, without retrying: the seed returns only after its mail is on screen.
     const subjects = await app.subjects();
     if (name === "empty") {
       expect(subjects).toEqual([]);
@@ -368,7 +349,6 @@ test("Gmail-side drafts, deleted threads, and expired history", async ({ app, gm
   await gmail.poll();
   await app.settle();
   await expect(app.row("Person 5")).toHaveCount(0);
-  // Left out of the listing but still in Gmail: kept.
   await expect(app.row("Person 2")).toHaveCount(1);
   const resync = (await gmail.requests("threads.list", { account: A })).find(
     (r) => r.params.includeSpamTrash === "true",
@@ -441,7 +421,6 @@ test("MIME: a sent reply's part tree", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
   await app.press("j", "j", "Enter");
   await app.reply();
-  // Sent before the autosave runs: the send carries the typed text itself.
   await app.type("Thanks for the note");
   await app.press("Meta+Enter");
   await app.advance(10_000);

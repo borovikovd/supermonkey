@@ -19,7 +19,6 @@ function Sheet({
   wide?: boolean;
 }) {
   return (
-    // The backdrop closes on a click outside the sheet; Esc closes from the keyboard.
     <div
       role="presentation"
       className="fixed inset-0 z-30 bg-scrim"
@@ -180,13 +179,10 @@ const STARTERS: [string, string][] = [
 function Splits() {
   const { account } = useCurrent();
   const summary = useSummary(account);
-  // Unedited, the sheet shows the live splits; the first edit takes a copy.
   const [edited, setEdited] = useState<SplitInfo[] | null>(null);
   const [deleted, setDeleted] = useState<number[]>([]);
-  // Why the core refused a rule, by split id, at the last Save.
   const [refused, setRefused] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
-  // New splits get negative ids until saved.
   const nextNewId = useRef(-1);
   const alive = useRef(true);
   useEffect(() => {
@@ -199,21 +195,15 @@ function Splits() {
   const rows = edited ?? summary.splits;
   const update = (i: number, patch: Partial<SplitInfo>) => {
     const id = rows[i]?.id;
-    // Editing a refused rule clears its message until the next Save.
     if (patch.query !== undefined && id !== undefined && id in refused) {
       setRefused(Object.fromEntries(Object.entries(refused).filter(([k]) => k !== String(id))));
     }
     setEdited(rows.map((r, j) => (i === j ? { ...r, ...patch } : r)));
   };
-  // The sheet closes once the core has saved; a refused rule keeps the
-  // sheet and every edit on screen (SPEC Split Inbox). One save at a time:
-  // a second would add the new splits again.
   const save = () => {
     if (saving) return;
     setSaving(true);
     act({ type: "saveSplits", account, splits: rows, deleted }, ({ refusal }) => {
-      // This sheet closed while the save was on its way: its answer must not
-      // close or mark a sheet opened since. A refusal still says why.
       if (!alive.current) {
         if (refusal !== null) toast.error(refusal.message);
         return;
@@ -232,7 +222,6 @@ function Splits() {
     const j = i + d;
     const a = rows[i];
     const b = rows[j];
-    // Only custom splits reorder, among themselves.
     if (!a || !b || a.kind !== "custom" || b.kind !== "custom") return;
     const next = [...rows];
     next[i] = b;
@@ -243,7 +232,6 @@ function Splits() {
     const id = nextNewId.current--;
     setEdited((current) => {
       const r = current ?? summary.splits;
-      // Custom splits come first, then Important, then Other.
       const fixed = r.findIndex((x) => x.kind !== "custom");
       const s: SplitInfo = {
         id,

@@ -1,13 +1,9 @@
-// Search (SPEC §Search): local results at once, the Gmail
-// merge, the 300 ms debounce, offline search, the query language, actions on
-// results, and paging.
 import type { App } from "./app.ts";
 import type { Control } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A, dates } from "./seeds.ts";
 
-/** Runs `step` on each item, one after another. */
 async function inOrder<T>(items: readonly T[], step: (item: T) => Promise<void>): Promise<void> {
   await items.reduce((prev, item) => prev.then(() => step(item)), Promise.resolve());
 }
@@ -16,7 +12,6 @@ function field(app: App) {
   return app.page.getByPlaceholder("Search");
 }
 
-/** Opens search if needed and replaces the query, as typing would. */
 async function search(app: App, query: string): Promise<void> {
   await app.press("/");
   await expect(field(app)).toBeFocused();
@@ -24,7 +19,6 @@ async function search(app: App, query: string): Promise<void> {
   await app.settle();
 }
 
-/** Moves the list highlight onto the row with this subject with `j` / `k`. */
 async function highlightRow(app: App, subject: string): Promise<void> {
   await expect(app.row(subject)).toHaveCount(1);
   const subjects = await app.subjects();
@@ -37,12 +31,10 @@ async function highlightRow(app: App, subject: string): Promise<void> {
   await expect(app.highlighted).toContainText(subject);
 }
 
-/** The request log's length now: a mark for `gmailSearches`. */
 async function mark(gmail: Control): Promise<number> {
   return (await gmail.requests()).length;
 }
 
-/** The `q` of each Gmail search since the mark (the contacts backfill also lists threads). */
 async function gmailSearches(gmail: Control, since: number): Promise<string[]> {
   return (await gmail.requests())
     .slice(since)
@@ -51,10 +43,6 @@ async function gmailSearches(gmail: Control, since: number): Promise<string[]> {
     .filter((q): q is string => q !== undefined);
 }
 
-/**
- * Scrolls the list from top to bottom and returns every row it rendered, as
- * key → subject.
- */
 async function collectRows(app: App): Promise<Map<string, string>> {
   const seen = new Map<string, string>();
   const scroller = app.list.locator("xpath=..");
@@ -85,7 +73,6 @@ async function collectRows(app: App): Promise<Map<string, string>> {
   return seen;
 }
 
-/** The rows' subjects once all of them are loaded, sorted. */
 async function allSubjects(app: App): Promise<string[]> {
   const rows = await collectRows(app);
   return [...rows.values()].toSorted();
@@ -99,7 +86,6 @@ test("SRC-01 / shows local results at once; focus moves to results; Esc restores
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  // Star p1 and p2 so Starred has two rows, then hold Gmail search forever.
   await app.press("s", "j", "s");
   await app.settle();
   await gmail.hold("threads.list");
@@ -120,7 +106,6 @@ test("SRC-01 / shows local results at once; focus moves to results; Esc restores
 
   await app.press("/");
   await expect(field(app)).toBeFocused();
-  // Every key goes into the field, even shortcut keys.
   await app.type("venue e#j!");
   await expect(field(app)).toHaveValue("venue e#j!");
   await app.settle();
@@ -128,7 +113,6 @@ test("SRC-01 / shows local results at once; focus moves to results; Esc restores
 
   await app.press("Meta+a", "Backspace");
   await app.type("venue");
-  // Local results, without waiting for Gmail.
   await expect(app.row("Offsite venue")).toHaveCount(1);
   await app.press("ArrowDown");
   await expect(field(app)).not.toBeFocused();
@@ -137,7 +121,6 @@ test("SRC-01 / shows local results at once; focus moves to results; Esc restores
   await app.press("Escape");
   await backOnStarred();
 
-  // Enter instead of ↓.
   await app.press("/");
   await app.type("venue");
   await expect(app.row("Offsite venue")).toHaveCount(1);
@@ -148,7 +131,6 @@ test("SRC-01 / shows local results at once; focus moves to results; Esc restores
   await app.press("Escape");
   await backOnStarred();
 
-  // Esc while focus is still in the field.
   await app.press("/");
   await app.type("venue");
   await expect(app.row("Offsite venue")).toHaveCount(1);
@@ -158,7 +140,6 @@ test("SRC-01 / shows local results at once; focus moves to results; Esc restores
 
 test("SRC-02 local query language, and what is sent to Gmail", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
-  // Cache trashOld through the Trash view, so its exclusion is not vacuous.
   await app.press("Meta+k");
   await app.palette.getByRole("option", { name: /^Go to Trash/ }).click();
   await expect(app.row("Old trash")).toHaveCount(1);
@@ -174,7 +155,6 @@ test("SRC-02 local query language, and what is sent to Gmail", async ({ app, gma
     ["subject:venue OR subject:ticket", ["Offsite venue", "Ticket #42"], []],
     ["label:receipts", ["Your receipt"], []],
     ["is:list", ["Digest: week 44", "Digest: daily", "Digest: week 43"], ["Big sale"]],
-    // Only in trashOld, which has no message outside trash and spam.
     ["wombat", [], ["Old trash"]],
   ];
   await inOrder(table, async ([query, include, exclude]) => {
@@ -194,8 +174,6 @@ test("SRC-02 local query language, and what is sent to Gmail", async ({ app, gma
   await app.advance(300);
   expect(await gmailSearches(gmail, since)).toEqual(["digest"]);
 
-  // Nothing but `is:list` would reach Gmail empty and list every thread, such
-  // as Invoice 2019, which only Gmail has and which is not list mail.
   await inOrder(["is:list", "-is:list", "(is:list)"], async (query) => {
     await search(app, query);
     await app.advance(300);
@@ -222,7 +200,6 @@ test("SRC-03 Gmail hits are merged in as their metadata arrives", async ({ app, 
   await expect(hit.locator(".tabular")).toHaveText(/\d/);
   await expect(app.page.getByText("Results from this Mac")).toHaveCount(0);
 
-  // Opening the hit fetches its body at once.
   await app.press("Enter");
   await expect(field(app)).not.toBeFocused();
   await app.press("Enter");
@@ -234,7 +211,6 @@ test("SRC-03 Gmail hits are merged in as their metadata arrives", async ({ app, 
   expect(full).toHaveLength(1);
   expect(full[0]?.at).toBe(dates.anchor + 300);
 
-  // A cached hit needs no fetch.
   const addrFetches = async () =>
     (await gmail.requests("threads.get", { account: A })).filter((r) =>
       r.path.endsWith(`/threads/${addr}`),
@@ -251,7 +227,6 @@ test("SRC-03 Gmail hits are merged in as their metadata arrives", async ({ app, 
 
 test("SRC-04 the Gmail query waits for a 300 ms pause", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
-  // Matches "invo" but not "invoice"; only in Gmail.
   await gmail.deliver({
     account: A,
     from: "Ivo Ivanov <ivo@inv.test>",
@@ -268,7 +243,6 @@ test("SRC-04 the Gmail query waits for a 300 ms pause", async ({ app, gmail }) =
   await app.advance(299);
   expect(await gmailSearches(gmail, since)).toEqual([]);
 
-  // Hold the metadata fetches, so invo's hits are still fetching below.
   const hold = await gmail.hold("threads.get");
   await app.type("o");
   await app.advance(300);
@@ -289,7 +263,6 @@ test("SRC-05 offline search shows cached mail and says the results are from this
 }) => {
   await seeds.standard(gmail, app);
   await gmail.offline(true);
-  // The next poll fails, so the app knows it is offline.
   await app.advance(45_000);
   await app.press("/");
   await app.type("venue");
@@ -304,7 +277,6 @@ test("SRC-06 actions on search results follow the removal table", async ({ app, 
   await app.press("Enter");
   await expect(app.highlighted).toContainText("Person 1");
 
-  // e: stays, since the thread still matches. Never removed and re-added.
   const p1Key = await app.rowKey("Person 1");
   const rows = await app.watchRows();
   await app.press("e");
@@ -315,21 +287,18 @@ test("SRC-06 actions on search results follow the removal table", async ({ app, 
   const p1 = (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p1", 1).id);
   expect(p1?.labels).not.toContain("INBOX");
 
-  // #: leaves, since local search skips trashed-only threads.
   await highlightRow(app, "Person 2");
   await app.press("#");
   await expect(app.row("Person 2")).toHaveCount(0);
   await app.settle();
   await expect(app.row("Person 2")).toHaveCount(0);
 
-  // s: stays, starred.
   await highlightRow(app, "Person 3");
   await app.press("s");
   await app.settle();
   await expect(app.row("Person 3")).toHaveCount(1);
   await expect(app.row("Person 3")).toHaveAttribute("data-starred", "true");
 
-  // y: nothing happens.
   const writes = (await gmail.requests()).length;
   const toasts = await app.toasts.count();
   await app.press("y");
@@ -349,7 +318,6 @@ test("SRC-07 Gmail results come 15 at a time, and each page is asked for once", 
   const pages = async (match: (p: Record<string, string>) => boolean) =>
     (await gmail.requests("threads.list", { account: A })).filter((r) => match(r.params));
 
-  // The Archive2019 label view.
   await app.press("Meta+k");
   await app.palette.getByRole("option", { name: /^Go to label/ }).click();
   const picker = app.page.getByRole("dialog", { name: "Go to label" });
@@ -360,17 +328,14 @@ test("SRC-07 Gmail results come 15 at a time, and each page is asked for once", 
   expect(labelPages[0]?.params.maxResults).toBe("15");
   await expect.poll(() => allSubjects(app), { timeout: 15_000 }).toEqual(forty("Archived"));
 
-  // Search: every hit exists only in Gmail.
   await search(app, "invoice");
   await app.advance(300);
   await app.settle();
   const searchPages = await pages((p) => p.q === "invoice");
   expect(searchPages[0]?.params.maxResults).toBe("15");
-  // The first page fits on screen: the next one is asked for without scrolling to the end.
   await expect.poll(async () => (await pages((p) => p.q === "invoice")).length).toBeGreaterThan(1);
   expect((await pages((p) => p.q === "invoice"))[1]?.params.pageToken).toBe("15");
   await expect.poll(() => allSubjects(app), { timeout: 15_000 }).toEqual(forty("Invoice"));
-  // Each page is asked for once.
   const tokens = (await pages((p) => p.q === "invoice")).map((r) => r.params.pageToken ?? "");
   expect(tokens).toEqual(["", "15", "30"]);
 });
@@ -384,23 +349,18 @@ test("SRC-13 the next Gmail page loads near the oldest Gmail hit, not the list's
     (await gmail.requests("threads.list", { account: A }))
       .filter((r) => match(r.params))
       .map((r) => r.params.pageToken ?? "");
-  // Gmail's two pages of newer hits, then the local rows below them.
   const top = [
     ...Array.from({ length: 30 }, (_, i) => `Remote ${String(i + 1).padStart(2, "0")}`),
     "Local 01",
   ];
   const shown = async () => (await app.subjects()).slice(0, top.length);
 
-  // Search: 80 older local matches sit below Gmail's first page, so its
-  // oldest hit is on screen while the list's end is far below. The second
-  // page loads without scrolling, and its hits land above the local rows.
   await search(app, "ledger");
   await app.advance(300);
   await app.settle();
   await expect.poll(() => pages((p) => p.q === "ledger")).toContain("15");
   await expect.poll(shown).toEqual(top);
 
-  // The Ledgers label view pages the same way.
   await app.press("Escape");
   await app.press("Meta+k");
   await app.palette.getByRole("option", { name: /^Go to label/ }).click();
@@ -426,7 +386,6 @@ test("SRC-08 a sent reply is found by local search", async ({ app, gmail }) => {
   await app.settle();
   await app.press("Escape");
 
-  // Offline, so only the local index can find it.
   await gmail.offline(true);
   await app.advance(45_000);
   await search(app, "zanzibar");
@@ -440,7 +399,6 @@ test("SRC-09 search takes the header as in Superhuman, marks matches, and lists 
   await seeds.standard(gmail, app);
   await app.press("/");
   await expect(field(app)).toBeFocused();
-  // In line with the senders below, larger than a row, and hints that work while typing.
   const left = (sel: string) =>
     app.page
       .locator(sel)
@@ -453,7 +411,6 @@ test("SRC-09 search takes the header as in Superhuman, marks matches, and lists 
   await expect(app.page.getByText("Enter to see results")).toBeVisible();
   await expect(app.page.getByRole("complementary", { name: "Search tips" })).toContainText("from:");
 
-  // Words are marked in the results; an operator's value is not.
   await field(app).fill("from:dave plan");
   await app.settle();
   await expect(app.row("Q4 plan")).toHaveCount(1);
@@ -461,20 +418,17 @@ test("SRC-09 search takes the header as in Superhuman, marks matches, and lists 
   expect(marks.length).toBeGreaterThan(0);
   expect(marks.every((m) => m.toLowerCase() === "plan")).toBe(true);
 
-  // The close button ends the search.
   await app.page.getByRole("button", { name: "Close search (Esc)" }).click();
   await expect(field(app)).toHaveCount(0);
   await expect(app.page.getByRole("complementary", { name: "Search tips" })).toHaveCount(0);
   await expect(app.splitTitles().first()).toBeVisible();
 });
 
-// A listing run on the account worker's tasks died with it, leaving "Searching Gmail…" up forever.
 test("SRC-10 a Gmail search stops searching when its account signs in again under it", async ({
   app,
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  // The search's listing is on its way to Gmail when A's worker is replaced.
   const listing = await gmail.hold({ api: "threads.list", query: { q: "zebra crossing" } });
   await search(app, "zebra crossing");
   await app.advance(300);
@@ -485,7 +439,6 @@ test("SRC-10 a Gmail search stops searching when its account signs in again unde
 
   const lists = (await gmail.requests("threads.list", { account: A })).length;
   await gmail.nextSignIn({ email: A });
-  // Enter leaves the field for the results, where the palette opens.
   await app.press("Enter");
   await expect(field(app)).not.toBeFocused();
   await app.press("Meta+k");
@@ -493,11 +446,9 @@ test("SRC-10 a Gmail search stops searching when its account signs in again unde
   await app.type("Add account");
   await expect(app.palette.locator("[cmdk-item]").first()).toContainText("Add account");
   await app.press("Enter");
-  // The new worker is running once it lists Inbox again.
   await expect
     .poll(async () => (await gmail.requests("threads.list", { account: A })).length)
     .toBeGreaterThan(lists);
-  // The old worker's listing went with it: nothing is parked any more.
   await listing.release(undefined, { min: 0 });
   await app.settle();
 
@@ -505,13 +456,11 @@ test("SRC-10 a Gmail search stops searching when its account signs in again unde
   await expect(app.page.getByText("Nothing here.")).toBeVisible();
 });
 
-// Local search matched everything on an operator it didn't know, so `in:sent venue` listed incoming mail.
 test("SRC-11 local search applies Gmail's operators before Gmail answers", async ({
   app,
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  // Cache trashOld through the Trash view, so in:trash has something to find.
   await app.press("Meta+k");
   await app.palette.getByRole("option", { name: /^Go to Trash/ }).click();
   await expect(app.row("Old trash")).toHaveCount(1);
@@ -519,13 +468,9 @@ test("SRC-11 local search applies Gmail's operators before Gmail answers", async
     .getByRole("navigation")
     .getByRole("button", { name: "Inbox", exact: true })
     .click();
-  // Gmail's own answer is right; parked, it can't hide what local search shows.
   await gmail.hold("threads.list");
 
-  // Mail dates: the clock is Monday 2026-11-02 10:00 in New York. Contract
-  // came at 00:00 that day, Links at 23:00 the day before.
   const table: [string, string[], string[]][] = [
-    // The reported bug: in:sent listed incoming mail with the word.
     ["in:sent venue", [], ["Offsite venue"]],
     [
       "in:sent",
@@ -566,16 +511,12 @@ test("SRC-12 a query local search can't evaluate waits for Gmail, and offline sa
 }) => {
   await seeds.standard(gmail, app);
   const listing = await gmail.hold("threads.list");
-  // `filename:` needs attachment names, which only Gmail has: local search
-  // must not list every venue mail as if the operator matched, or as if it
-  // never did.
   await search(app, "venue -filename:pdf");
   await app.advance(300);
   await app.settle();
   await expect(app.row("Offsite venue")).toHaveCount(0);
   await expect(app.rows).toHaveCount(0);
   await expect(app.page.getByText("Searching Gmail…")).toBeVisible();
-  // Gmail's hits are listed as usual once it answers.
   await listing.release();
   await app.settle();
   await expect(app.row("Offsite venue")).toHaveCount(1);
@@ -583,13 +524,11 @@ test("SRC-12 a query local search can't evaluate waits for Gmail, and offline sa
   await app.press("Escape");
 
   await gmail.offline(true);
-  // The next poll fails, so the app knows it is offline.
   await app.advance(45_000);
   await search(app, "filename:pdf venue");
   await expect(app.page.getByText("This search needs Gmail")).toBeVisible();
   await expect(app.page.getByText("Nothing here.")).toHaveCount(0);
   await expect(app.rows).toHaveCount(0);
-  // A query local search can evaluate still lists cached mail.
   await search(app, "has:attachment");
   await expect(app.row("Contract")).toHaveCount(1);
   await expect(app.page.getByText("This search needs Gmail")).toHaveCount(0);
@@ -601,18 +540,14 @@ test("SRC-14 a search or Gmail-listed view opened offline lists from Gmail when 
 }) => {
   const s = await seeds.standard(gmail, app);
   const projects = s.label(A, "Projects");
-  /** A's Gmail listings since the mark. */
   const listings = async (since: number) =>
     (await gmail.requests())
       .slice(since)
       .filter((r) => r.api === "threads.list" && r.account === A);
   await gmail.offline(true);
-  // The next poll fails, so the app knows it is offline.
   await app.advance(45_000);
   const offline = await mark(gmail);
 
-  // A replaced search and a closed one never reach Gmail; the view still
-  // open does, once Gmail can be reached.
   await search(app, "zebra crossing");
   await app.advance(300);
   await search(app, "invoice 2019");
@@ -631,7 +566,6 @@ test("SRC-14 a search or Gmail-listed view opened offline lists from Gmail when 
   expect(back.filter((r) => r.params.labelIds === projects)).toHaveLength(1);
   expect(back.flatMap((r) => r.params.q ?? []).filter((q) => /zebra|invoice/.test(q))).toEqual([]);
 
-  // A search open while offline searches Gmail again once it can.
   await gmail.offline(true);
   await app.advance(45_000);
   const offlineAgain = await mark(gmail);
@@ -662,7 +596,6 @@ test("SRC-15 an open search runs once Gmail can be reached again, though nothing
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  // The network goes away between polls, and the search is the first to find out.
   await gmail.offline(true);
   await search(app, "invoice 2019");
   await app.advance(300);
@@ -670,8 +603,6 @@ test("SRC-15 an open search runs once Gmail can be reached again, though nothing
   await expect(app.page.getByText("Results from this Mac")).toBeVisible();
   await expect(app.rows).toHaveCount(0);
 
-  // The network returns, and nothing tells the app: no action or send is
-  // waiting, and the next poll is 45 s away.
   await gmail.offline(false, { probe: true });
   await app.settle();
   await expect(app.page.getByText("Results from this Mac")).toBeVisible();
@@ -686,7 +617,6 @@ test("SRC-16 a conversation opened from a search in Trash or Spam lists their me
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  // Synced now, so local search finds it; Old trash comes from Gmail's hits.
   await gmail.deliver({
     account: A,
     from: "Tess Toss <tess@toss.test>",
@@ -703,19 +633,16 @@ test("SRC-16 a conversation opened from a search in Trash or Spam lists their me
   await app.press("Enter", "Enter");
   await expect(app.conversationTitle).toHaveText("Tossed today");
   await expect(app.messageBody(0).locator("body")).toContainText("A koala was here.");
-  // `j` opens the next results the same way: Latest rule with its trashed reply.
   await app.press("j");
   await expect(app.conversationTitle).toHaveText("Latest rule");
   await expect(app.messages).toHaveCount(2);
   await app.press("j");
   await expect(app.conversationTitle).toHaveText("Old trash");
   await expect(app.messageBody(0).locator("body")).toContainText("A wombat was here.");
-  // The reply keys work there.
   await app.reply("r");
   await app.press("Escape", "Escape");
   await expect(app.editor).toHaveCount(0);
 
-  // A search that does not look in Trash hides the trashed reply, as Inbox does (CONV-11).
   await search(app, "latest rule");
   await app.row("Latest rule").click();
   await expect(app.conversationTitle).toHaveText("Latest rule");
@@ -734,7 +661,6 @@ test("SRC-17 Gmail hits whose threads are deleted or trashed while their metadat
   await expect
     .poll(async () => (await gmail.requests("threads.get")).some((r) => r.held))
     .toBe(true);
-  // Meanwhile one hit is deleted forever and another trashed in Gmail.
   await gmail.deleteThread(A, s.thread("projOld1").threadId);
   await gmail.modify(A, s.latest("projOld2").id, ["TRASH"], [], { poll: true });
   await meta.release();
@@ -745,8 +671,6 @@ test("SRC-17 Gmail hits whose threads are deleted or trashed while their metadat
   await app.expectNoErrorToasts();
 });
 
-// With the search left open under the sign-in screen, its field took the
-// screen's Enter, so Enter did not sign in.
 test("SRC-18 a Gmail search whose account signs out or is removed while it lists stops searching, and the sign-in screen's Enter signs in", async ({
   app,
   gmail,
@@ -754,7 +678,6 @@ test("SRC-18 a Gmail search whose account signs out or is removed while it lists
   await seeds.standard(gmail, app);
   const searching = app.page.getByText("Searching Gmail…");
 
-  // A signs out while the listing is on its way.
   let listing = await gmail.hold({ api: "threads.list", query: { q: "zebra crossing" } });
   await search(app, "zebra crossing");
   await app.advance(300);
@@ -770,20 +693,17 @@ test("SRC-18 a Gmail search whose account signs out or is removed while it lists
   await gmail.release({ id: listing.id });
   await app.settle();
   await expect(searching).toHaveCount(0);
-  // The sign-in screen's Enter signs in, though the search is still open under it.
   await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
   await gmail.invalidGrant(A, false);
   await gmail.nextSignIn({ email: A });
   await app.press("Enter");
   await expect(app.signInMarker(A)).toHaveCount(0);
   await app.settle();
-  // Back to the search left open under the sign-in screen.
   await expect(field(app)).toHaveValue("zebra crossing");
   await expect(searching).toHaveCount(0);
   await app.press("Escape");
   await expect(field(app)).toHaveCount(0);
 
-  // A is removed while the listing is on its way.
   listing = await gmail.hold({ api: "threads.list", query: { q: "zebra crossing" } });
   await search(app, "zebra crossing");
   await app.advance(300);

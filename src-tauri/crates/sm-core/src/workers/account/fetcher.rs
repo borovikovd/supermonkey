@@ -1,6 +1,3 @@
-//! The fetch queue's workers, and the read of a thread the user opens (SPEC
-//! Sync).
-
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -18,14 +15,9 @@ use crate::read::read;
 use sm_domain::AccountId;
 use sm_store::ReadPool;
 
-/// Fetch workers per account. The account's scheduler caps how many of
-/// their requests run at once.
 pub(crate) const FETCHERS: usize = 4;
-/// Threads per connect-sync `threads.list` page.
 const LIST_PAGE: u32 = 500;
 
-/// One fetch worker: takes the queue's next item and runs it until it is
-/// done, gone, or the account stops.
 pub(crate) async fn run(ctx: Arc<AccountCtx>) {
     loop {
         let (slot, work) = ctx.queue.next(ctx.clock()).await;
@@ -35,8 +27,6 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
     }
 }
 
-/// Reads a thread the user opens, or a neighbor prefetched for it, at
-/// priority 2, unless every body it has is stored.
 pub(crate) async fn fetch_opened(ctx: &AccountCtx, thread: ThreadId) {
     let account = ctx.account;
     let gmail_id = ctx
@@ -62,17 +52,12 @@ pub(crate) async fn fetch_opened(ctx: &AccountCtx, thread: ThreadId) {
     .await;
 }
 
-/// How a retried call ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Ended {
-    /// It succeeded, or its item is gone.
     Done,
-    /// The account signed out: the worker is stopping.
     SignedOut,
 }
 
-/// Runs `call` until it succeeds or its outcome says to stop trying, backing
-/// off as SPEC Gmail errors says.
 pub(crate) async fn retrying<F, Fut>(ctx: &AccountCtx, call: F) -> Ended
 where
     F: FnMut() -> Fut,
@@ -86,7 +71,6 @@ where
             ctx.signed_out();
             Ended::SignedOut
         }
-        // Gone, or not this app's to read: dropped, with no toast.
         Outcome::NotFound => Ended::Done,
         outcome @ (Outcome::Offline
         | Outcome::NoResponse
@@ -95,7 +79,6 @@ where
         | Outcome::ServerError { .. }
         | Outcome::Conflict
         | Outcome::Rejected { .. }) => {
-            // Nothing retries it before the next launch, so say so.
             tracing::info!(account = ctx.account.0, %outcome, "Gmail refused a background read; dropping it");
             Ended::Done
         }
@@ -175,8 +158,6 @@ async fn run_one(ctx: &AccountCtx, slot: Slot, work: &Work) -> Result<(), GmailE
     }
 }
 
-/// Reads a thread and stores it. A 404 means Gmail no longer has it: it
-/// goes, with no toast (SPEC Gmail errors).
 pub(crate) async fn fetch_thread(
     ctx: &AccountCtx,
     thread: &GmailThreadId,
@@ -228,8 +209,6 @@ pub(crate) async fn fetch_thread(
     }
 }
 
-/// Whether the cached thread is at Gmail's `history` already, so a metadata
-/// read would change nothing.
 pub(crate) async fn is_current(
     pool: &Arc<ReadPool>,
     account: AccountId,
@@ -256,7 +235,6 @@ pub(crate) async fn is_current(
     }
 }
 
-/// Whether the thread is not stored, or a message of it lacks its body.
 pub(crate) async fn needs_bodies(
     pool: &Arc<ReadPool>,
     account: AccountId,

@@ -94,9 +94,8 @@ unsafe_code = "forbid"
 unused_must_use = "deny"
 rust_2018_idioms = { level = "deny", priority = -1 }
 unused_qualifications = "warn"
-# Every type can be printed while debugging, and every item says what it is.
+# Every type can be printed while debugging. Items carry no doc comments.
 missing_debug_implementations = "warn"
-missing_docs = "warn"
 # `pub` means exported: an item only the crate uses is `pub(crate)`.
 unreachable_pub = "warn"
 unnameable_types = "warn"

@@ -1,10 +1,3 @@
-//! A one-shot reply from the writer thread that works without an async
-//! runtime: await it from async code, or `wait` for it from a plain thread.
-//!
-//! Written here, on `parking_lot`, rather than taken from a crate: the store
-//! must not depend on tokio, `futures-channel` has no blocking receive, and
-//! this is a mutex, a condvar, and a waker.
-
 use std::fmt;
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -22,23 +15,18 @@ struct Slot<T> {
 
 struct State<T> {
     value: Option<T>,
-    /// The sender sent or was dropped: no value is coming after this.
     closed: bool,
     waker: Option<Waker>,
 }
 
-/// The writer's end: sends the value once. Dropping it unsent tells the
-/// receiver no value is coming.
 pub(crate) struct Sender<T> {
     slot: Arc<Slot<T>>,
 }
 
-/// The caller's end of a one-shot reply.
 pub(crate) struct Receiver<T> {
     slot: Arc<Slot<T>>,
 }
 
-/// A new reply channel.
 pub(crate) fn channel<T>() -> (Sender<T>, Receiver<T>) {
     let slot = Arc::new(Slot {
         state: Mutex::new(State {
@@ -57,10 +45,8 @@ pub(crate) fn channel<T>() -> (Sender<T>, Receiver<T>) {
 }
 
 impl<T> Sender<T> {
-    /// Sends the value. The receiver may already be gone; then it is dropped.
     pub(crate) fn send(self, value: T) {
         self.slot.state.lock().value = Some(value);
-        // `Drop` closes the slot and wakes the receiver.
     }
 }
 
@@ -71,7 +57,6 @@ impl<T> Drop for Sender<T> {
             state.closed = true;
             state.waker.take()
         };
-        // Outside the lock: a waker is code we don't own.
         self.slot.ready.notify_all();
         if let Some(waker) = waker {
             waker.wake();
@@ -80,7 +65,6 @@ impl<T> Drop for Sender<T> {
 }
 
 impl<T> Receiver<T> {
-    /// Blocks the thread until the value arrives; `None` if it never will.
     pub(crate) fn wait(self) -> Option<T> {
         let mut state = self.slot.state.lock();
         loop {
@@ -110,16 +94,12 @@ impl<T> Receiver<T> {
     }
 }
 
-/// A writer job's result: `.await` it, or [`Pending::wait`] for it on a
-/// thread that may block. Dropping it does not cancel the job, which still
-/// runs and commits; only its result is lost.
 #[must_use = "the job runs anyway; drop the result explicitly if it is not needed"]
 pub struct Pending<T, E> {
     rx: Receiver<Result<T, E>>,
     _error: PhantomData<fn() -> E>,
 }
 
-/// Its name only: the result may not be `Debug`, and may not be there yet.
 impl<T, E> fmt::Debug for Pending<T, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Pending").finish_non_exhaustive()
@@ -134,7 +114,6 @@ impl<T, E: From<StoreError>> Pending<T, E> {
         }
     }
 
-    /// Blocks until the job has run. Never call it on the writer thread.
     pub fn wait(self) -> Result<T, E> {
         self.rx
             .wait()

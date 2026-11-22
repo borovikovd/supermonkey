@@ -1,15 +1,10 @@
-//! List rows: threads, and drafts in the Drafts list.
-
 use sm_domain::{DraftId, LabelId, ThreadId};
 use sm_ipc::ListRow;
 use sm_store::{DraftRecord, Reads, StoreError, ThreadRow};
 
-/// The row of a draft with no recipients.
 const NO_RECIPIENTS: &str = "(no recipients)";
-/// The label a Drafts list row carries.
 const DRAFT_LABEL: &str = "DRAFT";
 
-/// A thread's list row. Its key is its id.
 pub(crate) fn thread_row(row: ThreadRow) -> ListRow {
     let starred = row.starred();
     ListRow {
@@ -32,8 +27,6 @@ pub(crate) fn thread_row(row: ThreadRow) -> ListRow {
     }
 }
 
-/// A draft's row in the Drafts list. Its key is the draft id, and it shows
-/// the recipients where a thread shows the sender.
 pub(crate) fn draft_row(record: DraftRecord) -> ListRow {
     let draft = record.draft;
     let sender = if draft.to.is_empty() {
@@ -76,8 +69,6 @@ pub(crate) fn draft_row(record: DraftRecord) -> ListRow {
     }
 }
 
-/// The rows for list keys: draft ids in the Drafts list, thread ids in
-/// every other. Unknown keys are left out.
 pub(crate) fn rows_for_keys(
     reads: Reads<'_>,
     drafts: bool,

@@ -1,5 +1,3 @@
-//! Notices waiting for the UI to show and ack them (SPEC UI state).
-
 use rusqlite::{Row, named_params};
 use sm_domain::{AccountId, DraftId, Millis, NoticeId, NoticeKind, ThreadId};
 
@@ -7,39 +5,24 @@ use crate::db::Db;
 use crate::tx::WriteTx;
 use crate::{StoreError, Table};
 
-/// A notice to add.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewNotice {
-    /// Its account.
     pub account: AccountId,
-    /// Why it is shown.
     pub kind: NoticeKind,
-    /// What the toast says.
     pub message: String,
-    /// The draft it is about, for `Open draft`.
     pub draft: Option<DraftId>,
-    /// The thread it is about.
     pub thread: Option<ThreadId>,
-    /// When it was made.
     pub created_at: Millis,
 }
 
-/// A stored notice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoticeRecord {
-    /// Its id, never reused.
     pub id: NoticeId,
-    /// Its account.
     pub account: AccountId,
-    /// Why it is shown.
     pub kind: NoticeKind,
-    /// What the toast says.
     pub message: String,
-    /// The draft it is about.
     pub draft: Option<DraftId>,
-    /// The thread it is about.
     pub thread: Option<ThreadId>,
-    /// When it was made.
     pub created_at: Millis,
 }
 
@@ -55,7 +38,6 @@ fn notice_row(r: &Row<'_>) -> rusqlite::Result<NoticeRecord> {
     })
 }
 
-/// Reads of notices.
 #[derive(Debug, Clone, Copy)]
 pub struct NoticeReads<'c> {
     db: Db<'c>,
@@ -66,7 +48,6 @@ impl<'c> NoticeReads<'c> {
         Self { db }
     }
 
-    /// The account's notices, oldest first.
     pub fn for_account(self, account: AccountId) -> Result<Vec<NoticeRecord>, StoreError> {
         self.db.all(
             "read the notices",
@@ -78,7 +59,6 @@ impl<'c> NoticeReads<'c> {
     }
 }
 
-/// Writes to notices.
 #[derive(Debug)]
 pub struct NoticeWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
@@ -89,7 +69,6 @@ impl<'t, 'c> NoticeWrites<'t, 'c> {
         Self { tx }
     }
 
-    /// Adds a notice. Its id is never reused.
     pub fn add(&mut self, notice: &NewNotice) -> Result<NoticeId, StoreError> {
         let id = NoticeId(self.tx.db().insert(
             "add a notice",
@@ -105,7 +84,6 @@ impl<'t, 'c> NoticeWrites<'t, 'c> {
         Ok(id)
     }
 
-    /// Removes a notice the UI acked. Unknown ids are skipped.
     pub fn delete(&mut self, id: NoticeId) -> Result<(), StoreError> {
         let account: Option<AccountId> = self.tx.db().optional(
             "remove a notice",

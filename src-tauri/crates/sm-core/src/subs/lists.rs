@@ -1,29 +1,16 @@
-//! A list subscription's ids, in order (SPEC Views, Search).
-
 use chrono::{DateTime, Local};
 use sm_domain::{AccountId, Millis, Query, ThreadId, View};
 use sm_ipc::ListEntry;
 use sm_store::{Reads, StoreError, Table};
 
-/// Rows a list's first load carries, from the top.
 pub(crate) const FIRST_WINDOW: usize = 80;
 
-/// What [`view_ids`] reads of a view's account, besides the Drafts list:
-/// thread rows and their labels, and the split order the Inbox sorts by.
-/// Its changed rows come from the thread ids a commit wrote.
 pub(crate) const VIEW_READS: &[Table] = &[Table::Threads, Table::Splits];
 
-/// What [`view_ids`] reads for the Drafts list: drafts without an outbox
-/// row. Its changed rows come from the draft ids a commit wrote.
 pub(crate) const DRAFTS_READS: &[Table] = &[Table::Drafts, Table::Outbox];
 
-/// What [`search_ids`] reads of its account: thread rows and their messages
-/// (a message write re-derives its thread), the account's addresses for
-/// `from:me`, and the label names `label:` matches.
 pub(crate) const SEARCH_READS: &[Table] = &[Table::Threads, Table::Account, Table::Labels];
 
-/// A view's keys in list order: thread ids with their split, or draft ids
-/// for the Drafts list.
 pub(crate) fn view_ids(
     reads: Reads<'_>,
     account: AccountId,
@@ -51,20 +38,12 @@ pub(crate) fn view_ids(
         .collect())
 }
 
-/// What a search's query says about its list, besides its keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SearchTraits {
-    /// Local search can't evaluate one of its terms, so only Gmail's hits
-    /// are listed.
     pub(crate) needs_gmail: bool,
-    /// It looks in Trash or Spam, so a conversation opened from its results
-    /// lists their messages (SPEC Reading).
     pub(crate) looks_in_trash: bool,
 }
 
-/// A search's keys: local matches plus the Gmail hits it holds, newest
-/// first; and what its query says about the list. Dates in the query are
-/// days in this Mac's time zone, and ages count back from `now`.
 pub(crate) fn search_ids(
     reads: Reads<'_>,
     account: AccountId,

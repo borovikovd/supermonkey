@@ -1,12 +1,9 @@
-// Security (SPEC Reading and Security): hostile HTML, markup in
-// metadata, links, and no Gmail credentials in the webview.
 import type { Dialog } from "@playwright/test";
 
 import type { App } from "./app.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 
-/** The type of `__pwned` on the app page and in every message frame ("undefined" when unset). */
 function pwned(app: App): Promise<string[]> {
   return app.page.evaluate(() =>
     [window, ...Array.from(document.querySelectorAll("iframe")).map((f) => f.contentWindow)].map(
@@ -15,11 +12,6 @@ function pwned(app: App): Promise<string[]> {
   );
 }
 
-/**
- * Everything the webview keeps: localStorage, sessionStorage, IndexedDB, the
- * `window.__sm` stores as JSON, and the DOM. A string, because `__sm` is the
- * app's own hook (src/main.tsx).
- */
 const WEBVIEW_STATE = `(async () => {
   const dump = (s) => Array.from({ length: s.length }, (_, i) => s.key(i) + "=" + s.getItem(s.key(i))).join("\\n");
   const request = (r) => new Promise((resolve, reject) => {
@@ -57,34 +49,28 @@ test.describe("security", () => {
     await app.press("Shift+O");
     await expect(body.getByText("Hostile content.")).toBeVisible();
 
-    // Click what is left of the javascript: link and the form's submit button.
     await body.getByText("Run me").click();
     await body.getByText("Submit").click();
-    // Tab to each link and open it.
     const links = await body.locator("a[href]").count();
     await app.press(...Array.from({ length: links }, () => ["Tab", "Enter"]).flat());
     await app.advance(1_000);
     await app.settle();
 
-    // Script and dialogs.
     expect(await pwned(app)).toEqual(["undefined", "undefined"]);
     expect(dialogs).toEqual([]);
 
-    // Navigation.
     expect(app.page.url()).toBe(url);
     const { openedUrls } = await gmail.platform();
     expect(openedUrls.filter((u) => /^javascript:|evil\.test/i.test(u))).toEqual([]);
     expect(app.popups.filter((u) => /^javascript:|evil\.test/i.test(u))).toEqual([]);
     expect((await gmail.hits()).filter((h) => h.path.startsWith("/sink/evil.test"))).toEqual([]);
 
-    // The frame.
     const frame = app.conversation.locator("iframe[data-frame]");
     await expect(frame).toHaveAttribute("sandbox", "allow-same-origin allow-scripts");
     const dom = await frame.evaluate((f) => {
       const doc = f instanceof HTMLIFrameElement ? f.contentDocument : null;
       if (!doc) return null;
       const head = Array.from(doc.head.children);
-      // The policy comes before anything but the charset.
       const first = head.find((el) => !el.matches("meta[charset]"));
       const all = Array.from(doc.querySelectorAll("*"));
       return {
@@ -118,18 +104,15 @@ test.describe("security", () => {
     await seeds.security(gmail, app);
     const row = app.row(HOSTILE_SUBJECT);
 
-    // The list row.
     await expect(row).toHaveCount(1);
     await expect(row).toContainText(HOSTILE_NAME);
     await expect(row.locator("img, b, script")).toHaveCount(0);
 
-    // The conversation.
     await row.click();
     await expect(app.conversationTitle).toHaveText(HOSTILE_SUBJECT);
     await expect(app.conversation).toContainText(HOSTILE_NAME);
     await expect(app.conversation.locator("img, b, script")).toHaveCount(0);
 
-    // Pin its sender with Move to Important.
     await app.press("Meta+k");
     await app.type("Move to Important");
     await app.press("Enter");
@@ -139,7 +122,6 @@ test.describe("security", () => {
     await app.press("Enter");
     await expect(pin).toHaveCount(0);
 
-    // Reply and send it, so its subject shows in the send toast.
     await app.reply("r");
     await app.type("Noted.");
     await app.settle();
@@ -148,12 +130,10 @@ test.describe("security", () => {
     await expect(toast).toHaveCount(1);
     await expect(app.toasts.locator("img, b, script")).toHaveCount(0);
 
-    // Its name in autocomplete.
     await app.press("Escape");
     await app.compose();
     await app.type("Bo");
     await expect(app.suggestions("To").filter({ hasText: HOSTILE_NAME })).toHaveCount(1);
-    // The list bolds the matched part itself; an injected <b> would hold "Boss".
     const list = app.page.locator("#To-suggestions");
     await expect(list.locator("img, script")).toHaveCount(0);
     await expect(list.locator("b").filter({ hasText: /^Boss$/ })).toHaveCount(0);
@@ -165,7 +145,6 @@ test.describe("security", () => {
   test("SEC-03 links never navigate the app window", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
     const url = app.page.url();
-    // The message frame must not follow a link either (SPEC Reading: clicks are caught).
     const framesLoaded: string[] = [];
     app.page.on("framenavigated", (f) => {
       if (f !== app.page.mainFrame() && !f.url().startsWith("about:")) framesLoaded.push(f.url());
@@ -237,7 +216,6 @@ test.describe("security", () => {
     await quote.getByRole("link", { name: "Other scheme" }).click();
     await app.settle();
 
-    // Nothing else opened, and the quote is still the quote, in the composer.
     expect(await opened()).toEqual(["http://evil.test/quoted", "mailto:x@example.org"]);
     await expect(quote.getByRole("link", { name: "Tracked link" })).toBeVisible();
     await expect(app.editor).toBeVisible();
@@ -258,7 +236,6 @@ test.describe("security", () => {
       tokens.map(() => false),
     );
 
-    // Every Gmail request came from the core, not the browser.
     const log = await gmail.requests();
     expect(log.length).toBeGreaterThan(0);
     expect(log.filter((r) => r.origin !== null)).toEqual([]);
@@ -274,8 +251,6 @@ test("SEC-06 the UI runs under the release app's content security policy", async
 }) => {
   await seeds.standard(gmail, app);
   await expect(app.rows.first()).toBeVisible();
-  // A script added inline does not run, as in the release app; the app's
-  // own scripts and its channel to the core work.
   const ran = await app.page.evaluate(() => {
     const script = document.createElement("script");
     script.textContent = "document.body.dataset.inlineRan = 'yes'";

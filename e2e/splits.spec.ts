@@ -1,6 +1,3 @@
-// Split Inbox (SPEC §Split Inbox): routing, Tab between
-// splits, pins, your own reply, custom splits, starters, hiding, and the
-// count cap. Rules and pins read the latest message from someone else.
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
@@ -38,9 +35,6 @@ const OTHER = [
 ];
 const NOTHING = "from:nobody@none.test";
 
-// ------------------------------------------------------------------ list helpers
-
-/** The section (split name) whose rows include this subject, or null. */
 async function splitOf(app: App, subject: string): Promise<string | null> {
   const sections = await app.sections();
   return sections.find((s) => s.subjects.includes(subject))?.name ?? null;
@@ -56,7 +50,6 @@ async function expectHeader(app: App, header: string) {
   await expect.poll(() => app.splitHeader()).toBe(header);
 }
 
-/** Moves the list highlight onto the row with this subject with `j` / `k`. */
 async function highlightRow(app: App, subject: string): Promise<void> {
   await expect(app.row(subject)).toHaveCount(1);
   const subjects = await app.subjects();
@@ -69,7 +62,6 @@ async function highlightRow(app: App, subject: string): Promise<void> {
   await expect(app.highlighted).toContainText(subject);
 }
 
-/** Runs a palette command by clicking it; returns the palette it leads to. */
 async function command(app: App, name: string): Promise<Locator> {
   await app.press("Meta+k");
   await expect(app.palette).toBeVisible();
@@ -77,7 +69,6 @@ async function command(app: App, name: string): Promise<Locator> {
   return app.palette;
 }
 
-/** `Add to split`, `Move to Important`, or `Move to Other` on the highlight, picking `choice`. */
 async function pin(app: App, how: string, choice: string): Promise<void> {
   await command(app, how);
   const picker = app.page.getByRole("dialog", { name: how });
@@ -86,7 +77,6 @@ async function pin(app: App, how: string, choice: string): Promise<void> {
   await expect(picker).toHaveCount(0);
 }
 
-/** Polls until a history poll of A has really run. */
 async function pollA(app: App, gmail: Control): Promise<void> {
   const polls = async () =>
     (await gmail.requests("history.list", { account: A })).filter((r) => r.answer === 200).length;
@@ -100,12 +90,9 @@ async function pollA(app: App, gmail: Control): Promise<void> {
     .toBeGreaterThan(before);
 }
 
-/** Done from the rail, so the `g` jumps under test are the only `g` keys pressed. */
 async function doneView(app: App): Promise<void> {
   await app.page.getByRole("navigation").getByRole("button", { name: /^Done/ }).click();
 }
-
-// ------------------------------------------------------------------ the settings sheet
 
 function splitSheet(app: App): Locator {
   return app.sheet(/^Split Inbox · /);
@@ -119,7 +106,6 @@ async function openSheet(app: App): Promise<Locator> {
 
 const sheetRows = (sheet: Locator) => sheet.locator("div.border-b");
 
-/** The split names in the sheet, in order. */
 async function sheetNames(sheet: Locator): Promise<string[]> {
   return sheetRows(sheet).evaluateAll((rows) =>
     rows.map((r) => r.querySelector("input")?.value ?? ""),
@@ -154,14 +140,11 @@ async function save(app: App, sheet: Locator): Promise<void> {
   await app.settle();
 }
 
-/** Opens the sheet, edits it, and saves. */
 async function editSplits(app: App, edit: (sheet: Locator) => Promise<void>): Promise<void> {
   const sheet = await openSheet(app);
   await edit(sheet);
   await save(app, sheet);
 }
-
-// ------------------------------------------------------------------ cases
 
 test("SPL-01 default routing to Important and Other, with counts in the header", async ({
   app,
@@ -171,7 +154,6 @@ test("SPL-01 default routing to Important and Other, with counts in the header",
   const sections = await app.sections();
   expect(sections.map((s) => s.name)).toEqual(["Important", "Other"]);
   expect(sections[0]?.subjects.toSorted()).toEqual(IMPORTANT.toSorted());
-  // news2 carries CATEGORY_PERSONAL but has List-Id: list mail beats the category.
   expect(sections[1]?.subjects.toSorted()).toEqual(OTHER.toSorted());
   const all = sections.flatMap((s) => s.subjects);
   expect(new Set(all).size).toBe(all.length);
@@ -181,7 +163,6 @@ test("SPL-01 default routing to Important and Other, with counts in the header",
   await expect(app.section("Important")).toContainText("Important");
   await expect(app.section("Important")).toContainText("16");
 
-  // The split holding the highlight is active; j crosses into Other.
   await expect(app.activeSplit).toHaveText("Important");
   await app.press(...Array.from({ length: 15 }, () => "j"));
   await expect(app.highlighted).toContainText(sections[0]?.subjects.at(-1) ?? "?");
@@ -193,8 +174,6 @@ test("SPL-01 default routing to Important and Other, with counts in the header",
 
 test("SPL-02 Tab and Shift+Tab move between visible splits", async ({ app, gmail }) => {
   await seeds.splits(gmail, app);
-  // Rules read plan's latest message from someone else (Dave's m12), so
-  // Dave is in the rule to keep two rows in VIP.
   await editSplits(app, (sheet) => addSplit(sheet, "VIP", "from:carol OR from:dave"));
   await expectHeader(app, "VIP 2 · Important 16 · Other 7");
   const sections = await app.sections();
@@ -220,7 +199,6 @@ test("SPL-02 Tab and Shift+Tab move between visible splits", async ({ app, gmail
   await app.settle();
   await expect(app.highlighted).toContainText(vip ?? "?");
 
-  // Empty VIP: it hides, and Tab and Shift+Tab skip it.
   await app.press("x", "Shift+J", "e");
   await expectHeader(app, "Important 16 · Other 7");
   await expect(app.highlighted).toContainText(important ?? "?");
@@ -248,7 +226,6 @@ test("SPL-03 pin precedence: sender over domain over label", async ({ app, gmail
   };
   await highlightRow(app, "X marks");
 
-  // The label is only on m1, but label pins read the thread's user labels.
   await pin(app, "Add to split", "Label Proj → Team");
   await where("Team", "Important", "1: label Proj → Team");
   await pin(app, "Add to split", "Domain corp.test → VIP");
@@ -287,7 +264,6 @@ test("SPL-04 pinning from the palette replaces an older pin; z restores it; a se
   await highlightRow(app, "Your receipt");
   await command(app, "Move to Important");
   const picker = app.page.getByRole("dialog", { name: "Move to Important" });
-  // The sender, its domain, and the thread's user labels.
   await expect(picker.getByRole("option")).toHaveText([
     "Sender billing@shop.test",
     "Domain shop.test",
@@ -332,7 +308,6 @@ test("SPL-04 pinning from the palette replaces an older pin; z restores it; a se
 test("SPL-05 your own reply does not move a thread", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   await editSplits(app, (sheet) => addSplit(sheet, "Mine", "from:ana@acme.test"));
-  // own's latest message is A's; the rules read Kim's.
   await expectSplit(app, "Budget draft", "Important");
   await expectSplit(app, "Offsite venue", "Important");
 
@@ -351,7 +326,6 @@ test("SPL-05 your own reply does not move a thread", async ({ app, gmail }) => {
   await app.press("Escape");
   await expectSplit(app, "Offsite venue", "Important", "after A's reply");
 
-  // When every message is from this account, the rules read the latest.
   await gmail.deliver({
     account: A,
     from: `Ana Ames <${A}>`,
@@ -371,7 +345,6 @@ test("SPL-06 custom splits: add, order, rename, turn off, delete", async ({ app,
   await seeds.standard(gmail, app);
   const requests = (await gmail.requests()).length;
 
-  // 1. The sheet is for A, with Important and Other only.
   let sheet = await openSheet(app);
   await expect(sheet).toHaveAccessibleName(`Split Inbox · ${A}`);
   expect(await sheetNames(sheet)).toEqual(["Important", "Other"]);
@@ -382,19 +355,16 @@ test("SPL-06 custom splits: add, order, rename, turn off, delete", async ({ app,
   await expect(other.getByRole("switch")).toHaveCount(0);
   await expect(other.getByRole("button", { name: "×" })).toHaveCount(0);
 
-  // 2. Custom splits come first.
   await addSplit(sheet, "Receipts", "label:receipts");
   await save(app, sheet);
   await expectHeader(app, "Receipts 1 · Important 16 · Other 6");
   expect((await app.sections())[0]).toEqual({ name: "Receipts", subjects: ["Your receipt"] });
 
-  // 3.
   await editSplits(app, (s) => addSplit(s, "Venue", "subject:venue OR subject:ticket"));
   await expectHeader(app, "Receipts 1 · Venue 2 · Important 14 · Other 6");
   await expectSplit(app, "Offsite venue", "Venue");
   await expectSplit(app, "Ticket #42", "Venue");
 
-  // 4. The first match wins.
   await editSplits(app, async (s) => {
     await addSplit(s, "Carol", "from:carol");
     await moveUp(s, "Carol");
@@ -406,13 +376,11 @@ test("SPL-06 custom splits: add, order, rename, turn off, delete", async ({ app,
   await expectSplit(app, "Offsite venue", "Venue");
   await expectHeader(app, "Receipts 1 · Venue 2 · Important 14 · Other 6");
 
-  // 5. Rename.
   await editSplits(app, async (s) => {
     await (await sheetRow(s, "Venue")).locator("input").first().fill("Places");
   });
   await expectHeader(app, "Receipts 1 · Places 2 · Important 14 · Other 6");
 
-  // 6. Off: its threads fall through; the sheet keeps its definition.
   await editSplits(app, (s) => toggle(s, "Places"));
   await expectSplit(app, "Offsite venue", "Carol");
   await expectSplit(app, "Ticket #42", "Important");
@@ -422,13 +390,11 @@ test("SPL-06 custom splits: add, order, rename, turn off, delete", async ({ app,
   await expect(places.locator("input").nth(1)).toHaveValue("subject:venue OR subject:ticket");
   await expect(places.getByRole("switch")).toHaveAttribute("aria-checked", "false");
 
-  // 7. On again.
   await toggle(sheet, "Places");
   await save(app, sheet);
   await expectSplit(app, "Offsite venue", "Places");
   await expectSplit(app, "Ticket #42", "Places");
 
-  // 8. Deleting a split drops its pins too.
   await highlightRow(app, "Your receipt");
   await pin(app, "Add to split", "Sender billing@shop.test → Receipts");
   await expectSplit(app, "Your receipt", "Receipts");
@@ -442,7 +408,6 @@ test("SPL-06 custom splits: add, order, rename, turn off, delete", async ({ app,
   await app.settle();
   expect((await gmail.requests()).slice(requests), "saving makes no Gmail request").toEqual([]);
 
-  // B has its own splits.
   await app.press("Control+2");
   sheet = await openSheet(app);
   await expect(sheet).toHaveAccessibleName(`Split Inbox · ${B}`);
@@ -457,7 +422,6 @@ test("SPL-07 starter splits, and a flat inbox", async ({ app, gmail }) => {
       expect(sheet.getByRole("button", { name: `+ ${starter}`, exact: true })).toBeVisible(),
     ),
   );
-  // None is active until added.
   expect(await sheetNames(sheet)).toEqual(["Important", "Other"]);
   await app.press("Escape");
   await expect(sheet).toHaveCount(0);
@@ -486,7 +450,6 @@ test("SPL-07 starter splits, and a flat inbox", async ({ app, gmail }) => {
   await expectSplit(app, "Your receipt", "Promotions");
   await expectHeader(app, "Newsletters 3 · Promotions 2 · Important 16 · Other 2");
 
-  // Everything off: one flat section, Other.
   await editSplits(app, async (s) => {
     await toggle(s, "Newsletters");
     await toggle(s, "Promotions");
@@ -501,21 +464,17 @@ test("SPL-07 starter splits, and a flat inbox", async ({ app, gmail }) => {
 
 test("SPL-08 empty splits hide themselves, except after g i / g o", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
-  // Not empty, hide on: the name shows with its count.
   expect(await app.splitHeader()).toBe("Important 16 · Other 7");
 
-  // Archive every Important thread.
   await expect(app.highlighted).toContainText("Person 1");
   await app.press("x", ...Array.from({ length: 15 }, () => "Shift+J"));
   await expect(app.selected).toHaveCount(16);
   await app.press("e");
   await app.settle();
 
-  // Empty, hide on: no name, no section.
   await expectHeader(app, "Other 7");
   await expect(app.section("Important")).toHaveCount(0);
 
-  // Empty, hide off: the name with no count, and no section header (SPEC Split Inbox).
   await editSplits(app, async (s) => {
     await (await sheetRow(s, "Important")).getByRole("checkbox").uncheck();
   });
@@ -527,7 +486,6 @@ test("SPL-08 empty splits hide themselves, except after g i / g o", async ({ app
   });
   await expectHeader(app, "Other 7");
 
-  // g i shows the hidden empty split's header; g o highlights Other's first row.
   await doneView(app);
   await expect(app.page.getByRole("toolbar", { name: "Splits" })).toHaveCount(0);
   await app.press("g", "i");
@@ -541,7 +499,6 @@ test("SPL-08 empty splits hide themselves, except after g i / g o", async ({ app
   await app.press("g", "o");
   await expect(app.highlighted).toContainText("Digest: week 44");
 
-  // Important off: g i opens Inbox without it.
   await editSplits(app, (s) => toggle(s, "Important"));
   await doneView(app);
   await app.press("g", "i");
@@ -568,7 +525,6 @@ test("SPL-09 counts cap at 999+", async ({ app, gmail }) => {
   await pollA(app, gmail);
   await app.settle();
   await expect.poll(() => app.splitHeader()).toMatch(/^Important 999\+( ·|$)/);
-  // Other is empty, and empty splits hide by default.
   expect(await app.splitHeader()).toBe("Important 999+");
 });
 
@@ -576,7 +532,6 @@ test("SPL-10 clicking a split name scrolls to its section", async ({ app, gmail 
   await seeds.bulk(gmail, app);
   expect(await app.splitHeader()).toBe("Important 40 · Other 20");
   await app.splitTitles().filter({ hasText: "Other" }).click();
-  // The Other header sits at the top of the list's viewport.
   await expect
     .poll(() =>
       app.list.evaluate((list) => {
@@ -600,14 +555,12 @@ test("SPL-11 a rule the core refuses keeps the sheet open with every edit", asyn
   await addSplit(sheet, "Carol", "from:carol -venue");
   const rule = (await sheetRow(sheet, "Carol")).locator("input").nth(1);
 
-  // Refused with the core's message under the rule; nothing is saved.
   await sheet.getByRole("button", { name: "Save", exact: true }).click();
   await app.settle();
   await expect(sheet).toBeVisible();
   await expect(sheet.getByRole("alert")).toHaveText("-venue isn't supported in split rules");
   await expect(rule).toHaveAttribute("aria-invalid", "true");
   await expect(rule).toHaveAccessibleDescription("-venue isn't supported in split rules");
-  // Shown on the rule, not as a toast.
   await app.expectNoErrorToasts();
   expect(await sheetNames(sheet)).toEqual(["Receipts", "Carol", "Important", "Other"]);
   await expect(rule).toHaveValue("from:carol -venue");
@@ -617,7 +570,6 @@ test("SPL-11 a rule the core refuses keeps the sheet open with every edit", asyn
   );
   await expectHeader(app, "Important 16 · Other 7");
 
-  // Fixed: the message goes as soon as the rule changes, and the save lands.
   await rule.fill("from:carol");
   await expect(sheet.getByRole("alert")).toHaveCount(0);
   await save(app, sheet);

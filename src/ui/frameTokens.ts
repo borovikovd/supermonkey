@@ -1,6 +1,3 @@
-// A message frame's document can't see the app's CSS variables, so the
-// tokens its CSS uses are copied in from the app's root once.
-
 const NAMES = [
   "--color-text",
   "--color-text-2",
@@ -13,7 +10,6 @@ const NAMES = [
 
 let rule: string | undefined;
 
-/** A `:root` rule declaring the design tokens frame CSS may use. */
 export function frameTokens(): string {
   if (rule === undefined) {
     const root = getComputedStyle(document.documentElement);

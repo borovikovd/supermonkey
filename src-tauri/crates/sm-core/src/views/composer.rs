@@ -1,13 +1,9 @@
-//! A draft as its composer shows it.
-
 use sm_domain::{AccountId, DraftId, DraftKind, Rev};
 use sm_ipc::{DraftAttachment, DraftState};
 use sm_store::{Reads, StoreError};
 
 use crate::drafts::lifecycle;
 
-/// The draft for a composer subscription. A draft that is gone gives
-/// `gone`, which closes the composer.
 pub(crate) fn draft_state(reads: Reads<'_>, id: &DraftId) -> Result<DraftState, StoreError> {
     let Some(record) = reads.drafts().get(id)? else {
         return Ok(DraftState {

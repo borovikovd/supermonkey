@@ -1,30 +1,16 @@
-//! The SQLite FTS5 `MATCH` string for a query.
-
 use super::{Expr, Field, Query};
 
-/// The columns of the FTS5 table that [`Query::to_fts5`] searches, in order.
 pub const FTS_COLUMNS: [&str; 5] = ["from_text", "to_text", "cc_text", "subject", "body"];
 
-/// Column filter for bare words.
 const ANY_COLUMNS: &str = "{from_text subject body}";
 
 impl Query {
-    /// An FTS5 `MATCH` expression over the [`FTS_COLUMNS`], or `None` when
-    /// nothing in the query can narrow the index (only `label:` or
-    /// `is:list`, say).
-    ///
-    /// It selects a superset of the matches. Terms FTS can't express
-    /// (`bcc:`, `label:`, `from:me`, `is:list`, `-term`, dates, ...) drop
-    /// out of an AND; an OR holding one can't narrow anything and drops out
-    /// whole.
-    /// This is the one SQL string built at runtime; bind it as a parameter.
     #[must_use]
     pub fn to_fts5(&self) -> Option<String> {
         fts(self.expr()).map(|(s, _)| s)
     }
 }
 
-/// The expression, and whether it is compound (needs parentheses when nested).
 fn fts(e: &Expr) -> Option<(String, bool)> {
     match e {
         Expr::Term(t) if !t.in_index() => None,
@@ -65,9 +51,6 @@ fn join(parts: Vec<(String, bool)>, op: &str) -> Option<(String, bool)> {
     Some((joined, true))
 }
 
-/// An FTS5 string literal, or `None` when the value has no token characters
-/// (an empty phrase is no use as a term). Control characters become spaces
-/// and `"` is doubled, so any input gives a valid literal.
 fn fts_string(value: &str) -> Option<String> {
     if !value.chars().any(char::is_alphanumeric) {
         return None;

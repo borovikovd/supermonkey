@@ -1,5 +1,3 @@
-// Rows never flash back during fast triage or a poll, and a reload keeps
-// queued actions and their numbers.
 import type { Route } from "@playwright/test";
 import type { App } from "./app.ts";
 import { expect, test } from "./fixtures.ts";
@@ -8,7 +6,6 @@ import { A } from "./seeds.ts";
 
 const two = (i: number) => String(i).padStart(2, "0");
 
-/** The last action number the page has seen acked on the channel. */
 const pageAck = (app: App): Promise<number> =>
   app.page.evaluate<number>("window.__sm.pending().ack");
 
@@ -26,10 +23,7 @@ test("UIC-01 rows you just acted on never flash back during fast triage or a pol
 
   await app.press("e", "e", "e", "e", "e");
   await expect(app.row("Bulk 05")).toHaveCount(0);
-  // A row React only moves is added again too: count adds from when each row left.
   const afterFirstFive = (await probe.added()).length;
-  // Halfway: two messages arrive in other threads, and a poll runs.
-  // Bulk 31's reply is the newer one, so it leads the list.
   await Promise.all(
     (
       [
@@ -48,8 +42,6 @@ test("UIC-01 rows you just acted on never flash back during fast triage or a pol
       }),
     ),
   );
-  // Another client stars Bulk 03 while its archive is held, so the poll reads
-  // that thread with Gmail's INBOX still on it.
   await gmail.modify(A, s.latest("important3").id, ["STARRED"], []);
   await gmail.poll();
   await app.press("e", "e", "e", "e", "e");
@@ -58,13 +50,11 @@ test("UIC-01 rows you just acted on never flash back during fast triage or a pol
   await hold.release();
   await app.settle();
 
-  // No archived row was ever added back.
   const added = await probe.added();
   const firstFive = new Set(archived.slice(0, 5));
   expect(added.slice(afterFirstFive).filter((k) => firstFive.has(k))).toEqual([]);
   expect(added.slice(afterAll).filter((k) => archived.includes(k))).toEqual([]);
 
-  // The list equals Gmail's Inbox: Bulk 31 and 30 (newest now), the rest of Bulk 11–40, then Offer 01–20.
   const inbox = new Set(
     (await gmail.gmail(A)).messages
       .filter((m) => m.labels.includes("INBOX"))
@@ -83,14 +73,12 @@ test("UIC-01 rows you just acted on never flash back during fast triage or a pol
   const rendered = (await app.sections()).flatMap((x) => x.subjects);
   expect(rendered.length).toBeGreaterThan(10);
   expect(rendered).toEqual(expected.slice(0, rendered.length));
-  // Every Inbox thread in Gmail is one the app lists, and none it archived.
   const archivedThreads = Array.from(
     { length: 10 },
     (_, i) => s.thread(`important${i + 1}`).threadId,
   );
   expect(archivedThreads.filter((t) => inbox.has(t))).toEqual([]);
 
-  // The highlight is on the row after the last archived one.
   await expect(app.highlighted).toContainText("Bulk 11");
 });
 
@@ -98,7 +86,6 @@ test("UIC-08 an action stays applied when the one before it is acked", async ({ 
   await seeds.standard(gmail, app);
   await expect(app.highlighted).toContainText("Person 1");
   const p2 = await app.rowKey("Person 2");
-  // The page's submits wait here, so they reach the core one at a time.
   const parked: Route[] = [];
   await app.page.route(/\/invoke\/submit$/, (route) => {
     parked.push(route);
@@ -111,7 +98,6 @@ test("UIC-08 an action stays applied when the one before it is acked", async ({ 
   const probe = await app.watchRows();
   const before = await pageAck(app);
 
-  // The core applies the first archive and acks it; the second is submitted and waits.
   await parked[0]?.continue();
   await expect.poll(() => parked.length).toBe(2);
   await expect.poll(() => pageAck(app)).toBeGreaterThan(before);
@@ -150,7 +136,6 @@ test("UIC-02 a reload keeps queued actions and keeps action numbers going", asyn
   expect(await inInbox("p1")).toBe(false);
   expect(await inInbox("p2")).toBe(false);
 
-  // Both entries survived the reload: z undoes p2, then p1.
   await app.press("z");
   await expect(app.row("Person 2")).toHaveCount(1);
   await expect(app.row("Person 1")).toHaveCount(0);
@@ -170,7 +155,6 @@ test("UIC-03 an action whose submit fails is sent again", async ({ app, gmail })
       .filter((m) => m.threadId === s.thread(key).threadId)
       .some((m) => m.labels.includes("INBOX"));
   await expect(app.highlighted).toContainText("Person 1");
-  // The first submit fails before it reaches the core; later ones go through.
   let failed = 0;
   const submit = /\/invoke\/submit$/;
   await app.page.route(submit, async (route) => {
@@ -196,7 +180,6 @@ test("UIC-04 a row that changed while no list held it is not shown from an old c
   gmail,
 }) => {
   await seeds.empty(gmail, app);
-  // 90 threads: the oldest is past the rows a first load carries.
   const sent = await gmail.deliverMany(
     Array.from({ length: 90 }, (_, i) => ({
       account: A,
@@ -216,18 +199,15 @@ test("UIC-04 a row that changed while no list held it is not shown from an old c
       el.scrollTop = el.scrollHeight;
     });
 
-  // The page has Batch 90's row, unread.
   await toBottom();
   await expect(app.row("Batch 90")).toHaveAttribute("data-unread");
 
-  // Another client archives it, then marks it read: no open list holds it by then.
   await gmail.modify(A, last.id, [], ["INBOX"], { poll: true });
   await app.settle();
   await expect(app.row("Batch 90")).toHaveCount(0);
   await gmail.modify(A, last.id, [], ["UNREAD"], { poll: true });
   await app.settle();
 
-  // A search lists it again, past its first rows: it shows as read.
   await app.press("/");
   await app.page.getByPlaceholder("Search").fill("Batch");
   await app.settle();
@@ -243,7 +223,6 @@ test("UIC-05 Cmd+Q quits only once the composer's close has committed", async ({
   await app.press("j", "j", "Enter");
   await app.reply();
   await app.type("Written just before the quit");
-  // The submit carrying the close waits here; page timers wait for the test.
   const parked: Route[] = [];
   const submit = /\/invoke\/submit$/;
   await app.page.route(submit, (route) => {
@@ -269,8 +248,6 @@ test("UIC-05 Cmd+Q quits only once the composer's close has committed", async ({
 
 test("UIC-06 an action the core rejects tells the user why", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
-  // The mute names an account the core doesn't have, as a UI out of step
-  // with the core would.
   const submit = /\/invoke\/submit$/;
   await app.page.route(submit, (route) =>
     route.continue({
@@ -289,10 +266,7 @@ test("UIC-06 an action the core rejects tells the user why", async ({ app, gmail
   await expect(
     app.errorToasts.filter({ hasText: "That account is no longer in Supermonkey" }),
   ).toHaveCount(1);
-  // The switch falls back to what the core holds.
   await expect(mute).toHaveAttribute("aria-checked", "false");
-  // Shown once: the refusal came with the message that settled the action,
-  // so a reload does not bring it back.
   await app.reload();
   await app.expectNoErrorToasts();
 });
@@ -308,8 +282,6 @@ test("UIC-07 an action the core can't read is refused, and the actions after it 
       .flatMap((m) => m.labels);
   const bug = app.errorToasts.filter({ hasText: "because of a bug in Supermonkey" });
   await expect(app.highlighted).toContainText("Person 1");
-  // Every submit carries the star with a thread the core can't read, as a
-  // page out of step with the core would send it.
   const submit = /\/invoke\/submit$/;
   await app.page.route(submit, (route) =>
     route.continue({
@@ -327,8 +299,6 @@ test("UIC-07 an action the core can't read is refused, and the actions after it 
   expect(await labels("p1")).not.toContain("STARRED");
   await expect(bug).toHaveCount(1);
 
-  // A batch the core can't read at all, here an action with no number, is
-  // not sent again: its actions are refused, and the next one goes through.
   await app.page.unroute(submit);
   await app.page.route(submit, (route) =>
     route.continue({

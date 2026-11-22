@@ -1,5 +1,3 @@
-//! The control API's routes, by path.
-
 use std::sync::Arc;
 
 use axum::Router;
@@ -8,8 +6,6 @@ use axum::routing::{any, get, post};
 use super::{accounts, faults, gmail, lifecycle, web};
 use crate::server::Server;
 
-/// The control routes, the image host and sink, and the built UI for every
-/// other path.
 pub(crate) fn router(server: Arc<Server>) -> Router {
     Router::new()
         .route("/__test/account", post(accounts::add_account))

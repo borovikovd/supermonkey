@@ -1,12 +1,3 @@
-//! Local search and autocomplete against their SPEC Performance budgets on
-//! the perf fixture. The budgets are keydown to paint, so the core's part
-//! must fit well inside them. Ignored by default; run with
-//!
-//! ```sh
-//! cargo run --features fake --bin perf-fixture -- /tmp/perf.db
-//! SUPERMONKEY_PERF_DB=/tmp/perf.db cargo test -p sm-core --release --lib perf -- --ignored --nocapture
-//! ```
-
 use std::time::{Duration, Instant};
 
 use sm_domain::{AccountId, SubId};
@@ -15,17 +6,10 @@ use sm_ipc::{Action, SubKey, SubUpdate};
 use super::Harness;
 use crate::Config;
 
-/// SPEC Performance: local search results for each keystroke.
 const SEARCH_BUDGET: Duration = Duration::from_millis(100);
-/// SPEC Performance: autocomplete suggestions for each keystroke.
 const AUTOCOMPLETE_BUDGET: Duration = Duration::from_millis(50);
-/// The perf fixture's first account.
 const ACCOUNT: AccountId = AccountId(1);
 
-/// A core on a copy of the perf fixture, so the fixture stays as written.
-/// The copy is read through once, so the system has it cached as it has a
-/// running app's database: reading a cold disk is part of a cold launch
-/// (its own budget), not of a keystroke.
 async fn on_fixture() -> Harness {
     let fixture = std::env::var_os("SUPERMONKEY_PERF_DB")
         .expect("set SUPERMONKEY_PERF_DB to a database written by the perf-fixture binary");
@@ -41,7 +25,6 @@ async fn on_fixture() -> Harness {
 async fn perf_local_search_per_keystroke() {
     let mut h = on_fixture().await;
     h.take();
-    // `i` twice: the first runs on a cold cache.
     let queries = [
         "i",
         "i",
@@ -92,8 +75,6 @@ async fn perf_local_search_per_keystroke() {
             "{query:>18}: {hits:>4} hits in {:>6.1} ms",
             took.as_secs_f64() * 1000.0
         );
-        // The fixture has these names, subjects, and labels: an empty
-        // result would be fast for the wrong reason.
         if ["from:ada", "q3 planning", "label:Receipts", "subject:lunch"].contains(&query) {
             assert!(hits > 0, "{query:?} found nothing on the perf fixture");
         }

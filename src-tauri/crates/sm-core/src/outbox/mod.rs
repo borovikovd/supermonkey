@@ -1,9 +1,3 @@
-//! The outbox on the writer side (SPEC Send and undo): queueing a send in
-//! its undo window, undoing it, the state machine its Gmail side moves it
-//! through (`machine`), writing each step, and settling it on launch.
-//!
-//! The runner that talks to Gmail is `workers::outbox`.
-
 mod machine;
 mod queue;
 mod resolve;

@@ -1,5 +1,3 @@
-//! Cases ported from the old `sm-rules` query tests.
-
 use super::*;
 use crate::test_support::message;
 use crate::{Addr, Identity, MessageFacts};
@@ -8,7 +6,6 @@ fn p(s: &str) -> String {
     Query::parse(s).to_string()
 }
 
-/// The clock the E2E seeds use: Monday 2026-11-02 10:00 in New York.
 fn now() -> chrono::DateTime<chrono_tz::Tz> {
     use chrono::TimeZone;
     chrono_tz::America::New_York
@@ -16,7 +13,6 @@ fn now() -> chrono::DateTime<chrono_tz::Tz> {
         .unwrap()
 }
 
-/// Milliseconds at a New York wall time.
 fn ny(y: i32, mo: u32, d: u32, h: u32) -> i64 {
     use chrono::TimeZone;
     chrono_tz::America::New_York
@@ -36,8 +32,6 @@ fn s(input: &str) -> String {
 fn strict_err(s: &str) -> String {
     Query::parse_rule(s).unwrap_err().to_string()
 }
-
-// --- parsing --------------------------------------------------------
 
 #[test]
 fn empty_and_blank_input_is_the_empty_query() {
@@ -95,12 +89,10 @@ fn parentheses_group_and_nest() {
 fn quoted_phrases() {
     assert_eq!(p(r#""q3 plan""#), r#""q3 plan""#);
     assert_eq!(p(r#""q3 plan"x"#), r#"(and "q3 plan" "x"*)"#);
-    // Unclosed: the user is still typing it.
     assert_eq!(p(r#""q3 pl"#), r#""q3 pl"*"#);
     assert_eq!(strict_err(r#""q3 pl"#), "Missing closing quote");
     assert_eq!(p(r#"subject:"q3 pl"#), r#"subject:"q3 pl"*"#);
     assert_eq!(strict_err(r#"subject:"q3"#), "Missing closing quote");
-    // A phrase can hold keywords and parentheses.
     assert_eq!(p(r#""a OR (b)""#), r#""a OR (b)""#);
 }
 
@@ -112,12 +104,10 @@ fn unsupported_operators_are_kept() {
     );
     assert_eq!(p("from:(a b) c "), r#"(and ?from:(a b) "c")"#);
     assert_eq!(p("in:(a b) c "), r#"(and ?in:(a b) "c")"#);
-    // Values that are no date are left to Gmail too.
     assert_eq!(
         s("after:yesterday before:2026/13/01 newer_than:2w older_than:d "),
         "(and ?after:yesterday ?before:2026/13/01 ?newer_than:2w ?older_than:d)"
     );
-    // Without a clock, dates can't be placed in time.
     assert_eq!(p("after:2026/01/31 "), "?after:2026/01/31");
     assert_eq!(
         strict_err("filename:pdf"),
@@ -140,7 +130,6 @@ fn search_operators() {
         r#"(and has:attachment label:"CATEGORY_PERSONAL" label:"CATEGORY_PROMOTIONS")"#
     );
     assert_eq!(p(r#"in:"Work Projects""#), r#"label:"Work Projects""#);
-    // Still typing an operator: nothing to match on yet.
     assert_eq!(p("is:"), "(and)");
 }
 
@@ -153,7 +142,6 @@ fn negation() {
     assert_eq!(p("--a "), r#"(not (not "a"))"#);
     assert_eq!(p("-OR "), r#"(not "OR")"#);
     assert_eq!(p("a OR -b "), r#"(or "a" (not "b"))"#);
-    // A `-` alone, inside a word, or before `)` negates nothing.
     assert_eq!(p("a - b "), r#"(and "a" "b")"#);
     assert_eq!(p("e-mail "), r#""e-mail""#);
     assert_eq!(p("(a -) "), r#""a""#);
@@ -233,7 +221,6 @@ fn garbage_never_panics() {
     ];
     for input in inputs {
         let q = Query::parse(input);
-        // Only that each returns: what it returns is not checked here.
         _ = q.to_fts5();
         _ = Query::parse_rule(input);
         _ = gmail_query(input);
@@ -250,7 +237,6 @@ fn strict_errors() {
     assert_eq!(strict_err("AND a"), "AND needs a term on both sides");
     assert_eq!(strict_err("from:"), "from: needs a value");
     assert_eq!(strict_err("a ()"), "Empty parentheses");
-    // The first problem by position wins, though the parser finds the dangling OR first.
     let err = Query::parse_rule("(a OR").unwrap_err();
     assert_eq!((err.to_string().as_str(), err.offset()), ("Missing )", 0));
 }
@@ -266,8 +252,6 @@ fn strict_accepts_valid_rules() {
         assert!(Query::parse_rule(rule).is_ok(), "{rule}");
     }
 }
-
-// --- matching -------------------------------------------------------
 
 fn msg() -> MessageFacts {
     MessageFacts {
@@ -345,9 +329,7 @@ fn bare_words_differ_by_mode() {
     assert!(m("\"q3 plan\"", Mode::Rule));
     assert!(!m("attached", Mode::Rule));
     assert!(m("attached", Mode::Search));
-    // A bare word does not look at recipients.
     assert!(!m("bob", Mode::Search));
-    // Nor at the snippet: search reads the stored body.
     assert!(!m("quarterly", Mode::Search));
 }
 
@@ -359,22 +341,18 @@ fn subject_operator() {
 
 #[test]
 fn label_operator() {
-    // User labels: thread label names, ignoring case; Gmail's hyphen form works.
     assert!(m("label:clients", Mode::Rule));
     assert!(m("label:work-projects", Mode::Rule));
     assert!(m("label:\"work/projects\"", Mode::Rule));
     assert!(!m("label:work", Mode::Rule));
-    // System and category ids: this message's own label ids.
     assert!(m("label:inbox", Mode::Rule));
     assert!(m("label:CATEGORY_UPDATES", Mode::Rule));
     assert!(m("label:category_updates", Mode::Rule));
-    // Spaces around a quoted value don't matter, for system ids as for names.
     assert!(m("label:\" inbox \"", Mode::Rule));
     assert!(m("label:\"category_updates \"", Mode::Rule));
     assert!(m("label:\" clients \"", Mode::Rule));
     assert!(!m("label:CATEGORY_PROMOTIONS", Mode::Rule));
     assert!(!m("label:starred", Mode::Rule));
-    // User label ids are not names.
     assert!(!m("label:Label_7", Mode::Rule));
 }
 
@@ -404,8 +382,6 @@ fn empty_matches_everything_and_unsupported_nothing() {
 
 #[test]
 fn label_operators_in_search() {
-    // msg() is INBOX, CATEGORY_UPDATES, and Label_7, in a thread labeled
-    // Work/Projects and Clients.
     assert!(m("in:inbox", Mode::Search));
     assert!(m("in:INBOX alice", Mode::Search));
     assert!(!m("in:sent", Mode::Search));
@@ -434,7 +410,6 @@ fn negation_matches_the_complement() {
     assert!(!m("-in:inbox", Mode::Search));
     assert!(m("budget -(bob OR carol)", Mode::Search));
     assert!(!m("budget -(bob OR alice)", Mode::Search));
-    // The body counts for a negated word, as for a bare one.
     assert!(!m("-attached", Mode::Search));
 }
 
@@ -474,14 +449,12 @@ fn me_is_this_accounts_addresses_in_search_only() {
     };
     assert!(matches_msg("from:me", &from_me, Mode::Search));
     assert!(matches_msg("bcc:me", &from_me, Mode::Search));
-    // A rule keeps reading `me` as text, as it always has.
     let named = MessageFacts {
         from: Addr::new("me@example.com"),
         ..msg()
     };
     assert!(matches_msg("from:me", &named, Mode::Rule));
     assert!(!matches_msg("from:me", &named, Mode::Search));
-    // The index has no `me` to look up.
     assert_eq!(
         search("from:me x ").to_fts5().as_deref(),
         Some(r#"{from_text subject body} : "x""#)
@@ -496,15 +469,12 @@ fn dates_are_local_days_as_in_gmail() {
     assert_eq!(s("newer:11/02/2026 "), format!("after:{midnight}"));
     assert_eq!(s("before:2026/11/02 "), format!("before:{midnight}"));
     assert_eq!(s("older:2026/11/02 "), format!("before:{midnight}"));
-    // Before the DST change: midnight is at -04:00, not today's -05:00.
     assert_eq!(
         s("after:2026/10/31 "),
         format!("after:{}", ny(2026, 10, 31, 0))
     );
     assert_eq!(ny(2026, 10, 31, 0), 1_793_419_200_000);
-    // A bare number is seconds since the epoch.
     assert_eq!(s("after:1793419200 "), "after:1793419200000");
-    // Ages count back calendar days, months, and years from now.
     assert_eq!(
         s("newer_than:2d "),
         format!("after:{}", ny(2026, 10, 31, 10))
@@ -615,8 +585,6 @@ fn unicode_matching_is_case_insensitive() {
     assert!(matches_msg("привет", &fields, Mode::Rule));
 }
 
-// --- FTS5 -----------------------------------------------------------
-
 fn fts(q: &str) -> Option<String> {
     Query::parse(q).to_fts5()
 }
@@ -659,7 +627,6 @@ fn fts_drops_what_it_cannot_express() {
         fts("is:list from:a ").as_deref(),
         Some(r#"from_text : "a""#)
     );
-    // OR with an inexpressible side can't narrow anything.
     assert_eq!(fts("from:a OR label:x "), None);
     assert_eq!(
         fts("(from:a OR label:x) b ").as_deref(),
@@ -722,7 +689,6 @@ fn fts_escapes_special_characters() {
         fts("a\u{0}b ").as_deref(),
         Some(r#"{from_text subject body} : "a b""#)
     );
-    // Nothing tokenizable: no term rather than an empty phrase.
     assert_eq!(fts("*** ^ "), None);
 }
 
@@ -746,7 +712,6 @@ fn reads_body_only_for_bare_words() {
     assert!(!Query::parse("has:attachment").reads_body());
 }
 
-/// Every FTS5 string we produce must be accepted by SQLite and find the row.
 #[test]
 fn fts_output_is_valid_sqlite() {
     let db = rusqlite::Connection::open_in_memory().unwrap();
@@ -795,8 +760,6 @@ fn fts_output_is_valid_sqlite() {
         }
     }
 }
-
-// --- the Gmail query ------------------------------------------------
 
 #[test]
 fn gmail_query_strips_is_list() {

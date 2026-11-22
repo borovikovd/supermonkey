@@ -1,5 +1,3 @@
-//! One run of one op: its Gmail calls, then its result written.
-
 use std::sync::Arc;
 
 use futures_util::future::join_all;
@@ -16,55 +14,38 @@ use crate::ops::{LabelCreateOp, ModifyOp, reject, relabel};
 use crate::workers::account::AccountCtx;
 use crate::workers::drafts::{Upserted, WriteFailure, delete_copies, delete_draft, upsert};
 
-/// The most ids one `messages.batchModify` takes.
 const BATCH_MODIFY_MAX: usize = 1000;
 
-/// Why a run left its op queued.
 #[derive(Debug)]
 pub(super) enum Failure {
-    /// Gmail did not answer clearly: offline, a transient error, a refused
-    /// grant.
     Gmail(GmailError),
-    /// The database refused a read or write.
     Store(Error),
-    /// The outbox is writing the op's draft: run it again once it is done.
     Busy,
 }
 
-/// What Gmail said, as the op's result to write.
 #[derive(Debug)]
 enum Answer {
-    /// Done: the op leaves the queue.
     Done(Landing),
-    /// Some of its messages are gone: run it again with the rest.
     Narrowed(ModifyOp),
-    /// Rejected, with the toast's text.
     Rejected(String),
-    /// Its payload does not parse: it can never run.
     Unreadable,
 }
 
-/// What a done op leaves behind.
 #[derive(Debug)]
 enum Landing {
-    /// A label change: kept on top of reads that were in flight.
     Modify(ModifyOp),
-    /// A label made here, and Gmail's id for it.
-    Label { local: LabelId, gmail: LabelId },
-    /// A draft written to Gmail, and Gmail's ids for it; `None` when there
-    /// was nothing to write.
+    Label {
+        local: LabelId,
+        gmail: LabelId,
+    },
     Draft {
         draft: DraftId,
         written: Option<Box<sm_gmail::Draft>>,
     },
-    /// Nothing more to write.
     Plain,
 }
 
-/// Runs `op` once and writes what came of it. Nothing is written when Gmail
-/// gave no clear answer: the op stays as it was, to run again.
 pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure> {
-    // A draft write stays in progress until its Gmail ids are stored.
     let mut writing: Option<WritingDraft> = None;
     let answer = match op.kind {
         OpKind::Modify => match parsed::<ModifyOp>(&op) {
@@ -91,14 +72,11 @@ pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure
     if let Some(writing) = writing {
         let draft = writing.draft().clone();
         drop(writing);
-        // A send of the draft waited for this write to end.
         wake_outbox_if_sending(ctx, draft);
     }
     written
 }
 
-/// The op's payload as `P`, or `None`, logged, when it does not parse: the
-/// op can never run.
 fn parsed<P: DeserializeOwned>(op: &OpRecord) -> Option<P> {
     match op.payload::<P>() {
         Ok(payload) => Some(payload),
@@ -109,8 +87,6 @@ fn parsed<P: DeserializeOwned>(op: &OpRecord) -> Option<P> {
     }
 }
 
-/// `messages.batchModify`, in chunks Gmail takes. A 404 narrows the op to
-/// the messages that still exist.
 async fn modify(ctx: &AccountCtx, op: ModifyOp) -> Result<Answer, Failure> {
     if op.messages.is_empty() || (op.add.is_empty() && op.remove.is_empty()) {
         return Ok(Answer::Done(Landing::Modify(op)));
@@ -120,8 +96,6 @@ async fn modify(ctx: &AccountCtx, op: ModifyOp) -> Result<Answer, Failure> {
         .read(move |r| r.labels().gmail_ids(account))
         .await
         .map_err(Failure::Store)?;
-    // A label with no Gmail id yet keeps its own: Gmail rejects it, and the
-    // change rolls back.
     let gmail = |set: &LabelSet| -> Vec<LabelId> {
         set.iter()
             .map(|l| ids.get(l).unwrap_or(l).clone())
@@ -142,9 +116,6 @@ async fn modify(ctx: &AccountCtx, op: ModifyOp) -> Result<Answer, Failure> {
     Ok(Answer::Done(Landing::Modify(op)))
 }
 
-/// After a 404 from `batchModify`, which does not say which id is missing:
-/// checks each message with `messages.get` (`format=minimal`) and keeps the
-/// ones Gmail still has (SPEC Gmail errors). With none left, the op is done.
 async fn narrow(ctx: &AccountCtx, mut op: ModifyOp) -> Result<Answer, Failure> {
     let checks = join_all(
         op.messages
@@ -152,7 +123,6 @@ async fn narrow(ctx: &AccountCtx, mut op: ModifyOp) -> Result<Answer, Failure> {
             .map(|id| ctx.gmail.get_message(Priority::P1, id, Format::Minimal)),
     )
     .await;
-    // Whether Gmail still has each message, in the op's order.
     let mut alive = Vec::with_capacity(op.messages.len());
     for check in checks {
         match check {
@@ -166,7 +136,6 @@ async fn narrow(ctx: &AccountCtx, mut op: ModifyOp) -> Result<Answer, Failure> {
         return Ok(Answer::Done(Landing::Modify(op)));
     }
     if left == op.messages.len() {
-        // Every message is there, so the 404 was about a label.
         return Ok(Answer::Rejected(
             "Gmail rejected a change: a label it names is gone".to_owned(),
         ));
@@ -176,8 +145,6 @@ async fn narrow(ctx: &AccountCtx, mut op: ModifyOp) -> Result<Answer, Failure> {
     Ok(Answer::Narrowed(op))
 }
 
-/// `labels.create`. A 409 means the name exists on Gmail: that label is
-/// used, as its id from `labels.list` (SPEC Labels). Not a rejection.
 async fn create_label(ctx: &AccountCtx, op: LabelCreateOp) -> Result<Answer, Failure> {
     let created = ctx.gmail.create_label(Priority::P1, &op.name).await;
     let gmail = match created {
@@ -208,9 +175,6 @@ async fn create_label(ctx: &AccountCtx, op: LabelCreateOp) -> Result<Answer, Fai
     }))
 }
 
-/// A draft upsert (SPEC Drafts), and the write in progress to end once its
-/// answer is stored. Whatever came of it, a send of the draft waiting for
-/// this write to end looks again. An op that names no draft can never run.
 async fn draft_upsert(
     ctx: &AccountCtx,
     op: OpId,
@@ -221,7 +185,6 @@ async fn draft_upsert(
         return Ok((Answer::Unreadable, None));
     };
     let upserted = upsert(ctx, &draft).await;
-    // A written draft's write ends once its ids are stored (`run_op`).
     if !matches!(upserted, Ok(Upserted::Written { .. })) {
         wake_outbox_if_sending(ctx, draft.clone());
     }
@@ -253,8 +216,6 @@ async fn draft_upsert(
     }
 }
 
-/// A draft delete: of the Gmail draft it names, else of every Gmail copy of
-/// its local draft.
 async fn draft_delete(ctx: &AccountCtx, op: &OpRecord) -> Result<Answer, Failure> {
     if let Some(gmail) = &op.gmail_draft {
         return match delete_draft(ctx, gmail).await {
@@ -268,9 +229,6 @@ async fn draft_delete(ctx: &AccountCtx, op: &OpRecord) -> Result<Answer, Failure
     };
     match delete_copies(ctx, local).await {
         Ok(None) => Ok(Answer::Done(Landing::Plain)),
-        // A draft Gmail failed to read may be a copy. The op stays, so sync
-        // does not bring the copy back as a draft, and goes behind the
-        // queue's other ops, so they do not wait for it.
         Ok(Some(unread)) => {
             let id = op.id;
             ctx.writer()
@@ -285,9 +243,6 @@ async fn draft_delete(ctx: &AccountCtx, op: &OpRecord) -> Result<Answer, Failure
     }
 }
 
-/// Wakes the account's outbox if `draft` is being sent: its send waits for
-/// the draft's write to end. Through the writer, so it reaches the account's
-/// current worker even if this one was replaced.
 fn wake_outbox_if_sending(ctx: &AccountCtx, draft: DraftId) {
     let account = ctx.account;
     ctx.writer().queue(
@@ -302,19 +257,14 @@ fn wake_outbox_if_sending(ctx: &AccountCtx, draft: DraftId) {
     );
 }
 
-/// `messages.trash` of a sent message whose send was undone. One Gmail no
-/// longer has is gone already.
 async fn trash_message(ctx: &AccountCtx, message: GmailMessageId) -> Result<Answer, Failure> {
     match ctx.gmail.trash_message(Priority::P1, &message).await {
-        // Kept on top of reads that were in flight, as a modify is.
         Ok(_) => Ok(Answer::Done(Landing::Modify(ModifyOp::trash(message)))),
         Err(e) if *e.outcome() == Outcome::NotFound => Ok(Answer::Done(Landing::Plain)),
         Err(e) => refused(e),
     }
 }
 
-/// A failed call: a rejection is an answer; anything else leaves the op
-/// queued (SPEC Gmail errors: only a rejection rolls an action back).
 fn refused(e: GmailError) -> Result<Answer, Failure> {
     match e.outcome() {
         Outcome::Rejected {
@@ -335,23 +285,16 @@ fn refused(e: GmailError) -> Result<Answer, Failure> {
     }
 }
 
-/// Writes a run's answer. An op gone meanwhile (its account removed)
-/// writes nothing.
 async fn write(ctx: &AccountCtx, id: OpId, answer: Answer) -> Result<(), Error> {
     let (account, now, lane) = (ctx.account, ctx.clock().now(), Arc::clone(&ctx.lane));
     ctx.writer()
         .call(WritePriority::Sync, move |tx, state| match answer {
             Answer::Rejected(message) => reject(tx, id, message, now),
             Answer::Unreadable => tx.ops().delete(id),
-            // Stored even when a newer save replaced the op: the next write
-            // updates this Gmail draft instead of making another.
             Answer::Done(Landing::Draft { draft, written }) => {
                 if let Some(written) = written {
                     let ids = GmailIds::of(*written);
                     let made = ids.draft.clone();
-                    // Discarded while its upsert was in flight: the Gmail
-                    // draft the upsert made goes too, or sync would bring
-                    // it back.
                     if !store_ids(tx, &draft, ids)? {
                         delete_gmail_draft(tx, state, account, &made, now)?;
                     }

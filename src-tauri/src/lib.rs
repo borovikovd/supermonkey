@@ -1,22 +1,3 @@
-//! The Tauri shell (ARCHITECTURE.md, section 3): plugins, the window and
-//! Dock, the [`Platform`](sm_core::Platform) port, and commands that call
-//! `sm_bridge`. No logic beyond wiring: the core decides.
-//!
-//! - Closing the window hides it; the app keeps syncing in the Dock, and a
-//!   Dock click shows it again.
-//! - Cmd+Q, the app menu's own Quit, asks a connected page to close an open
-//!   composer first, then the page calls `quit_now`; quitting waits for the
-//!   user's last actions to commit (SPEC UI state, Actions), then exits. A
-//!   page that has not asked within 10 s is quit without.
-//! - When macOS terminates the app (Quit in the Dock, a logout, a
-//!   shutdown), the page can't answer: the exit still waits, within the
-//!   core's own deadline, for the UI actions the core has queued.
-//! - Debug builds with the `web` feature serve the web bridge on
-//!   127.0.0.1:1430 when `SUPERMONKEY_WEB_BRIDGE=1`, for the UI in a browser.
-//! - Debug builds with the `fake` feature run demo mode when
-//!   `SUPERMONKEY_FAKE=1` (`vp run demo`): an in-process fake Gmail with demo
-//!   mail and two accounts, on fresh data in its own folder each launch.
-
 mod commands;
 mod logging;
 mod menu;
@@ -39,46 +20,28 @@ pub use crate::logging::init_logging;
 pub use crate::menu::{QUIT_MENU_ITEM, app_menu};
 use crate::platform::TauriPlatform;
 
-/// The main window's label (`tauri.conf.json`).
 pub(crate) const MAIN_WINDOW: &str = "main";
 
-// Demo mode and the E2E server link the fake Gmail and the test control
-// server: never into a release build.
 #[cfg(all(feature = "fake", not(debug_assertions)))]
 compile_error!("the `fake` feature is for debug builds only");
 
-/// How long after launch the window shows even if the page has not
-/// connected (SPEC Window).
 const SHOW_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// How long the page has to answer a quit before the app quits without it
-/// (SPEC Actions): longer than the page's own 5 s wait for the core.
 const PAGE_QUIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
 
-/// Quota units a minute per account when the build sets no usable
-/// `SUPERMONKEY_QUOTA_PER_MIN` (SPEC Sync).
 const DEFAULT_QUOTA_PER_MIN: u32 = 5800;
 
-/// What the commands and window events share.
 pub(crate) struct Shell {
     pub(crate) core: Arc<App>,
-    /// The shell's own tasks (the debug web bridge), stopped on quit.
     tasks: Tasks,
-    /// Set by the first quit, so a second Cmd+Q doesn't quit twice.
     quitting: AtomicBool,
-    /// Set once the shell's tasks and the core have stopped ([`Shell::stop`]).
     stopped: OnceCell<()>,
-    /// Set once the page has connected and the window has been shown.
     pub(crate) connected: AtomicBool,
-    /// Demo mode's fake Gmail, kept running for as long as the app.
     #[cfg(feature = "fake")]
     _demo: Option<sm_testkit::Demo>,
 }
 
 impl Shell {
-    /// Stops the shell's tasks and quits the core, which commits the UI
-    /// actions it has queued within its own deadline. Runs once: a later
-    /// caller waits for the first to finish.
     async fn stop(&self) {
         self.stopped
             .get_or_init(|| async {
@@ -89,8 +52,6 @@ impl Shell {
     }
 }
 
-/// Where the core keeps its data, which Gmail it talks to, and where its
-/// refresh tokens live.
 struct Setup {
     config: Config,
     tokens: Arc<TokenFile>,
@@ -98,7 +59,6 @@ struct Setup {
     demo: Option<sm_testkit::Demo>,
 }
 
-/// Starts the app.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_logging();
@@ -106,7 +66,6 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main(app);
         }))
-        // Size and position only: the shell decides when the window shows.
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::all() - StateFlags::VISIBLE)
@@ -132,7 +91,6 @@ pub fn run() {
                 reason = "Tauri's enum is non-exhaustive, and the app acts on these two events only"
             )]
             match event {
-                // Closing the window hides it; the app keeps syncing in the Dock.
                 WindowEvent::CloseRequested { api, .. } if window.label() == MAIN_WINDOW => {
                     api.prevent_close();
                     if let Err(e) = window.hide() {
@@ -165,10 +123,7 @@ pub fn run() {
             reason = "Tauri's enum is non-exhaustive, and the app acts on these three events only"
         )]
         match event {
-            // Clicking the Dock icon shows the window again.
             RunEvent::Reopen { .. } => show_main(app),
-            // Tauri asks this when the last window is gone, which hiding on
-            // close never lets happen; quit as Cmd+Q does all the same.
             RunEvent::ExitRequested {
                 code: None, api, ..
             } => {
@@ -181,12 +136,8 @@ pub fn run() {
     });
 }
 
-/// Opens the core and launches it: in the app's data folder, or on demo
-/// data in demo mode.
 fn start_core(app: &AppHandle) -> anyhow::Result<Shell> {
     let runtime = tauri::async_runtime::handle().inner().clone();
-    // The core spawns its tasks on the runtime it starts in, and so does
-    // demo mode's fake Gmail.
     let _in_runtime = runtime.enter();
     let setup = setup(app)?;
     let activity = Activity::new();
@@ -215,8 +166,6 @@ fn start_core(app: &AppHandle) -> anyhow::Result<Shell> {
     })
 }
 
-/// The app's data folder, Google's Gmail, and the token file; or, in demo
-/// mode, the demo's.
 fn setup(app: &AppHandle) -> anyhow::Result<Setup> {
     #[cfg(feature = "fake")]
     if cfg!(debug_assertions) && std::env::var_os("SUPERMONKEY_FAKE").is_some_and(|v| v == "1") {
@@ -234,7 +183,6 @@ fn setup(app: &AppHandle) -> anyhow::Result<Setup> {
         expect(unused_mut, reason = "only debug builds take a database override")
     )]
     let mut config = Config::in_data_dir(&data_dir, cfg!(debug_assertions), gmail_config());
-    // Debug only: a perf fixture or other test database (`perf-fixture`).
     #[cfg(debug_assertions)]
     if let Some(path) = std::env::var_os("SUPERMONKEY_DB") {
         config.db_path = std::path::PathBuf::from(path);
@@ -247,8 +195,6 @@ fn setup(app: &AppHandle) -> anyhow::Result<Setup> {
     })
 }
 
-/// Google's Gmail with the OAuth client and budget the build baked in
-/// (`build.rs`).
 fn gmail_config() -> GmailConfig {
     let per_minute = env!("SUPERMONKEY_QUOTA_PER_MIN")
         .parse()
@@ -260,18 +206,14 @@ fn gmail_config() -> GmailConfig {
     GmailConfig::google(oauth, QuotaConfig::for_budget(Units(per_minute)))
 }
 
-/// The refresh-token file in the data folder.
 fn token_store(data_dir: &Path) -> Arc<TokenFile> {
     Arc::new(TokenFile::new(data_dir.join(Config::TOKEN_FILE)))
 }
 
-/// Whether `SUPERMONKEY_WEB_BRIDGE=1` asks for the debug web bridge.
 fn wants_web_bridge() -> bool {
     std::env::var_os("SUPERMONKEY_WEB_BRIDGE").is_some_and(|v| v == "1")
 }
 
-/// Serves the debug web bridge when asked for, in debug builds with the
-/// `web` feature.
 #[cfg(all(debug_assertions, feature = "web"))]
 fn start_web_bridge(core: &Arc<App>, tasks: &Tasks) {
     if !wants_web_bridge() {
@@ -285,7 +227,6 @@ fn start_web_bridge(core: &Arc<App>, tasks: &Tasks) {
     });
 }
 
-/// Builds without the bridge only say why it isn't there.
 #[cfg(not(all(debug_assertions, feature = "web")))]
 fn start_web_bridge(_core: &Arc<App>, _tasks: &Tasks) {
     if wants_web_bridge() {
@@ -295,9 +236,6 @@ fn start_web_bridge(_core: &Arc<App>, _tasks: &Tasks) {
     }
 }
 
-/// Shows the window [`SHOW_DEADLINE`] after launch if the page has not
-/// connected by then, which shows it: a page that failed to load still gets
-/// a window, so the app is never running with nothing to quit from.
 fn show_if_never_connected(app: &AppHandle) {
     let app = app.clone();
     let spawned = std::thread::Builder::new()
@@ -317,7 +255,6 @@ fn show_if_never_connected(app: &AppHandle) {
     }
 }
 
-/// Shows, unhides, and focuses the main window.
 pub(crate) fn show_main(app: &AppHandle) {
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
         return;
@@ -333,8 +270,6 @@ pub(crate) fn show_main(app: &AppHandle) {
     }
 }
 
-/// The window gained or lost focus. A focus that counts as a click on the
-/// last notification shows its thread.
 fn on_focus(app: &AppHandle, focused: bool) {
     let Some(shell) = app.try_state::<Shell>() else {
         return;
@@ -351,18 +286,12 @@ fn on_focus(app: &AppHandle, focused: bool) {
     }
 }
 
-/// Sends the page an app event.
 fn emit(app: &AppHandle, event: &AppEvent) -> anyhow::Result<()> {
     let (name, payload) = event.parts()?;
     app.emit(&name, payload)?;
     Ok(())
 }
 
-/// The app menu's Quit (`Cmd+Q`): a page that has connected closes an open
-/// composer and waits for its last actions to commit, then calls
-/// `quit_now`, or [`PAGE_QUIT_DEADLINE`] later the app quits anyway. The
-/// window may be hidden or minimized: its page can still hold a composer. A
-/// page that never connected can't answer, so the app quits at once.
 fn request_quit(app: &AppHandle) {
     let Some(shell) = app.try_state::<Shell>() else {
         quit(app.clone());
@@ -381,9 +310,6 @@ fn request_quit(app: &AppHandle) {
     }
 }
 
-/// Quits after [`PAGE_QUIT_DEADLINE`] if the page has not asked to by then:
-/// a hung page never keeps the app open. A quit the page asked for first
-/// makes this one do nothing.
 fn quit_after_deadline(app: &AppHandle) {
     let app = app.clone();
     let spawned = std::thread::Builder::new()
@@ -403,8 +329,6 @@ fn quit_after_deadline(app: &AppHandle) {
     }
 }
 
-/// Exits once the core has committed the UI actions queued so far, so the
-/// last ones the page sent are not lost; queued sync work is dropped.
 pub(crate) fn quit(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         if let Some(shell) = app.try_state::<Shell>() {
@@ -417,11 +341,6 @@ pub(crate) fn quit(app: AppHandle) {
     });
 }
 
-/// The process is about to end: after [`quit`], or because macOS terminated
-/// the app (Quit in the Dock, a logout, a shutdown, a script), which goes
-/// straight to `RunEvent::Exit` with no chance for the page to answer. Waits
-/// on the main thread until the core has committed the UI actions it has
-/// queued, within its own deadline; after [`quit`] that is already done.
 fn finish_quit(app: &AppHandle) {
     if let Some(shell) = app.try_state::<Shell>() {
         shell.quitting.store(true, Ordering::Release);

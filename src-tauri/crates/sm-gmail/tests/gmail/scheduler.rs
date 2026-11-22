@@ -1,6 +1,3 @@
-//! Priority order, the in-flight cap, the quota bucket rules, and back-off,
-//! on tokio's paused clock.
-
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -12,7 +9,6 @@ use tokio::time::{Instant, sleep};
 const A: &str = "a@example.com";
 const B: &str = "b@example.com";
 
-/// Lets every spawned task run until it blocks.
 async fn settle() {
     sleep(Duration::from_millis(1)).await;
 }
@@ -93,7 +89,6 @@ async fn at_most_eight_requests_run_at_once_per_account() {
     for task in tasks {
         task.await.unwrap();
     }
-    // Eight per account, two accounts.
     assert_eq!(peak.load(Ordering::SeqCst), 16);
 }
 
@@ -102,11 +97,9 @@ async fn background_priorities_starve_below_the_reserve_but_priority_one_runs() 
     let scheduler = Scheduler::new(QuotaConfig::default());
     let account = scheduler.account(A);
 
-    // Priorities 1-3 may take the bucket from 1000 down to 400.
     drop(account.acquire(Priority::P1, Units(600)).await);
     assert!((account.bucket_level() - 400.0).abs() < 1e-6);
 
-    // Priority 4 waits until the bucket holds more than 500: 101 units at 80 a second.
     let start = Instant::now();
     let background = tokio::spawn({
         let account = account.clone();
@@ -118,12 +111,10 @@ async fn background_priorities_starve_below_the_reserve_but_priority_one_runs() 
     settle().await;
     assert_eq!(account.queued(), 1);
 
-    // Priority 1 is not held behind it and may drain the bucket.
     let p1 = Instant::now();
     drop(account.acquire(Priority::P1, Units(300)).await);
     assert_eq!(Instant::now(), p1);
 
-    // Now the bucket holds about 100: priority 4 needs 401 more units, about 5 s.
     let ran_at = background.await.unwrap();
     let waited = ran_at - start;
     let expected = Duration::from_secs_f64(401.0 / 80.0);
@@ -155,7 +146,6 @@ async fn a_cheap_request_does_not_overtake_an_earlier_one_waiting_for_budget() {
     drop(account.acquire(Priority::P1, Units(1000)).await);
     let order = Arc::new(Mutex::new(Vec::new()));
     let mut tasks = Vec::new();
-    // 400 units take 5 s to refill; 10 would take 125 ms.
     for cost in [400, 10] {
         let (account, order) = (account.clone(), Arc::clone(&order));
         tasks.push(tokio::spawn(async move {
@@ -183,7 +173,6 @@ async fn background_spending_is_capped_per_minute() {
         }
         spent_in_first_minute += 100;
     }
-    // The reserve and refill alone would allow about 500 + 4800 units.
     assert_eq!(spent_in_first_minute, 4000);
 }
 
@@ -201,7 +190,6 @@ async fn a_background_request_dropped_once_granted_gives_back_its_minute_budget(
     });
     settle().await;
     assert_eq!(account.queued(), 1);
-    // The slot frees and the waiter is granted, but it is cancelled before it runs.
     drop(holder);
     queued.abort();
     settle().await;
@@ -220,7 +208,6 @@ async fn dropping_a_queued_or_running_request_frees_its_place() {
     let scheduler = Scheduler::new(one_at_a_time());
     let account = scheduler.account(A);
 
-    // A running request that is dropped frees the slot.
     let stuck = async {
         let _permit = account.acquire(Priority::P2, Units(40)).await;
         std::future::pending::<()>().await;
@@ -232,7 +219,6 @@ async fn dropping_a_queued_or_running_request_frees_its_place() {
     );
     assert_eq!(account.in_flight(), 0);
 
-    // A queued request that is dropped leaves the queue.
     let holder = account.acquire(Priority::P2, Units(1)).await;
     let queued = tokio::spawn({
         let account = account.clone();
@@ -252,7 +238,6 @@ async fn a_dropped_waiter_at_the_head_lets_the_next_one_run() {
     let scheduler = Scheduler::new(QuotaConfig::default());
     let account = scheduler.account(A);
     drop(account.acquire(Priority::P1, Units(1000)).await);
-    // The head waits 5 s for 400 units; the cheap one behind it waits with it.
     let head = tokio::spawn({
         let account = account.clone();
         async move { drop(account.acquire(Priority::P1, Units(400)).await) }

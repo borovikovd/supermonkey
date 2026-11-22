@@ -1,38 +1,22 @@
-//! `List-Unsubscribe` (RFC 2369) and `List-Unsubscribe-Post` (RFC 8058), for
-//! SPEC Unsubscribe and block.
-
 use percent_encoding::percent_decode_str;
 use sm_domain::Addr;
 
 use crate::addr::is_valid_email;
 
-/// The ways a list offers to unsubscribe.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ListUnsubscribe {
-    /// The first `mailto:` URI with a valid address.
     pub mailto: Option<Mailto>,
-    /// The first `https:` or `http:` URI.
     pub web: Option<String>,
-    /// `List-Unsubscribe-Post: List-Unsubscribe=One-Click` with a web URI: a
-    /// POST to [`ListUnsubscribe::web`] unsubscribes without a page. Which URLs
-    /// may be posted to (https only) is the caller's decision.
     pub is_one_click: bool,
 }
 
-/// A `mailto:` unsubscribe address with its optional subject and body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mailto {
-    /// The address to write to, without a display name.
     pub to: Addr,
-    /// The `subject` field, when it is not empty.
     pub subject: Option<String>,
-    /// The `body` field, when it is not empty.
     pub body: Option<String>,
 }
 
-/// Reads the `<uri>, <uri>` list of a `List-Unsubscribe` header, and its
-/// `List-Unsubscribe-Post` companion. URIs outside angle brackets and schemes
-/// other than mailto and http(s) are ignored.
 #[must_use]
 pub fn list_unsubscribe(header: &str, post: Option<&str>) -> ListUnsubscribe {
     let mut out = ListUnsubscribe::default();

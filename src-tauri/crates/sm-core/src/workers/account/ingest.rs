@@ -1,7 +1,3 @@
-//! Writing what Gmail said, on the writer thread, in small sync jobs
-//! (ARCHITECTURE.md, section 5.3): fetched threads, history batches, and
-//! threads Gmail no longer has.
-
 use std::collections::{BTreeSet, HashMap};
 
 use sm_domain::{
@@ -19,20 +15,12 @@ use crate::effects::Effect;
 use crate::ops::{LocalChanges, ReadTicket};
 use crate::writer::WriterState;
 
-/// What storing a thread did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Stored {
-    /// The thread, or `None` when it is gone.
     pub(crate) thread: Option<ThreadId>,
-    /// Messages the app did not have before.
     pub(crate) added: Vec<MessageId>,
 }
 
-/// Stores a thread read from Gmail (SPEC Sync): its messages replace what is
-/// stored, labels included, with this app's changes still on their way
-/// (`local`) kept on top, and messages it no longer has go. An answer older
-/// than the stored thread (a slow read overtaken by a poll) keeps only the
-/// bodies it brought, which never change.
 pub(crate) fn store_thread(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -57,9 +45,6 @@ pub(crate) fn store_thread(
     }
     let labels = Labels::load(reads, account)?;
     let mut unknown = false;
-    // Each message moves into the thread to store. What the steps after
-    // need of it stays, in the same order: its body, and whether Gmail has
-    // it in Spam, before this app's changes go on top of its labels.
     let mut rest = Vec::with_capacity(read.messages.len());
     let messages = read
         .messages
@@ -97,10 +82,6 @@ pub(crate) fn store_thread(
     })
 }
 
-/// Stores the message of a Gmail draft read with `drafts.get` into its
-/// thread, adding the thread if new, and leaves the thread's other messages
-/// as they are. Its labels need no local changes on top: no action changes
-/// a draft's. Returns the thread, or `None` when it is gone.
 pub(crate) fn store_draft_message(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -126,7 +107,6 @@ pub(crate) fn store_draft_message(
     Ok(stored.thread)
 }
 
-/// Drops a thread Gmail no longer has: a 404 on a read of it.
 pub(crate) fn drop_thread(
     tx: &mut WriteTx<'_>,
     account: AccountId,
@@ -138,34 +118,16 @@ pub(crate) fn drop_thread(
     Ok(())
 }
 
-/// What one poll read, for [`apply_history`].
 pub(crate) struct Polled<'a> {
     pub(crate) account: AccountId,
-    /// Its history records, gathered.
     pub(crate) batch: &'a HistoryBatch,
-    /// The threads read for messages the app did not know; `None` when the
-    /// thread is gone.
     pub(crate) read: Vec<(GmailThreadId, Option<ReadThread>)>,
-    /// Threads with messages the app did not know whose read failed: left
-    /// to the fetch queue, they keep their stored history, so nothing takes
-    /// them for current before that read lands.
     pub(crate) deferred: &'a [GmailThreadId],
-    /// Where the account's history cursor moves.
     pub(crate) cursor: HistoryId,
     pub(crate) now: Millis,
-    /// The poll's, taken before it read history.
     pub(crate) ticket: &'a ReadTicket,
 }
 
-/// One poll's history, applied in one transaction (SPEC Sync): deletes, the
-/// threads read for messages the app did not know (`None` when the thread
-/// is gone), then label changes for the messages it knows, with this app's
-/// changes still on their way kept on top; a thread stored meanwhile by a
-/// read newer than every record naming it keeps its labels. Then each
-/// thread's history moves
-/// up to the newest record that named it, so an older read counts as
-/// older; the snooze rule runs; and the account's cursor moves. Returns the
-/// messages added.
 pub(crate) fn apply_history(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -214,8 +176,6 @@ pub(crate) fn apply_history(
         let Some(record) = reads.messages().by_gmail_id(account, message)? else {
             continue;
         };
-        // A thread fetched while this history was on its way (an opened
-        // conversation) holds newer labels than these records: keep them.
         if let Some(newest) = batch.newest.get(thread)
             && stored_history(reads, record.thread)?.is_some_and(|stored| stored > *newest)
         {
@@ -247,14 +207,10 @@ pub(crate) fn apply_history(
     Ok(added)
 }
 
-/// The stored thread's Gmail `historyId`.
 fn stored_history(reads: Reads<'_>, thread: ThreadId) -> Result<Option<HistoryId>, StoreError> {
     Ok(reads.threads().row(thread)?.and_then(|row| row.history_id))
 }
 
-/// Stores the bodies a read brought, each with its message's Gmail id, for
-/// messages that have none yet, and fills the drafts that quote one's
-/// snippet.
 fn store_bodies<'a>(
     tx: &mut WriteTx<'_>,
     account: AccountId,
@@ -275,9 +231,6 @@ fn store_bodies<'a>(
     Ok(())
 }
 
-/// Counts the addresses of messages not in drafts or spam for recipient
-/// autocomplete, each message once (SPEC Recipients and autocomplete).
-/// `not_spam` are the read's messages Gmail does not have in Spam.
 fn count_contacts<'a>(
     tx: &mut WriteTx<'_>,
     account: AccountId,
@@ -299,8 +252,6 @@ fn count_contacts<'a>(
     Ok(())
 }
 
-/// The snooze rule (SPEC Snooze, Sync): a snoozed thread that has gained
-/// `INBOX` from outside this app loses its snooze.
 fn wake_if_back_in_inbox(
     tx: &mut WriteTx<'_>,
     thread: ThreadId,
@@ -319,7 +270,6 @@ fn wake_if_back_in_inbox(
     Ok(())
 }
 
-/// The account's label table, to map Gmail's label ids to local ones.
 struct Labels(HashMap<LabelId, LabelId>);
 
 impl Labels {
@@ -327,8 +277,6 @@ impl Labels {
         Ok(Self(reads.labels().local_ids(account)?))
     }
 
-    /// Gmail's labels as local ids. An id the table lacks is kept as it is,
-    /// and sets `unknown`, so the label list is read again.
     fn local(&self, gmail: &LabelSet, unknown: &mut bool) -> LabelSet {
         gmail
             .iter()

@@ -1,5 +1,3 @@
-//! First loads and patches, built from the committed snapshot.
-
 use std::collections::HashSet;
 
 use sm_domain::{Millis, SubId, ThreadId, View};
@@ -12,19 +10,13 @@ use super::lists::{FIRST_WINDOW, SearchTraits, search_ids, view_ids};
 use super::registry::Sub;
 use crate::views;
 
-/// What updates are built from.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Source<'c> {
-    /// The committed snapshot.
     pub(super) reads: Reads<'c>,
-    /// Whether Gmail is reachable, for the app subscription.
     pub(super) online: bool,
-    /// App time, for searches that name relative dates.
     pub(super) now: Millis,
 }
 
-/// A subscription's first load: the whole of what it shows, and for a list
-/// its ids and the rows of the top of the window. Records the ids sent.
 pub(super) fn first_load(
     source: Source<'_>,
     id: &SubId,
@@ -69,10 +61,6 @@ pub(super) fn first_load(
     })
 }
 
-/// The patch for a subscription the commit may have changed, or `None` when
-/// it did not change it. A forced patch goes out even when it changes
-/// nothing, so the app's `online` and a list's `searching` and `more` reach
-/// the mirror. Records the ids sent.
 pub(super) fn patch(
     source: Source<'_>,
     id: &SubId,
@@ -101,7 +89,6 @@ pub(super) fn patch(
             first: false,
             state: views::app_state(reads, online)?,
         }),
-        // Patches start once the account exists.
         SubKey::Account { account } => {
             views::account_summary(reads, *account)?.map(|summary| SubUpdate::Account {
                 sub: sub_id,
@@ -124,14 +111,10 @@ pub(super) fn patch(
     })
 }
 
-/// What a list holds, as its updates need to know.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ListKind {
-    /// Threads in a view.
     View,
-    /// Drafts, keyed by draft id.
     Drafts,
-    /// Search results, and what the query says about them.
     Search(SearchTraits),
 }
 
@@ -153,13 +136,10 @@ impl ListKind {
     }
 }
 
-/// A list subscription's update in the making: the list as the snapshot
-/// has it now, against what the subscription last sent.
 struct ListUpdate<'a, 'c> {
     reads: Reads<'c>,
     sub_id: SubId,
     sub: &'a mut Sub,
-    /// The list's entries now.
     ids: Vec<ListEntry>,
     kind: ListKind,
 }
@@ -181,7 +161,6 @@ impl<'a, 'c> ListUpdate<'a, 'c> {
         }
     }
 
-    /// The first load: every id, and the rows of the top of the window.
     fn first(self) -> Result<SubUpdate, StoreError> {
         let Self {
             reads,
@@ -214,9 +193,6 @@ impl<'a, 'c> ListUpdate<'a, 'c> {
         })
     }
 
-    /// The patch: old ids plus new ids give removals and moves; changed rows
-    /// go along whether or not they are in the window. `None` when nothing
-    /// changed and the patch is not forced.
     fn patch(self, changes: &Changes, forced: bool) -> Result<Option<SubUpdate>, StoreError> {
         let Self {
             reads,
@@ -260,7 +236,6 @@ impl<'a, 'c> ListUpdate<'a, 'c> {
     }
 }
 
-/// The key of the last entry that is one of the list's Gmail hits.
 fn oldest_hit(ids: &[ListEntry], hits: &[ThreadId]) -> Option<String> {
     if hits.is_empty() {
         return None;

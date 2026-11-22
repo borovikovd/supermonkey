@@ -1,4 +1,3 @@
-/** Search operators, as Superhuman lists them beside the results. */
 const TIPS: [string, string][] = [
   ["from:nicole", "from Nicole"],
   ["to:roman", "to Roman"],

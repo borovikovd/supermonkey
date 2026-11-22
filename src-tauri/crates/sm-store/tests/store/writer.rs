@@ -1,5 +1,3 @@
-//! The writer actor: ordering, transactions, rev, hooks, panics, stopping.
-
 use std::pin::pin;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -19,7 +17,6 @@ fn tag(name: &'static str) -> impl FnOnce(&mut WriteTx<'_>, &mut State) -> Resul
     }
 }
 
-/// Holds the writer busy until the returned sender sends.
 fn hold(h: &Harness) -> (std::sync::mpsc::SyncSender<()>, Pending<(), StoreError>) {
     let (started_tx, started) = sync_channel(0);
     let (release, release_rx) = sync_channel::<()>(0);
@@ -98,14 +95,12 @@ fn rev_moves_once_per_writing_commit_and_survives_a_restart() {
     assert_eq!(first.rev, Rev(1));
     assert!(first.changes.touched(account, Table::Account));
 
-    // A job that writes nothing still commits and runs on_commit, at the same rev.
     let commits = h.commits.lock().len();
     h.write(|_| Ok(()));
     assert_eq!(h.commits.lock().len(), commits + 1);
     assert_eq!(h.last_commit().rev, Rev(1));
     assert!(h.last_commit().changes.is_empty());
 
-    // The action number is not a row: it moves no rev, and never goes back.
     h.write(|tx| tx.meta().set_last_action(ActionNo(5)));
     h.write(|tx| tx.meta().set_last_action(ActionNo(3)));
     assert_eq!(h.last_commit().rev, Rev(1));
@@ -184,7 +179,6 @@ fn stop_runs_earlier_ui_jobs_and_drops_queued_sync_jobs() {
     stopped.wait().unwrap();
     let late: Result<(), StoreError> = h.writer.call_blocking(Priority::Ui, tag("late"));
     assert!(matches!(late, Err(StoreError::WriterStopped)));
-    // Stopping twice is fine.
     h.writer.stop().wait().unwrap();
 }
 

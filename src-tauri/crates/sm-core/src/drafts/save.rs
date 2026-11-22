@@ -1,5 +1,3 @@
-//! A composer's later saves, and the Gmail upsert they queue (SPEC Drafts).
-
 use sm_domain::{AccountId, DraftId, MessageId, Millis, Rev};
 use sm_ipc::DraftFields;
 use sm_store::{DraftAttachment, NewOp, OpKind, Reads, StoreError, WriteTx};
@@ -9,17 +7,11 @@ use super::text::snippet;
 use crate::effects::Effect;
 use crate::writer::WriterState;
 
-/// A composer's save after an edit.
 pub(crate) struct Edit {
-    /// The composer's fields, as edited.
     pub(crate) fields: DraftFields,
-    /// The `rev` of the draft state the composer saved from.
     pub(crate) seen: Rev,
 }
 
-/// Stores the composer's fields after an edit, and queues the upsert that
-/// writes them to Gmail unless the draft is untouched. A draft gone or
-/// being sent drops the save: it arrived after the send or discard.
 pub(crate) fn update(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -44,10 +36,7 @@ pub(crate) fn update(
         body_html,
         attachments,
     } = fields;
-    // The stored attachments, taken: the list built below replaces them.
     let old = std::mem::take(&mut draft.attachments);
-    // The composer holds attachments as it first loaded them; a file stored
-    // since (a download of a Gmail draft's parts) is kept.
     let mut attachments: Vec<DraftAttachment> = attachments
         .into_iter()
         .map(|a| {
@@ -63,8 +52,6 @@ pub(crate) fn update(
             }
         })
         .collect();
-    // One Rust added after the state the composer saved from (a forward's,
-    // once its target's body landed) was never shown there, so not removed.
     let unseen: Vec<DraftAttachment> = old
         .into_iter()
         .filter(|s| s.added.is_some_and(|added| added > seen))
@@ -82,19 +69,12 @@ pub(crate) fn update(
     draft.updated_at = now;
     lifecycle::edited(&mut draft);
     tx.drafts().put(&draft)?;
-    // A fresh draft still as it started is not written: closing discards
-    // it. One opened again may be in Gmail with other text, so it is
-    // written even when the edit put it back as it started.
     if !lifecycle::discards_on_close(&draft) {
         queue_upsert(tx, state, draft.account, id, now)?;
     }
     Ok(())
 }
 
-/// Queues one upsert of the draft. It writes the draft as it is when it
-/// runs, so a save replaces the one queued: an upsert already running read
-/// the draft before this save, and the new one, last in the queue, carries
-/// it (SPEC Drafts).
 pub(crate) fn queue_upsert(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -116,9 +96,6 @@ pub(crate) fn queue_upsert(
     Ok(())
 }
 
-/// A message's attachments as a draft carries them: a forward carries its
-/// target's, and a draft read from Gmail its own. Inline parts stay with
-/// the HTML that shows them.
 pub(crate) fn message_attachments(
     reads: Reads<'_>,
     message: MessageId,

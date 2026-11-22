@@ -1,5 +1,3 @@
-//! A writer on a temporary database, and builders for fetched mail.
-
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -11,16 +9,12 @@ use sm_store::{
 };
 use tempfile::TempDir;
 
-/// The writer-side state the tests' jobs and hooks see.
 #[derive(Default)]
 pub(crate) struct State {
-    /// Tags jobs pushed, in the order they ran.
     pub order: Vec<String>,
-    /// Bumped by jobs; `on_rollback` checks it was rolled back with them.
     pub dirty: u32,
 }
 
-/// A started writer, with what its hooks saw.
 pub(crate) struct Harness {
     pub dir: TempDir,
     pub writer: Writer<State>,
@@ -44,7 +38,6 @@ impl Harness {
         self.dir.path().join("mail.db")
     }
 
-    /// Stops the writer and starts a new one on the same file.
     pub(crate) fn restart(&mut self) {
         self.writer.stop().wait().unwrap();
         let (writer, commits, rollbacks) = start_at(&self.path());
@@ -53,7 +46,6 @@ impl Harness {
         self.rollbacks = rollbacks;
     }
 
-    /// Runs a UI job and waits for it.
     pub(crate) fn write<T: Send + 'static>(
         &self,
         job: impl FnOnce(&mut WriteTx<'_>) -> Result<T, StoreError> + Send + 'static,
@@ -63,7 +55,6 @@ impl Harness {
             .unwrap()
     }
 
-    /// Reads on a fresh pool connection.
     pub(crate) fn read<T>(&self, read: impl FnOnce(Reads<'_>) -> Result<T, StoreError>) -> T {
         let pool = ReadPool::open(&self.path(), std::num::NonZeroUsize::MIN).unwrap();
         pool.with(|r| read(**r)).unwrap()
@@ -87,8 +78,6 @@ fn start_at(path: &std::path::Path) -> (Writer<State>, Arc<Mutex<Vec<Commit>>>, 
         path,
         State::default(),
         move |state: &mut State, snapshot, commit: &Commit| {
-            // The snapshot is the committed state: its stored rev is the
-            // commit's. A mismatch shows as a commit with rev -1.
             let rev = snapshot.meta().rev().ok();
             state.dirty = 0;
             seen.lock().push(if rev == Some(commit.rev) {
@@ -109,7 +98,6 @@ fn start_at(path: &std::path::Path) -> (Writer<State>, Arc<Mutex<Vec<Commit>>>, 
     (writer, commits, rollbacks)
 }
 
-/// A message from `from` at `date` with these labels.
 pub(crate) fn msg(gmail_id: &str, date: i64, from: &str, labels: &[&str]) -> NewMessage {
     NewMessage {
         gmail_id: GmailMessageId::from(gmail_id),
@@ -132,7 +120,6 @@ pub(crate) fn msg(gmail_id: &str, date: i64, from: &str, labels: &[&str]) -> New
     }
 }
 
-/// A complete fetch of a thread.
 pub(crate) fn fetched(
     account: AccountId,
     gmail_id: &str,

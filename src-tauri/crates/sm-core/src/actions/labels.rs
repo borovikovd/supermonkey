@@ -1,5 +1,3 @@
-//! Creating a label from the `l` picker (SPEC Labels).
-
 use sm_domain::{AccountId, LabelId};
 use sm_ipc::ModifyAction;
 use sm_store::{NewOp, OpKind};
@@ -8,10 +6,6 @@ use super::{ActionCtx, ActionError, mail};
 use crate::effects::Effect;
 use crate::ops::LabelCreateOp;
 
-/// `createLabel`: a user label under the UI's id, at once, with a queued
-/// `labels.create` that gives it Gmail's id when it replays. `apply`, the
-/// label's first use, goes in the same action. A user label the account
-/// already has by that name is used instead.
 pub(super) fn create_label(
     ctx: &mut ActionCtx<'_, '_>,
     account: AccountId,
@@ -34,9 +28,7 @@ pub(super) fn create_label(
             "Couldn't create that label. Try again.",
         ));
     }
-    // A system label's name is Gmail's to refuse, as a rejection.
     let existing = reads.labels().by_name(account, name)?.filter(|l| !l.system);
-    // An existing user label takes the place of the requested id in `apply`.
     let rename = if let Some(existing) = existing {
         Some((id, existing.id))
     } else {

@@ -1,6 +1,3 @@
-// The `c` screen, formatting and compose shortcuts, the Esc machine, the
-// untouched rule, discard, and what takes a composer off screen
-// (SPEC Compose, Keyboard, UI state).
 import type { App } from "./app.ts";
 import type { Control, GmailMessage } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
@@ -8,16 +5,12 @@ import { htmlOf, parseMime } from "./mime.ts";
 import * as seeds from "./seeds.ts";
 import { A, A_ALIAS, B } from "./seeds.ts";
 
-// ------------------------------------------------------------------ helpers
-
-/** Every address in a header, lower-cased, in order. */
 function emails(header: string | undefined): string[] {
   return [...(header ?? "").matchAll(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)].map((m) =>
     m[0].toLowerCase(),
   );
 }
 
-/** Mail this app sent: SENT and carrying its draft header. */
 async function sentByApp(gmail: Control, account: string): Promise<GmailMessage[]> {
   const { messages } = await gmail.gmail(account);
   return messages.filter(
@@ -25,7 +18,6 @@ async function sentByApp(gmail: Control, account: string): Promise<GmailMessage[
   );
 }
 
-/** The one message the app sent with this subject. */
 async function sentWithSubject(
   gmail: Control,
   account: string,
@@ -38,7 +30,6 @@ async function sentWithSubject(
   return m;
 }
 
-/** Drafts in Gmail whose subject is `subject`. */
 async function gmailDrafts(gmail: Control, account: string, subject?: string) {
   const { drafts } = await gmail.gmail(account);
   return subject === undefined
@@ -46,21 +37,18 @@ async function gmailDrafts(gmail: Control, account: string, subject?: string) {
     : drafts.filter((d) => d.message.headers.subject === subject);
 }
 
-/** Visible text of an HTML body. */
 const textOf = (html: string) =>
   html
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-/** Opens a conversation by clicking its row. */
 async function open(app: App, subject: string): Promise<void> {
   await app.row(subject).first().click();
   await expect(app.conversationTitle).toHaveText(subject);
   await app.settle();
 }
 
-/** Runs `step` for each item, one after another. */
 async function inOrder<T>(
   items: readonly T[],
   step: (item: T, i: number) => Promise<void>,
@@ -71,7 +59,6 @@ async function inOrder<T>(
   );
 }
 
-/** Highlights a list row with `j` without opening it. */
 async function highlight(app: App, subject: string): Promise<void> {
   await expect(app.row(subject)).toHaveCount(1);
   const down = async (tries: number): Promise<void> => {
@@ -83,13 +70,11 @@ async function highlight(app: App, subject: string): Promise<void> {
   await down(40);
 }
 
-/** Cmd+Shift+M, and waits until the editor has focus. */
 async function focusBody(app: App): Promise<void> {
   await app.press("Meta+Shift+m");
   await expect(app.editor).toBeFocused();
 }
 
-/** Cmd+Shift+S, and waits until Subject has focus (it moves in the next frame). */
 async function focusSubject(app: App): Promise<void> {
   await app.press("Meta+Shift+s");
   await expect(app.subject).toBeFocused();
@@ -97,7 +82,6 @@ async function focusSubject(app: App): Promise<void> {
 
 const newMessage = (app: App) => app.page.getByRole("heading", { name: "New Message" });
 
-/** Fills a fresh `c` composer: To, Subject, and body. Leaves the editor focused. */
 async function fill(app: App, to: string, subject: string, body: string): Promise<void> {
   await app.press("Meta+Shift+o");
   await app.type(`${to},`);
@@ -108,21 +92,18 @@ async function fill(app: App, to: string, subject: string, body: string): Promis
   await app.type(body);
 }
 
-/** Closes the composer as two `Esc` presses do. */
 async function closeComposer(app: App): Promise<void> {
   await app.press("Escape", "Escape");
   await expect(app.editor).toHaveCount(0);
   await app.settle();
 }
 
-/** Sends the composer on screen once its autosave has run. */
 async function sendSaved(app: App): Promise<void> {
   await app.settle();
   await app.press("Meta+Enter");
   await expect(app.editor).toHaveCount(0);
 }
 
-/** The From button (shown only with more than one sendAs address). */
 function fromButton(app: App) {
   return app.page
     .locator("div")
@@ -131,7 +112,6 @@ function fromButton(app: App) {
     .getByRole("button");
 }
 
-/** Draft stubs in the open conversation. */
 function stubs(app: App) {
   return app.conversation.getByRole("button", { name: /^Draft/ });
 }
@@ -140,7 +120,6 @@ function rail(app: App, title: string) {
   return app.page.getByRole("navigation").getByTitle(title, { exact: true });
 }
 
-/** Rows in the Drafts view, opened from the rail; returns to Inbox afterwards. */
 async function draftRows(app: App): Promise<string[]> {
   await rail(app, "Drafts (g d)").click();
   await expect(rail(app, "Drafts (g d)")).toHaveClass(/bg-bg/);
@@ -150,8 +129,6 @@ async function draftRows(app: App): Promise<string[]> {
   await expect(app.section("Important")).toBeVisible();
   return rows;
 }
-
-// ------------------------------------------------------------------ cases
 
 test("NEW-01 c replaces the screen, and closing it returns to where it came from", async ({
   app,
@@ -191,7 +168,6 @@ test("NEW-01 c replaces the screen, and closing it returns to where it came from
     await start.go();
     await start.check();
 
-    // Esc Esc with typed content.
     await app.compose();
     await expect(newMessage(app)).toBeVisible();
     await expect(app.field("To")).toBeFocused();
@@ -203,7 +179,6 @@ test("NEW-01 c replaces the screen, and closing it returns to where it came from
     await expect(newMessage(app)).toHaveCount(0);
     await start.check();
 
-    // After sending.
     await app.compose();
     await fill(app, "kim@kite.test", `Sent ${i}`, "Sent content");
     await sendSaved(app);
@@ -254,7 +229,6 @@ test("NEW-02 compose and send a formatted message, including the last keystrokes
   await expect(app.editor.locator('a[href*="example.org"]')).toHaveText("here");
   await expect(app.editor).toBeFocused();
   await app.press("ArrowRight", "Enter");
-  // The last keystrokes, then Send at once.
   await app.type("end");
   await app.press("Meta+Enter");
 
@@ -293,19 +267,16 @@ test("NEW-03 TipTap shortcuts that clash with the compose table are replaced", a
   await app.compose();
   await fill(app, "kim@kite.test", "Clash test", "one");
 
-  // Cmd+Shift+B: the Bcc field, not a blockquote.
   await app.press("Meta+Shift+b");
   await expect(app.field("Bcc")).toBeFocused();
   await expect(app.editor.locator("blockquote")).toHaveCount(0);
 
-  // Cmd+Shift+S: Subject, not strikethrough.
   await focusBody(app);
   await focusSubject(app);
   await focusBody(app);
   await app.type(" two");
   await expect(app.editor.locator("s")).toHaveCount(0);
 
-  // Shift+Enter is a hard break; Cmd+Shift+X is strikethrough.
   await app.press("Shift+Enter");
   await app.type("three ");
   await app.press("Meta+Shift+x");
@@ -314,7 +285,6 @@ test("NEW-03 TipTap shortcuts that clash with the compose table are replaced", a
   await expect(app.editor.locator("br")).toHaveCount(1);
   await expect(app.editor.locator("s")).toHaveText("struck");
 
-  // Cmd+Enter sends, without adding a hard break.
   await sendSaved(app);
   await app.advance(10_000);
   await app.settle();
@@ -392,7 +362,6 @@ test("NEW-05 Esc in compose: the first blurs, the second closes; while blurred, 
   await expect(app.editor).not.toBeFocused();
   await expect(newMessage(app)).toBeVisible();
 
-  // Keys from the shortcut table do nothing while blurred.
   await app.press("e", "j", "#", "x", "s", "z", "!");
   await app.settle();
   await expect(app.editor).toHaveText("Body text");
@@ -400,7 +369,6 @@ test("NEW-05 Esc in compose: the first blurs, the second closes; while blurred, 
   expect(await gmail.requests("messages.batchModify")).toEqual([]);
   expect(await gmail.requests("messages.trash")).toEqual([]);
 
-  // Enter refocuses the editor.
   await app.press("Enter");
   await expect(app.editor).toBeFocused();
   await app.type(" more");
@@ -408,7 +376,6 @@ test("NEW-05 Esc in compose: the first blurs, the second closes; while blurred, 
   await app.press("Escape");
   await expect(app.editor).not.toBeFocused();
 
-  // Cmd+K: the draft actions, and Esc closes them; the composer stays, blurred.
   await app.press("Meta+k");
   const actions = app.page.getByRole("dialog", { name: "Draft actions" });
   await expect(actions).toBeVisible();
@@ -422,7 +389,6 @@ test("NEW-05 Esc in compose: the first blurs, the second closes; while blurred, 
   await expect(newMessage(app)).toBeVisible();
   await expect(app.editor).not.toBeFocused();
 
-  // The last Esc closes the composer and keeps the draft.
   await app.press("Escape");
   await expect(newMessage(app)).toHaveCount(0);
   await app.settle();
@@ -432,7 +398,6 @@ test("NEW-05 Esc in compose: the first blurs, the second closes; while blurred, 
   expect(htmlOf(parseMime(draft?.message.raw ?? ""))).toContain("Body text more");
   expect(await draftRows(app)).toEqual(["Blur test"]);
 
-  // Variant: while blurred, Cmd+Enter sends.
   await rail(app, "Drafts (g d)").click();
   await app.row("Blur test").click();
   await expect(newMessage(app)).toBeVisible();
@@ -451,7 +416,6 @@ test("NEW-06 shortcuts never fire while typing in compose", async ({ app, gmail 
   await seeds.standard(gmail, app);
   const inbox = await app.subjects();
   const text = "Je suis #1! E? K/O x z";
-  // Person 2 is read, so opening it makes no Gmail call of its own.
   await open(app, "Person 2");
   await app.reply("r");
   await app.type(text);
@@ -485,7 +449,6 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await seeds.standard(gmail, app);
   let kept = 0;
 
-  /** Local stubs, Drafts rows, and Gmail drafts after a row. */
   const expectLeft = async (row: string, stubCount: number | null) => {
     await app.settle();
     if (stubCount !== null) await expect(stubs(app), `${row}: stubs`).toHaveCount(stubCount);
@@ -494,7 +457,6 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
     expect(await draftRows(app), `${row}: Drafts rows`).toHaveLength(kept);
   };
 
-  // Untouched rows: nothing left.
   await open(app, "Person 1");
   await app.reply("r");
   await closeComposer(app);
@@ -515,9 +477,6 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await closeComposer(app);
   await expectLeft("c, untouched", null);
 
-  // Untouched is judged by value (SPEC Keyboard). Typed, saved to Gmail, then
-  // deleted back to empty: the draft is untouched, so it is discarded here and
-  // in Gmail.
   await open(app, "Person 5");
   await app.reply("r");
   await app.type("Second thoughts");
@@ -528,7 +487,6 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await closeComposer(app);
   await expectLeft("r, typed then deleted", 0);
 
-  // Touched rows: kept.
   await open(app, "Person 1");
   await app.reply("r");
   await app.type("Typed body");
@@ -577,15 +535,12 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   kept++;
   await expectLeft("c, subject only", null);
 
-  // A resumed draft, closed untouched, is kept.
   await open(app, "Person 1");
   await app.reply("r");
   await expect(app.editor).toHaveText("Typed body");
   await closeComposer(app);
   await expectLeft("resumed, untouched", 1);
 
-  // Still kept when edited back to how its composer started: a resumed draft is
-  // never discarded as untouched, even when its fields equal the defaults.
   await open(app, "Person 1");
   await app.reply("r");
   await expect(app.editor).toHaveText("Typed body");
@@ -594,8 +549,6 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await closeComposer(app);
   await expectLeft("resumed, edited back to the defaults", 1);
 
-  // A draft reopened by undo send is kept (SPEC Keyboard), even when its text is
-  // then deleted back to how `r` started it.
   await open(app, "Person 4");
   await app.reply("r");
   await app.type("Undo me");
@@ -615,7 +568,6 @@ test("NEW-08 Cmd+K in compose", async ({ app, gmail }) => {
   await app.compose();
   await fill(app, "kim@kite.test", "Link test", "Click here");
 
-  // Focused, with "here" selected: the link input.
   await app.press(..."here".split("").map(() => "Shift+ArrowLeft"));
   await app.press("Meta+k");
   const input = app.page.getByPlaceholder("https://");
@@ -625,7 +577,6 @@ test("NEW-08 Cmd+K in compose", async ({ app, gmail }) => {
   await expect(app.editor.locator('a[href*="example.org"]')).toHaveText("here");
   await expect(app.page.getByRole("dialog")).toHaveCount(0);
 
-  // Blurred: the draft-actions palette; Discard draft removes it here and in Gmail.
   await app.settle();
   expect(await gmailDrafts(gmail, A, "Link test")).toHaveLength(1);
   await app.press("Escape");
@@ -646,7 +597,6 @@ test("NEW-09 sending with no recipients never loses the draft; text still in To 
 }) => {
   await seeds.standard(gmail, app);
 
-  // Empty To, no chips: refused with a toast (SPEC Recipients and autocomplete); the draft stays.
   await app.compose();
   await focusSubject(app);
   await app.type("Nobody yet");
@@ -662,7 +612,6 @@ test("NEW-09 sending with no recipients never loses the draft; text still in To 
   expect(await gmail.requests("drafts.send")).toEqual([]);
   expect(await gmailDrafts(gmail, A, "Nobody yet")).toHaveLength(1);
 
-  // "pat@p.test" typed but not yet a chip: sent to it.
   await app.press("Meta+Shift+o");
   await app.type("pat@p.test");
   await expect(app.chips("To")).toHaveCount(0);
@@ -673,7 +622,6 @@ test("NEW-09 sending with no recipients never loses the draft; text still in To 
   const m = await sentWithSubject(gmail, A, "Nobody yet");
   expect(emails(m.headers.to)).toContain("pat@p.test");
 
-  // Cmd+Enter with the suggestion list open sends to the typed address.
   await app.compose();
   await focusSubject(app);
   await app.type("Picked by send");
@@ -708,7 +656,6 @@ test("NEW-10 From picker and the sending account", async ({ app, gmail }) => {
   await app.press("Control+2");
   await expect(app.row("B 2")).toHaveCount(1);
   await app.compose();
-  // B has one sendAs address: no From row.
   await expect(app.page.getByText("From", { exact: true })).toHaveCount(0);
   await fill(app, "kim@kite.test", "From Ben", "Hi");
   await sendSaved(app);
@@ -726,7 +673,6 @@ test("NEW-11 Cmd+Shift+, discards locally and in Gmail", async ({ app, gmail }) 
   const s = await seeds.drafts(gmail, app);
   const before = (await gmailDrafts(gmail, A)).length;
 
-  // A new message.
   await app.compose();
   await fill(app, "kim@kite.test", "Discard me", "Soon gone");
   await app.settle();
@@ -742,7 +688,6 @@ test("NEW-11 Cmd+Shift+, discards locally and in Gmail", async ({ app, gmail }) 
   expect(await gmailDrafts(gmail, A)).toHaveLength(before);
   expect(await draftRows(app)).not.toContain("Discard me");
 
-  // The resumed Gmail draft dNew.
   const dNew = s.draft("dNew");
   await rail(app, "Drafts (g d)").click();
   await app.row("Idea").click();
@@ -768,8 +713,6 @@ test("NEW-12 opening another composer, closing search, a new query, or another a
   const drafts = async () => gmailDrafts(gmail, A);
   const start = (await drafts()).length;
 
-  // Reply, touched: opening another draft (dEarly's stub) keeps it. SPEC Keyboard
-  // makes `c` do nothing while a composer is open, so it cannot open one here.
   await open(app, "Q4 plan");
   await app.reply("r");
   await app.type("touched one");
@@ -785,7 +728,6 @@ test("NEW-12 opening another composer, closing search, a new query, or another a
   await closeComposer(app);
   await app.press("Escape");
 
-  // Reply, untouched: opening dFwd's stub discards it.
   await open(app, "Contract");
   await app.reply("r");
   await stubs(app).filter({ hasText: "FYI" }).click();
@@ -798,7 +740,6 @@ test("NEW-12 opening another composer, closing search, a new query, or another a
   await closeComposer(app);
   await app.press("Escape");
 
-  // c, touched: clicking the Inbox rail icon keeps it.
   await app.compose();
   await focusSubject(app);
   await app.type("Rail kept");
@@ -809,8 +750,6 @@ test("NEW-12 opening another composer, closing search, a new query, or another a
   expect(await gmailDrafts(gmail, A, "Rail kept")).toHaveLength(1);
   expect(await draftRows(app)).toContain("Rail kept");
 
-  // c, untouched: the rail click closes it as a second Esc would, so it is
-  // discarded. Not a case of its own; the same rule as the untouched reply above.
   const rowsBefore = await draftRows(app);
   await app.compose();
   await rail(app, "Inbox").click();
@@ -818,7 +757,6 @@ test("NEW-12 opening another composer, closing search, a new query, or another a
   await app.settle();
   expect(await draftRows(app)).toEqual(rowsBefore);
 
-  // Reply, touched: going to Drafts and opening another draft there keeps it.
   await open(app, "Person 1");
   await app.reply("r");
   await app.type("row four");
@@ -837,10 +775,7 @@ test("NEW-12 opening another composer, closing search, a new query, or another a
   await rail(app, "Inbox").click();
   await expect(app.section("Important")).toBeVisible();
 
-  // Search, and another account's Split Inbox settings: each closes an
-  // untouched composer as a second Esc would, so nothing is left behind.
   const field = app.page.getByPlaceholder("Search");
-  /** Searches for `query` and opens its first result. */
   const openResult = async (query: string, subject: string) => {
     await app.press("/");
     await expect(field).toBeFocused();
@@ -859,7 +794,6 @@ test("NEW-12 opening another composer, closing search, a new query, or another a
     expect(await draftRows(app), `${row}: Drafts rows`).toEqual(rowsNow);
   };
 
-  // Search's close button, with an untouched reply on a result: discarded.
   await openResult("Offsite", "Offsite venue");
   await app.reply("r");
   await app.page.getByTitle("Close search (Esc)").click();
@@ -867,7 +801,6 @@ test("NEW-12 opening another composer, closing search, a new query, or another a
   await expect(field).toHaveCount(0);
   await nothingLeft("search closed");
 
-  // A new query replaces the screen: the reply closes, and keys act on the results.
   await openResult("Offsite", "Offsite venue");
   await app.reply("r");
   await field.fill("Guild");
@@ -880,7 +813,6 @@ test("NEW-12 opening another composer, closing search, a new query, or another a
   await expect(field).toHaveCount(0);
   await nothingLeft("new query");
 
-  // Another account's Split Inbox settings switch to it, closing `c` here.
   await app.compose();
   await app.press("Meta+,");
   await app
@@ -907,18 +839,15 @@ test("NEW-14 an Esc pressed just after a composer opens, or after a key that mov
   await app.compose();
   await fill(app, "kim@kite.test", "Late focus", "Body text");
   await app.settle();
-  /** What has focus: nothing, or the focused element's label or class. */
   const focused = () =>
     app.page.evaluate(() => {
       const el = document.activeElement;
       if (el === null || el === document.body) return "nothing";
       return el.getAttribute("aria-label") ?? el.getAttribute("placeholder") ?? el.className;
     });
-  // Page frames wait, so a focus put off to a later frame lands only after the Esc.
   await app.page.clock.pauseAt(await app.now());
   const later = () => app.page.clock.runFor(100);
 
-  // Each key, then Esc at once: the Esc blurs compose, and no focus comes after it.
   await app.press("Escape");
   await inOrder(
     [
@@ -937,7 +866,6 @@ test("NEW-14 an Esc pressed just after a composer opens, or after a key that mov
     },
   );
 
-  // Tab from Subject to the message, then Esc.
   await app.press("Meta+Shift+s");
   await later();
   await expect(app.subject).toBeFocused();
@@ -945,7 +873,6 @@ test("NEW-14 an Esc pressed just after a composer opens, or after a key that mov
   await later();
   expect(await focused(), "Tab").toBe("nothing");
 
-  // Esc closes the link field and returns to the message; a second Esc at once blurs it.
   await app.press("Enter");
   await later();
   await app.press("Meta+k");
@@ -958,7 +885,6 @@ test("NEW-14 an Esc pressed just after a composer opens, or after a key that mov
   expect(await focused(), "link").toBe("nothing");
   await expect(newMessage(app)).toBeVisible();
 
-  // No key reached the draft; the next Esc closes it and keeps it.
   await expect(app.editor).toHaveText("Body text");
   await app.press("Escape");
   await expect(newMessage(app)).toHaveCount(0);
@@ -968,8 +894,6 @@ test("NEW-14 an Esc pressed just after a composer opens, or after a key that mov
   const [draft] = await gmailDrafts(gmail, A, "Late focus");
   expect(htmlOf(parseMime(draft?.message.raw ?? ""))).toContain("Body text");
 
-  // The composer just opened, its editor's focus still to come: an Esc at once
-  // counts, so a second closes it.
   await open(app, "Person 3");
   await app.page.clock.pauseAt(await app.now());
   await app.press("r");
@@ -982,6 +906,5 @@ test("NEW-14 an Esc pressed just after a composer opens, or after a key that mov
   await app.page.clock.resume();
   await app.page.clock.setFixedTime(await app.now());
   await app.settle();
-  // The untouched fresh reply left nothing behind.
   expect(await gmailDrafts(gmail, A)).toHaveLength(1);
 });

@@ -1,11 +1,3 @@
-//! Google OAuth for an installed app (SPEC Accounts): sign-in through the
-//! system browser with a loopback redirect and PKCE, access tokens refreshed
-//! shortly before they expire, and revoke.
-//!
-//! The `oauth2` crate makes the consent URL, the PKCE pair, and the state.
-//! The token calls are plain form posts through [`HttpClient`](crate::HttpClient),
-//! so their failures classify like Gmail calls.
-
 mod config;
 mod endpoints;
 mod loopback;

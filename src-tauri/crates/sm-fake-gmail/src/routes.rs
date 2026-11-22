@@ -1,6 +1,3 @@
-//! HTTP handlers: the Gmail REST routes under `/gmail/v1/users/{user}` and Google OAuth
-//! (`/auth`, `/token`, `/revoke`).
-
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -64,7 +61,6 @@ pub(crate) fn router(state: Arc<Shared>) -> Router {
         .with_state(state)
 }
 
-/// A Google API error response: `{"error":{"code","message","errors":[{"reason"}],"status"}}`.
 pub(crate) fn google_error(
     status: u16,
     reason: &str,
@@ -100,10 +96,8 @@ pub(crate) fn google_error(
     response
 }
 
-/// An error a Gmail handler answers with.
 enum ApiError {
     Unauthenticated,
-    /// The grant lacks the scope the method needs.
     InsufficientScope,
     NotFound,
     BadRequest(String),
@@ -144,9 +138,6 @@ impl From<Missing> for ApiError {
 
 type ApiResult<T = Json<Value>> = Result<T, ApiError>;
 
-/// The caller of a Gmail route: the `{user}` path segment and the bearer token. The token is
-/// checked by [`Caller::mailbox`], not on extraction, so a malformed body answers 400 before
-/// a bad token answers 401.
 struct Caller {
     state: Arc<Shared>,
     user: String,
@@ -177,10 +168,8 @@ impl FromRequestParts<Arc<Shared>> for Caller {
 }
 
 impl Caller {
-    /// Checks the bearer token and runs `f` on the user's mailbox.
     fn mailbox<T>(&self, f: impl FnOnce(&mut Mailbox) -> ApiResult<T>) -> ApiResult<T> {
         let mut guard = self.state.world();
-        // Through a plain reference, tokens and mailboxes borrow apart.
         let world = &mut *guard;
         let email = match world.access_tokens.get(&self.token) {
             Some((email, expiry))
@@ -193,8 +182,6 @@ impl Caller {
         f(world.mailboxes.get_mut(email).expect("token user exists"))
     }
 
-    /// Like [`Caller::mailbox`], for `settings.*` methods that need the
-    /// `gmail.settings.basic` scope.
     fn settings<T>(&self, f: impl FnOnce(&mut Mailbox) -> ApiResult<T>) -> ApiResult<T> {
         let lacking = {
             let world = self.state.world();
@@ -210,7 +197,6 @@ impl Caller {
     }
 }
 
-/// Query parameters, keeping repeated keys.
 struct Params(Vec<(String, String)>);
 
 impl<S: Send + Sync> FromRequestParts<S> for Params {
@@ -223,7 +209,6 @@ impl<S: Send + Sync> FromRequestParts<S> for Params {
 }
 
 impl Params {
-    /// Parses `application/x-www-form-urlencoded` pairs.
     fn parse(input: &[u8]) -> Self {
         Self(url::form_urlencoded::parse(input).into_owned().collect())
     }
@@ -247,7 +232,6 @@ impl Params {
         self.get("format").unwrap_or("full")
     }
 
-    /// `(offset, page size)` from `pageToken` and `maxResults`.
     fn page(&self) -> (usize, usize) {
         let offset = self
             .get("pageToken")
@@ -262,8 +246,6 @@ impl Params {
     }
 }
 
-/// Adds the page of `items` that `params` asks for to a list response: under `key`, left out
-/// when the page is empty as Gmail does, plus `nextPageToken` while more pages follow.
 fn with_page<T>(
     mut out: Value,
     key: &str,
@@ -287,7 +269,6 @@ fn json_body(body: &Bytes) -> ApiResult<Value> {
         .map_err(|e| ApiError::BadRequest(format!("Invalid JSON payload received: {e}")))
 }
 
-/// The strings of a JSON array; anything else in it is left out.
 fn string_list(value: &Value) -> Vec<&str> {
     value
         .as_array()
@@ -426,7 +407,6 @@ fn draft_json(mb: &Mailbox, draft_id: &str, format: &str) -> Value {
     json!({ "id": draft_id, "message": message })
 }
 
-/// The raw bytes and thread id of a request's `message`.
 fn draft_input(body: &Value, mb: &Mailbox) -> ApiResult<(Vec<u8>, Option<String>)> {
     let raw = body["message"]["raw"]
         .as_str()
@@ -494,7 +474,6 @@ async fn update_draft(
     })
 }
 
-/// Sends a draft: the draft and its message go away and a `SENT` message joins the thread.
 async fn send_draft(caller: Caller, body: Bytes) -> ApiResult {
     let body = json_body(&body)?;
     let now = caller.state.clock_ms();
@@ -515,7 +494,6 @@ async fn send_draft(caller: Caller, body: Bytes) -> ApiResult {
     })
 }
 
-/// `settings.filters.list`.
 async fn list_filters(caller: Caller) -> ApiResult {
     caller.settings(|mb| {
         let filters: Vec<Value> = mb.filters.iter().map(Filter::json).collect();
@@ -527,7 +505,6 @@ async fn list_filters(caller: Caller) -> ApiResult {
     })
 }
 
-/// `settings.filters.create`. Only `criteria.from` and the label actions are kept.
 async fn create_filter(caller: Caller, body: Bytes) -> ApiResult {
     let body = json_body(&body)?;
     caller.settings(|mb| {
@@ -557,7 +534,6 @@ async fn create_filter(caller: Caller, body: Bytes) -> ApiResult {
     })
 }
 
-/// `settings.filters.delete`.
 async fn delete_filter(
     caller: Caller,
     Path((_, id)): Path<(String, String)>,
@@ -572,7 +548,6 @@ async fn delete_filter(
     })
 }
 
-/// `messages.send`: the message is stored in its own thread with `SENT`.
 async fn send_message(caller: Caller, body: Bytes) -> ApiResult {
     let body = json_body(&body)?;
     let now = caller.state.clock_ms();
@@ -610,7 +585,6 @@ fn invalid_grant() -> Response {
     oauth_error("invalid_grant", "Token has been expired or revoked.")
 }
 
-/// The consent page: checks the request and redirects to `redirect_uri` with a code.
 async fn auth(
     State(s): State<Arc<Shared>>,
     params: Params,
@@ -661,7 +635,6 @@ async fn auth(
     Ok((StatusCode::FOUND, [(LOCATION, location.to_string())]).into_response())
 }
 
-/// The token endpoint: `authorization_code` (with PKCE) and `refresh_token` grants.
 async fn token(State(s): State<Arc<Shared>>, body: Bytes) -> Response {
     let form = Params::parse(&body);
     let mut world = s.world();
@@ -718,7 +691,6 @@ async fn token(State(s): State<Arc<Shared>>, body: Bytes) -> Response {
     Json(out).into_response()
 }
 
-/// Revokes the grant behind a refresh or access token: every token of that user dies.
 async fn revoke(State(s): State<Arc<Shared>>, mut params: Params, body: Bytes) -> Response {
     params
         .0

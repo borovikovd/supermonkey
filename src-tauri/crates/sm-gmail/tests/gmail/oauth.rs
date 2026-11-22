@@ -1,7 +1,3 @@
-//! OAuth logic the end-to-end suite can't observe: the state check, a
-//! connection that sends nothing, one refresh shared by concurrent 401s, and
-//! secrets kept out of debug output.
-
 use std::time::Duration;
 
 use sm_fake_gmail::FakeGmail;
@@ -10,7 +6,6 @@ use tokio::io::AsyncWriteExt as _;
 
 use crate::common::{ME, oauth_config, setup};
 
-/// The redirect URI the consent URL names.
 fn redirect_uri(consent_url: &str) -> String {
     url::Url::parse(consent_url)
         .unwrap()
@@ -24,7 +19,6 @@ fn redirect_uri(consent_url: &str) -> String {
 #[tokio::test]
 async fn a_wrong_state_is_refused_and_the_sign_in_goes_on() {
     let fake = FakeGmail::start();
-    // The user only has to exist: nothing here uses its handle.
     _ = fake.add_user(ME);
     let http = HttpClient::new().unwrap();
     let sign_in = SignIn::start(oauth_config(&fake)).await.unwrap();
@@ -33,7 +27,6 @@ async fn a_wrong_state_is_refused_and_the_sign_in_goes_on() {
     let finishing =
         tokio::spawn(async move { sign_in.finish(&http, std::future::ready(())).await });
 
-    // A page that knows the port sends a forged redirect first.
     let forged = reqwest::get(format!("{redirect}?code=stolen&state=forged"))
         .await
         .unwrap();
@@ -44,7 +37,6 @@ async fn a_wrong_state_is_refused_and_the_sign_in_goes_on() {
     );
     assert_eq!(fake.count("POST", "/token"), 0);
 
-    // The user's own consent still completes it.
     assert!(reqwest::get(consent).await.unwrap().status().is_success());
     let grant = tokio::time::timeout(Duration::from_secs(5), finishing)
         .await
@@ -58,7 +50,6 @@ async fn a_wrong_state_is_refused_and_the_sign_in_goes_on() {
 #[tokio::test]
 async fn sign_in_finishes_past_a_connection_that_sends_nothing() {
     let fake = FakeGmail::start();
-    // The user only has to exist: nothing here uses its handle.
     _ = fake.add_user(ME);
     let http = HttpClient::new().unwrap();
     let sign_in = SignIn::start(oauth_config(&fake)).await.unwrap();
@@ -68,12 +59,10 @@ async fn sign_in_finishes_past_a_connection_that_sends_nothing() {
         .port()
         .unwrap();
 
-    // A browser's speculative connection: open, and silent.
     let mut idle = tokio::net::TcpStream::connect(("127.0.0.1", port))
         .await
         .unwrap();
     idle.write_all(b"GET").await.unwrap();
-    // The fake's consent page redirects straight back with a code.
     let browser = tokio::spawn(async move { reqwest::get(consent).await.map(|r| r.status()) });
 
     let grant = tokio::time::timeout(
@@ -92,7 +81,6 @@ async fn sign_in_finishes_past_a_connection_that_sends_nothing() {
 #[tokio::test]
 async fn a_denied_sign_in_says_why() {
     let fake = FakeGmail::start();
-    // The user only has to exist: nothing here uses its handle.
     _ = fake.add_user(ME);
     fake.deny_next_sign_in();
     let http = HttpClient::new().unwrap();

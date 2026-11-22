@@ -1,6 +1,3 @@
-// Playwright fixtures: every test gets its own E2E server (fresh fake Gmail
-// and database) and an `App` page object bound to it.
-
 import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 import { createInterface } from "node:readline";
@@ -13,7 +10,6 @@ import { ANCHOR, TZ } from "./seeds.ts";
 
 const SERVER = path.resolve(import.meta.dirname, "../src-tauri/target/debug/e2e-server");
 
-/** A fresh server: app time at the anchor, in the test time zone. */
 async function startServer(): Promise<{ proc: ChildProcess; url: string; log: string[] }> {
   const proc = spawn(SERVER, ["--port", "0", "--now", String(ANCHOR)], {
     stdio: ["ignore", "pipe", "pipe"],
@@ -37,7 +33,6 @@ async function startServer(): Promise<{ proc: ChildProcess; url: string; log: st
 }
 
 type Fixtures = {
-  /** The control API of this test's server. Seed with it before `app.open()`. */
   gmail: Control;
   app: App;
 };

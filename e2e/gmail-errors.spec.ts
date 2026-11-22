@@ -1,15 +1,9 @@
-// Gmail errors (SPEC §Gmail errors): each outcome of a Gmail
-// call, for mail actions, `drafts.create`, and body fetches. Only a rejection
-// rolls an action back and shows a toast; transient failures retry silently.
 import type { App } from "./app.ts";
 import type { GmailMessage, GmailState, LoggedRequest, Outcome } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A } from "./seeds.ts";
 
-// ------------------------------------------------------------------ helpers
-
-/** Runs steps one after another, each waiting for the one before. */
 async function inSeries<T>(items: T[], step: (item: T, i: number) => Promise<void>): Promise<void> {
   await items.reduce<Promise<void>>(
     (prev, item, i) => prev.then(() => step(item, i)),
@@ -17,10 +11,8 @@ async function inSeries<T>(items: T[], step: (item: T, i: number) => Promise<voi
   );
 }
 
-/** Moves the highlight to the row whose subject is exactly `subject`, with `j` / `k`. */
 async function highlight(app: App, subject: string): Promise<void> {
   await expect(app.rows.filter({ hasText: subject }).first()).toBeVisible();
-  // A view switch restores its highlight after the rows arrive.
   await app.settle();
   const { subjects, at } = await app.list.evaluate((list) => {
     const rows = Array.from(list.querySelectorAll("[data-row]"))
@@ -40,7 +32,6 @@ async function highlight(app: App, subject: string): Promise<void> {
   await expect(app.highlighted).toContainText(subject);
 }
 
-/** Opens a palette picker (`l`, `h`) and picks the first item matching `query`. */
 async function pick(app: App, key: string, query = ""): Promise<void> {
   await app.press(key);
   await expect(app.palette).toBeVisible();
@@ -50,10 +41,6 @@ async function pick(app: App, key: string, query = ""): Promise<void> {
   await expect(app.palette).toHaveCount(0);
 }
 
-/**
- * The error toasts shown from now on, even ones Sonner has already
- * dismissed (`App.errorToastsShown`).
- */
 async function errorToastProbe(app: App): Promise<() => Promise<string[]>> {
   const since = (await app.errorToastsShown()).length;
   return () => app.errorToastsShown(since);
@@ -62,7 +49,6 @@ async function errorToastProbe(app: App): Promise<() => Promise<string[]>> {
 const messagesOf = (state: GmailState, threadId: string): GmailMessage[] =>
   state.messages.filter((m) => m.threadId === threadId);
 
-/** Gmail's "label on a thread": some message outside trash and spam carries it (§Views). */
 const threadHas = (state: GmailState, threadId: string, label: string): boolean =>
   messagesOf(state, threadId).some(
     (m) => m.labels.includes(label) && !m.labels.includes("TRASH") && !m.labels.includes("SPAM"),
@@ -75,12 +61,10 @@ function modifyBody(r: LoggedRequest): ModifyBody {
   if (typeof b !== "object" || b === null || !("ids" in b)) {
     throw new Error(`not a batchModify body: ${JSON.stringify(b)}`);
   }
-  // The request log holds the JSON body the app sent to messages.batchModify.
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- shape checked above
   return b as ModifyBody;
 }
 
-/** `batchModify` requests whose ids are exactly `ids` (in any order). */
 async function modifiesOf(app: App, ids: string[]): Promise<LoggedRequest[]> {
   const want = ids.toSorted().join(",");
   return (await app.gmail.requests("messages.batchModify")).filter(
@@ -92,10 +76,7 @@ const byId = (x: string, y: string) => x.localeCompare(y);
 
 const ok = (r: LoggedRequest) => typeof r.answer === "number" && r.answer >= 200 && r.answer < 300;
 
-/** The Gmail message a fault answers with: the fake cannot set a custom one. */
 const GMAIL_MESSAGE = "Injected fault";
-
-// ------------------------------------------------------------------ cases
 
 test("ERR-01 transient failures retry silently and keep the row as the user left it", async ({
   app,
@@ -148,7 +129,6 @@ test("ERR-01 transient failures retry silently and keep the row as the user left
 test("ERR-02 back-off timing and Retry-After", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
 
-  // Retry-After wins over the back-off.
   await gmail.fault(
     "messages.batchModify",
     { kind: "status", status: 429, retryAfterSecs: 7 },
@@ -165,7 +145,6 @@ test("ERR-02 back-off timing and Retry-After", async ({ app, gmail }) => {
   expect(retried.map((r) => r.answer)).toEqual([429, 204]);
   expect((retried[1]?.at ?? 0) - (retried[0]?.at ?? 0)).toBe(7_000);
 
-  // 1 s doubling, capped at 60 s, with jitter.
   await gmail.fault("messages.batchModify", { kind: "status", status: 500 }, { times: 8 });
   await app.press("e");
   await app.settle();
@@ -194,7 +173,6 @@ test("ERR-03 a quiet sync status after 30 s of retrying", async ({ app, gmail })
   await app.advance(2_000);
   await expect(app.syncMarker(A)).toBeVisible();
   await expect(app.account(A)).toHaveAttribute("title", /· Can't reach Gmail$/);
-  // Cached mail still opens.
   await highlight(app, "Ticket #42");
   await app.press("Enter");
   await expect(app.conversationTitle).toHaveText("Ticket #42");
@@ -230,7 +208,6 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   };
   const t = (key: string) => s.thread(key).threadId;
 
-  // e on p1, with another action right behind it that must not be affected.
   await reject();
   await highlight(app, "Person 1");
   await app.press("e");
@@ -245,7 +222,6 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   expect(threadHas(a, t("p1"), "INBOX")).toBe(true);
   expect(threadHas(a, t("fold"), "STARRED")).toBe(true);
 
-  // # on p2: back in Inbox, not in Trash.
   await reject();
   await highlight(app, "Person 2");
   await app.press("#");
@@ -257,7 +233,6 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   await expect(app.row("Person 2")).toHaveCount(0);
   await app.press("g", "i");
 
-  // ! on p3: back in Inbox.
   await reject();
   await highlight(app, "Person 3");
   await app.press("!");
@@ -265,7 +240,6 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   await expectNewErrorToast("!");
   await expect(app.row("Person 3")).toHaveCount(1);
 
-  // s on p4: not starred.
   await reject();
   await highlight(app, "Person 4");
   await app.press("s");
@@ -273,7 +247,6 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   await expectNewErrorToast("s");
   await expect(app.row("Person 4")).not.toHaveAttribute("data-starred");
 
-  // u on p6: read again.
   await reject();
   await highlight(app, "Person 6");
   await app.press("u");
@@ -281,7 +254,6 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   await expectNewErrorToast("u");
   await expect(app.row("Person 6")).not.toHaveAttribute("data-unread");
 
-  // l Travel on p5: the label is gone again.
   await reject();
   await highlight(app, "Person 5");
   await pick(app, "l", "Travel");
@@ -293,7 +265,6 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   );
   await app.press("Escape");
 
-  // h on own: in Inbox, with no snooze.
   await reject();
   await highlight(app, "Budget draft");
   await pick(app, "h");
@@ -305,7 +276,6 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   await expect(app.rows).toHaveCount(0);
   await app.press("g", "i");
 
-  // Shift+E on p1 in Done: back in Done.
   await highlight(app, "Person 1");
   await app.press("e");
   await app.settle();
@@ -319,7 +289,6 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   await app.press("g", "i");
   await expect(app.row("Person 1")).toHaveCount(0);
 
-  // A 403 that is not a rate limit is a rejection too.
   await highlight(app, "Person 2");
   await gmail.fault(
     "messages.batchModify",
@@ -400,7 +369,6 @@ test("ERR-06 a 404 on part of an action drops only the missing messages", async 
     return [first, ...rest];
   };
 
-  // Part of the thread is gone.
   const [m1, m2, m3] = await deliverThread("Three parts", 3);
   if (!m1 || !m2 || !m3) throw new Error("thread not delivered");
   await gmail.poll();
@@ -425,7 +393,6 @@ test("ERR-06 a 404 on part of an action drops only the missing messages", async 
   expect(a.messages.find((m) => m.id === m3.id)?.labels).not.toContain("INBOX");
   await expect(app.row("Three parts")).toHaveCount(0);
 
-  // The whole thread is gone: the action finishes, and the next poll drops it.
   const [n1, n2] = await deliverThread("Two parts", 2);
   if (!n1 || !n2) throw new Error("thread not delivered");
   await gmail.poll();
@@ -454,7 +421,6 @@ test("ERR-07 drafts.create with no clear answer never makes a duplicate draft", 
   const draftsOn = async (threadId: string) =>
     (await gmail.gmail(A)).drafts.filter((d) => d.message.threadId === threadId);
 
-  /** Opens a reply on `subject`, types twice with an autosave after each, then closes it. */
   const open = async (subject: string) => {
     await highlight(app, subject);
     await app.press("Enter");
@@ -483,7 +449,6 @@ test("ERR-07 drafts.create with no clear answer never makes a duplicate draft", 
     return drafts[0]?.id;
   };
 
-  // noResponse once: Gmail made it; the recovery finds it by its header, and edits update it.
   await gmail.fault("drafts.create", { kind: "noResponse" }, { times: 1 });
   let firstId: string | undefined;
   await write("Person 3", async () => {
@@ -496,17 +461,14 @@ test("ERR-07 drafts.create with no clear answer never makes a duplicate draft", 
     (await gmail.requests("drafts.create")).filter((r) => r.answer !== "noResponse"),
   ).toHaveLength(0);
 
-  // drop once: not created; it is created on retry.
   await gmail.fault("drafts.create", { kind: "drop" }, { times: 1 });
   await write("Person 4");
   await expectOneDraft("p4");
 
-  // statusAfterApply(500) once: Gmail made it, then answered 500.
   await gmail.fault("drafts.create", { kind: "statusAfterApply", status: 500 }, { times: 1 });
   await write("Person 5");
   await expectOneDraft("p5");
 
-  // Two copies exist in Gmail: the app keeps one and deletes the other.
   const create = await gmail.hold("drafts.create");
   const list = await gmail.hold("drafts.list");
   await open("Person 6");
@@ -514,7 +476,6 @@ test("ERR-07 drafts.create with no clear answer never makes a duplicate draft", 
   await app.type("First words");
   await app.settle();
   await create.release({ kind: "noResponse" });
-  // The app now lists drafts to recover: a second copy appears first.
   await expect
     .poll(async () => (await gmail.requests("drafts.list")).some((r) => r.held))
     .toBe(true);
@@ -539,7 +500,6 @@ test("ERR-07 drafts.create with no clear answer never makes a duplicate draft", 
   await app.settle();
   await expectOneDraft("p6");
 
-  // Drafts lists one row per draft.
   await app.press("g", "d");
   await app.settle();
   await inSeries(["Person 3", "Person 4", "Person 5", "Person 6"], async (subject) => {
@@ -569,7 +529,6 @@ test("ERR-08 a 404 while fetching a body is dropped silently", async ({ app, gma
   const fetches = (await gmail.requests("threads.get")).filter((r) => r.path.endsWith(t.threadId));
   expect(fetches.map((r) => r.answer)).toContain(404);
   expect(await errors()).toEqual([]);
-  // The app stays usable: another thread opens with its body.
   await highlight(app, "Person 2");
   await app.press("Enter");
   await expect(
@@ -581,7 +540,6 @@ test("ERR-09 a rejected undo or label create", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
   const errors = await errorToastProbe(app);
 
-  // A rejected label create: the label and its use disappear.
   await gmail.fault("labels.create", { kind: "status", status: 400, reason: "badRequest" });
   await highlight(app, "Person 2");
   await app.press("l");
@@ -602,7 +560,6 @@ test("ERR-09 a rejected undo or label create", async ({ app, gmail }) => {
     s.thread("p2").messages.flatMap(() => ["INBOX", "CATEGORY_PERSONAL"]),
   );
 
-  // A rejected undo: p1 returns to archived.
   const before = (await errors()).length;
   await highlight(app, "Person 1");
   await app.press("e");
@@ -632,7 +589,6 @@ test("ERR-10 the quiet sync status clears once Gmail answers after a relaunch", 
   await app.advance(31_000);
   await expect(app.syncMarker(A)).toBeVisible();
 
-  // Gmail recovers while the app is closed.
   await app.restart(async () => {
     await gmail.clearFaults();
   });

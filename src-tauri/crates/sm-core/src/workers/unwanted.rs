@@ -1,7 +1,3 @@
-//! Unsubscribe and block (SPEC Unsubscribe and block). Both need the network
-//! and are not queued: a queued unsubscribe could fire long after the user
-//! stopped caring.
-
 use sm_domain::{Addr, MessageFacts, ThreadId, email_domain};
 use sm_gmail::{Filter, FilterId, GmailError, HttpClient, Priority};
 use sm_ipc::{BlockResult, BlockedSender, BlockedSenders, Unsubscribed};
@@ -14,15 +10,9 @@ use sm_domain::AccountId;
 use sm_store::ReadPool;
 use std::sync::Arc;
 
-/// The headers an unsubscribe reads.
 const HEADERS: [&str; 2] = ["List-Unsubscribe", "List-Unsubscribe-Post"];
-/// What an unsubscribe email says when the list names nothing.
 const UNSUBSCRIBE: &str = "Unsubscribe";
 
-/// Unsubscribes from the list `thread`'s latest list message came from (or
-/// its latest message): reads its unsubscribe headers from Gmail, then
-/// posts the one-click request, emails the list, or opens its page, in that
-/// order.
 pub(crate) async fn unsubscribe(
     ctx: &AccountCtx,
     http: &HttpClient,
@@ -51,7 +41,6 @@ pub(crate) async fn unsubscribe(
     {
         match sm_gmail::one_click_unsubscribe(http, url).await {
             Ok(()) => return Ok(Unsubscribed::OneClick { sender }),
-            // The list's other ways are still there.
             Err(e) => {
                 tracing::warn!(account = ctx.account.0, outcome = %e.outcome(), "the one-click unsubscribe failed");
             }
@@ -77,18 +66,11 @@ pub(crate) async fn unsubscribe(
     Ok(Unsubscribed::NoLink { sender })
 }
 
-/// The message an unsubscribe reads: the latest list message, else the
-/// latest message, drafts aside. Trashed ones count: "Unsubscribe, and trash
-/// all" trashes the conversation first, and that may commit before this
-/// reads it.
 fn unsubscribe_source(messages: &[MessageFacts]) -> Option<&MessageFacts> {
     let sent = || messages.iter().rev().filter(|m| !m.is_draft);
     sent().find(|m| m.is_list).or_else(|| sent().next())
 }
 
-/// Blocks the sender of `thread`'s latest message, or everyone at its
-/// domain, with a Gmail filter that sends their mail to Trash. An account
-/// whose grant lacks the filters scope needs to sign in again.
 pub(crate) async fn block(
     ctx: &AccountCtx,
     thread: ThreadId,
@@ -125,9 +107,6 @@ pub(crate) async fn block(
     }
 }
 
-/// The account's blocked senders: its filters that match only a sender and
-/// send it to Trash, the shape [`block`] makes. Filters the user made in
-/// Gmail for other things are left out.
 pub(crate) async fn blocked_senders(ctx: &AccountCtx) -> Result<BlockedSenders, Error> {
     let listed = ctx.gmail.list_filters(Priority::P1).await;
     ctx.note(&listed);
@@ -140,9 +119,6 @@ pub(crate) async fn blocked_senders(ctx: &AccountCtx) -> Result<BlockedSenders, 
     }
 }
 
-/// Unblocks a sender by deleting its filter. The id comes from the webview,
-/// which is not trusted: only one of the account's block filters (as
-/// Blocked senders lists them) is deleted, never another filter.
 pub(crate) async fn unblock(ctx: &AccountCtx, filter: &FilterId) -> Result<(), Error> {
     let listed = ctx.gmail.list_filters(Priority::P1).await;
     ctx.note(&listed);
@@ -161,7 +137,6 @@ pub(crate) async fn unblock(ctx: &AccountCtx, filter: &FilterId) -> Result<(), E
     Ok(())
 }
 
-/// A filter that blocks a sender: it matches only `from` and adds `TRASH`.
 fn blocked_sender(filter: Filter) -> Option<BlockedSender> {
     let Filter {
         id,
@@ -173,8 +148,6 @@ fn blocked_sender(filter: Filter) -> Option<BlockedSender> {
     (criteria.other.is_empty() && trashes).then_some(BlockedSender { id: id.0, from })
 }
 
-/// The thread's messages, oldest first; the thread must be the account's,
-/// since the webview is not trusted.
 async fn thread_messages(
     pool: &Arc<ReadPool>,
     account: AccountId,
@@ -192,7 +165,6 @@ async fn thread_messages(
     Ok(messages)
 }
 
-/// The account's address, which an unsubscribe email comes from.
 async fn account_email(pool: &Arc<ReadPool>, account: AccountId) -> Result<String, Error> {
     read(pool, move |r| {
         Ok(r.accounts().get(account)?.map(|a| a.email))

@@ -1,5 +1,3 @@
-// Attachments (SPEC Reading, Drafts, Addressing, Send and undo):
-// attach and send, download on demand, offline forwards, the MIME tree.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
@@ -13,10 +11,8 @@ import { attachments, findPart, htmlOf, parseMime, shape, type MimePart } from "
 import * as seeds from "./seeds.ts";
 import { A, B, C } from "./seeds.ts";
 
-/** The decoded subjects of these messages. */
 const subjects = (msgs: GmailMessage[]) => msgs.map((m) => parseMime(m.raw).headers.subject);
 
-/** A's sent messages, parsed, by decoded subject. */
 async function sent(gmail: Control): Promise<{ message: GmailMessage; mime: MimePart }[]> {
   return (await gmail.gmail(A)).messages
     .filter((m) => m.labels.includes("SENT"))
@@ -31,20 +27,17 @@ async function sentWithSubject(gmail: Control, subject: string): Promise<MimePar
   return first.mime;
 }
 
-/** The Subject header as written, folded lines joined, nothing decoded. */
 function rawSubject(raw: string): string {
   const [head = ""] = raw.split(/\r?\n\r?\n/, 1);
   return /^subject:(.*)$/im.exec(head.replace(/\r?\n[ \t]+/g, " "))?.[1]?.trim() ?? "";
 }
 
-/** Files by name, with their decoded bytes and content type. */
 function filesOf(mime: MimePart): Record<string, { type: string; bytes: Buffer }> {
   return Object.fromEntries(
     attachments(mime).map((p) => [p.filename ?? "", { type: p.contentType, bytes: p.body }]),
   );
 }
 
-/** Starts a new message to Kim with this subject and body; the composer is ready to send. */
 async function newMessage(app: App, subject: string, body: string): Promise<void> {
   await app.compose();
   await app.type("kim@kite.test,");
@@ -88,13 +81,11 @@ test.describe("attachments", () => {
 
   test("ATT-02 received attachments download only when opened", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
-    // The connect sync may fetch inline cid: images with their bodies (SPEC Reading), nothing else.
     const synced = (await gmail.requests("attachments.get")).map((r) => r.path);
 
     await app.row("Contract").click();
     const chip = app.conversation.getByRole("button", { name: /contract\.pdf/ });
     await expect(chip).toContainText("contract.pdf");
-    // The inline image is part of the body, not a file chip.
     await expect(app.conversation.getByRole("button", { name: /logo\.png/ })).toHaveCount(0);
     await app.settle();
     const opened = (await gmail.requests("attachments.get")).length;
@@ -105,7 +96,6 @@ test.describe("attachments", () => {
     expect(first).toHaveLength(opened + 1);
     const download = first.at(-1);
     expect(download?.answer).toBe(200);
-    // That file was not fetched before it was opened.
     expect(synced).not.toContain(download?.path);
     const { openedFiles } = await gmail.platform();
     expect(openedFiles).toHaveLength(1);
@@ -133,11 +123,9 @@ test.describe("attachments", () => {
     });
     await app.settle();
     await app.row("Meeting notes").click();
-    // The received message's chip: the forward below carries one too.
     const chip = app.conversation.getByRole("button", { name: /notes\.txt/ }).first();
     await expect(chip).toContainText("notes.txt");
 
-    // Forwarded before it was ever opened.
     await app.reply("f");
     await app.press("Meta+Shift+o");
     await app.type("kim@kite.test,");
@@ -182,7 +170,6 @@ test.describe("attachments", () => {
     const out = filesOf(forward[0]?.mime ?? parseMime(""));
     expect(out["contract.pdf"]?.bytes.equals(files.contractPdf.buffer)).toBe(true);
 
-    // The file was downloaded before the draft was written and sent.
     const ok = (await gmail.requests()).filter(
       (r) => typeof r.answer === "number" && r.answer < 300,
     );
@@ -223,7 +210,6 @@ test.describe("attachments", () => {
     await app.advance(10_000);
     await app.settle();
 
-    // A forward of `fwd`: the inline image goes back to a cid: part next to the body.
     const fwd = (await sent(gmail)).find((m) => m.message.threadId === s.thread("fwd").threadId);
     const tree = fwd?.mime ?? parseMime("");
     expect(shape(tree)).toBe(
@@ -233,7 +219,6 @@ test.describe("attachments", () => {
     expect(png?.contentId).toBeTruthy();
     expect(htmlOf(tree)).toContain(`cid:${png?.contentId ?? "missing"}`);
 
-    // Encoded headers: RFC 2047 words on the wire, decoded and identical in Gmail.
     const plain = await sentWithSubject(gmail, plainSubject);
     expect(plain.headers.subject).toBe(plainSubject);
     const wire = (await sent(gmail)).find((m) => m.mime.headers.subject === plainSubject);
@@ -241,7 +226,6 @@ test.describe("attachments", () => {
       /^[\x20-\x7e]*=\?utf-8\?[bq]\?[\x20-\x7e]*$/i,
     );
 
-    // New messages, without and with an attachment.
     expect(shape(plain)).toBe("multipart/related[multipart/alternative[text/plain,text/html]]");
     expect(shape(await sentWithSubject(gmail, "One file"))).toBe(
       "multipart/mixed[multipart/related[multipart/alternative[text/plain,text/html]],application/pdf]",
@@ -317,7 +301,6 @@ test.describe("attachments", () => {
     expect(added, "the file never went to the core").toEqual([]);
     await expect(app.page.locator('[aria-busy="true"]')).toHaveCount(0);
 
-    // A file of exactly 25 MB is taken. Reading and storing it takes a while.
     await app.chooseFiles(
       () => app.press("Meta+Shift+a"),
       [{ ...big, name: "max.bin", buffer: Buffer.alloc(25 * 1024 * 1024) }],
@@ -338,7 +321,6 @@ test.describe("attachments", () => {
     const release = await app.park("add_attachment");
     await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
     const quitting = app.quit();
-    // Cmd+Q takes the composer off screen at once; its close waits for the file.
     await expect(app.page.getByRole("heading", { name: "New Message" })).toHaveCount(0);
     await release();
     await quitting;
@@ -360,7 +342,6 @@ test.describe("attachments", () => {
     const release = await app.park("add_attachment");
     await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
     await app.press("Meta+Enter");
-    // The composer stays while the send waits for the file; Esc Esc closes it.
     await expect(heading).toBeVisible();
     await app.press("Escape", "Escape");
     await expect(heading).toHaveCount(0);
@@ -373,7 +354,6 @@ test.describe("attachments", () => {
     expect(Object.keys(out)).toEqual(["notes.txt"]);
     expect((await gmail.gmail(A)).drafts).toHaveLength(0);
 
-    // A file that fails to attach sends nothing, and the closed draft is kept.
     await newMessage(app, "Kept after closing", "The file fails.");
     const attach = /\/invoke\/add_attachment$/;
     const parked: Route[] = [];
@@ -412,7 +392,6 @@ test.describe("attachments", () => {
     await app.press("Escape", "Escape");
     await expect(app.editor).toHaveCount(0);
 
-    // `r` resumes the same draft while its close still waits for the file.
     await app.press("r");
     await expect(app.editor).toBeFocused();
     await expect(app.editor).toHaveText("Old words.");
@@ -439,7 +418,6 @@ test.describe("attachments", () => {
     await seeds.standard(gmail, app);
     const heading = app.page.getByRole("heading", { name: "New Message" });
     await newMessage(app, "Two files", "Both files follow.");
-    // Each file's attach is held on its own, so the first can land before the second.
     const attach = /\/invoke\/add_attachment$/;
     const parked = new Map<string, Route>();
     await app.page.route(attach, (route) => {
@@ -453,7 +431,6 @@ test.describe("attachments", () => {
     await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.reportPdf]);
     await expect.poll(() => parked.has("report.pdf")).toBe(true);
 
-    // The first file is in; the send still waits for the second, with the composer on screen.
     await parked.get("notes.txt")?.continue();
     await expect(app.page.getByRole("button", { name: "Remove notes.txt" })).toBeVisible();
     await expect(heading).toBeVisible();
@@ -484,7 +461,6 @@ test.describe("attachments", () => {
     await expect(app.toast("Draft discarded")).toBeVisible();
     await expect(heading).toHaveCount(0);
 
-    // The file lands after the discard: nothing is sent, and nothing goes wrong.
     await release();
     await app.expectNoErrorToasts();
     await app.advance(10_000);
@@ -492,7 +468,6 @@ test.describe("attachments", () => {
     const state = await gmail.gmail(A);
     expect(subjects(state.messages)).not.toContain("Thrown away");
     expect(state.drafts).toHaveLength(0);
-    // The file went with the draft.
     expect(await gmail.draftFolders()).toEqual([]);
   });
 
@@ -502,8 +477,6 @@ test.describe("attachments", () => {
     const removeNotes = app.page.getByRole("button", { name: "Remove notes.txt" });
     await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
     await expect(removeNotes).toHaveCount(1);
-    // A browser fires no change for a pick equal to the input's value, so the
-    // picker forgets each pick. Playwright fires one anyway, so check the value.
     await expect(app.page.locator('input[type="file"]')).toHaveValue("");
     await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
     await expect(removeNotes).toHaveCount(2);
@@ -523,14 +496,12 @@ test.describe("attachments", () => {
     await expect(chip).toBeVisible();
     await app.settle();
 
-    // Offline, a file not yet downloaded can't be had.
     await gmail.offline(true);
     await chip.click();
     await app.settle();
     await expect(app.errorToasts.filter({ hasText: "Couldn't open contract.pdf" })).toBeVisible();
     expect((await gmail.platform()).openedFiles).toEqual([]);
 
-    // Back online, the same click opens it.
     await gmail.offline(false);
     await app.settle();
     await chip.click();
@@ -543,7 +514,6 @@ test.describe("attachments", () => {
     gmail,
   }) => {
     await seeds.standard(gmail, app);
-    // Apple Mail with a plain-text body sends a photo `inline`, with no Content-ID.
     await gmail.deliver({
       account: A,
       from: "Ann Apple <ann@apple.test>",
@@ -551,7 +521,6 @@ test.describe("attachments", () => {
       text: "Here it is.",
       attachments: [{ ...attachment(files.photoPng), inline: true }],
     });
-    // HTML that shows its logo but never references the photo.
     await gmail.deliver({
       account: A,
       from: "Carl Chart <carl@chart.test>",
@@ -559,7 +528,6 @@ test.describe("attachments", () => {
       html: '<p>The photo is attached.</p><p><img src="cid:logo" alt="logo"></p>',
       attachments: [attachment(files.logoPng, "logo"), attachment(files.photoPng, "unused")],
     });
-    // A file sent inline, as Apple Mail sends every file.
     await gmail.deliver({
       account: A,
       from: "Ann Apple <ann@apple.test>",
@@ -572,7 +540,6 @@ test.describe("attachments", () => {
     await expect(app.row("Logo and photo")).toHaveAttribute("data-attachments");
     await expect(app.row("Scans from my phone")).toHaveAttribute("data-attachments");
 
-    // The inline PDF is a chip, and opens.
     await app.row("Scans from my phone").click();
     await expect(app.conversationTitle).toHaveText("Scans from my phone");
     const pdf = app.conversation.getByRole("button", { name: /report\.pdf/ });
@@ -584,7 +551,6 @@ test.describe("attachments", () => {
     expect(readFileSync(scans.openedFiles[0] ?? "").equals(files.reportPdf.buffer)).toBe(true);
     await app.press("Escape");
 
-    // The logo is in the body, not a chip; the photo is a chip.
     await app.row("Logo and photo").click();
     await expect(app.conversationTitle).toHaveText("Logo and photo");
     await expect(app.messageBody(0).getByRole("img", { name: "logo" })).toHaveAttribute(
@@ -617,8 +583,6 @@ test.describe("attachments", () => {
     expect(forwarded["photo.png"]?.bytes.equals(files.photoPng.buffer)).toBe(true);
   });
 
-  // The send went ahead for the removed draft once the file was in: Rust
-  // refused it, and the draft's "not sent" switched back to the removed account.
   test("ATT-20 removing the account while its composer's send or close waits for a file leaves nothing behind", async ({
     app,
     gmail,
@@ -626,7 +590,6 @@ test.describe("attachments", () => {
     await seeds.standard(gmail, app, { connect: ["A", "B", "C"] });
     const heading = app.page.getByRole("heading", { name: "New Message" });
 
-    // A send waits for the file when the account on screen is removed.
     await newMessage(app, "Gone with A", "The file is late.");
     let attach = await app.park("add_attachment");
     await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
@@ -641,7 +604,6 @@ test.describe("attachments", () => {
     await expect(heading).toHaveCount(0);
     await app.expectNoErrorToasts();
 
-    // A close waits for the file when its account is removed from another one's screen.
     await newMessage(app, "Gone with B", "The file is late.");
     attach = await app.park("add_attachment");
     await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
@@ -662,8 +624,6 @@ test.describe("attachments", () => {
     );
   });
 
-  // Its next create named the thread Gmail deleted with the draft, got a 404,
-  // and the draft never reached Gmail again.
   test("ATT-21 a file attaching when the draft is deleted in Gmail joins the draft written again", async ({
     app,
     gmail,
@@ -679,7 +639,6 @@ test.describe("attachments", () => {
 
     const attach = await app.park("add_attachment");
     await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
-    // The page's attach is parked, so it can't settle: the toast says when the deletion is in.
     await gmail.deleteDraft(A, first.id, { poll: true });
     await expect(app.toast("Draft was sent or deleted elsewhere")).toBeVisible();
     await expect(app.page.getByRole("heading", { name: "New Message" })).toBeVisible();
@@ -696,8 +655,6 @@ test.describe("attachments", () => {
     await app.expectNoErrorToasts();
   });
 
-  // The composer left the screen before its close or send ran, and took the
-  // typed address with it: the fields that held it were gone by then.
   test("ATT-19 an address typed but not yet a chip goes with a close or send that waits for a file", async ({
     app,
     gmail,
@@ -710,7 +667,6 @@ test.describe("attachments", () => {
       await app.type(address);
     };
 
-    // Closed while the file attaches: the draft keeps the address.
     await newMessage(app, "Closed mid-upload", "Cc is typed.");
     const closing = await app.park("add_attachment");
     await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
@@ -723,7 +679,6 @@ test.describe("attachments", () => {
     expect(subjects(drafts.map((d) => d.message))).toEqual(["Closed mid-upload"]);
     expect(parseMime(drafts[0]?.message.raw ?? "").headers.cc).toContain("cora@cc.test");
 
-    // Sent while the file attaches, then closed: the send carries the address.
     await newMessage(app, "Sent mid-upload", "Cc is typed.");
     const sending = await app.park("add_attachment");
     await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
@@ -746,7 +701,6 @@ test.describe("attachments", () => {
     gmail,
   }) => {
     await seeds.standard(gmail, app);
-    // A draft that is kept, with a file.
     await newMessage(app, "Kept with a file", "See attached.");
     await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
     await expect(app.page.getByRole("button", { name: "Remove notes.txt" })).toBeVisible();

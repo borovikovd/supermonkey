@@ -1,41 +1,22 @@
-// Seed scenarios. Each builds fake-Gmail state through the control API, then
-// opens the app and waits for the connect sync to settle (`{ open: false }`
-// to add state first and call `app.open()` yourself). Each returns handles:
-// threads by key, label ids, and drafts; lookups throw on an unknown key.
-// Unless a thread says otherwise, Inbox mail is CATEGORY_PERSONAL from the
-// last few days, dated relative to ANCHOR.
-//
-//   const s = await seeds.standard(gmail, app);
-//   await app.row(s.thread("p1").subject).click();
-//   await gmail.modify(A, s.message("plan", 12).id, [], ["UNREAD"], { poll: true });
-
 import type { App } from "./app.ts";
 import type { AddedDraft, Control, Delivered, Delivery, DraftSpec } from "./control.ts";
 import { attachment, files, pixelDataUrl } from "./files.ts";
 
-// ------------------------------------------------------------------ time
-
-/** The time zone both the core and the browser run in. */
 export const TZ = "America/New_York";
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
-/** Monday 2026-11-02 10:00 in New York (EST, UTC−5): app time when every test starts. */
 export const ANCHOR = Date.parse("2026-11-02T10:00:00-05:00");
 
-/** Times relative to the anchor. DST ended on 1 November, so the test week is all EST. */
 export const dates = {
   anchor: ANCHOR,
   minutesAgo: (n: number) => ANCHOR - n * MINUTE,
   hoursAgo: (n: number) => ANCHOR - n * HOUR,
   daysAgo: (n: number) => ANCHOR - n * DAY,
-  /** A New York wall time in the test week, e.g. `at("2026-11-02T18:00")`. */
   at: (local: string) => Date.parse(`${local}-05:00`),
 };
-
-// ------------------------------------------------------------------ identities
 
 export const A = "ana@acme.test";
 export const B = "ben@bolt.test";
@@ -46,24 +27,17 @@ export type Identity = "A" | "B" | "C";
 
 const IDENTITIES: Record<Identity, { email: string; name: string }> = {
   A: { email: A, name: "Ana Ames" },
-  // Differs from the address, so a test can see the display name comes from sendAs.
   B: { email: B, name: "Zed Bolt" },
   C: { email: C, name: "Cat Cove" },
 };
 
 export type SeedOptions = {
-  /** Which seeded identities are already signed in. Default: all the scenario names. */
   connect?: Identity[];
-  /** Start the app and wait for the connect sync. Default true. */
   open?: boolean;
 };
 
-/** How long a seed waits for the connect sync, by scenario size. */
 const OPEN_TIMEOUT = { normal: 10_000, huge: 60_000 };
 
-// ------------------------------------------------------------------ handles
-
-/** A seeded thread: its Gmail thread id, subject, and messages oldest first. */
 export type Thread = {
   key: string;
   account: string;
@@ -72,7 +46,6 @@ export type Thread = {
   messages: Delivered[];
 };
 
-/** What a scenario seeded, by key. Lookups throw on an unknown key. */
 export class Seeded {
   readonly threads = new Map<string, Thread>();
   readonly labels = new Map<string, string>();
@@ -84,19 +57,16 @@ export class Seeded {
     return t;
   }
 
-  /** The nth message of a thread, counted from 1. */
   message(key: string, n: number): Delivered {
     const m = this.thread(key).messages[n - 1];
     if (!m) throw new Error(`thread ${key} has no message ${n}`);
     return m;
   }
 
-  /** The latest message of a thread. */
   latest(key: string): Delivered {
     return this.message(key, this.thread(key).messages.length);
   }
 
-  /** A user label's Gmail id. */
   label(account: string, name: string): string {
     const id = this.labels.get(`${account}/${name}`);
     if (!id) throw new Error(`no seeded label ${name} on ${account}`);
@@ -110,20 +80,14 @@ export class Seeded {
   }
 }
 
-/** One message of a seeded thread; the account, thread, and reply headers are filled in. */
 type Msg = Omit<Delivery, "account" | "threadId" | "poll" | "subject" | "after"> & {
   subject?: string;
 };
 
-/** Runs steps one after another, each waiting for the one before. */
 async function inOrder(steps: (() => Promise<unknown>)[]): Promise<void> {
   await steps.reduce<Promise<unknown>>((prev, step) => prev.then(step), Promise.resolve());
 }
 
-/**
- * Queues a scenario's mail and delivers it in one batch, so a seed costs one
- * round trip whatever its size.
- */
 class Builder {
   readonly seeded = new Seeded();
   readonly gmail: Control;
@@ -153,7 +117,6 @@ class Builder {
     return this.seeded.label(account, name);
   }
 
-  /** Queues a thread: each message replies to the one before it. */
   thread(key: string, account: string, subject: string, msgs: Msg[]): void {
     const items = msgs.map((m, i) => {
       const at = this.batch.length;
@@ -169,7 +132,6 @@ class Builder {
     this.queued.push({ key, account, subject, items });
   }
 
-  /** Delivers everything queued, then records the threads. */
   async deliver(): Promise<void> {
     const delivered = await this.gmail.deliverMany(this.batch.splice(0));
     for (const q of this.queued.splice(0)) {
@@ -189,7 +151,6 @@ class Builder {
     }
   }
 
-  /** Gmail drafts made by another client, created in order. */
   async drafts(account: string, list: [string, DraftSpec][]): Promise<void> {
     await inOrder(
       list.map(([key, d]) => async () => {
@@ -199,10 +160,8 @@ class Builder {
   }
 }
 
-/** Inbox labels for a received personal message. */
 const inbox = (unread = false) => ["INBOX", "CATEGORY_PERSONAL", ...(unread ? ["UNREAD"] : [])];
 
-/** Two digits, for names that sort as they are numbered. */
 const two = (i: number) => String(i).padStart(2, "0");
 
 const ANA = "Ana Ames <ana@acme.test>";
@@ -219,7 +178,6 @@ const P = {
   ned: "Ned Nolan <ned@n.test>",
 };
 
-/** `p1`…`p6`: one message each, from these people. */
 export const PERSONS = [
   "Pia Park <pia@people.test>",
   "Quin Quill <quin@people.test>",
@@ -243,23 +201,6 @@ function signedIn(opts: SeedOptions, id: Identity, byDefault: Identity[]): boole
   return (opts.connect ?? byDefault).includes(id);
 }
 
-// ------------------------------------------------------------------ standard
-
-/**
- * Queues A's Inbox. Rows from newest: p1…p6, plan, … trashedLatest.
- *
- * Important: p1…p6 (one message each; p1, p3, p5 unread; p3 mentions
- * "quokka"), plan (12 messages, m10–m12 unread, two of A's own replies),
- * fold (11 messages, only m5 unread), addr (To A and Dave, Cc Erin), replyto
- * (a Reply-To), alias (to A's alias), own and ownAlias (A sent the latest
- * message, so rules read Kim's), fwd (a `gmail_quote`, an inline `cid:`
- * image, and contract.pdf), links (links, remote and `data:` images), and
- * trashedLatest (its newer message is in Trash).
- *
- * Other: news1…news3 (list mail sent to the list, not to A; news2 is
- * CATEGORY_PERSONAL, so the list header beats the category), promo, social,
- * forum, and receipt (Promotions and the Receipts label).
- */
 function queueInbox(b: Builder): void {
   for (const [i, from] of PERSONS.entries()) {
     const n = i + 1;
@@ -414,7 +355,6 @@ function queueInbox(b: Builder): void {
     { from: P.ned, to: [A], text: "A trashed reply.", labels: ["TRASH"], date: dates.hoursAgo(20) },
   ]);
 
-  // Other: list mail and categories.
   const unsubscribe: [string, string] = ["List-Unsubscribe", "<mailto:leave@letters.test>"];
   const news = (
     key: string,
@@ -480,13 +420,6 @@ function queueInbox(b: Builder): void {
   );
 }
 
-/**
- * Queues A's mail outside Inbox. The connect sync fetches starredOld
- * (starred) and sent10 and sent89 (inside its 90 days of Sent); sent91,
- * archivedOld (never seen in Inbox), projOld1…3, trashOld, spamOld, and
- * invoiceOld (400 days old) wait for a view that lists from Gmail, a search,
- * or an open.
- */
 function queueArchive(b: Builder): void {
   const old = (
     key: string,
@@ -545,11 +478,6 @@ function queueArchive(b: Builder): void {
   );
 }
 
-/**
- * Queues B's and C's mail: B's b1 and b2 unread, b4 labeled Family; C's
- * c1…c3 unread. C is only in Gmail unless `connect` names it (for Add
- * account).
- */
 function queueOthers(b: Builder): void {
   const bMail: [string, string, boolean, number, string[]][] = [
     ["b1", "Bea Blue <bea@blue.test>", true, 15, []],
@@ -581,7 +509,6 @@ function queueOthers(b: Builder): void {
   }
 }
 
-/** A's, B's, and C's mail (`standard`), without opening the app. */
 async function standardMail(b: Builder, opts: SeedOptions, byDefault: Identity[]): Promise<void> {
   await b.identity("A", signedIn(opts, "A", byDefault));
   await b.identity("B", signedIn(opts, "B", byDefault));
@@ -593,7 +520,6 @@ async function standardMail(b: Builder, opts: SeedOptions, byDefault: Identity[]
   queueArchive(b);
   queueOthers(b);
   await b.deliver();
-  // B's `collide` shares p1's Gmail thread id: rows are keyed by account.
   const collide = await b.gmail.deliver({
     account: B,
     from: "Cole Lide <cole@collide.test>",
@@ -614,34 +540,24 @@ async function standardMail(b: Builder, opts: SeedOptions, byDefault: Identity[]
   });
 }
 
-/** The first-run screen: A, B, and C exist with `standard` mail; no account is signed in. */
 export async function none(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await standardMail(b, opts, []);
   return finish(b, app, opts);
 }
 
-/** A signed in with no mail and only system labels. */
 export async function empty(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await b.identity("A", signedIn(opts, "A", ["A"]));
   return finish(b, app, opts);
 }
 
-/** A and B signed in; C only in Gmail. No drafts. */
 export async function standard(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await standardMail(b, opts, ["A", "B"]);
   return finish(b, app, opts);
 }
 
-/**
- * `standard`, plus Gmail-made drafts on A: dNew (alone in its thread, no
- * `In-Reply-To`), dFwd ("Fwd: Contract" in fwd's thread), dLatest (a reply
- * to p4's latest, with a `gmail_quote` and spec.pdf), dEarly (aimed at plan's
- * m3), dUnknown (an `In-Reply-To` that matches nothing), and dTwoA and dTwoB
- * (both aimed at p2's latest; dTwoB is newer).
- */
 export async function drafts(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await standardMail(b, opts, ["A", "B"]);
@@ -712,7 +628,6 @@ export async function drafts(gmail: Control, app: App, opts: SeedOptions = {}): 
         threadId: p2,
         inReplyTo: s.latest("p2").messageId,
         html: `<p>${key}</p>`,
-        // dTwoB is the newer one.
         date: dates.minutesAgo(40 - 10 * i),
       },
     ]),
@@ -720,14 +635,6 @@ export async function drafts(gmail: Control, app: App, opts: SeedOptions = {}): 
   return finish(b, app, opts);
 }
 
-/**
- * A signed in, with mail built to exercise autocomplete. Every name starts
- * with S, so one query reaches every tier: Sam (sent to five times), Sara
- * (sent to 200 days ago, so only after the contacts backfill), Sue (received
- * from), and Sid (a co-recipient on Cc). Never suggested: Sly (only on list
- * mail), the noreply and no-reply senders, Spam Sam (only in Spam), Sy Draft
- * (only in a draft), and A's own alias.
- */
 export async function contacts(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await b.identity("A", signedIn(opts, "A", ["A"]));
@@ -741,7 +648,6 @@ export async function contacts(gmail: Control, app: App, opts: SeedOptions = {})
 
   for (const [i, days] of [2, 5, 10, 15, 20].entries())
     sent(`sam${i + 1}`, "Sam Stone <sam@x.test>", days);
-  // Outside the 90-day sync: found only by the contacts backfill.
   sent("sara", "Sara Swift <sara@x.test>", 200);
   received("sue1", {
     from: "Sue Sender <sue@recv.test>",
@@ -789,7 +695,6 @@ export async function contacts(gmail: Control, app: App, opts: SeedOptions = {})
     subject: "To the alias",
     date: dates.daysAgo(10),
   });
-  // Eight "Mark M…" contacts A sent to: more than the six suggestions shown.
   const marks = ["Maddox", "Malone", "Mann", "Marsh", "Mayer", "Meyer", "Miles", "Moore"];
   for (const [i, last] of marks.entries()) {
     sent(`mark${i + 1}`, `Mark ${last} <${last.toLowerCase()}@marks.test>`, 3 + i);
@@ -801,7 +706,6 @@ export async function contacts(gmail: Control, app: App, opts: SeedOptions = {})
   return finish(b, app, opts);
 }
 
-/** `standard`, plus X (labels Proj and Ops on m1 only) and Y on A. */
 export async function splits(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await standardMail(b, opts, ["A", "B"]);
@@ -835,10 +739,6 @@ export async function splits(gmail: Control, app: App, opts: SeedOptions = {}): 
   return finish(b, app, opts);
 }
 
-/**
- * A signed in, with hostile mail. Every payload sets `top.__pwned` or
- * `parent.__pwned`; `evil.test` is routed to the server's sink (`gmail.hits()`).
- */
 export async function security(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await b.identity("A", signedIn(opts, "A", ["A"]));
@@ -875,10 +775,6 @@ export async function security(gmail: Control, app: App, opts: SeedOptions = {})
   return finish(b, app, opts);
 }
 
-/**
- * A signed in: 60 Inbox threads (40 Important, 20 Other), 40 in Archive2019
- * out of Inbox, 40 archived invoices older than 90 days. Fast quota.
- */
 export async function bulk(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await b.identity("A", signedIn(opts, "A", ["A"]));
@@ -924,13 +820,6 @@ export async function bulk(gmail: Control, app: App, opts: SeedOptions = {}): Pr
   return finish(b, app, opts);
 }
 
-/**
- * A signed in, with mail that matches `ledger` and carries the Ledgers label:
- * 30 archived threads only Gmail has (Remote 01…30, 1–30 days old, two Gmail
- * pages), and 80 older Inbox threads the connect sync stores (Local 01…80,
- * 41–120 days old). Gmail's first page leaves its oldest hit far above the
- * list's end, and its second page belongs above every local row.
- */
 export async function paging(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await b.identity("A", signedIn(opts, "A", ["A"]));
@@ -952,7 +841,6 @@ export async function paging(gmail: Control, app: App, opts: SeedOptions = {}): 
   return finish(b, app, opts);
 }
 
-/** A signed in with 999 Important Inbox threads. Fast quota; its connect sync takes a while. */
 export async function bulk1000(gmail: Control, app: App, opts: SeedOptions = {}): Promise<Seeded> {
   const b = new Builder(gmail);
   await b.identity("A", signedIn(opts, "A", ["A"]));

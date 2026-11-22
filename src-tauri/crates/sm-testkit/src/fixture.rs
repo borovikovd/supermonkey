@@ -1,8 +1,3 @@
-//! The perf fixture (SPEC Performance), and smaller demo-sized data: a
-//! database written through the store, as sync would leave it. The perf
-//! fixture has two accounts, each with 20,000 cached threads, 2,000 of them
-//! in Inbox, one 60-message thread, and 5,000 contacts.
-
 use std::path::Path;
 
 use rand::rngs::StdRng;
@@ -14,20 +9,14 @@ use sm_store::{
     FetchedThread, GmailLabel, NewBody, NewMessage, Priority, Sighting, StoreError, WriteTx, Writer,
 };
 
-/// How much data to write per account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Size {
-    /// Cached threads.
     pub threads: usize,
-    /// Of them, in Inbox.
     pub inbox: usize,
-    /// Contacts for autocomplete.
     pub contacts: usize,
-    /// Messages in the one long thread.
     pub long_thread: usize,
 }
 
-/// The fixture SPEC Performance measures against.
 pub const PERF: Size = Size {
     threads: 20_000,
     inbox: 2_000,
@@ -35,7 +24,6 @@ pub const PERF: Size = Size {
     long_thread: 60,
 };
 
-/// The fixture's user labels: Gmail's id and the name.
 const LABELS: [(&str, &str); 3] = [
     ("Label_1", "Receipts"),
     ("Label_2", "Travel"),
@@ -131,12 +119,9 @@ const LINES: [&str; 10] = [
     "Sounds good to me, let's go with option B.",
 ];
 
-/// The thread that gets [`Size::long_thread`] messages.
 const LONG_THREAD: usize = 3;
-/// Minutes between one thread's latest message and the next older thread's.
 const MINUTES_APART: i64 = 37;
 
-/// Picks one of `items`.
 fn pick<'a>(rng: &mut StdRng, items: &[&'a str]) -> &'a str {
     items
         .get(rng.random_range(0..items.len()))
@@ -144,7 +129,6 @@ fn pick<'a>(rng: &mut StdRng, items: &[&'a str]) -> &'a str {
         .unwrap_or_default()
 }
 
-/// Someone who writes to the account.
 fn person(rng: &mut StdRng) -> Addr {
     let (first, last) = (pick(rng, &FIRST), pick(rng, &LAST));
     let domain = pick(rng, &DOMAINS);
@@ -154,7 +138,6 @@ fn person(rng: &mut StdRng) -> Addr {
     )
 }
 
-/// A message body: HTML and its text.
 fn body(rng: &mut StdRng) -> (String, String) {
     let lines: Vec<&str> = (0..rng.random_range(1..4))
         .map(|_| pick(rng, &LINES))
@@ -168,9 +151,6 @@ fn body(rng: &mut StdRng) -> (String, String) {
     (html, lines.join(" "))
 }
 
-/// Writes the fixture into a new database at `path`: one account per
-/// address in `accounts`, each of `size`, with message times counting back
-/// from `now`. The same arguments write the same data.
 pub fn generate(path: &Path, size: Size, accounts: &[&str], now: Millis) -> Result<(), StoreError> {
     let writer = Writer::start(path, (), |(), _, _| {}, |()| {})?;
     let mut rng = StdRng::seed_from_u64(7);
@@ -186,27 +166,19 @@ pub fn generate(path: &Path, size: Size, accounts: &[&str], now: Millis) -> Resu
     writer.stop().wait()
 }
 
-/// What one account of the fixture is written to.
 #[derive(Debug, Clone, Copy)]
 struct Plan {
-    /// Its number among the fixture's accounts, which its Gmail ids carry.
     n: usize,
-    /// How much data it gets.
     size: Size,
-    /// The time its mail counts back from.
     now: Millis,
 }
 
-/// The account a fixture thread is written for.
 struct Owner {
     account: AccountId,
-    /// The account's own address.
     me: Addr,
-    /// Its user labels.
     labels: Vec<LabelId>,
 }
 
-/// One account and its mail, in one transaction.
 fn write_account(
     tx: &mut WriteTx<'_>,
     rng: &mut StdRng,
@@ -283,7 +255,6 @@ fn write_account(
     Ok(())
 }
 
-/// What the messages of one fixture thread share.
 struct Traits<'a> {
     in_inbox: bool,
     category: Option<&'static str>,
@@ -293,8 +264,6 @@ struct Traits<'a> {
 }
 
 impl<'a> Traits<'a> {
-    /// Draws a thread's traits: its category, whether it is list mail or
-    /// starred, and a user label for one thread in twenty.
     fn draw(rng: &mut StdRng, in_inbox: bool, user_labels: &'a [LabelId]) -> Self {
         let category = match rng.random_range(0..10) {
             0..=4 => None,
@@ -320,9 +289,6 @@ impl<'a> Traits<'a> {
         }
     }
 
-    /// One message's labels: `SENT` for one the account sent, else the
-    /// thread's Inbox and category, unread at times for the newest; the
-    /// star on the newest; and the thread's user label.
     fn labels(&self, rng: &mut StdRng, from_me: bool, newest: bool) -> LabelSet {
         let mut labels: Vec<&str> = Vec::new();
         if from_me {
@@ -344,9 +310,6 @@ impl<'a> Traits<'a> {
     }
 }
 
-/// Thread `t` of the account `plan` and `owner` describe, as a full fetch
-/// would bring it, with each message's body. Thread [`LONG_THREAD`] is the
-/// long one; the first `size.inbox` are in the Inbox.
 fn thread(rng: &mut StdRng, plan: Plan, owner: &Owner, t: usize) -> (FetchedThread, Vec<NewBody>) {
     let Plan { n, size, now } = plan;
     let me = &owner.me;

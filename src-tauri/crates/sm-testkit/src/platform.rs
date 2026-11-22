@@ -1,7 +1,3 @@
-//! The recording [`Platform`] (ARCHITECTURE.md, section 8.3): what the core
-//! asked of the operating system, for tests to assert on, and a browser
-//! that completes Google sign-ins against the fake.
-
 use std::path::Path;
 
 use parking_lot::Mutex;
@@ -9,37 +5,27 @@ use sm_core::activity::{Tasks, waiting_on_person};
 use sm_core::{Notification, Platform, PlatformError};
 use url::Url;
 
-/// What the core asked of the OS so far.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Recorded {
     pub(crate) notifications: Vec<Notification>,
-    /// The Dock badge; `None` when cleared.
     pub(crate) badge: Option<u32>,
     pub(crate) opened_urls: Vec<String>,
     pub(crate) opened_files: Vec<String>,
     pub(crate) focus_requests: usize,
 }
 
-/// How the next Google sign-in in the browser goes. Used once.
 #[derive(Debug, Default)]
 pub(crate) enum SignInMode {
-    /// The fake signs in its first user.
     #[default]
     FirstUser,
-    /// The fake signs in this user.
     As(String),
-    /// The person closes the browser tab: nothing comes back.
     Abandon,
 }
 
-/// Records every call. Opening the sign-in page "completes" it with a plain
-/// HTTP request: the fake's consent page answers at once and redirects to the
-/// core's loopback listener.
 pub(crate) struct RecordingPlatform {
     recorded: Mutex<Recorded>,
     sign_in: Mutex<SignInMode>,
     http: reqwest::Client,
-    /// The browser's requests, counted as core activity until answered.
     browser: Tasks,
 }
 
@@ -53,12 +39,10 @@ impl RecordingPlatform {
         }
     }
 
-    /// A copy of what was recorded.
     pub(crate) fn recorded(&self) -> Recorded {
         self.recorded.lock().clone()
     }
 
-    /// Forgets what was recorded so far; the badge stays as it is.
     pub(crate) fn clear(&self) {
         let mut r = self.recorded.lock();
         r.notifications.clear();
@@ -67,7 +51,6 @@ impl RecordingPlatform {
         r.focus_requests = 0;
     }
 
-    /// How the next sign-in goes.
     pub(crate) fn next_sign_in(&self, mode: SignInMode) {
         *self.sign_in.lock() = mode;
     }

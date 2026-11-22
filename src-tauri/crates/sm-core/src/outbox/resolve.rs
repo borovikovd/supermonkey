@@ -1,5 +1,3 @@
-//! Writing a step of a send's state machine.
-
 use sm_domain::{Millis, OutboxId};
 use sm_store::{NewNotice, StoreError, WriteTx};
 
@@ -9,9 +7,6 @@ use crate::drafts::lifecycle;
 use crate::drafts::queue_upsert;
 use crate::writer::WriterState;
 
-/// Applies what the outbox runner saw (`event`) to send `outbox`, and
-/// returns whether it applied. A row gone meanwhile (undone, or its account
-/// removed) changes nothing.
 pub(crate) fn resolve(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -36,7 +31,6 @@ pub(crate) fn resolve(
             drop_entry,
         } => {
             tx.outbox().update(&row)?;
-            // Gmail removed its draft as it sent.
             let copies = tx.read().messages().draft_copies(account, &row.draft)?;
             tx.messages().delete(&copies)?;
             if let Some(message) = &trash {
@@ -58,8 +52,6 @@ pub(crate) fn resolve(
                     let mut kept = record.draft;
                     lifecycle::keep(&mut kept);
                     tx.drafts().put(&kept)?;
-                    // Gmail may never have got it: a send made before any
-                    // autosave, cut short before its write.
                     queue_upsert(tx, state, account, &kept.id, now)?;
                     kept.thread
                 }

@@ -1,6 +1,3 @@
-// List and conversation navigation: j/k, x, Shift+J/K, select all, Tab
-// between splits, n/p/o inside a conversation.
-
 import { fetchRows } from "../ipc/bridge";
 import type { ConversationData } from "../ipc/types";
 import { focusOf, formerNeighbor, highlight, openConversation, visibleSplits } from "../navigation";
@@ -20,7 +17,6 @@ export function moveHighlight(delta: number) {
   const focus = focusOf();
   let at = focus === null ? -1 : ids.indexOf(focus);
   if (at < 0 && focus !== null) {
-    // The focused row left: step to its old neighbor.
     const from = formerNeighbor(focus, ids, delta > 0);
     if (from != null) at = ids.indexOf(from) - delta;
   }
@@ -32,22 +28,15 @@ export function moveHighlight(delta: number) {
   const next = Math.min(ids.length - 1, Math.max(0, at + delta));
   const key = ids[next];
   if (key === undefined) return;
-  // `j` on the last conversation and `k` on the first do nothing.
   if (key === focus) return;
   if (cur.screen.kind === "conversation") {
     openConversation(Number(key));
     return;
   }
-  // Plain j/k replace a selection with the one conversation they move to.
   highlight(key);
   if (c.selection.length > 0) c.setSelection([]);
 }
 
-/**
- * `j` / `k` in a conversation opened from Drafts, whose rows are drafts: the
- * thread of the next draft past `at` that has one (SPEC Reading). A row not
- * loaded yet ends the search rather than be passed over unseen.
- */
 function openDraftThread(ids: string[], at: number, delta: number) {
   for (let i = at + delta; i >= 0 && i < ids.length; i += delta) {
     const key = ids[i];
@@ -61,7 +50,6 @@ function openDraftThread(ids: string[], at: number, delta: number) {
   }
 }
 
-/** Adds `x` if missing, else removes it. */
 function toggled<T>(xs: readonly T[], x: T): T[] {
   const set = new Set(xs);
   if (!set.delete(x)) set.add(x);
@@ -87,10 +75,6 @@ export function extendSelection(delta: number) {
   chrome().setSelection([...sel]);
 }
 
-/**
- * The rows Select All covers, as in Superhuman: in a split Inbox the split that
- * holds the highlight, otherwise the whole list.
- */
 function selectionScope(highlighted: string | null): string[] {
   const ids = visibleIds();
   const entries = currentListView()?.ids ?? [];
@@ -100,7 +84,6 @@ function selectionScope(highlighted: string | null): string[] {
   return ids.filter((k) => inSplit.has(k));
 }
 
-/** `Cmd+Shift+A` selects every row in scope; `Cmd+A` the highlighted row and those below it. */
 export function selectAll(fromHere: boolean) {
   const cur = chrome().current();
   if (!cur || cur.screen.kind !== "list") return;
@@ -109,8 +92,6 @@ export function selectAll(fromHere: boolean) {
   if (at < 0) return;
   const keys = scope.slice(at);
   chrome().setSelection(keys);
-  // The mirror keeps selected rows: read the ones the list never loaded, so
-  // what the next key or the label picker shows counts all of them.
   const missing = keys.filter((k) => !rowOf(k));
   if (missing.length === 0) return;
   fetchRows(false, missing)
@@ -118,7 +99,6 @@ export function selectAll(fromHere: boolean) {
     .catch((err: unknown) => console.warn("rows of the selection", err));
 }
 
-/** Tab / Shift+Tab: first conversation of the next / previous visible split. */
 export function jumpSplit(delta: number) {
   const cur = chrome().current();
   if (!cur || cur.screen.kind !== "list") return;
@@ -127,14 +107,10 @@ export function jumpSplit(delta: number) {
   const entries = currentListView()?.ids ?? [];
   const hSplit = entries.find((e) => e.key === cur.highlight)?.split ?? null;
   const at = splits.findIndex((s) => s.split === hSplit);
-  // Outside any split, forward goes to the first one.
   const target = splits[at < 0 && delta > 0 ? 0 : at + delta];
   if (target) highlight(target.first);
 }
 
-// ------------------------------------------------------------ conversation
-
-/** Messages `n`/`p` select; drafts and the Sending row are not in `messages`. */
 export function selectable(data: ConversationData): number[] {
   return data.messages.map((m) => m.id);
 }
@@ -146,7 +122,6 @@ export function selectMessage(data: ConversationData, delta: number) {
   const at = c.selectedMessage === null ? -1 : ids.indexOf(c.selectedMessage);
   const next = ids[Math.min(last, Math.max(0, (at < 0 ? last : at) + delta))];
   if (next === undefined) return;
-  // Selecting a message inside a fold opens the whole fold, as a click on it does.
   const expanded = new Set(c.expandAll ? ids : c.expanded);
   const unfolded = new Set(
     c.selectedMessage === null ? c.unfolded : [...c.unfolded, c.selectedMessage],

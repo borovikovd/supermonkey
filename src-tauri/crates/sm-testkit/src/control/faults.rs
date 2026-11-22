@@ -1,5 +1,3 @@
-//! Gmail faults and holds, the network, and the request log.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,8 +10,6 @@ use sm_fake_gmail::{Answer, Fault, LoggedRequest, Matcher};
 
 use crate::server::{Ctl, Fail, SETTLE_LIMIT, Server, done};
 
-/// Picks requests: by Gmail method (`api`, e.g. `messages.batchModify`),
-/// HTTP method and path glob, account, and query parameters.
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MatchReq {
@@ -58,12 +54,9 @@ impl MatchReq {
     }
 }
 
-/// What a matched request suffers.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FaultSpec {
-    /// `drop`, `noResponse`, `status`, `statusAfterApply`, `hold`,
-    /// `holdAnswer`, or `omitThreads`.
     kind: String,
     #[serde(default)]
     status: Option<u16>,
@@ -122,8 +115,6 @@ pub(crate) struct FaultReq {
     fault: FaultSpec,
 }
 
-/// Makes matching Gmail requests fail or wait (SPEC Gmail errors). Returns
-/// the fault's id, which `release` takes for a hold.
 pub(crate) async fn fault(State(s): State<Arc<Server>>, Json(req): Json<FaultReq>) -> Ctl {
     let id = s.fake.inject(req.on.matcher(), req.fault.fault()?);
     Ok(Json(json!({ "id": id })))
@@ -132,18 +123,13 @@ pub(crate) async fn fault(State(s): State<Arc<Server>>, Json(req): Json<FaultReq
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ReleaseReq {
-    /// The hold, by the id `fault` returned.
     id: u64,
-    /// What released requests suffer instead of being handled normally.
     #[serde(default)]
     outcome: Option<FaultSpec>,
-    /// Waits until the holds have parked at least this many requests first,
-    /// so a release never overtakes the request it is meant for.
     #[serde(default)]
     min: usize,
 }
 
-/// Ends a hold and lets the requests it parked go on.
 pub(crate) async fn release(State(s): State<Arc<Server>>, Json(req): Json<ReleaseReq>) -> Ctl {
     let outcome = req.outcome.map(FaultSpec::fault).transpose()?;
     let deadline = tokio::time::Instant::now() + SETTLE_LIMIT;
@@ -156,15 +142,12 @@ pub(crate) async fn release(State(s): State<Arc<Server>>, Json(req): Json<Releas
                 SETTLE_LIMIT.as_secs(),
             )));
         }
-        // The fake has no signal for a newly parked request.
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
     let released = s.fake.release(req.id, outcome.as_ref());
     Ok(Json(json!({ "released": released })))
 }
 
-/// Removes every fault and hold, then retries what is backing off, as a
-/// network change would. Requests already held stay held until released.
 pub(crate) async fn clear_faults(State(s): State<Arc<Server>>) -> Ctl {
     s.fake.clear_faults();
     s.retry().await;
@@ -174,14 +157,10 @@ pub(crate) async fn clear_faults(State(s): State<Arc<Server>>) -> Ctl {
 #[derive(Deserialize)]
 pub(crate) struct OfflineReq {
     on: bool,
-    /// Coming back, leave it to the app's own poll to find out.
     #[serde(default)]
     probe: bool,
 }
 
-/// The network goes away (every Gmail request fails to connect) or comes
-/// back. Coming back retries the app's backed-off work and polls at once,
-/// unless `probe`.
 pub(crate) async fn offline(State(s): State<Arc<Server>>, Json(req): Json<OfflineReq>) -> Ctl {
     s.fake.set_offline(req.on).await;
     if !req.on && !req.probe {
@@ -228,7 +207,6 @@ fn request_json(r: &LoggedRequest) -> Value {
     })
 }
 
-/// Every request the fake received, in arrival order.
 pub(crate) async fn requests(State(s): State<Arc<Server>>) -> Ctl {
     let list: Vec<Value> = s.fake.requests().iter().map(request_json).collect();
     Ok(Json(json!(list)))

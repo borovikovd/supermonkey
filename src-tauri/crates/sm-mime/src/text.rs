@@ -1,6 +1,3 @@
-//! HTML to text: one line of words for search and snippets, and a readable
-//! `text/plain` alternative for outgoing mail.
-
 use std::borrow::Cow;
 use std::sync::LazyLock;
 
@@ -8,24 +5,16 @@ use regex::Regex;
 
 use crate::collapse_whitespace;
 
-/// Plain text of an HTML body for full-text search and snippets: no `<head>`,
-/// `<style>`, `<script>` or comments, entities decoded, and every run of
-/// whitespace one space.
 #[must_use]
 pub fn html_to_text(html: &str) -> String {
     collapse_whitespace(&render(html, Style::Search))
 }
 
-/// A Gmail `snippet` as text: Gmail sends it with HTML entities (`&#39;`,
-/// `&amp;`) escaped, though it holds no markup.
 #[must_use]
 pub fn snippet_text(snippet: &str) -> Cow<'_, str> {
     html_escape::decode_html_entities(snippet)
 }
 
-/// The `text/plain` alternative of an outgoing HTML body: lines from blocks and
-/// `<br>`, `> ` before quoted lines, `- ` before list items, and `text <url>`
-/// for http(s) links whose text is not the URL.
 pub(crate) fn html_to_plain(html: &str) -> String {
     let text = render(html, Style::Plain);
     let mut out = String::with_capacity(text.len());
@@ -43,7 +32,6 @@ pub(crate) fn html_to_plain(html: &str) -> String {
         out.push_str(line);
         out.push('\n');
     }
-    // No blank lines at either end, and one newline at the end.
     out.truncate(out.trim_end_matches('\n').len());
     let leading = out.len() - out.trim_start_matches('\n').len();
     out.drain(..leading);
@@ -51,20 +39,15 @@ pub(crate) fn html_to_plain(html: &str) -> String {
     out
 }
 
-/// What the text is for.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Style {
-    /// Words only; line structure does not matter.
     Search,
-    /// Formatting meant for people reading the text part.
     Plain,
 }
 
-/// Comments, `<!DOCTYPE>` and `<![CDATA[` declarations, and `<?xml ?>`.
 static COMMENT: LazyLock<Regex> =
     LazyLock::new(|| crate::regex(r"(?s)<!--.*?-->|<![^>]*>|<\?[^>]*>"));
 
-/// Elements whose content is not text.
 static HIDDEN: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     ["head", "style", "script", "title", "noscript", "template"]
         .iter()
@@ -72,9 +55,6 @@ static HIDDEN: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         .collect()
 });
 
-/// A start or end tag: `/`, the name, and the attributes. A value is quoted
-/// only when the quote follows its `=`; a quote inside an unquoted value
-/// (`title=it's`) is just a character, as browsers read it.
 static TAG: LazyLock<Regex> = LazyLock::new(|| {
     crate::regex(r#"<(/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:[^>=]|=\s*(?:"[^"]*"|'[^']*'|[^\s>]*))*)>"#)
 });
@@ -82,9 +62,7 @@ static TAG: LazyLock<Regex> = LazyLock::new(|| {
 static HREF: LazyLock<Regex> =
     LazyLock::new(|| crate::regex(r#"(?i)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#));
 
-/// Walks the tags of `html` and writes its text.
 fn render(html: &str, style: Style) -> String {
-    // Most bodies have few of these, so copy only when one matches.
     let mut html = COMMENT.replace_all(html, "");
     for hidden in HIDDEN.iter() {
         if let Cow::Owned(replaced) = hidden.replace_all(&html, " ") {
@@ -94,7 +72,6 @@ fn render(html: &str, style: Style) -> String {
 
     let mut w = TextWriter::new(style);
     let mut pre_depth = 0u32;
-    // The open link: its href and where its text starts in the output.
     let mut link: Option<(Cow<'_, str>, usize)> = None;
     let mut last = 0;
     for tag in TAG.captures_iter(&html) {
@@ -147,7 +124,6 @@ fn render(html: &str, style: Style) -> String {
             }
             ("a", true) if style == Style::Plain => {
                 if let Some((href, start)) = link.take() {
-                    // `start` can be past the end after a newline trimmed spaces.
                     let shown = w.out.get(start..).unwrap_or_default().trim();
                     let is_web = href.starts_with("http://") || href.starts_with("https://");
                     if is_web && !shown.is_empty() && shown != href {
@@ -162,23 +138,17 @@ fn render(html: &str, style: Style) -> String {
     w.out
 }
 
-/// The longest tag name [`render`] acts on: `blockquote`.
 const MAX_TAG_NAME: usize = 10;
 
-/// A tag's name in ASCII lowercase, written into `buffer`. A name longer
-/// than every tag [`render`] acts on is empty, which is no tag.
 fn lowercase_tag_name<'b>(name: &str, buffer: &'b mut [u8; MAX_TAG_NAME]) -> &'b str {
     let Some(lowered) = buffer.get_mut(..name.len()) else {
         return "";
     };
     lowered.copy_from_slice(name.as_bytes());
     lowered.make_ascii_lowercase();
-    // Changing the case of ASCII letters keeps UTF-8 valid.
     std::str::from_utf8(lowered).unwrap_or_default()
 }
 
-/// The decoded `href` of a start tag's attributes. Borrows when it has no
-/// entities to decode.
 fn href(attributes: &str) -> Option<Cow<'_, str>> {
     let found = HREF.captures(attributes)?;
     let value = found
@@ -188,12 +158,10 @@ fn href(attributes: &str) -> Option<Cow<'_, str>> {
     Some(html_escape::decode_html_entities(value.as_str()))
 }
 
-/// Zero-width and filler characters newsletters pad their preview text with.
 const INVISIBLE: [char; 7] = [
     '\u{200b}', '\u{200c}', '\u{200d}', '\u{2060}', '\u{feff}', '\u{034f}', '\u{00ad}',
 ];
 
-/// Accumulates text, keeping line structure and quote prefixes.
 struct TextWriter {
     out: String,
     quote_depth: usize,
@@ -219,8 +187,6 @@ impl TextWriter {
         }
     }
 
-    /// Writes text from between tags. Outside `<pre>`, a whitespace run is one
-    /// space, never at a line start and never doubled.
     fn text(&mut self, raw: &str, is_preformatted: bool) {
         let decoded: String = html_escape::decode_html_entities(raw)
             .chars()
@@ -268,14 +234,12 @@ impl TextWriter {
         self.out.push('\n');
     }
 
-    /// Ends the current line, if one is open.
     fn block(&mut self) {
         if !self.is_at_line_start() {
             self.newline();
         }
     }
 
-    /// Ends the current line and leaves one blank line.
     fn paragraph(&mut self) {
         self.block();
         if !self.out.is_empty() && !self.out.ends_with("\n\n") {

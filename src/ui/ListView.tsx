@@ -21,12 +21,6 @@ type Item =
   | { type: "row"; key: string }
   | { type: "header"; split: number; name: string; count: number };
 
-/**
- * Where the pointer was at its last move anywhere in the window. WebKit sends
- * mouse moves without the pointer moving when the page changes under it (a
- * sheet closes, the list scrolls); those match this and are ignored. Window
- * listeners run after React's, so a row compares against the move before.
- */
 const pointer = { x: -1, y: -1 };
 if (typeof window !== "undefined") {
   window.addEventListener("mousemove", (e) => {
@@ -35,8 +29,6 @@ if (typeof window !== "undefined") {
   });
 }
 
-// Memoized by hand: ListView is not compiled (see useVirtualizer) and
-// re-renders on every scroll.
 const Row = memo(function Row({
   row,
   rowKey,
@@ -50,17 +42,13 @@ const Row = memo(function Row({
   rowKey: string;
   highlighted: boolean;
   selected: boolean;
-  /** Search words to mark in the subject and snippet. */
   terms: readonly string[];
   onClick: (key: string) => void;
   onHover: (key: string, e: React.MouseEvent) => void;
 }) {
   const bg = selected ? "bg-fill" : highlighted ? "bg-accent-soft" : "";
   return (
-    // An ARIA listbox option: focus stays on the listbox (aria-activedescendant)
-    // and j / k / Enter drive it through the global shortcut handler. Rows are
-    // rich and virtualized, so a native <option> cannot render them.
-    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus
+    // oxlint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/interactive-supports-focus -- a listbox option; keys drive it through the global handler
     <div
       // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- rich rows; native elements cannot render them
       role="option"
@@ -131,7 +119,6 @@ function Empty({ inbox, loaded }: { inbox: boolean; loaded: boolean }) {
   );
 }
 
-/** Row keys asked for and not answered yet: scrolling never asks twice. */
 const fetching = new Set<string>();
 
 export function ListView() {
@@ -159,7 +146,6 @@ export function ListView() {
       }
       out.push({ type: "row", key: e.key });
     }
-    // `g i` / `g o` on an empty, hidden split shows its header.
     if (forced !== null && !list.ids.some((e) => e.split === forced)) {
       const s = splits.find((x) => x.id === forced);
       if (s) out.unshift({ type: "header", split: s.id, name: s.name, count: 0 });
@@ -168,9 +154,7 @@ export function ListView() {
   }, [list.ids, isInbox, splits, forced]);
 
   const parent = useRef<HTMLDivElement>(null);
-  // TanStack Virtual returns functions the React Compiler cannot memoize, so it
-  // skips this component; the list is virtualized and stays fast without it.
-  // oxlint-disable-next-line react/incompatible-library
+  // oxlint-disable-next-line react/incompatible-library -- TanStack Virtual; the list is fast without the compiler
   const v = useVirtualizer({
     count: items.length,
     getScrollElement: () => parent.current,
@@ -183,19 +167,13 @@ export function ListView() {
     },
   });
 
-  // Debug builds: when the first rows paint after launch (cold launch budget).
   useEffect(() => {
     if (items.length > 0 && performance.getEntriesByName("first-rows").length === 0) {
       requestAnimationFrame(() => performance.mark("first-rows"));
     }
   }, [items.length]);
 
-  // Bring the highlight into view when it moves or the list comes on screen,
-  // unless the pointer put it there: that row is already under the mouse, and
-  // scrolling would move the list under it. A change to the list under a
-  // highlight that stays put never scrolls: the user may have scrolled away.
   const hovered = useRef<string | null>(null);
-  /** The list and highlighted row last brought into view. */
   const shown = useRef<string | null>(null);
   const listSub = list.sub;
   useEffect(() => {
@@ -208,22 +186,16 @@ export function ListView() {
       return;
     }
     const i = items.findIndex((it) => it.type === "row" && it.key === highlight);
-    // Not listed yet: once it is.
     if (i < 0) return;
     shown.current = target;
-    // A click on a split name asks for its header at the top.
     const toTop = listScroll.headerToTop;
     listScroll.headerToTop = false;
-    // Show the split header too when the highlight is its first row. Only a
-    // header above the viewport needs scrolling to: scrolling down to the row
-    // brings the header just above it into view anyway.
     const header = items[i - 1]?.type === "header" ? v.measurementsCache[i - 1] : undefined;
     if (header && (toTop || header.start < (v.scrollOffset ?? 0)))
       v.scrollToIndex(i - 1, { align: "start" });
     else v.scrollToIndex(i, { align: "auto" });
   }, [highlight, items, v, listSub]);
 
-  // Rows outside the pushed window are fetched ahead of scrolling.
   const virtual = v.getVirtualItems();
   const rows = list.rows;
   useEffect(() => {
@@ -250,10 +222,6 @@ export function ListView() {
     return () => clearTimeout(t);
   }, [virtual, items, rows, isDrafts]);
 
-  // Gmail pages: fetch the next one as the list nears its oldest Gmail hit,
-  // not its end. The next page may hold mail newer than the local rows below
-  // that hit. With no hit listed (or one a pending action hid), the end stands
-  // in. Asked once per list, hit, and length: a page moves the hit or the length.
   const asked = useRef("");
   const oldestHit = list.oldestHit;
   const anchor = useMemo(() => {
@@ -283,9 +251,6 @@ export function ListView() {
     [isDrafts],
   );
 
-  // The highlight follows the mouse, as in Superhuman, so e acts on the row
-  // under it. Only a real move counts: j and k scroll rows under a resting
-  // pointer, and that must not pull the highlight back.
   const onHover = useCallback((k: string, e: React.MouseEvent) => {
     if (e.clientX === pointer.x && e.clientY === pointer.y) return;
     const c = useChrome.getState();
@@ -300,7 +265,6 @@ export function ListView() {
 
   if (items.length === 0) {
     const search = cur?.where.kind === "search";
-    // Offline, local search can't answer a query only Gmail evaluates.
     const needsGmail = search && list.needsGmail && !online;
     return (
       <div className="flex flex-1 flex-col">

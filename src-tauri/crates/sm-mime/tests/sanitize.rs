@@ -1,8 +1,5 @@
-//! The sanitizer against hostile HTML (e2e/COVERAGE.md, kept unit tests).
-
 use sm_mime::{CidImages, html_to_text, sanitize_html};
 
-/// Kept byte for byte: the expectations below quote it.
 const HOSTILE: &str = include_str!("fixtures/hostile.html");
 
 #[test]
@@ -84,7 +81,6 @@ fn cid_references_are_rewritten_before_sanitizing() {
     let html = r#"<img src="cid:ii_abc"><img src='CID:logo%40corp.example'><img src="cid:unknown"><table><tr><td background="cid:ii_abc">x</td></tr></table>"#;
     let clean = sanitize_html(html, &images);
     assert_eq!(clean.matches(uri).count(), 3, "{clean}");
-    // Unknown cid: is not an allowed scheme, so the attribute goes.
     assert!(!clean.contains("cid:unknown"));
 }
 

@@ -1,5 +1,3 @@
-//! Outgoing RFC 5322 messages, built with mail-builder (SPEC Compose, Drafts).
-
 use std::iter;
 
 use mail_builder::MessageBuilder;
@@ -14,80 +12,43 @@ use sm_domain::{Addr, DraftId, Millis};
 use crate::headers::{DRAFT_HEADER, bare_id, is_draft_token, is_message_id};
 use crate::text::html_to_plain;
 
-/// A message that cannot be built.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BuildError {
-    /// The local draft id is not a safe header token (see [`Outgoing::draft_id`]).
     #[error("the draft id is not a header-safe token")]
     DraftId,
 }
 
-/// A file attached to an outgoing message.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutAttachment {
-    /// The file's name, as the recipient sees it.
     pub filename: String,
-    /// Its MIME type.
     pub mime_type: String,
-    /// Its bytes.
     pub data: Vec<u8>,
 }
 
-/// An inline part, referenced from the HTML as `cid:<content_id>`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InlinePart {
-    /// The Content-ID, with or without angle brackets.
     pub content_id: String,
-    /// Its MIME type.
     pub mime_type: String,
-    /// Its file name, if it has one.
     pub filename: Option<String>,
-    /// Its bytes.
     pub data: Vec<u8>,
 }
 
-/// A draft or message to write to Gmail.
 #[derive(Debug, Clone, Copy)]
 pub struct Outgoing<'a> {
-    /// The sender. Its domain also names the `Message-ID`.
     pub from: &'a Addr,
-    /// `To` recipients.
     pub to: &'a [Addr],
-    /// `Cc` recipients.
     pub cc: &'a [Addr],
-    /// `Bcc` recipients, written so Gmail can deliver to them; Gmail strips them.
     pub bcc: &'a [Addr],
-    /// The subject.
     pub subject: &'a str,
-    /// The whole HTML body: the editor's HTML, then the quote block, with
-    /// `cid:` references (see [`data_images_to_cid`](crate::data_images_to_cid)).
     pub html: &'a str,
-    /// The message replied to, with or without angle brackets.
     pub in_reply_to: Option<&'a str>,
-    /// The thread's message ids, with or without angle brackets.
     pub references: &'a [String],
-    /// The local draft id, written as `X-Supermonkey-Draft` (SPEC Drafts). It
-    /// must be 1 to 128 ASCII letters, digits, `-`, `_` or `.`, as UUIDs are.
     pub draft_id: &'a DraftId,
-    /// Attachments.
     pub attachments: &'a [OutAttachment],
-    /// Inline parts. Pass only those the HTML references.
     pub inline: &'a [InlinePart],
-    /// The `Date` header.
     pub date: Millis,
 }
 
-/// Builds the RFC 5322 bytes of `message`, for `drafts.create`,
-/// `drafts.update`, and `messages.send` (base64url them into `raw`).
-///
-/// The tree is `multipart/mixed { multipart/related { multipart/alternative {
-/// text/plain, text/html }, inline parts… }, attachments… }`, without
-/// `multipart/mixed` when there are no attachments; `multipart/related` stays
-/// even with no inline parts (SPEC Compose). The `text/plain` part is made from
-/// the HTML. mail-builder encodes non-ASCII names, subjects, and filenames.
-/// Empty address lists are left out. The `Message-ID` is
-/// `ub.<draft id>.<date ms>@<sender's domain>`. Reply ids that could not be
-/// written back safely are dropped.
 pub fn build_mime(message: &Outgoing<'_>) -> Result<Vec<u8>, BuildError> {
     let draft_id = message.draft_id.as_str();
     if !is_draft_token(draft_id) {
@@ -135,24 +96,15 @@ pub fn build_mime(message: &Outgoing<'_>) -> Result<Vec<u8>, BuildError> {
     Ok(out)
 }
 
-/// A plain-text message, such as a list's unsubscribe request (SPEC
-/// Unsubscribe and block). It carries no draft header: it is not one of the app's drafts.
 #[derive(Debug, Clone, Copy)]
 pub struct PlainMessage<'a> {
-    /// The sender. Its domain also names the `Message-ID`.
     pub from: &'a Addr,
-    /// The one recipient.
     pub to: &'a Addr,
-    /// The subject.
     pub subject: &'a str,
-    /// The text body.
     pub text: &'a str,
-    /// The `Date` header.
     pub date: Millis,
 }
 
-/// Builds the RFC 5322 bytes of a [`PlainMessage`], for `messages.send`. Its
-/// `Message-ID` is `ub.unsubscribe.<date ms>@<sender's domain>`.
 #[must_use]
 pub fn build_plain(message: &PlainMessage<'_>) -> Vec<u8> {
     let mut out = Vec::new();
@@ -171,7 +123,6 @@ pub fn build_plain(message: &PlainMessage<'_>) -> Vec<u8> {
     out
 }
 
-/// The domain for generated `Message-ID`s: the sender's, when it has a safe one.
 fn id_domain(from: &Addr) -> &str {
     from.email
         .rsplit_once('@')
@@ -180,7 +131,6 @@ fn id_domain(from: &Addr) -> &str {
         .unwrap_or("supermonkey.local")
 }
 
-/// The body tree described on [`build_mime`].
 fn body_tree<'a>(message: &Outgoing<'a>) -> MimePart<'a> {
     let alternative = MimePart::new(
         "multipart/alternative",
@@ -202,8 +152,6 @@ fn body_tree<'a>(message: &Outgoing<'a>) -> MimePart<'a> {
     MimePart::new("multipart/mixed", mixed)
 }
 
-/// `mime_type` when it is a plain `type/subtype` token, else
-/// `application/octet-stream`: mail-builder writes it into the header as it is.
 fn safe_mime_type(mime_type: &str) -> &str {
     let is_token = |s: &str| {
         !s.is_empty()

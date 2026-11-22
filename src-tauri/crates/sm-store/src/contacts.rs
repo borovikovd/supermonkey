@@ -1,7 +1,3 @@
-//! Contacts for recipient autocomplete (SPEC Recipients and autocomplete).
-//! Counting rules and ranking are `sm_domain::contacts`'; this stores the
-//! counts and counts each Gmail message once.
-
 use rusqlite::named_params;
 use sm_domain::contacts::ContactStats;
 use sm_domain::{AccountId, GmailMessageId, Millis};
@@ -10,36 +6,23 @@ use crate::db::Db;
 use crate::tx::WriteTx;
 use crate::{StoreError, Table};
 
-/// One address seen on one message, with what it adds to the counts. It
-/// borrows the message's text for the one [`ContactWrites::count`] call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sighting<'a> {
-    /// The address; stored lowercased.
     pub email: &'a str,
-    /// Its display name on this message; empty for none.
     pub name: &'a str,
-    /// Messages this account sent to it: 0 or 1.
     pub sent: u32,
-    /// Messages this account received from it: 0 or 1.
     pub received: u32,
-    /// Seen on list mail.
     pub on_list: bool,
-    /// The message's date.
     pub at: Millis,
 }
 
-/// A stored contact.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContactRecord {
-    /// The address, lowercased.
     pub email: String,
-    /// The latest display name; empty for none.
     pub name: String,
-    /// Its counts, for ranking.
     pub stats: ContactStats,
 }
 
-/// Reads of contacts.
 #[derive(Debug, Clone, Copy)]
 pub struct ContactReads<'c> {
     db: Db<'c>,
@@ -50,10 +33,6 @@ impl<'c> ContactReads<'c> {
         Self { db }
     }
 
-    /// Contacts that may match `query`: a superset of what
-    /// `contacts::contact_matches` accepts, for it to filter and rank. An
-    /// ASCII query narrows by substring; any other gets every contact, since
-    /// SQLite folds only ASCII case.
     pub fn candidates(
         self,
         account: AccountId,
@@ -96,7 +75,6 @@ impl<'c> ContactReads<'c> {
         )
     }
 
-    /// Whether a Gmail message was already counted.
     pub fn is_counted(
         self,
         account: AccountId,
@@ -112,7 +90,6 @@ impl<'c> ContactReads<'c> {
     }
 }
 
-/// Writes to contacts.
 #[derive(Debug)]
 pub struct ContactWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
@@ -123,10 +100,6 @@ impl<'t, 'c> ContactWrites<'t, 'c> {
         Self { tx }
     }
 
-    /// Counts one message's addresses, once per message: false, and no
-    /// change, when it was counted before. Each address keeps its latest
-    /// name, sums its counts, stays list-only only while every sighting was
-    /// on list mail, and keeps its latest contact time.
     pub fn count(
         &mut self,
         account: AccountId,

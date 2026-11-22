@@ -1,6 +1,3 @@
-//! Queueing ops, and undoing what an action did here: for `z`, and when
-//! Gmail rejects an op (SPEC Undo, Gmail errors).
-
 use sm_domain::{AccountId, ActionNo, LabelId, Millis, NoticeKind, ThreadChange, UndoEntryId};
 use sm_store::{NewNotice, NewOp, OpId, OpKind, StoreError, UndoAction, WriteTx};
 
@@ -9,20 +6,13 @@ use super::{LabelCreateOp, ModifyOp};
 use crate::effects::Effect;
 use crate::writer::WriterState;
 
-/// Where an op comes from.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct OpOrigin {
-    /// The account it changes.
     pub(crate) account: AccountId,
-    /// The action that made it; `None` for the core's own, such as a snooze
-    /// waking.
     pub(crate) action: Option<ActionNo>,
-    /// When it was made.
     pub(crate) now: Millis,
 }
 
-/// Queues `op`, made as `origin` says, and wakes the account's runner once
-/// the commit lands.
 pub(crate) fn queue_modify(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -47,11 +37,6 @@ pub(crate) fn queue_modify(
     Ok(())
 }
 
-/// Reverts `changes` where nothing has changed them since: a message loses
-/// what it gained and still has, and gets back what it lost and still
-/// lacks; a snooze time nothing has changed since goes back. Later changes,
-/// such as a read on open or an edit in another Gmail client, stay. Returns
-/// what the revert itself changed, per thread.
 pub(crate) fn revert(
     tx: &mut WriteTx<'_>,
     changes: &[ThreadChange],
@@ -87,9 +72,6 @@ pub(crate) fn revert(
     Ok(reverted)
 }
 
-/// Queues the Gmail side of a revert made as `origin` says: one
-/// `batchModify` per distinct label change, naming the messages that made
-/// it. A thread's snooze change rides with its first op, for a rollback.
 pub(crate) fn queue_revert(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -124,7 +106,6 @@ pub(crate) fn queue_revert(
             if let Some(t) = op.threads.iter_mut().find(|t| t.thread == thread.thread) {
                 t.changes.push(change);
             } else {
-                // Only one op restores the snooze; the others leave it.
                 let (before, after) = snooze
                     .take()
                     .unwrap_or((thread.snooze_after, thread.snooze_after));
@@ -143,10 +124,6 @@ pub(crate) fn queue_revert(
     Ok(())
 }
 
-/// Gmail rejected op `id` (SPEC Gmail errors): what it did here rolls back,
-/// its action's undo entry goes, and a notice with `message` carries Gmail's
-/// error to a toast. Replay goes on with the next op. An op already gone
-/// (its account removed) changes nothing.
 pub(crate) fn reject(
     tx: &mut WriteTx<'_>,
     id: OpId,
@@ -169,9 +146,6 @@ pub(crate) fn reject(
                 tracing::warn!(op = %id, error = %e, "a rejected op does not parse; nothing to roll back");
             }
         },
-        // Nothing here to roll back: a draft keeps its text when Gmail
-        // refuses it, and a sent message trashed by an undo stays trashed
-        // here; the notice says Gmail refused.
         OpKind::DraftUpsert | OpKind::DraftDelete | OpKind::TrashMessage => {}
     }
     if let Some(action) = op.action {
@@ -189,9 +163,6 @@ pub(crate) fn reject(
     Ok(())
 }
 
-/// A label made here that Gmail refused can't be applied either: the queued
-/// changes that use it roll back, newest first, and go with their undo
-/// entries; then the label goes.
 pub(crate) fn drop_label(
     tx: &mut WriteTx<'_>,
     account: AccountId,
@@ -214,9 +185,6 @@ pub(crate) fn drop_label(
     tx.labels().delete_local(account, label)
 }
 
-/// A label made here merged into the label Gmail already had under its
-/// name: queued ops and undo entries that name the local id name Gmail's
-/// label instead.
 pub(crate) fn relabel(
     tx: &mut WriteTx<'_>,
     account: AccountId,

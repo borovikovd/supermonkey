@@ -1,8 +1,3 @@
-//! The account workers that run (ARCHITECTURE.md, sections 4 and 8.1): which
-//! accounts sync and with which grant. Starting, replacing, signing out, and
-//! forgetting them happens here, so no two workers of one account ever run
-//! at once.
-
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -23,7 +18,6 @@ use crate::read::read;
 use crate::writer::CoreWriter;
 use crate::{Error, GmailConfig};
 
-/// Every running account worker, and what starting one takes.
 pub(crate) struct AccountWorkers {
     deps: Arc<WorkerDeps>,
     gmail: GmailConfig,
@@ -32,33 +26,21 @@ pub(crate) struct AccountWorkers {
     tokens: Arc<TokenFile>,
     tasks: Tasks,
     live: Arc<Live>,
-    /// Each account's op lane. It outlives the account's workers, so an op
-    /// a replaced worker had sent lands before the next one replays.
     lanes: Mutex<HashMap<AccountId, Arc<OpsLane>>>,
     sign_outs: SignOutSender,
     next_id: AtomicU64,
-    /// Workers start only once the core has launched.
     launched: AtomicBool,
-    /// How many removed accounts are still being cleaned up. A sign-in waits
-    /// until none is: a revoke landing after it would end the new grant too.
     removals: watch::Sender<usize>,
-    /// Drafts whose files were deleted this run: sent, discarded, or their
-    /// account removed. Draft ids are never reused, so a file that lands for
-    /// one later goes too.
     gone_drafts: Mutex<HashSet<DraftId>>,
 }
 
-/// The running workers, by account.
 struct Live {
     workers: Mutex<HashMap<AccountId, AccountWorker>>,
     writer: CoreWriter,
-    /// Which sign-in each account's grant is from.
     grants: Arc<Grants>,
 }
 
 impl Live {
-    /// Takes the account's worker out if it is `id`: a report from a
-    /// worker already replaced changes nothing.
     fn take_if(&self, account: AccountId, id: WorkerId) -> Option<AccountWorker> {
         let mut workers = self.workers.lock();
         if workers.get(&account).is_some_and(|w| w.id() == id) {
@@ -102,40 +84,30 @@ impl AccountWorkers {
         })
     }
 
-    /// The Gmail endpoints and OAuth client.
     pub(crate) const fn gmail_config(&self) -> &GmailConfig {
         &self.gmail
     }
 
-    /// The shared HTTP client.
     pub(crate) const fn http(&self) -> &HttpClient {
         &self.http
     }
 
-    /// Where refresh tokens live.
     pub(crate) const fn tokens(&self) -> &Arc<TokenFile> {
         &self.tokens
     }
 
-    /// The writer.
     pub(crate) fn writer(&self) -> &CoreWriter {
         &self.deps.writer
     }
 
-    /// Which sign-in each account's grant is from: a sign-in renews it in
-    /// the writer job that marks the account signed in.
     pub(crate) fn grants(&self) -> &Arc<Grants> {
         &self.live.grants
     }
 
-    /// The folder of a draft's added files.
     pub(crate) fn draft_dir(&self, draft: &DraftId) -> PathBuf {
         draft_dir(&self.deps.data_dir, draft)
     }
 
-    /// Deletes a draft's added files: its row is gone. It is marked gone
-    /// first, so a file written before the mark is in the folder this
-    /// deletes, and one written after it sees the mark.
     pub(crate) fn delete_draft_files(&self, draft: DraftId) {
         let dir = self.draft_dir(&draft);
         self.gone_drafts.lock().insert(draft);
@@ -154,18 +126,14 @@ impl AccountWorkers {
         });
     }
 
-    /// A draft whose files went is stored again (its account removed and
-    /// added back, and the draft read from Gmail): it takes files again.
     pub(crate) fn draft_back(&self, draft: &DraftId) {
         self.gone_drafts.lock().remove(draft);
     }
 
-    /// Whether the draft's files were deleted with it this run.
     pub(crate) fn draft_files_gone(&self, draft: &DraftId) -> bool {
         self.gone_drafts.lock().contains(draft)
     }
 
-    /// The account's running worker.
     pub(crate) fn get(&self, account: AccountId) -> Option<AccountWorker> {
         self.live.workers.lock().get(&account).cloned()
     }
@@ -174,9 +142,6 @@ impl AccountWorkers {
         self.live.workers.lock().values().cloned().collect()
     }
 
-    /// Starts a worker for every signed-in account (SPEC Accounts). An
-    /// account with no stored token shows Sign in again. From now on, a
-    /// registered account starts its worker at once.
     pub(crate) fn launch(self: &Arc<Self>) {
         if self.launched.swap(true, Ordering::SeqCst) {
             return;
@@ -201,9 +166,6 @@ impl AccountWorkers {
         });
     }
 
-    /// At launch: what a removal left when a quit or crash cut it off before
-    /// its clean-up, a refresh token or an attachments folder of an account
-    /// no longer stored, is deleted (SPEC Accounts).
     async fn sweep(&self, accounts: &[AccountRecord]) {
         let emails: HashSet<String> = accounts.iter().map(|a| a.email.clone()).collect();
         let ids: HashSet<String> = accounts.iter().map(|a| a.id.0.to_string()).collect();
@@ -219,9 +181,6 @@ impl AccountWorkers {
         }
     }
 
-    /// At launch: the added files of drafts no longer stored are deleted.
-    /// A quit or crash between a discard or a send and the delete that
-    /// follows it leaves them (SPEC Drafts).
     async fn sweep_draft_files(&self) {
         if let Err(e) = self.delete_left_draft_files().await {
             tracing::warn!(error = %e, "the launch clean-up of draft files failed; keeping them");
@@ -230,8 +189,6 @@ impl AccountWorkers {
 
     async fn delete_left_draft_files(&self) -> Result<(), Error> {
         let dir = drafts_dir(&self.deps.data_dir);
-        // The folders first, then the drafts: a draft is stored before it
-        // has a folder, so one made meanwhile is never taken for a leftover.
         let scanned = dir.clone();
         let found = tokio::task::spawn_blocking(move || folders(&scanned)).await?;
         if found.is_empty() {
@@ -246,8 +203,6 @@ impl AccountWorkers {
         Ok(())
     }
 
-    /// An account was added or signed in again with the refresh token in
-    /// the store, as `grant`: starts its worker, if the core has launched.
     pub(crate) async fn registered(
         &self,
         account: AccountId,
@@ -260,8 +215,6 @@ impl AccountWorkers {
         Ok(())
     }
 
-    /// A sign-in finished with `tokens`, as `grant`: starts the account's
-    /// worker on them, if the core has launched.
     pub(crate) fn signed_in(
         &self,
         account: AccountId,
@@ -275,8 +228,6 @@ impl AccountWorkers {
         Ok(())
     }
 
-    /// Starts the account on its stored refresh token, or marks it signed
-    /// out when there is none.
     async fn start_stored(
         &self,
         account: AccountId,
@@ -309,8 +260,6 @@ impl AccountWorkers {
         Ok(tokio::task::spawn_blocking(move || tokens.load(&email)).await??)
     }
 
-    /// Starts the account's worker on `tokens`. A worker it already has is
-    /// replaced: the new one's tasks start once the old one's have ended.
     fn start(
         &self,
         account: AccountId,
@@ -343,8 +292,6 @@ impl AccountWorkers {
             },
             grant,
         );
-        // Only the swap under the lock: cancelling the old worker and
-        // starting the new one's tasks run outside it.
         let old = self.live.workers.lock().insert(account, worker.clone());
         if let Some(old) = &old {
             old.cancel();
@@ -354,20 +301,16 @@ impl AccountWorkers {
         Ok(())
     }
 
-    /// Marks the account signed out, unless a sign-in renewed its grant
-    /// since `grant`.
     pub(crate) fn mark_signed_out(&self, account: AccountId, grant: Grant) {
         mark_signed_out(&self.live, account, grant);
     }
 
-    /// Polls every account now.
     pub(crate) fn poll_all(&self) {
         for worker in self.all() {
             worker.poll_now();
         }
     }
 
-    /// Reads every account's `sendAs` and labels again, and polls.
     pub(crate) fn refresh_all(&self) {
         for worker in self.all() {
             worker.poll_now();
@@ -375,33 +318,23 @@ impl AccountWorkers {
         }
     }
 
-    /// Stops the read of `thread`'s bodies for a conversation, in whichever
-    /// account has it: no subscription shows it any more.
     pub(crate) fn release_opened(&self, thread: ThreadId) {
         for worker in self.all() {
             worker.release_opened(thread);
         }
     }
 
-    /// Ends every wait for the network and every back-off now.
     pub(crate) fn retry_now(&self) {
         self.deps.network.retry_now();
     }
 
-    /// Waits until no removed account is still being cleaned up.
     pub(crate) async fn removals_done(&self) {
         let mut removals = self.removals.subscribe();
-        // A removal's clean-up counts as busy on its own. The sender lives
-        // as long as `self`, so the wait never fails.
         if parked(removals.wait_for(|&n| n == 0)).await.is_err() {
             tracing::debug!("the removal count is gone; nothing to wait for");
         }
     }
 
-    /// An account was removed (its rows are gone): stops its worker, revokes
-    /// and deletes its refresh token, and deletes its files. Returns at
-    /// once: the clean-up runs on its own task, counted until it ends, so
-    /// a slow revoke holds up only the sign-ins that must wait for it.
     pub(crate) fn forget(self: &Arc<Self>, account: AccountId, email: String) {
         let removal = Removal::start(&self.removals);
         let workers = Arc::clone(self);
@@ -422,9 +355,6 @@ impl AccountWorkers {
                     None
                 }
             };
-            // The local clean-up first, on a blocking task that finishes even
-            // if a quit cancels this one: the revoke after it may take a
-            // network round trip, and the token must not outlive the account.
             let tokens = Arc::clone(&workers.tokens);
             let dir = attachments_dir(&workers.deps.data_dir, account);
             let gone = email.clone();
@@ -454,7 +384,6 @@ impl AccountWorkers {
     }
 }
 
-/// Deletes the stored refresh tokens of accounts not among `emails`.
 fn sweep_tokens(tokens: &TokenFile, emails: &HashSet<String>) {
     match tokens.entries() {
         Ok(entries) => {
@@ -466,7 +395,6 @@ fn sweep_tokens(tokens: &TokenFile, emails: &HashSet<String>) {
     }
 }
 
-/// Deletes the refresh token of an account removed before a quit.
 fn delete_swept_token(tokens: &TokenFile, email: &str) {
     if let Err(e) = tokens.delete(email) {
         tracing::warn!(error = %e, "couldn't delete a removed account's token");
@@ -475,7 +403,6 @@ fn delete_swept_token(tokens: &TokenFile, email: &str) {
     }
 }
 
-/// The names of the folders in `dir`; none when it can't be read.
 fn folders(dir: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
@@ -487,7 +414,6 @@ fn folders(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Deletes the folders of `dir` named in `found` and not in `kept`.
 fn delete_folders(dir: &Path, found: Vec<String>, kept: &HashSet<String>) {
     for name in found.into_iter().filter(|name| !kept.contains(name)) {
         if let Err(e) = std::fs::remove_dir_all(dir.join(name)) {
@@ -496,8 +422,6 @@ fn delete_folders(dir: &Path, found: Vec<String>, kept: &HashSet<String>) {
     }
 }
 
-/// One removed account's clean-up, counted until it is dropped: when it
-/// ends, or when the core stops it.
 struct Removal(watch::Sender<usize>);
 
 impl Removal {
@@ -513,9 +437,6 @@ impl Drop for Removal {
     }
 }
 
-/// Marks the account signed out: it shows Sign in again (SPEC Accounts).
-/// A sign-in that renewed its grant since `grant` was refused wins, even
-/// when its job ran first.
 fn mark_signed_out(live: &Live, account: AccountId, grant: Grant) {
     let grants = Arc::clone(&live.grants);
     live.writer.queue(
@@ -537,8 +458,6 @@ fn mark_signed_out(live: &Live, account: AccountId, grant: Grant) {
     );
 }
 
-/// Handles workers' reports that Google refused their grant: only the
-/// account's current worker signs it out and stops.
 async fn sign_out_reports(
     live: Arc<Live>,
     mut reports: mpsc::UnboundedReceiver<Tracked<(AccountId, WorkerId)>>,

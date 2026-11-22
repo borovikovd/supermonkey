@@ -1,6 +1,3 @@
-//! The snooze timer (SPEC Snooze): wakes each snoozed thread at its time on
-//! the core's clock. Launch and wake from sleep wake the due ones too.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,13 +8,8 @@ use crate::activity::Kick;
 use crate::clock::Clock;
 use crate::writer::CoreWriter;
 
-/// The longest the timer waits before it looks again. A snooze time set
-/// without a kick, such as one a rejected op's rollback restores, still
-/// wakes within this of its time.
 const LOOK_AGAIN: Duration = Duration::from_secs(60);
 
-/// Runs the timer until cancelled: waits for the soonest snooze, or a kick
-/// when a snooze time is set, then wakes what is due.
 pub(crate) async fn run(
     kick: Arc<Kick>,
     pool: Arc<ReadPool>,
@@ -44,8 +36,6 @@ pub(crate) async fn run(
     }
 }
 
-/// The soonest snooze end; `None` when there is none or it can't be read,
-/// which is logged.
 async fn next_snooze(pool: &Arc<ReadPool>) -> Option<Millis> {
     crate::read::read(pool, |r| r.threads().next_snooze())
         .await
@@ -55,8 +45,6 @@ async fn next_snooze(pool: &Arc<ReadPool>) -> Option<Millis> {
         })
 }
 
-/// Wakes the snoozes due by `now` and waits for the commit. Returns whether
-/// it committed; a failure is logged.
 pub(crate) async fn wake_due(writer: &CoreWriter, now: Millis) -> bool {
     let woke = writer
         .call(Priority::Sync, move |tx, state| {

@@ -1,6 +1,3 @@
-//! The `payload` of a Gmail `users.messages` resource: its headers, bodies, and
-//! attachment and inline parts.
-
 use std::borrow::Cow;
 use std::collections::HashSet;
 
@@ -15,92 +12,53 @@ use crate::encoded_word::decode_encoded_words;
 use crate::headers::{DRAFT_HEADER, bare_id, message_ids, parse_date, parse_draft_id};
 use crate::params::{header_kind, header_param};
 
-/// A payload that is not the shape Gmail documents.
 #[derive(Debug, thiserror::Error)]
 #[error("malformed Gmail message payload: {0}")]
 pub struct PayloadError(#[from] serde_json::Error);
 
-/// A received message, parsed. Nothing here is sanitized yet: render the body
-/// with [`RawBody::render`] or [`RawBody::to_draft`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParsedMessage {
-    /// The headers the app stores.
     pub headers: MessageHeaders,
-    /// The decoded bodies; empty for `format=metadata`.
     pub body: RawBody,
-    /// Attachments and inline parts in document order. Body parts are not here.
     pub parts: Vec<Part>,
 }
 
-/// The headers of a received message the app uses.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MessageHeaders {
-    /// The first `From` mailbox.
     pub from: Option<Addr>,
-    /// `To` mailboxes.
     pub to: Vec<Addr>,
-    /// `Cc` mailboxes.
     pub cc: Vec<Addr>,
-    /// `Bcc` mailboxes (present on mail this account sent).
     pub bcc: Vec<Addr>,
-    /// `Reply-To` mailboxes.
     pub reply_to: Vec<Addr>,
-    /// The decoded, trimmed subject; empty when there is none.
     pub subject: String,
-    /// The `Date` header, when it parses.
     pub date: Option<Millis>,
-    /// `Message-ID`, without angle brackets.
     pub message_id: Option<String>,
-    /// The first `In-Reply-To` id, without angle brackets.
     pub in_reply_to: Option<String>,
-    /// `References` ids in order, without angle brackets.
     pub references: Vec<String>,
-    /// `List-Id` or `List-Unsubscribe` is present (SPEC Split Inbox).
     pub is_list: bool,
-    /// The local draft id from `X-Supermonkey-Draft`, on drafts this app wrote.
     pub draft_id: Option<DraftId>,
 }
 
-/// An attachment or inline part of a received message.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Part {
-    /// Gmail's `partId`, such as `1.2`.
     pub id: String,
-    /// The decoded filename. A nameless calendar part is `invite.ics`, an
-    /// attached message `message.eml`, anything else empty.
     pub filename: String,
-    /// The lowercased MIME type, such as `image/png`.
     pub mime_type: String,
-    /// Decoded size in bytes, as Gmail reports it.
     pub size: u64,
-    /// Gmail's attachment id, when the bytes need `messages.attachments.get`.
     pub attachment_id: Option<String>,
-    /// The Content-ID, without angle brackets.
     pub content_id: Option<String>,
-    /// An inline image: an `image/*` part whose Content-ID the message's
-    /// HTML body references (`cid:`), so the body shows it. Any other part
-    /// is an attachment, whatever its disposition: Apple Mail sends every
-    /// file `inline`, and a photo with no Content-ID, or one the HTML never
-    /// references, would otherwise show nowhere.
     pub is_inline: bool,
-    /// The bytes, when Gmail sent them in the payload.
     pub data: Option<Vec<u8>>,
 }
 
-/// An inline image whose bytes must be fetched before the body can show it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InlineFetch<'a> {
-    /// The image's Content-ID, for [`CidImages::insert`].
     pub content_id: &'a str,
-    /// Gmail's attachment id, for `messages.attachments.get`.
     pub attachment_id: &'a str,
-    /// The image's MIME type, for [`CidImages::insert`].
     pub mime_type: &'a str,
 }
 
 impl ParsedMessage {
-    /// Inline images ([`Part::is_inline`]) that Gmail left out of the
-    /// payload. Fetch each, add it to [`ParsedMessage::cid_images`], then render.
     pub fn inline_images_to_fetch(&self) -> impl Iterator<Item = InlineFetch<'_>> {
         self.parts.iter().filter_map(|part| {
             if part.data.is_some() || !part.is_inline {
@@ -114,7 +72,6 @@ impl ParsedMessage {
         })
     }
 
-    /// The inline parts whose bytes came in the payload, by Content-ID.
     #[must_use]
     pub fn cid_images(&self) -> CidImages {
         let mut images = CidImages::new();
@@ -127,18 +84,6 @@ impl ParsedMessage {
     }
 }
 
-/// Parses the `payload` of a Gmail `users.messages` resource, from
-/// `format=full` or `format=metadata` (headers only, so no bodies or parts).
-///
-/// Bodies are the base64url `body.data` of `text/html` and `text/plain` parts
-/// without a filename, decoded in their charset; several of one type (Apple
-/// Mail splits a body around attachments) are joined in order. A body Gmail
-/// moved behind an attachment id is skipped. Only the images the HTML body
-/// shows are inline parts ([`Part::is_inline`]). A message attached to this
-/// one (`message/rfc822`, as a forward as attachment sends it) adds the
-/// attachments inside it, not its body or the images its own HTML body
-/// shows; the attached message itself is listed only when Gmail gives it an
-/// attachment id.
 pub fn parse_message(payload: &serde_json::Value) -> Result<ParsedMessage, PayloadError> {
     let root = WirePart::deserialize(payload)?;
     let mut walk = Walk::new();
@@ -174,8 +119,6 @@ impl MessageHeaders {
     }
 }
 
-/// A `Subject` value, decoded and trimmed. Copies decoded text only when it
-/// had whitespace to trim.
 fn subject(value: &str) -> String {
     match decode_encoded_words(value) {
         Cow::Borrowed(as_written) => as_written.trim().to_owned(),
@@ -190,7 +133,6 @@ fn subject(value: &str) -> String {
     }
 }
 
-/// Gmail's `MessagePart`, borrowed from the JSON.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WirePart<'a> {
@@ -226,7 +168,6 @@ struct WireBody<'a> {
 }
 
 impl WirePart<'_> {
-    /// The first header with this name, in any case.
     fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
@@ -235,19 +176,12 @@ impl WirePart<'_> {
     }
 }
 
-/// The index of the message being parsed in [`Walk::messages`]; the messages
-/// attached to it follow in document order.
 const THIS_MESSAGE: usize = 0;
 
-/// What a walk of the part tree collects, in document order.
 struct Walk {
     html: Option<String>,
     text: Option<String>,
-    /// Each part that is not a body, with the index of the message it is
-    /// in, before [`Walk::finish`] decides which are inline.
     found: Vec<(usize, Part)>,
-    /// The Content-IDs each message's HTML body references, by index: this
-    /// message, then each attached one.
     messages: Vec<HashSet<String>>,
 }
 
@@ -261,8 +195,6 @@ impl Walk {
         }
     }
 
-    /// Visits `part`, which is in message `message` (an index into
-    /// [`Walk::messages`]).
     fn visit(&mut self, part: &WirePart<'_>, message: usize) {
         let mime_type = part.mime_type.trim().to_ascii_lowercase();
         if mime_type.starts_with("multipart/") {
@@ -271,7 +203,6 @@ impl Walk {
             }
             return;
         }
-        // Gmail serves an attached message's parts under it.
         let is_message = mime_type == "message/rfc822";
         self.leaf(part, mime_type, message);
         if is_message {
@@ -283,10 +214,6 @@ impl Walk {
         }
     }
 
-    /// Ends the walk: this message's bodies, and the parts found, each image
-    /// marked inline when its message's HTML body references it. An attached
-    /// message's inline images belong to its body, which is not shown, so
-    /// they are left out.
     fn finish(self) -> (RawBody, Vec<Part>) {
         let Self {
             html,
@@ -309,7 +236,6 @@ impl Walk {
         (RawBody { html, text }, parts)
     }
 
-    /// A part that is not a container: a body, an attachment, or an inline part.
     fn leaf(&mut self, part: &WirePart<'_>, mime_type: String, message: usize) {
         let content_type = part.header("Content-Type").unwrap_or_default();
         let disposition = part.header("Content-Disposition").unwrap_or_default();
@@ -327,7 +253,6 @@ impl Walk {
             && !disposition_kind.eq_ignore_ascii_case("attachment");
         if is_body {
             let is_html = mime_type == "text/html";
-            // An attached message's HTML only says which of its images it shows.
             if message != THIS_MESSAGE && !is_html {
                 return;
             }
@@ -379,7 +304,6 @@ impl Walk {
                 size: part.body.size,
                 attachment_id,
                 content_id,
-                // Decided once every body is in (`Walk::finish`).
                 is_inline: false,
                 data,
             },
@@ -387,7 +311,6 @@ impl Walk {
     }
 }
 
-/// The name a nameless part is saved under; empty when its type has none.
 fn default_filename(mime_type: &str) -> &'static str {
     match mime_type {
         "text/calendar" => "invite.ics",

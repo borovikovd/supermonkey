@@ -1,18 +1,7 @@
-//! The menu bar the app runs with (SPEC Window): Tauri's standard menus,
-//! except Quit. Tauri's predefined Quit sends macOS's `terminate:`, which
-//! ends the app without asking the page to close its composer and commit
-//! (SPEC UI state, Actions), so the app menu has the app's own Quit in its
-//! place, on `Cmd+Q`.
-//!
-//! No test harness: macOS makes menus only on the main thread, and only
-//! `main` runs there.
-
 use supermonkey_lib::{QUIT_MENU_ITEM, app_menu};
 use tauri::menu::{Menu, MenuItemKind};
 use tauri::test::{MockRuntime, mock_app};
 
-/// Each menu as `title >`, then each of its items as `title > text`, with
-/// `#id` for an item of the app's own rather than a predefined one.
 fn items(within: &str, kinds: &[MenuItemKind<MockRuntime>], out: &mut Vec<String>) {
     for kind in kinds {
         match kind {
@@ -59,7 +48,6 @@ fn main() {
         panic!("couldn't build the menus");
     };
 
-    // Tauri's menus, with its predefined Quit swapped for the app's own.
     let predefined_quit = format!("{name} > Quit ");
     assert!(
         standard.iter().any(|i| i.starts_with(&predefined_quit)),

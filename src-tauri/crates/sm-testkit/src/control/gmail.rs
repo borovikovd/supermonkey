@@ -1,7 +1,3 @@
-//! Mail and Gmail-side changes: deliveries, the mailbox as Gmail sees it,
-//! and changes made in other clients (labels, deletes, drafts, aliases,
-//! expired tokens and history).
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -20,17 +16,14 @@ pub(crate) struct AttachmentReq {
     filename: String,
     #[serde(default)]
     mime_type: Option<String>,
-    /// Plain text content, or base64 with `base64: true`.
     #[serde(default)]
     content: String,
     #[serde(default)]
     base64: bool,
     #[serde(default)]
     content_id: Option<String>,
-    /// `Content-Disposition: inline` with no content id.
     #[serde(default)]
     inline: bool,
-    /// Served in the payload with no attachment id.
     #[serde(default)]
     served_inline: bool,
 }
@@ -57,7 +50,6 @@ fn attachments(list: Vec<AttachmentReq>) -> Result<Vec<NewAttachment>, Fail> {
         .collect()
 }
 
-/// App time as the fake's dates count it.
 fn app_now(s: &Server) -> u64 {
     u64::try_from(s.now().0).unwrap_or(0)
 }
@@ -65,7 +57,6 @@ fn app_now(s: &Server) -> u64 {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DeliverReq {
-    /// The mailbox the message lands in.
     account: String,
     from: String,
     #[serde(default)]
@@ -77,13 +68,10 @@ pub(crate) struct DeliverReq {
     text: Option<String>,
     #[serde(default)]
     html: Option<String>,
-    /// The charset the text parts are labelled with; their bytes stay UTF-8.
     #[serde(default)]
     charset: Option<String>,
-    /// Defaults to `INBOX`, `UNREAD`.
     #[serde(default)]
     labels: Option<Vec<String>>,
-    /// Joins this Gmail thread.
     #[serde(default)]
     thread_id: Option<String>,
     #[serde(default)]
@@ -96,13 +84,10 @@ pub(crate) struct DeliverReq {
     headers: Vec<(String, String)>,
     #[serde(default)]
     attachments: Vec<AttachmentReq>,
-    /// Unix ms; defaults to app time.
     #[serde(default)]
     date: Option<u64>,
-    /// In a batch: joins the thread of this earlier item and replies to it.
     #[serde(default)]
     after: Option<usize>,
-    /// Poll at once, so the app sees the message without waiting.
     #[serde(default = "yes")]
     poll: bool,
 }
@@ -144,7 +129,6 @@ fn deliver_one(s: &Server, req: DeliverReq) -> Result<AddedMessage, Fail> {
     }))
 }
 
-/// Puts a message in a mailbox, as if it arrived or was filed in Gmail web.
 pub(crate) async fn deliver(State(s): State<Arc<Server>>, Json(req): Json<DeliverReq>) -> Ctl {
     let poll = req.poll;
     let added = deliver_one(&s, req)?;
@@ -154,9 +138,6 @@ pub(crate) async fn deliver(State(s): State<Arc<Server>>, Json(req): Json<Delive
     Ok(Json(added_json(&added)))
 }
 
-/// Many deliveries in one call, in order (whole seeds). An item's `after`
-/// names an earlier item whose thread it joins. Polls once at the end if
-/// any asks.
 pub(crate) async fn deliver_batch(
     State(s): State<Arc<Server>>,
     Json(list): Json<Vec<DeliverReq>>,
@@ -190,13 +171,10 @@ struct MessageView {
     labels: Vec<String>,
     date: u64,
     headers: HashMap<String, String>,
-    /// The raw RFC 822 message, for checking what was sent.
     raw: String,
 }
 
 fn message_view(m: FakeMessage) -> MessageView {
-    // Of repeated headers the last one wins: the suite was written against
-    // that, though control.ts says the first.
     let headers: HashMap<String, String> = m
         .headers
         .into_iter()
@@ -213,7 +191,6 @@ fn message_view(m: FakeMessage) -> MessageView {
     }
 }
 
-/// The mailbox as Gmail sees it: messages, drafts, labels, and sendAs.
 pub(crate) async fn gmail_state(State(s): State<Arc<Server>>, Path(email): Path<String>) -> Ctl {
     let user = s.user(&email)?;
     let messages: Vec<MessageView> = user.messages().into_iter().map(message_view).collect();
@@ -242,7 +219,6 @@ pub(crate) async fn gmail_state(State(s): State<Arc<Server>>, Path(email): Path<
     })))
 }
 
-/// Gmail-side changes poll only when asked: tests usually poll as a step.
 #[derive(Deserialize, Default)]
 pub(crate) struct PollOpt {
     #[serde(default)]
@@ -260,7 +236,6 @@ pub(crate) struct ModifyReq {
     poll: bool,
 }
 
-/// A label change made outside the app (Gmail web, a filter).
 pub(crate) async fn modify(
     State(s): State<Arc<Server>>,
     Path(email): Path<String>,
@@ -285,7 +260,6 @@ pub(crate) struct IdReq {
     poll: bool,
 }
 
-/// A message deleted outside the app.
 pub(crate) async fn delete_message(
     State(s): State<Arc<Server>>,
     Path(email): Path<String>,
@@ -300,7 +274,6 @@ pub(crate) async fn delete_message(
     Ok(done())
 }
 
-/// A whole thread deleted outside the app.
 pub(crate) async fn delete_thread(
     State(s): State<Arc<Server>>,
     Path(email): Path<String>,
@@ -318,7 +291,6 @@ pub(crate) struct NameReq {
     name: String,
 }
 
-/// A label created outside the app. Returns its Gmail id.
 pub(crate) async fn label(
     State(s): State<Arc<Server>>,
     Path(email): Path<String>,
@@ -338,7 +310,6 @@ pub(crate) struct SendAsReq {
     display_name: String,
 }
 
-/// A send-as alias added in Gmail settings.
 pub(crate) async fn send_as(
     State(s): State<Arc<Server>>,
     Path(email): Path<String>,
@@ -351,7 +322,6 @@ pub(crate) async fn send_as(
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DraftReq {
-    /// Defaults to the mailbox's own address.
     #[serde(default)]
     from: Option<String>,
     #[serde(default)]
@@ -408,7 +378,6 @@ fn draft_json(d: &AddedDraft) -> Json<Value> {
     }))
 }
 
-/// A draft made in another client (Gmail web, a phone).
 pub(crate) async fn create_draft(
     State(s): State<Arc<Server>>,
     Path(email): Path<String>,
@@ -423,7 +392,6 @@ pub(crate) async fn create_draft(
     Ok(draft_json(&added))
 }
 
-/// A draft edited in another client.
 pub(crate) async fn update_draft(
     State(s): State<Arc<Server>>,
     Path((email, id)): Path<(String, String)>,
@@ -440,7 +408,6 @@ pub(crate) async fn update_draft(
     Ok(draft_json(&updated))
 }
 
-/// A draft deleted in another client.
 pub(crate) async fn delete_draft(
     State(s): State<Arc<Server>>,
     Path((email, id)): Path<(String, String)>,
@@ -455,7 +422,6 @@ pub(crate) async fn delete_draft(
     Ok(done())
 }
 
-/// A draft sent from another client (a phone).
 pub(crate) async fn send_draft(
     State(s): State<Arc<Server>>,
     Path((email, id)): Path<(String, String)>,
@@ -471,13 +437,11 @@ pub(crate) async fn send_draft(
     Ok(Json(added_json(&sent)))
 }
 
-/// The account's access tokens expire: its next Gmail call gets a 401.
 pub(crate) async fn expire_tokens(State(s): State<Arc<Server>>, Path(email): Path<String>) -> Ctl {
     s.user(&email)?.expire_access_tokens();
     Ok(done())
 }
 
-/// Gmail forgets the account's history: the next `history.list` answers 404.
 pub(crate) async fn expire_history(State(s): State<Arc<Server>>, Path(email): Path<String>) -> Ctl {
     s.user(&email)?.expire_history();
     Ok(done())

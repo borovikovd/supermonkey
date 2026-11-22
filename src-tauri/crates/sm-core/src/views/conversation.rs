@@ -1,12 +1,9 @@
-//! Conversations, their outbox rows, and message bodies.
-
 use sm_domain::{AccountId, Rev, SystemLabel, ThreadId};
 use sm_ipc::{
     AttachmentInfo, ConversationData, DraftSummary, MessageBody, MessageSummary, OutboxRow,
 };
 use sm_store::{BodyRecord, ConversationMessage, OutboxRecord, Reads, StoreError};
 
-/// A send as its toast and the pending message show it.
 pub(crate) fn outbox_row(record: OutboxRecord) -> OutboxRow {
     let o = record.outbox;
     OutboxRow {
@@ -62,8 +59,6 @@ fn message_summary(entry: ConversationMessage) -> MessageSummary {
     }
 }
 
-/// A conversation as its subscription shows it. `trash_mode` lists the
-/// messages in Trash and Spam too. A thread that is gone gives `gone`.
 pub(crate) fn conversation(
     reads: Reads<'_>,
     thread: ThreadId,
@@ -113,7 +108,6 @@ pub(crate) fn conversation(
     })
 }
 
-/// A stored body for the message view. Plain-text mail becomes HTML here.
 pub(crate) fn message_body(body: BodyRecord) -> MessageBody {
     let html = body
         .html

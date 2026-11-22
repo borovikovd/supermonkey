@@ -1,10 +1,3 @@
-//! UI actions (SPEC UI state, Actions; ARCHITECTURE.md, section 5.1): each
-//! numbered action is applied once, in order, on the writer thread. A
-//! handler reads and writes through the store's repositories, decides with
-//! `sm_domain` rules, and records effects on the writer state.
-//!
-//! One module per group of actions.
-
 mod accounts;
 mod batch;
 mod compose;

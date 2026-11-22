@@ -1,7 +1,3 @@
-//! The recipient check against the case table the UI's copy of it is also
-//! held to (`e2e/recipients.spec.ts`, RCP-11): the composer marks a chip
-//! invalid exactly when the core would refuse to send to it.
-
 use serde::Deserialize;
 use sm_mime::is_valid_email;
 

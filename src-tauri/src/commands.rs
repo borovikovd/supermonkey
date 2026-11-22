@@ -1,8 +1,3 @@
-//! The Tauri commands: `connect`, which hands the core the page's channel,
-//! and `dispatch`, which runs every other command through
-//! [`sm_bridge::dispatch`], the code the debug web bridge runs too. A
-//! command is defined once, in `sm_ipc::Command`; nothing here names one.
-
 use serde_json::Value;
 use sm_bridge::Answer;
 use sm_bridge::commands::{self as cmd, CmdResult};
@@ -12,8 +7,6 @@ use tauri::{AppHandle, State};
 
 use crate::Shell;
 
-/// The page's first call: channel messages go to `channel` from now on.
-/// Shows the window, which starts hidden until the UI is ready.
 #[tauri::command]
 pub(crate) async fn connect(
     app: AppHandle,
@@ -33,9 +26,6 @@ pub(crate) async fn connect(
     Ok(info)
 }
 
-/// Runs the command `command` with `args`, as the web bridge's
-/// `/invoke/{command}` does. `quit_now` quits once the core has committed
-/// the page's last actions.
 #[tauri::command]
 pub(crate) async fn dispatch(
     app: AppHandle,

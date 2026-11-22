@@ -1,5 +1,3 @@
-//! Admitting requests per account: slots, budget, and priority order.
-
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -10,8 +8,6 @@ use tokio::time::Instant;
 use super::bucket::{BackgroundWindow, Bucket, Spend};
 use super::{Priority, QuotaConfig, Units};
 
-/// The schedulers of every account: one per app, held by whoever makes the
-/// accounts' clients.
 #[derive(Debug)]
 pub struct Scheduler {
     config: QuotaConfig,
@@ -19,7 +15,6 @@ pub struct Scheduler {
 }
 
 impl Scheduler {
-    /// A scheduler that gives every account `config`'s limits.
     #[must_use]
     pub fn new(config: QuotaConfig) -> Self {
         Self {
@@ -28,11 +23,8 @@ impl Scheduler {
         }
     }
 
-    /// The scheduler of the account `email`, made on first use. Gmail's quota
-    /// is per user, so every client of one address shares one scheduler.
     #[must_use]
     pub fn account(&self, email: &str) -> AccountScheduler {
-        // Read before locking: no clock calls under a lock.
         let now = Instant::now();
         self.accounts
             .lock()
@@ -41,16 +33,12 @@ impl Scheduler {
             .clone()
     }
 
-    /// Forgets the account `email`: it was removed, and its clients are
-    /// gone. Handles still held keep working on their own; the next
-    /// [`Scheduler::account`] for the address starts afresh.
     pub fn forget(&self, email: &str) {
         let forgotten = self.accounts.lock().remove(email);
         drop(forgotten);
     }
 }
 
-/// One account's slots and budget. A cheap handle: clones share the account.
 #[derive(Debug, Clone)]
 pub struct AccountScheduler {
     shared: Arc<Shared>,
@@ -62,17 +50,12 @@ struct Shared {
     state: Mutex<State>,
 }
 
-/// Everything that must agree, under one lock.
 #[derive(Debug)]
 struct State {
     budget: Budget,
-    /// Waiters by priority, then arrival.
     waiters: BTreeMap<WaiterKey, Waiter>,
 }
 
-/// What admitting a request reads and changes: the units, the background
-/// spending, and the slots. Apart from the waiters, so the line can be walked
-/// while requests are admitted.
 #[derive(Debug)]
 struct Budget {
     bucket: Bucket,
@@ -81,7 +64,6 @@ struct Budget {
     next_ticket: u64,
 }
 
-/// A waiter's place in line: priority first, then arrival.
 type WaiterKey = (Priority, u64);
 
 #[derive(Debug)]
@@ -93,14 +75,10 @@ struct Waiter {
 
 #[derive(Debug)]
 enum Stage {
-    /// In line. `wake_at` is set when this waiter is first in line and must
-    /// look again at that time, as budget refills or background spends expire.
     Waiting { wake_at: Option<Instant> },
-    /// Holds a slot and its units; `spend` is its background spending.
     Granted { spend: Option<u64> },
 }
 
-/// Whether the first waiter in line may start.
 enum Admit {
     Now,
     WhenSlotFrees,
@@ -125,11 +103,6 @@ impl AccountScheduler {
         }
     }
 
-    /// Waits for a slot and `cost` units at `priority`. The slot is held until
-    /// the [`Permit`] drops; the units are spent.
-    ///
-    /// Cancellation-safe: dropping the future before it resolves gives back
-    /// everything it was granted.
     pub async fn acquire(&self, priority: Priority, cost: Units) -> Permit {
         let notify = Arc::new(Notify::new());
         let now = Instant::now();
@@ -165,7 +138,6 @@ impl AccountScheduler {
                         };
                     }
                     Some(Stage::Waiting { wake_at }) => *wake_at,
-                    // Only this future removes its own entry.
                     None => None,
                 }
             };
@@ -181,20 +153,17 @@ impl AccountScheduler {
         }
     }
 
-    /// Units in the bucket now.
     #[must_use]
     pub fn bucket_level(&self) -> f64 {
         let now = Instant::now();
         self.shared.state.lock().budget.bucket.level(now)
     }
 
-    /// Requests running now.
     #[must_use]
     pub fn in_flight(&self) -> usize {
         self.shared.state.lock().budget.in_flight
     }
 
-    /// Requests waiting for a slot or budget.
     #[must_use]
     pub fn queued(&self) -> usize {
         self.shared
@@ -208,7 +177,6 @@ impl AccountScheduler {
 }
 
 impl Shared {
-    /// Starts what may start at `now`, then wakes those waiters outside the lock.
     fn pump(&self, now: Instant) {
         let woken = self.state.lock().pump(self.config, now);
         wake(woken);
@@ -216,15 +184,12 @@ impl Shared {
 }
 
 impl Budget {
-    /// The next number: a waiter's place in arrival order, or a background
-    /// spend's name.
     const fn ticket(&mut self) -> u64 {
         let ticket = self.next_ticket;
         self.next_ticket += 1;
         ticket
     }
 
-    /// Whether a request may start at `now`.
     fn admit(
         &mut self,
         config: QuotaConfig,
@@ -235,7 +200,6 @@ impl Budget {
         if self.in_flight >= config.max_in_flight {
             return Admit::WhenSlotFrees;
         }
-        // A request that costs more than the bucket holds runs once it is full.
         let mut needed = f64::from(cost.0.min(config.capacity.0));
         if priority.is_background() {
             let spent = self.background.spent(now);
@@ -244,7 +208,6 @@ impl Budget {
             {
                 return Admit::At(expiry);
             }
-            // "More than the reserve", in whole units.
             needed = needed.max(f64::from(config.background_reserve.0) + 1.0);
         }
         if self.bucket.has(needed, now) {
@@ -254,7 +217,6 @@ impl Budget {
         }
     }
 
-    /// Takes a slot and the units. Returns the background spend's ticket.
     fn start(&mut self, priority: Priority, cost: Units, now: Instant) -> Option<u64> {
         self.bucket.take(cost, now);
         self.in_flight += 1;
@@ -271,10 +233,6 @@ impl Budget {
 }
 
 impl State {
-    /// Starts every waiter that may start, in line order. Once the first
-    /// waiter still in line is blocked, everyone behind it waits too, so a
-    /// cheap request never overtakes an earlier one waiting for budget.
-    /// Returns the waiters to wake, for the caller to wake after unlocking.
     fn pump(&mut self, config: QuotaConfig, now: Instant) -> Vec<Arc<Notify>> {
         let mut woken = Vec::new();
         let in_line = self
@@ -289,12 +247,10 @@ impl State {
                     woken.push(Arc::clone(&waiter.notify));
                 }
                 Admit::WhenSlotFrees => {
-                    // A freed slot pumps again; no timer needed.
                     waiter.stage = Stage::Waiting { wake_at: None };
                     break;
                 }
                 Admit::At(at) => {
-                    // The waiter may be asleep without a timer: wake it to arm one.
                     if !matches!(waiter.stage, Stage::Waiting { wake_at: Some(t) } if t == at) {
                         waiter.stage = Stage::Waiting { wake_at: Some(at) };
                         woken.push(Arc::clone(&waiter.notify));
@@ -313,8 +269,6 @@ fn wake(woken: Vec<Arc<Notify>>) {
     }
 }
 
-/// Takes a waiter out of line when its `acquire` future is dropped. If it was
-/// granted but never ran, its slot, units, and background spend go back.
 struct InLine<'a> {
     shared: &'a Shared,
     key: Option<WaiterKey>,
@@ -345,7 +299,6 @@ impl Drop for InLine<'_> {
     }
 }
 
-/// A running request's slot. Dropping it lets the next request start.
 #[must_use = "the slot frees as soon as the permit drops"]
 #[derive(Debug)]
 pub struct Permit {

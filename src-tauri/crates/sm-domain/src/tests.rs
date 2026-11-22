@@ -1,7 +1,3 @@
-//! Unit tests for the mail model rules that span modules: threads and views,
-//! label changes, split routing (with the cases ported from the old
-//! `sm-rules` splits tests), and Gmail drafts.
-
 use crate::test_support::{message, set};
 use crate::*;
 
@@ -19,8 +15,6 @@ fn draft(id: i64) -> MessageFacts {
         ..message(id, Addr::new("me@x.io"), &["DRAFT"])
     }
 }
-
-// --- threads and views ---------------------------------------------------
 
 #[test]
 fn latest_is_newest_live_then_newest_non_draft_then_draft() {
@@ -94,7 +88,6 @@ fn digest_counts_and_flags() {
     assert!(d.has_attachments);
     assert!(d.in_inbox() && d.in_trash() && !d.in_spam() && d.has_live);
 
-    // With nothing live, the non-drafts count and decide unread.
     let gone = Thread::new(vec![
         message(1, alice(), &["TRASH", "UNREAD"]),
         message(2, alice(), &["TRASH"]),
@@ -103,12 +96,10 @@ fn digest_counts_and_flags() {
     let d = gone.digest().unwrap();
     assert_eq!((d.message_count, d.unread, d.has_live), (2, true, false));
     assert_eq!(d.sender, "Alice");
-    // A thread of one draft still counts one.
     assert_eq!(
         Thread::new(vec![draft(1)]).digest().unwrap().message_count,
         1
     );
-    // A live read message hides an unread trashed one.
     let read = Thread::new(vec![
         message(1, alice(), &["INBOX"]),
         message(2, alice(), &["TRASH", "UNREAD"]),
@@ -158,7 +149,6 @@ fn view_membership() {
             thread.labels
         );
     }
-    // A trashed message leaves the thread in the views its other messages put it in.
     let mixed = Thread::new(vec![
         message(1, alice(), &["INBOX"]),
         message(2, alice(), &["TRASH"]),
@@ -181,8 +171,6 @@ fn snooze_rule_ignores_trash_and_pending_ops() {
     let archived = Thread::new(vec![message(1, alice(), &["SENT"])]);
     assert!(!archived.gained_inbox(|_| false));
 }
-
-// --- label changes -------------------------------------------------------
 
 fn delta(kind: ModifyKind) -> LabelDelta {
     LabelDelta::preset(kind).unwrap()
@@ -228,7 +216,6 @@ fn mark_unread_touches_the_latest_live_message_only() {
     let ops: Vec<i64> = plan.op_messages.iter().map(|m| m.id.0).collect();
     assert_eq!(ops, [2]);
     assert_eq!(plan.changes, [change(2, &["UNREAD"], &[])]);
-    // With nothing live, every non-draft message.
     let gone = Thread::new(vec![
         message(1, alice(), &["TRASH"]),
         message(2, alice(), &["TRASH", "UNREAD"]),
@@ -246,13 +233,10 @@ fn revert_undoes_only_what_is_still_there() {
     let back = done.reverted(&now).unwrap();
     assert_eq!(back, change(1, &["INBOX", "UNREAD"], &["STARRED"]));
     assert_eq!(back.apply(now), set(&["INBOX", "UNREAD", "Label_1"]));
-    // INBOX put back and STARRED removed elsewhere since: only UNREAD is left to revert.
     let partly = done.reverted(&set(&["INBOX", "Label_1"])).unwrap();
     assert_eq!(partly, change(1, &["UNREAD"], &[]));
     assert_eq!(done.reverted(&set(&["INBOX", "UNREAD"])), None);
 }
-
-// --- split routing ---------------------------------------------------------
 
 const NEWS: SplitId = SplitId(1);
 const VIP: SplitId = SplitId(2);
@@ -292,7 +276,6 @@ fn routing_falls_through_rules_important_and_other() {
     assert_eq!(router.route(&boss, &[]), Some(VIP));
     assert_eq!(router.route(&person, &[]), Some(IMPORTANT));
     assert_eq!(router.route(&promo, &[]), Some(OTHER));
-    // Turned off: skipped, falling through.
     let flat = Router::new(splits(false, false, false), []);
     for m in [&list, &boss, &person, &promo] {
         assert_eq!(flat.route(m, &[]), Some(OTHER));
@@ -316,7 +299,6 @@ fn pins_beat_rules_sender_then_domain_then_label() {
     assert_eq!(router(&all[..2]).route(&m, &labels), Some(OTHER));
     assert_eq!(router(&all[..1]).route(&m, &labels), Some(VIP));
     assert_eq!(router(&[]).route(&m, &labels), Some(NEWS));
-    // A pin to a split that is off is skipped, falling through to the next rule.
     let off = Router::new(splits(true, true, false), all.to_vec());
     assert_eq!(
         off.route(&m, &labels),
@@ -362,8 +344,6 @@ fn place_routes_inbox_threads_by_someone_else_s_message() {
     );
 }
 
-// --- Gmail drafts ----------------------------------------------------------
-
 #[test]
 fn gmail_draft_aim_by_in_reply_to_or_latest() {
     let t = Thread::new(vec![
@@ -372,8 +352,6 @@ fn gmail_draft_aim_by_in_reply_to_or_latest() {
         message(5, alice(), &["TRASH"]),
         draft(4),
     ]);
-    // No In-Reply-To match: the latest message, and it is the newest non-draft
-    // no newer than a draft written at 3.5 s.
     let aim = gmail_draft_aim(&t, None, Millis(3500));
     assert_eq!(
         aim,
@@ -382,7 +360,6 @@ fn gmail_draft_aim_by_in_reply_to_or_latest() {
             started_on_latest: true
         }
     );
-    // Written before message 3 arrived: not started on the latest.
     let early = gmail_draft_aim(&t, None, Millis(2000));
     assert_eq!(
         early,
@@ -391,7 +368,6 @@ fn gmail_draft_aim_by_in_reply_to_or_latest() {
             started_on_latest: false
         }
     );
-    // Aimed at message 1 by In-Reply-To, written right after it.
     let first = gmail_draft_aim(&t, Some(MessageId(1)), Millis(1500));
     assert_eq!(
         first,
@@ -400,8 +376,6 @@ fn gmail_draft_aim_by_in_reply_to_or_latest() {
             started_on_latest: true
         }
     );
-    // The trashed message 5 is newer than the draft written at 6 s, so the
-    // draft did not start on the latest message.
     let after_trash = gmail_draft_aim(&t, None, Millis(6000));
     assert!(!after_trash.started_on_latest);
     let empty = gmail_draft_aim(&Thread::new(vec![draft(1)]), None, Millis(9));

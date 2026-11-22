@@ -1,15 +1,8 @@
-//! Removing an account (SPEC Accounts, Settings).
-
 use sm_domain::AccountId;
 
 use super::{ActionCtx, ActionError};
 use crate::effects::Effect;
 
-/// `removeAccount`: deletes the account's rows, its queue, outbox, and
-/// drafts among them, in this transaction. Its worker stops, its refresh
-/// token is revoked and deleted, and its drafts' files go, once the commit
-/// lands. Its lists and summary go
-/// empty with the commit's patches.
 pub(super) fn remove_account(
     ctx: &mut ActionCtx<'_, '_>,
     account: AccountId,

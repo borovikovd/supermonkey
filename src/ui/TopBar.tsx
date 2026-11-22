@@ -14,8 +14,6 @@ function SearchField() {
   const online = useAppState()?.online ?? true;
 
   if (!search) return null;
-  // As in Superhuman: the query takes the header, in line with the senders
-  // below, with the accent edge while it has focus and a close button.
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3" data-tauri-drag-region="false">
       {search.focus === "field" && (
@@ -25,16 +23,13 @@ function SearchField() {
         ref={(el) => {
           dom.searchInput = el;
         }}
-        // Focus moves into search because the user just pressed `/`.
-        // oxlint-disable-next-line jsx-a11y/no-autofocus
+        // oxlint-disable-next-line jsx-a11y/no-autofocus -- the user just pressed /
         autoFocus
         aria-label="Search"
         className="ml-3.25 min-w-0 flex-1 bg-transparent text-search text-text outline-none placeholder:text-text-3"
         placeholder="Search"
         value={search.query}
         onChange={(e) => editSearch(e.target.value)}
-        // Its keys (Enter, ↓, Esc) are the search layer of the dispatcher, which
-        // applies while the field has focus.
         onFocus={() => useChrome.getState().setSearchFocus("field")}
         onBlur={() => useChrome.getState().setSearchFocus("results")}
       />
@@ -46,7 +41,6 @@ function SearchField() {
   );
 }
 
-/** The Inbox title: its splits with counts; a click scrolls to that split. */
 function SplitTitles() {
   const splits = useSplitCounts();
   const list = useCurrentList();
@@ -61,9 +55,6 @@ function SplitTitles() {
           <button
             aria-current={s.id === highlightSplit || undefined}
             className={s.id === highlightSplit ? "font-semibold text-text" : "text-text-2"}
-            // Like Tab, the highlight moves to the split's first row; the list
-            // scrolls its header to the top (through the virtual list, which
-            // may not have rendered it).
             onClick={() => {
               const first = visibleSplits().find((v) => v.split === s.id)?.first;
               if (!first || useChrome.getState().current()?.highlight === first) return;
@@ -99,10 +90,7 @@ export function TopBar() {
 
   const screen = composing ? "compose" : (cur?.screen.kind ?? "list");
   if (screen !== "list" && !searchOpen) {
-    // Conversation and compose: back to the list, and previous / next conversation.
     return (
-      // Overlaid on the panel so the subject sits on the same row; round floating
-      // buttons as in Superhuman.
       <div className="pointer-events-none absolute top-0 left-0 z-10 flex h-12 items-center gap-2 px-4 [&>*]:pointer-events-auto">
         <div className="flex h-8 items-center rounded-full bg-bg px-0.5 shadow-card">
           <IconButton round command="back">
@@ -143,7 +131,6 @@ export function TopBar() {
   );
 }
 
-/** A button for a command: its title from the table, disabled where it does nothing. */
 function IconButton({
   command,
   round = false,

@@ -1,15 +1,8 @@
-//! Plain-text mail shown as HTML.
-
 use std::fmt::Write as _;
 use std::sync::LazyLock;
 
 use regex::Regex;
 
-/// Converts a plain-text body to HTML: escaped, newlines as `<br>`, spaces kept
-/// with `white-space:pre-wrap`, and http(s) URLs linked. A trailing block of
-/// `>`-quoted lines, with the `… wrote:` line before it, is wrapped in
-/// `<blockquote type="cite">` so [`split_quoted_history`](crate::split_quoted_history)
-/// can fold it. Sanitize the result like any other body.
 #[must_use]
 pub fn text_to_html(text: &str) -> String {
     let text = text.replace("\r\n", "\n");
@@ -20,7 +13,6 @@ pub fn text_to_html(text: &str) -> String {
             let (above, quoted) = lines.split_at(start);
             if !above.is_empty() {
                 write_lines(&mut out, above);
-                // A <br> just before a block element does not show; keep the break.
                 out.push_str("<br>");
             }
             out.push_str(r#"<blockquote type="cite" style="margin:0">"#);
@@ -42,8 +34,6 @@ fn write_lines(out: &mut String, lines: &[&str]) {
     }
 }
 
-/// The index of the first line of the trailing run of `>`-quoted lines, or of
-/// the `… wrote:` attribution line just before it.
 fn trailing_quote_start(lines: &[&str]) -> Option<usize> {
     let mut start = None;
     for (i, line) in lines.iter().enumerate().rev() {
@@ -74,8 +64,6 @@ fn trailing_quote_start(lines: &[&str]) -> Option<usize> {
 
 static URL: LazyLock<Regex> = LazyLock::new(|| crate::regex(r#"https?://[^\s<>"]+"#));
 
-/// Writes one escaped line with its URLs as links. Trailing punctuation, and a
-/// closing parenthesis the URL did not open, stay outside the link.
 fn write_linked(out: &mut String, line: &str) {
     let mut last = 0;
     for found in URL.find_iter(line) {
@@ -83,7 +71,6 @@ fn write_linked(out: &mut String, line: &str) {
         out.push_str(&html_escape::encode_text(
             line.get(last..found.start()).unwrap_or_default(),
         ));
-        // Writing to a String cannot fail.
         _ = write!(
             out,
             r#"<a href="{}">{}</a>"#,

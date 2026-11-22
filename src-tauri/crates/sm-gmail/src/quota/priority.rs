@@ -1,25 +1,14 @@
-//! Request priorities.
-
-/// A request's priority, 1 (first) to 6. SPEC Sync lists what runs at each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Priority {
-    /// UI actions, sends, and draft upserts.
     P1 = 1,
-    /// An opened thread and its neighbors, search, label views, attachments,
-    /// draft reconciliation.
     P2 = 2,
-    /// History polls and the metadata fetches they report.
     P3 = 3,
-    /// Poll bodies, inbox metadata and bodies, drafts and starred metadata.
     P4 = 4,
-    /// Search-hit bodies, Sent, draft and starred bodies, other resync refetches.
     P5 = 5,
-    /// The contacts backfill.
     P6 = 6,
 }
 
 impl Priority {
-    /// Priorities 4 to 6, which leave the bucket's reserve to 1 to 3.
     #[must_use]
     pub fn is_background(self) -> bool {
         self >= Self::P4

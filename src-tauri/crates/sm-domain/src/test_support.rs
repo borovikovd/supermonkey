@@ -1,9 +1,5 @@
-//! Builders shared by the unit tests.
-
 use crate::{Addr, GmailMessageId, LabelSet, MessageFacts, MessageId, Millis};
 
-/// A non-draft, non-list message `id` from `from`, dated `id` seconds in,
-/// with `labels` and nothing else.
 pub(crate) fn message(id: i64, from: Addr, labels: &[&str]) -> MessageFacts {
     MessageFacts {
         id: MessageId(id),
@@ -22,7 +18,6 @@ pub(crate) fn message(id: i64, from: Addr, labels: &[&str]) -> MessageFacts {
     }
 }
 
-/// `labels` as a set.
 pub(crate) fn set(labels: &[&str]) -> LabelSet {
     labels.iter().copied().collect()
 }

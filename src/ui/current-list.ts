@@ -4,20 +4,16 @@ import { useChrome } from "../store/chrome";
 import { listKey } from "../store/current";
 import { useCurrent, useListView, useSummary } from "../store/hooks";
 
-/** The list on screen for the current account: its view or its search. */
 export function useCurrentList() {
   const { account, cur } = useCurrent();
   return useListView(account !== null && cur ? listKey(account, cur.where) : null);
 }
 
-/** Split names with counts for the Inbox header and section headers. */
 export function useSplitCounts() {
   const { account } = useCurrent();
   const summary = useSummary(account);
   const list = useCurrentList();
   const forced = useChrome((s) => s.forcedSplit);
-  // Explicit memo, not left to the compiler: ListView keys its effects off
-  // this array's identity.
   return useMemo(() => {
     const counts = new Map<number, number>();
     for (const e of list.ids)

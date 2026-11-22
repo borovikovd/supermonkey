@@ -1,7 +1,3 @@
-//! The `Queries` handle: plain reads for the UI's lookups, on the read pool
-//! (SPEC UI state, Ordering). Each returns rows with their `rev` and never
-//! changes pending actions.
-
 use std::fmt;
 use std::sync::Arc;
 
@@ -15,17 +11,13 @@ use sm_store::{ReadPool, ReadTx, StoreError};
 use crate::clock::Clock;
 use crate::{Error, views};
 
-/// How many suggestions autocomplete gives.
 const SUGGESTIONS: usize = 6;
 
-/// Reads for the UI's lookups: rows outside the pushed window, bodies,
-/// autocomplete, snooze times, and a sender's threads.
 pub struct Queries {
     pool: Arc<ReadPool>,
     clock: Arc<dyn Clock>,
 }
 
-/// Its name only: it holds the read pool and the clock.
 impl fmt::Debug for Queries {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Queries").finish_non_exhaustive()
@@ -37,7 +29,6 @@ impl Queries {
         Self { pool, clock }
     }
 
-    /// Runs `read` on a pool connection, off the async threads.
     async fn read<T: Send + 'static>(
         &self,
         read: impl FnOnce(&ReadTx<'_>) -> Result<T, StoreError> + Send + 'static,
@@ -45,15 +36,11 @@ impl Queries {
         crate::read::read(&self.pool, read).await
     }
 
-    /// Rows for list keys, fetched ahead of scrolling: draft ids for the
-    /// Drafts list, thread ids for every other. Unknown keys are left out.
     pub async fn fetch_rows(&self, drafts: bool, keys: Vec<String>) -> Result<Vec<ListRow>, Error> {
         self.read(move |r| views::rows_for_keys(**r, drafts, &keys))
             .await
     }
 
-    /// Sanitized bodies, in the order asked. A message with no stored body
-    /// is left out; plain-text mail comes as HTML.
     pub async fn get_bodies(&self, ids: Vec<MessageId>) -> Result<Vec<MessageBody>, Error> {
         self.read(move |r| {
             Ok(r.messages()
@@ -65,8 +52,6 @@ impl Queries {
         .await
     }
 
-    /// Recipient suggestions for what the user typed (SPEC Recipients and
-    /// autocomplete): matching contacts the account may suggest, best first.
     pub async fn autocomplete(
         &self,
         account: AccountId,
@@ -121,8 +106,6 @@ impl Queries {
         .await
     }
 
-    /// The snooze picker's rows for what the user typed, in the local time
-    /// zone at app time: the time the text names, then the fixed choices.
     pub fn snooze_options(&self, text: &str) -> Vec<SnoozeChoice> {
         let Some(now) = DateTime::from_timestamp_millis(self.clock.now().0) else {
             tracing::warn!("app time is out of the calendar's range");
@@ -137,8 +120,6 @@ impl Queries {
             .collect()
     }
 
-    /// Inbox threads with a message from the sender of `thread`'s latest
-    /// message, `thread` included: what Unsubscribe's "all" choices act on.
     pub async fn sender_threads(
         &self,
         account: AccountId,
@@ -148,7 +129,6 @@ impl Queries {
             .await
     }
 
-    /// Gmail's id for a thread, if the app has the thread.
     pub async fn gmail_thread(&self, thread: ThreadId) -> Result<Option<GmailThreadId>, Error> {
         self.read(move |r| Ok(r.threads().row(thread)?.map(|row| row.gmail_id)))
             .await

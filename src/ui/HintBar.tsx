@@ -1,6 +1,5 @@
 import { hintOf, hints, useCtx } from "../keyboard/table";
 
-/** The hint bar: the commands that work on this screen, from the command table. */
 export function HintBar() {
   const items = hints(useCtx()).map(hintOf);
   return (

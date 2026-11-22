@@ -1,41 +1,21 @@
-//! Gmail-style quote blocks and subjects for replies and forwards (SPEC Reply
-//! composer).
-
 use std::fmt::Write as _;
 
 use chrono::{DateTime, FixedOffset, Offset as _, Utc};
 use sm_domain::{Addr, Millis};
 
-/// The message a reply or forward quotes.
 #[derive(Debug, Clone, Copy)]
 pub struct QuoteSource<'a> {
-    /// Its sender.
     pub from: &'a Addr,
-    /// Its `To` recipients.
     pub to: &'a [Addr],
-    /// Its `Cc` recipients.
     pub cc: &'a [Addr],
-    /// When it was sent.
     pub date: Millis,
-    /// Its subject.
     pub subject: &'a str,
-    /// Its stored, sanitized HTML. For a plain-text message, pass
-    /// [`text_to_html`](crate::text_to_html) of its text.
     pub html: &'a str,
 }
 
-/// The user's offset from UTC, in minutes east (UTC+2 is `120`; JavaScript's
-/// `getTimezoneOffset()` has the opposite sign). Quote dates are shown in it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct UtcOffset(pub i32);
 
-/// Gmail's reply quote block:
-///
-/// ```html
-/// <div class="gmail_quote"><div dir="ltr" class="gmail_attr">On Mon, Jan 6, 2025 at 10:00 AM
-/// Alice &lt;<a href="mailto:a@x.com">a@x.com</a>&gt; wrote:<br></div><blockquote
-/// class="gmail_quote" style="…">original html</blockquote></div>
-/// ```
 #[must_use]
 pub fn reply_quote_html(source: &QuoteSource<'_>, offset: UtcOffset) -> String {
     format!(
@@ -48,9 +28,6 @@ pub fn reply_quote_html(source: &QuoteSource<'_>, offset: UtcOffset) -> String {
     )
 }
 
-/// Gmail's forward block: `---------- Forwarded message ---------`, the
-/// original From, Date, Subject, To (and Cc when there is one), then the
-/// original HTML, all inside `<div class="gmail_quote">`.
 #[must_use]
 pub fn forward_quote_html(source: &QuoteSource<'_>, offset: UtcOffset) -> String {
     let email = mailto_html(&source.from.email);
@@ -69,7 +46,6 @@ pub fn forward_quote_html(source: &QuoteSource<'_>, offset: UtcOffset) -> String
         addr_list_html(source.to),
     );
     if !source.cc.is_empty() {
-        // Writing to a String cannot fail.
         _ = write!(out, "Cc: {}<br>", addr_list_html(source.cc));
     }
     out.push_str("</div><br><br>");
@@ -78,8 +54,6 @@ pub fn forward_quote_html(source: &QuoteSource<'_>, offset: UtcOffset) -> String
     out
 }
 
-/// `Mon, Jan 6, 2025 at 10:00 AM`, Gmail's quote date format. An offset out of
-/// range is read as UTC.
 fn quote_date(date: Millis, offset: UtcOffset) -> String {
     let zone = offset
         .0
@@ -105,7 +79,6 @@ fn mailto_html(email: &str) -> String {
     )
 }
 
-/// `Name &lt;<a href="mailto:e">e</a>&gt;`, or the bracketed link alone.
 fn addr_html(addr: &Addr) -> String {
     let email = mailto_html(&addr.email);
     match display_name(addr) {
@@ -118,13 +91,11 @@ fn addr_list_html(list: &[Addr]) -> String {
     list.iter().map(addr_html).collect::<Vec<_>>().join(", ")
 }
 
-/// `Re: subject`, unless it already starts with `Re:` in any case.
 #[must_use]
 pub fn reply_subject(subject: &str) -> String {
     prefixed(subject, "Re:", &["re:"])
 }
 
-/// `Fwd: subject`, unless it already starts with `Fwd:` or `Fw:` in any case.
 #[must_use]
 pub fn forward_subject(subject: &str) -> String {
     prefixed(subject, "Fwd:", &["fwd:", "fw:"])

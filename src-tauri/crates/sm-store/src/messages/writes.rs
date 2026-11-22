@@ -1,6 +1,3 @@
-//! Writes of messages: each re-derives the threads it touches (see
-//! `routing`) and keeps the search index in step.
-
 use std::collections::BTreeSet;
 
 use rusqlite::named_params;
@@ -14,8 +11,6 @@ use crate::db::{Db, id_list, json_column, to_json};
 use crate::routing;
 use crate::tx::{WriteTx, require};
 
-/// Writes to messages. Each re-derives, stamps, and records the threads it
-/// touches, once per call.
 #[derive(Debug)]
 pub struct MessageWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
@@ -26,9 +21,6 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
         Self { tx }
     }
 
-    /// Stores a message's headers and labels in `thread`, adding it or
-    /// replacing what was stored (a metadata fetch replaces labels). Its body,
-    /// if stored, stays. Returns its id.
     pub fn upsert(
         &mut self,
         thread: ThreadId,
@@ -45,7 +37,6 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
         Ok(id)
     }
 
-    /// Sets messages' labels, as a sync or a merge decides them.
     pub fn set_labels(&mut self, labels: &[(MessageId, LabelSet)]) -> Result<(), StoreError> {
         let mut touched = BTreeSet::new();
         for (id, set) in labels {
@@ -54,8 +45,6 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
         derive_all(self.tx, touched)
     }
 
-    /// Applies an action's label changes, each to the message's current
-    /// labels. Messages that are gone are skipped.
     pub fn apply(&mut self, changes: &[MessageChange]) -> Result<(), StoreError> {
         let mut touched = BTreeSet::new();
         for change in changes {
@@ -77,8 +66,6 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
         derive_all(self.tx, touched)
     }
 
-    /// Stores a message's body and attachments. Attachments keep their id and
-    /// downloaded file by part id; parts the body no longer has go.
     pub fn store_body(&mut self, id: MessageId, body: &NewBody) -> Result<(), StoreError> {
         let rev = self.tx.stamp();
         let db = self.tx.db();
@@ -135,8 +122,6 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
         derive_all(self.tx, BTreeSet::from([thread]))
     }
 
-    /// Deletes messages, from Gmail's history or a refetch. Drafts aimed at
-    /// one lose their target. Unknown ids are skipped.
     pub fn delete(&mut self, ids: &[MessageId]) -> Result<(), StoreError> {
         let mut touched = BTreeSet::new();
         for &id in ids {
@@ -147,7 +132,6 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
         derive_all(self.tx, touched)
     }
 
-    /// Records where an attachment was downloaded.
     pub fn set_attachment_path(&mut self, id: AttachmentId, path: &str) -> Result<(), StoreError> {
         let rev = self.tx.stamp();
         let db = self.tx.db();
@@ -176,9 +160,6 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
     }
 }
 
-/// Inserts or updates one message row and its index entry. Adds to `touched`
-/// the thread it is in and, when it moved, the one it left. Returns its id
-/// and whether it is new.
 pub(crate) fn upsert_row(
     tx: &mut WriteTx<'_>,
     account: AccountId,
@@ -244,7 +225,6 @@ pub(crate) fn upsert_row(
     Ok((id, is_new))
 }
 
-/// Writes one message's labels and returns its thread.
 fn write_labels(
     tx: &mut WriteTx<'_>,
     id: MessageId,
@@ -275,8 +255,6 @@ fn write_labels(
     Ok(thread)
 }
 
-/// Deletes one message row and its index entry; returns its thread, or
-/// `None` when it was not stored.
 pub(crate) fn delete_row(
     tx: &mut WriteTx<'_>,
     id: MessageId,
@@ -320,7 +298,6 @@ pub(crate) fn delete_row(
     Ok(Some(thread))
 }
 
-/// Rebuilds a message's search index entry from its row.
 fn reindex(db: Db<'_>, id: MessageId) -> Result<(), StoreError> {
     db.execute(
         "drop a message's index entry",
@@ -346,7 +323,6 @@ fn reindex(db: Db<'_>, id: MessageId) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// Re-derives each thread once.
 pub(crate) fn derive_all(
     tx: &mut WriteTx<'_>,
     threads: BTreeSet<ThreadId>,

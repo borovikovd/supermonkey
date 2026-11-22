@@ -18,7 +18,6 @@ import { LoadingBody, MessageFrame } from "./MessageFrame";
 
 type Address = MessageSummary["from"];
 
-/** The account's own addresses, lower-cased: shown as "Me". */
 function useOwnAddresses(): Set<string> {
   const { account } = useCurrent();
   const info = useAppState()?.accounts.find((a) => a.id === account);
@@ -34,11 +33,9 @@ const isOwn = (a: Address, own: Set<string>) => own.has(a.email.toLowerCase());
 
 const name = (a: Address, own: Set<string>) => (isOwn(a, own) ? "Me" : a.name || a.email);
 
-/** A recipient as Superhuman shows one: the first name, or the address's local part. */
 const shortName = (a: Address, own: Set<string>) =>
   isOwn(a, own) ? "Me" : (a.name ?? "").split(/\s+/)[0] || a.email.split("@")[0] || a.email;
 
-/** "to Dave, Erin & Me"; empty when the mail went only to this account. */
 function recipients(m: MessageSummary, own: Set<string>): string {
   const all = [...m.to, ...m.cc];
   const seen = new Set<string>();
@@ -67,10 +64,8 @@ function fullDate(ms: number) {
   });
 }
 
-/** Clicking a message selects it (SPEC Reading). Stable, so frames keep their listeners. */
 const select = (id: number) => useChrome.getState().selectMessage(id);
 
-/** Expands or collapses a message, and selects it. */
 const toggle = (id: number) => useChrome.getState().toggleExpanded(id, true);
 
 export function ConversationView({ thread, trashMode }: { thread: number; trashMode: boolean }) {
@@ -80,7 +75,6 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
   const unfoldedArr = useChrome((s) => s.unfolded);
   const expandAll = useChrome((s) => s.expandAll);
   const selected = useChrome((s) => s.selectedMessage);
-  /** The reply composer open in this conversation. */
   const inlineDraft = useComposeState((s) =>
     s.onScreen?.thread === thread ? s.onScreen.draft : null,
   );
@@ -89,8 +83,6 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
   const known = useRef<Set<number> | null>(null);
   const latestRef = useRef<number | null>(null);
 
-  // Fix expansion and scroll from the unread state when the conversation opens;
-  // later arrivals expand when they are the new latest or unread.
   useLayoutEffect(() => {
     if (!data || data.gone) return;
     const c = useChrome.getState();
@@ -100,7 +92,6 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
       known.current = new Set(msgs.map((m) => m.id));
       const expanded = msgs.filter((m) => m.unread).map((m) => m.id);
       if (latest !== null) expanded.push(latest);
-      // A reply composer opened with the conversation keeps its target selected.
       const onScreen = composerOnScreen();
       const target =
         onScreen?.thread === data.thread
@@ -111,8 +102,6 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
       latestRef.current = latest;
       const firstUnread = msgs.find((m) => m.unread)?.id ?? latest;
       requestAnimationFrame(() => {
-        // A reply composer opened with the conversation scrolls itself into
-        // view, as it does whenever it opens (SPEC Reply composer).
         if (composerOnScreen()?.thread === data.thread) return;
         if (firstUnread !== null)
           document
@@ -128,12 +117,10 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
     let sel = c.selectedMessage;
     const fresh = added.filter((m) => m.id === latest || m.unread).map((m) => m.id);
     if (fresh.length > 0) expanded = [...expanded, ...fresh];
-    // Selection follows a new latest message when it sat on the previous latest.
     if (latest !== latestRef.current && sel === latestRef.current) sel = latest;
     if (sel !== null && !msgs.some((m) => m.id === sel)) sel = latest;
     latestRef.current = latest;
     if (expanded !== c.expanded || sel !== c.selectedMessage) c.layoutConversation(expanded, sel);
-    // A message arriving unread while open in the focused window is marked read.
     if (added.some((m) => m.unread) && document.hasFocus()) markReadOnOpen(thread);
   }, [data, thread]);
 
@@ -146,12 +133,10 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
     );
 
   const expanded = new Set(expandAll ? data.messages.map((m) => m.id) : expandedArr);
-  // The selected message never hides in a fold.
   const unfolded = new Set(selected === null ? unfoldedArr : [...unfoldedArr, selected]);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {/* Wide: centered. Narrow: clear of the round header buttons. */}
       <div className="mr-auto reading-column max-w-reading min-w-content-min px-16 pt-2 pb-24">
         <div className="mb-6 flex items-start gap-4">
           <h1 className="selectable flex-1 text-subject">{data.subject || "(no subject)"}</h1>
@@ -179,7 +164,6 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
             />
           ),
         )}
-        {/* Rust keeps a sent row here until the thread holds its message. */}
         {data.outbox.map((o) => (
           <PendingSend key={`ob${o.id}`} row={o} />
         ))}
@@ -194,14 +178,9 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
   );
 }
 
-/** A folded run of collapsed messages; a click unfolds it. */
 function Fold({ ids }: { ids: number[] }) {
   return (
-    <button
-      onClick={() => useChrome.getState().unfold(ids)}
-      // Reads as one more collapsed row.
-      className={`${ROW} text-text-2`}
-    >
+    <button onClick={() => useChrome.getState().unfold(ids)} className={`${ROW} text-text-2`}>
       <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-fill px-1.5 text-hint font-medium text-text-2">
         {ids.length}
       </span>
@@ -210,7 +189,6 @@ function Fold({ ids }: { ids: number[] }) {
   );
 }
 
-/** A send in the outbox, shown at the end of its thread until its message is there. */
 function PendingSend({ row }: { row: OutboxRow }) {
   const state = row.state === "sent" ? "Sent" : row.delayed ? "Email delayed" : "Sending";
   return (
@@ -222,7 +200,6 @@ function PendingSend({ row }: { row: OutboxRow }) {
   );
 }
 
-/** A closed reply or forward draft; a click reopens it. */
 function DraftStub({ draft }: { draft: DraftSummary }) {
   return (
     <button
@@ -238,7 +215,6 @@ function DraftStub({ draft }: { draft: DraftSummary }) {
   );
 }
 
-/** A subject-row action: its command from the table, as its key runs it. */
 function Action({ command, children }: { command: CommandId; children: React.ReactNode }) {
   const { title, enabled, run } = useCommand(command);
   return (
@@ -254,25 +230,14 @@ function Action({ command, children }: { command: CommandId; children: React.Rea
   );
 }
 
-/**
- * Every message block spans past the text column by the same amount, so the
- * text never moves when the selection raises a block into a card.
- */
 const BLOCK = "relative bleed-x px-10";
-/** A one-line block: a collapsed message or a fold. */
 const ROW = `${BLOCK} flex h-12 items-center gap-3 text-left text-body hover:bg-fill-half`;
-/** The selected message: a white card with a soft shadow. */
 const CARD = "rounded-sm bg-bg shadow-card hover:bg-bg";
 
-/** The selected message's light accent edge. */
 const Edge = () => (
   <span className="absolute inset-y-0 left-0 w-0.75 rounded-l-sm bg-accent-edge" />
 );
 
-/**
- * The conversation before its first load: the subject and latest message
- * from the list row, so opening never shows a blank screen.
- */
 function Opening({ thread }: { thread: number }) {
   const row = useMirror((s) => s.rows[String(thread)]);
   return (
@@ -336,8 +301,7 @@ function Message({
   const files = m.attachments.filter((a) => !a.inline);
   const to = recipients(m, own);
   return (
-    // Clicking selects the message, a pointer shortcut for `n` / `p`.
-    // oxlint-disable-next-line jsx-a11y/no-static-element-interactions
+    // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- a pointer shortcut for n / p
     <div
       data-message={m.id}
       aria-current={selected || undefined}

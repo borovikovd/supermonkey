@@ -7,10 +7,6 @@ import { conversationData } from "./current";
 import { accountSummary, appState, viewList, type ListView, type MirrorState } from "./mirror-core";
 import { useMirror } from "./mirror";
 
-/**
- * The mirror's subscription id for a key. Read from the store, not the bridge's
- * map, so a component re-renders when the subscription opens or closes.
- */
 export function useSubId(key: SubKey | null): string | undefined {
   const k = key ? keyString(key) : null;
   return useMirror((s) => {
@@ -20,9 +16,7 @@ export function useSubId(key: SubKey | null): string | undefined {
   });
 }
 
-/** Keeps a subscription open while the component is mounted. */
 export function useSubscription(key: SubKey | null): string | undefined {
-  // Callers build a fresh key object on every render; keep one per value.
   const [stable, setStable] = useState(key);
   const k = key ? keyString(key) : null;
   if (k !== (stable ? keyString(stable) : null)) setStable(key);
@@ -38,7 +32,6 @@ export function useAppState(): AppState | null {
   return useMirror(appState);
 }
 
-/** The account needs Sign in again: its screen shows that, not its mail. */
 export function useNeedsSignin(account: number | null): boolean {
   return useMirror((s) => signedOut(s, account));
 }
@@ -51,7 +44,6 @@ export function useSummary(account: number | null): AccountSummary | null {
   return useMirror((s) => (account === null ? null : accountSummary(s, account)));
 }
 
-/** The list as shown, with pending actions applied. */
 export function useListView(key: SubKey | null): ListView & {
   loaded: boolean;
   searching: boolean;
@@ -65,8 +57,6 @@ export function useListView(key: SubKey | null): ListView & {
   const rows = useMirror((s) => s.rows);
   const pending = useMirror((s) => s.pending);
   const removals = useMirror((s) => s.removals);
-  // Explicit memo, not left to the compiler: `ids` feeds effect dependencies in
-  // ListView, and the compiler's caching is an optimization, not a guarantee.
   return useMemo(() => {
     if (!id || sub?.type !== "list") {
       return {

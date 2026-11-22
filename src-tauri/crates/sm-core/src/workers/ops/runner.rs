@@ -1,6 +1,3 @@
-//! An ops runner's loop: takes the next op of its queue in that queue's turn,
-//! runs it in the lane's task group, and waits as its outcome asks.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,14 +10,9 @@ use super::run::{Failure, run_op};
 use crate::activity::parked;
 use crate::workers::account::{AccountCtx, OFFLINE_RETRY};
 
-/// How long the runner waits for a kick before it looks at the queue
-/// again anyway.
 const IDLE_WAIT: Duration = Duration::from_secs(60);
-/// How long an op whose draft the outbox is writing waits before it looks
-/// again.
 const BUSY_WAIT: Duration = Duration::from_secs(1);
 
-/// Replays one of the account's op queues until the worker stops.
 pub(crate) async fn run(ctx: Arc<AccountCtx>, queue: OpQueue) {
     let mut backoff = Backoff::new();
     loop {
@@ -45,13 +37,8 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>, queue: OpQueue) {
         ctx.lane.tasks().spawn("op", async move {
             let result = run_op(&runner, op).await;
             drop(turn);
-            // Busy until the runner has taken it, so the core never looks
-            // idle between this run and the next. The worker that asked may
-            // have been replaced meanwhile.
             _ = done.send(runner.tasks.activity().track("op result", result));
         });
-        // Parked: the run counts as busy, and its result carries its own
-        // activity. A held Gmail request then counts once (`settle`).
         let Ok(ran) = parked(ran).await else {
             tracing::debug!(
                 account = account.0,
@@ -59,7 +46,6 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>, queue: OpQueue) {
             );
             return;
         };
-        // Resumed: this task counts again.
         let (result, _) = ran.into_parts();
         match result {
             Ok(()) => backoff.reset(),
@@ -72,8 +58,6 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>, queue: OpQueue) {
     }
 }
 
-/// Waits as a failed run's outcome asks (SPEC Gmail errors). Returns false
-/// when the runner should stop: the account is signed out.
 async fn wait_after(
     ctx: &AccountCtx,
     queue: OpQueue,
@@ -116,14 +100,9 @@ async fn wait_after(
     true
 }
 
-/// Waits out `wait`, taking every kick that comes meanwhile: the runner
-/// goes back to the queue when the wait ends, so a kick asks for nothing
-/// more, and a kick nobody took would keep the core busy. A kick never
-/// cuts a wait short, so a back-off keeps its timing.
 async fn draining(ctx: &AccountCtx, queue: OpQueue, wait: impl Future<Output = ()>) {
     tokio::pin!(wait);
     loop {
-        // The wait first, so its timer is set before this task parks.
         tokio::select! {
             biased;
             () = &mut wait => return,

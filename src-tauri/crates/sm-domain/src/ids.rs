@@ -1,7 +1,3 @@
-//! One newtype per kind of id, so an `AccountId` can't be passed where a
-//! `ThreadId` is meant. On the wire (serde, SQLite, TypeScript) each is exactly
-//! its inner value.
-
 use std::borrow::Borrow;
 use std::fmt;
 use std::num::ParseIntError;
@@ -9,7 +5,6 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// Integer ids. TypeScript sees `number`: they stay far below 2^53.
 macro_rules! int_id {
     ($($(#[$doc:meta])* $name:ident),* $(,)?) => {$(
         $(#[$doc])*
@@ -23,7 +18,6 @@ macro_rules! int_id {
             }
         }
 
-        // List keys carry thread ids as text.
         impl FromStr for $name {
             type Err = ParseIntError;
             fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -45,8 +39,6 @@ macro_rules! int_id {
             }
         }
 
-        // By hand: the derive would emit a named alias and an import into
-        // every binding, where the bindings want a plain `number`.
         #[cfg(feature = "ts")]
         impl ts_rs::TS for $name {
             type WithoutGenerics = Self;
@@ -61,7 +53,6 @@ macro_rules! int_id {
     )*};
 }
 
-/// Opaque string ids. TypeScript sees `string`.
 macro_rules! str_id {
     ($($(#[$doc:meta])* $name:ident),* $(,)?) => {$(
         $(#[$doc])*
@@ -70,7 +61,6 @@ macro_rules! str_id {
         pub struct $name(pub String);
 
         impl $name {
-            /// The id's text.
             pub fn as_str(&self) -> &str {
                 &self.0
             }
@@ -88,7 +78,6 @@ macro_rules! str_id {
             }
         }
 
-        // Maps keyed by the id can be looked up with a `&str`.
         impl Borrow<str> for $name {
             fn borrow(&self) -> &str {
                 &self.0
@@ -136,36 +125,23 @@ macro_rules! str_id {
 }
 
 int_id!(
-    /// An account's row.
     AccountId,
-    /// A thread's row; not Gmail's thread id.
     ThreadId,
-    /// A message's row; not Gmail's message id.
     MessageId,
-    /// A Split Inbox split.
     SplitId,
-    /// An outbox row: one send waiting, sending, or sent.
     OutboxId,
-    /// An undo history entry: the number of the action that made it.
     UndoEntryId,
-    /// A notice waiting for the UI to show and ack it.
     NoticeId,
-    /// An attachment of a stored message.
     AttachmentId,
-    /// The `rev` a write transaction stamps on the rows it changes (SPEC UI state).
     Rev,
-    /// A UI action's number; the channel's `ack` is the highest one applied.
     ActionNo,
 );
 
 impl AccountId {
-    /// Rowids start at 1, so 0 is no account: it keys the global settings and
-    /// stands for the owner of a row that is gone.
     pub const NONE: Self = Self(0);
 }
 
 impl SplitId {
-    /// The Split Inbox sheet numbers splits it has not saved yet below 1.
     #[must_use]
     pub const fn is_saved(self) -> bool {
         self.0 > 0
@@ -173,24 +149,14 @@ impl SplitId {
 }
 
 str_id!(
-    /// A local draft's id, made by the UI; not Gmail's draft id.
     DraftId,
-    /// A UI subscription's id, made by the UI.
     SubId,
-    /// A label's local id: Gmail's for labels Gmail made, the UI's for labels
-    /// made here until Gmail assigns one (SPEC Labels).
     LabelId,
-    /// Gmail's id of a thread.
     GmailThreadId,
-    /// Gmail's id of a message.
     GmailMessageId,
-    /// Gmail's id of a draft.
     GmailDraftId,
 );
 
-/// Gmail's mailbox history cursor (`historyId`): it grows with every change
-/// to the mailbox. Gmail sends it as a decimal string, and SQLite keeps it
-/// as one; it is a number everywhere else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 pub struct HistoryId(pub u64);
 
@@ -207,7 +173,6 @@ impl FromStr for HistoryId {
     }
 }
 
-/// Gmail's JSON spelling: a decimal string or, leniently, a number.
 impl<'de> Deserialize<'de> for HistoryId {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         use serde::de::Error as _;
@@ -232,8 +197,6 @@ impl rusqlite::ToSql for HistoryId {
     }
 }
 
-/// A stored cursor that is not a number is an error, never a missing one:
-/// polling would stop without a word.
 #[cfg(feature = "sqlite")]
 impl rusqlite::types::FromSql for HistoryId {
     fn column_result(v: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {

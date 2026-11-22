@@ -4,13 +4,11 @@ import { create } from "zustand";
 import { addAccount, signInAgain } from "../ipc/bridge";
 import { useChrome } from "../store/chrome";
 
-/** Why a sign-in failed, or null when a newer sign-in replaced it: that says nothing. */
 function failure(e: unknown): string | null {
   const message = String(e);
   return message.includes("Sign-in cancelled") ? null : message;
 }
 
-/** Shows why a sign-in failed. One replaced by a newer attempt says nothing. */
 export function reportSignIn(signIn: Promise<unknown>) {
   signIn.catch((e: unknown) => {
     const message = failure(e);
@@ -22,16 +20,9 @@ type Status = { busy: boolean; error: string | null };
 
 const IDLE: Status = { busy: false, error: null };
 
-/** Sign-ins started from a screen, by key: `add`, or `again-<account>`. */
 const useStatus = create<Record<string, Status>>(() => ({}));
 const attempts = new Map<string, number>();
 
-/**
- * Starts a sign-in whose status shows on its screen. Starting again while one
- * waits starts over: the core cancels the sign-in left in the browser, and
- * only the latest attempt reports back. One cancelled by a sign-in started
- * elsewhere (another account's, or Add account) stops waiting and says nothing.
- */
 function startSignIn(key: string, run: () => Promise<unknown>) {
   const mine = (attempts.get(key) ?? 0) + 1;
   attempts.set(key, mine);
@@ -49,17 +40,14 @@ function startSignIn(key: string, run: () => Promise<unknown>) {
 
 const againKey = (account: number) => `again-${account}`;
 
-/** The first-run screen's Add a Gmail account. */
 export const startAddAccount = () => startSignIn("add", addAccount);
 
 export const useAddAccountStatus = () => useStatus((s) => s.add ?? IDLE);
 
-/** Sign in again for a signed-out account, from its screen's button or `Enter`. */
 export function startSignInAgain(account: number) {
   startSignIn(againKey(account), () => signInAgain(account));
 }
 
-/** `Enter` on the signed-out account's screen. */
 export function signInAgainOnScreen() {
   const { account } = useChrome.getState();
   if (account !== null) startSignInAgain(account);

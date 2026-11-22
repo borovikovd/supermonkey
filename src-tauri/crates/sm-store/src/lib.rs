@@ -1,24 +1,3 @@
-//! SQLite storage: the writer actor, the read pool, and typed repositories
-//! (ARCHITECTURE.md, section 6).
-//!
-//! - [`Writer`] owns the only write connection, on its own thread. Jobs run
-//!   one at a time by [`Priority`], each in its own transaction, through a
-//!   [`WriteTx`]: the only way to write. Every write method stamps the rows
-//!   it changes with the transaction's `rev` and records them, and the
-//!   account's [`Table`]s it wrote, in its [`Changes`]; after each commit the
-//!   writer hands a [`Snapshot`] and the [`Commit`] to the caller's
-//!   `on_commit`, which decides what that makes stale.
-//! - [`ReadPool`] gives read-only connections; [`ReadTx`] reads in one
-//!   snapshot.
-//! - [`Reads`] holds every read, the same on a [`Snapshot`], a [`ReadTx`],
-//!   and [`WriteTx::read`].
-//! - Writing a message re-derives its thread's row, labels, and split by the
-//!   domain rules (`sm_domain::Thread::digest`, `sm_domain::Router`), and a
-//!   split, pin, label, or address change re-routes the Inbox, so derived
-//!   state can't drift from the messages.
-//! - The schema is created fresh; a file with another [`SCHEMA_VERSION`] is
-//!   moved aside to `<name>.old-<n>`.
-
 mod accounts;
 mod changes;
 mod contacts;

@@ -1,8 +1,5 @@
-//! The query as Gmail should get it.
-
 use super::lexer::{Tok, TokKind, lex};
 
-/// How a kept token joins its neighbours.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Open,
@@ -12,15 +9,11 @@ enum Kind {
     Other,
 }
 
-/// `raw` with its `is:list` (and `-is:list`) terms removed, for Gmail, which
-/// does not know that operator. `AND`, `OR`, and parentheses the removal
-/// leaves dangling go too. `raw` comes back unchanged when it has no `is:list`.
 pub fn gmail_query(raw: &str) -> String {
     let toks = lex(raw);
     if !toks.iter().any(is_list) {
         return raw.to_owned();
     }
-    // `-is:list` goes whole: the `-` with the term it negates.
     let negates_is_list =
         |i: usize| toks[i].kind == TokKind::Minus && toks.get(i + 1).is_some_and(is_list);
     let mut kept: Vec<(Kind, Tok<'_>)> = (0..toks.len())
@@ -38,7 +31,6 @@ pub fn gmail_query(raw: &str) -> String {
         })
         .collect();
 
-    // Drop operators with nothing on one side, and empty groups, until stable.
     while let Some((i, count)) = dangling(&kept) {
         kept.drain(i..i + count);
     }
@@ -62,7 +54,6 @@ const fn is_list(t: &Tok<'_>) -> bool {
     matches!(t.kind, TokKind::Word(w) if w.eq_ignore_ascii_case("is:list"))
 }
 
-/// The first dangling operator or empty group: its index and length.
 fn dangling(kept: &[(Kind, Tok<'_>)]) -> Option<(usize, usize)> {
     (0..kept.len()).find_map(|i| {
         let prev = i.checked_sub(1).and_then(|p| kept.get(p)).map(|k| k.0);
@@ -70,7 +61,6 @@ fn dangling(kept: &[(Kind, Tok<'_>)]) -> Option<(usize, usize)> {
         match kept.get(i)?.0 {
             Kind::Op if matches!(prev, None | Some(Kind::Open | Kind::Op)) => Some((i, 1)),
             Kind::Op if matches!(next, None | Some(Kind::Close)) => Some((i, 1)),
-            // A `-` goes with the empty group it negated.
             Kind::Open if next == Some(Kind::Close) && prev == Some(Kind::Minus) => {
                 Some((i - 1, 3))
             }

@@ -1,6 +1,3 @@
-//! Parameters of structured headers: `text/html; charset="utf-8"`,
-//! `attachment; filename*=utf-8''r%C3%A9sum%C3%A9.pdf`.
-
 use std::borrow::Cow;
 
 use percent_encoding::percent_decode_str;
@@ -8,17 +5,10 @@ use percent_encoding::percent_decode_str;
 use crate::charset::decode_charset;
 use crate::encoded_word::decode_encoded_words;
 
-/// The kind of a structured header: the value before its first `;`, in the
-/// case it was written in (`attachment`, `Text/HTML`). Empty when the header is.
 pub(crate) fn header_kind(value: &str) -> &str {
     split_params(value).next().map_or("", str::trim)
 }
 
-/// A parameter of a structured header, by case-insensitive name.
-///
-/// Handles quoted values with escapes, RFC 2047 words in a plain value (common,
-/// though not allowed), and RFC 2231 extended values: `name*=charset'lang'%XX`,
-/// split over `name*0*=`, `name*1=` sections. Extended values win over plain ones.
 pub(crate) fn header_param<'a>(value: &'a str, name: &str) -> Option<Cow<'a, str>> {
     let mut plain = None;
     let mut sections = Vec::new();
@@ -65,7 +55,6 @@ pub(crate) fn header_param<'a>(value: &'a str, name: &str) -> Option<Cow<'a, str
     Some(Cow::Owned(decode_charset(bytes, charset)))
 }
 
-/// One RFC 2231 section: `name*` (encoded), `name*0` (plain), `name*0*` (encoded).
 struct Section<'a> {
     index: u32,
     is_encoded: bool,
@@ -92,13 +81,10 @@ impl<'a> Section<'a> {
     }
 }
 
-/// Splits a structured header on the `;`s outside quoted strings: always at
-/// least one part, the last being what follows the last such `;`.
 fn split_params(value: &str) -> impl Iterator<Item = &str> {
     let mut rest = Some(value);
     std::iter::from_fn(move || {
         let part = rest.take()?;
-        // A part ends outside any quote and escape, so the next starts so.
         let mut in_quote = false;
         let mut escaped = false;
         for (i, c) in part.char_indices() {
@@ -117,7 +103,6 @@ fn split_params(value: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-/// A parameter value without its quotes and backslash escapes.
 fn unquote(value: &str) -> Cow<'_, str> {
     let value = value.trim();
     let Some(inner) = value.strip_prefix('"').and_then(|v| v.strip_suffix('"')) else {

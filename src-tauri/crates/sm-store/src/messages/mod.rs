@@ -1,6 +1,3 @@
-//! Messages: headers, labels, bodies, attachments, and their search index.
-//! Every write re-derives the threads it touches (see `routing`).
-
 mod model;
 mod reads;
 mod writes;

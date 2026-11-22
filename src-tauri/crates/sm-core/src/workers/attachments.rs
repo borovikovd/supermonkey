@@ -1,7 +1,3 @@
-//! Attachments download on demand into the app's data folder (SPEC
-//! Reading): to open one with its default app, and to send one a draft
-//! carries (SPEC Send and undo). They are never fetched during sync.
-
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,20 +12,14 @@ use super::quarantine::quarantine;
 use super::registry::AccountWorkers;
 use crate::{Error, Platform};
 
-/// Why an attachment's file could not be had.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum DownloadError {
-    /// It is not stored, Gmail no longer serves its bytes, or it is another
-    /// account's.
     #[error("The attachment is gone")]
     Gone,
-    /// The account stopped syncing: offline at launch, or signed out.
     #[error("The account is offline or signed out")]
     Stopped,
-    /// Gmail did not give it.
     #[error(transparent)]
     Gmail(#[from] GmailError),
-    /// The database or the disk refused.
     #[error(transparent)]
     Core(#[from] Error),
 }
@@ -44,7 +34,6 @@ impl From<DownloadError> for Error {
     }
 }
 
-/// Downloads an attachment unless its file is on disk already, and opens it.
 pub(crate) async fn open_attachment(
     workers: &AccountWorkers,
     pool: &Arc<ReadPool>,
@@ -61,8 +50,6 @@ pub(crate) async fn open_attachment(
     Ok(())
 }
 
-/// The file of one of the account's attachments, downloaded at priority 2
-/// if it is not on disk.
 pub(crate) async fn ensure(
     ctx: &AccountCtx,
     attachment: AttachmentId,
@@ -97,7 +84,6 @@ pub(crate) async fn ensure(
         }
         None => in_message(ctx, &message_gmail_id, &record.part_id).await?,
     };
-    // Removed meanwhile: its folder is gone and must stay gone.
     if ctx.tasks.token().is_cancelled() {
         return Err(DownloadError::Stopped);
     }
@@ -119,8 +105,6 @@ pub(crate) async fn ensure(
     Ok(path)
 }
 
-/// The bytes of a part Gmail serves inside its message, with no attachment
-/// id, as it does for some small files: the message is read again.
 async fn in_message(
     ctx: &AccountCtx,
     message: &GmailMessageId,
@@ -146,12 +130,6 @@ async fn in_message(
         .ok_or(DownloadError::Gone)
 }
 
-/// Writes an attachment of the message whose folder is `message_dir` into
-/// its own folder there, so two parts with one name (`image.png`,
-/// `ATT00001.htm`) never share a file and the name stays as sent. Writes
-/// aside, quarantined as downloaded at `now`, then renames into place, so
-/// two downloads of one attachment at once never leave a half-written file
-/// at its path, and no file from mail is ever there without the flag.
 fn write_file(
     message_dir: &Path,
     name: &str,
@@ -170,7 +148,6 @@ fn write_file(
     ));
     std::fs::write(&part, bytes)?;
     if let Err(e) = quarantine(&part, now) {
-        // Never left where it could open unflagged.
         if let Err(removed) = std::fs::remove_file(&part) {
             tracing::warn!(error = %removed, "couldn't remove an attachment that could not be quarantined");
         }

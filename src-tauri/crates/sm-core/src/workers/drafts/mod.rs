@@ -1,12 +1,3 @@
-//! Drafts on the Gmail side (SPEC Drafts, Gmail errors): writing a draft
-//! with `drafts.create` or `drafts.update` (`write`), the queued upsert and
-//! delete (`ops`), reading Gmail's drafts back (`reconcile`), and
-//! downloading a read draft's parts (`parts`).
-//!
-//! `drafts.create` is unsafe to repeat: every draft this app writes carries
-//! `X-Supermonkey-Draft` with its local id, which is how a create with no
-//! clear answer is recovered, and how sync tells this app's drafts apart.
-
 mod failure;
 mod ops;
 mod parts;

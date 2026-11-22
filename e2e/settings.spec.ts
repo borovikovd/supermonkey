@@ -1,4 +1,3 @@
-// The Settings sheet and the remote images setting.
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
@@ -6,7 +5,6 @@ import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A, B } from "./seeds.ts";
 
-/** An account's block in the Settings sheet. */
 function settingsBlock(app: App, email: string): Locator {
   return app
     .sheet("Settings")
@@ -19,12 +17,10 @@ function settingsBlock(app: App, email: string): Locator {
 const remoteImages = (app: App): Locator =>
   app.sheet("Settings").getByRole("switch", { name: "Load remote images" });
 
-/** Paths fetched from the remote image host so far. */
 async function imageHits(app: App): Promise<string[]> {
   return (await app.gmail.hits()).map((h) => h.path);
 }
 
-/** Whether an image in the open message's frame has loaded. */
 function loaded(app: App, alt: string): Promise<boolean> {
   return app.conversation
     .locator("iframe[data-frame]")
@@ -34,7 +30,6 @@ function loaded(app: App, alt: string): Promise<boolean> {
     .evaluate((img) => img instanceof HTMLImageElement && img.complete && img.naturalWidth > 0);
 }
 
-/** The open message frame's Content-Security-Policy. */
 function frameCsp(app: App): Promise<string> {
   return app.conversation
     .locator("iframe[data-frame]")
@@ -49,11 +44,9 @@ test("SET-01 what the Settings sheet holds, and how it opens", async ({ app, gma
   await seeds.standard(gmail, app);
   const settings = app.sheet("Settings");
 
-  // Cmd+, opens it.
   await app.press("Meta+,");
   await expect(settings).toBeVisible();
   await expect(remoteImages(app)).toHaveAttribute("aria-checked", "true");
-  // One block per account.
   await Promise.all(
     [A, B].map(async (email) => {
       const block = settingsBlock(app, email);
@@ -67,12 +60,10 @@ test("SET-01 what the Settings sheet holds, and how it opens", async ({ app, gma
     }),
   );
   await expect(settings.getByRole("switch", { name: "Mute notifications" })).toHaveCount(2);
-  // No account needs it.
   await expect(settings.getByRole("button", { name: "Sign in again" })).toHaveCount(0);
   await app.press("Escape");
   await expect(settings).toHaveCount(0);
 
-  // The palette's Settings opens the same sheet.
   await app.press("Meta+k");
   await app.type("Settings");
   await app.palette.locator("[cmdk-item]", { hasText: /^Settings/ }).click();
@@ -81,13 +72,11 @@ test("SET-01 what the Settings sheet holds, and how it opens", async ({ app, gma
   await expect(remoteImages(app)).toBeVisible();
   await expect(settings.getByRole("button", { name: "Remove account" })).toHaveCount(2);
 
-  // Split Inbox settings opens that account's split sheet.
   await settingsBlock(app, B).getByRole("button", { name: "Split Inbox settings" }).click();
   await expect(app.sheet(`Split Inbox · ${B}`)).toBeVisible();
   await app.press("Escape");
   await expect(app.sheet(/^Split Inbox/)).toHaveCount(0);
 
-  // ? opens the shortcut sheet; Esc closes it.
   await app.press("?");
   const shortcuts = app.sheet("Keyboard shortcuts");
   await expect(shortcuts).toBeVisible();
@@ -98,12 +87,10 @@ test("SET-01 what the Settings sheet holds, and how it opens", async ({ app, gma
 
 test("SET-02 remote images", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
-  // An undo entry made before the setting changes.
   await expect(app.highlighted).toContainText("Person 1");
   await app.press("e");
   await expect(app.row("Person 1")).toHaveCount(0);
 
-  // On (the default): the remote <img> and the CSS background are fetched; data: shows.
   await app.row("Links").click();
   await expect(app.conversationTitle).toHaveText("Links");
   await expect
@@ -113,7 +100,6 @@ test("SET-02 remote images", async ({ app, gmail }) => {
   await expect.poll(() => loaded(app, "data pixel")).toBe(true);
   expect(await frameCsp(app)).not.toContain("img-src");
 
-  // Off, with links open: it re-renders at once, with remote images blocked.
   await app.press("Meta+,");
   await remoteImages(app).click();
   await expect(remoteImages(app)).toHaveAttribute("aria-checked", "false");
@@ -123,7 +109,6 @@ test("SET-02 remote images", async ({ app, gmail }) => {
   await expect.poll(() => loaded(app, "remote pixel")).toBe(false);
   await expect.poll(() => loaded(app, "data pixel")).toBe(true);
 
-  // Not an undo entry: z undoes the archive before it, and the setting stays off.
   await app.press("Escape");
   await app.press("z");
   await expect(app.row("Person 1")).toHaveCount(1);
@@ -134,13 +119,11 @@ test("SET-02 remote images", async ({ app, gmail }) => {
   await expect(remoteImages(app)).toHaveAttribute("aria-checked", "false");
   await app.press("Escape");
 
-  // It survives a restart.
   await app.restart();
   await app.press("Meta+,");
   await expect(remoteImages(app)).toHaveAttribute("aria-checked", "false");
   await app.press("Escape");
 
-  // Back on, with a message open: its remote images load at once.
   await app.row("Links").click();
   await expect(app.conversationTitle).toHaveText("Links");
   await expect.poll(() => frameCsp(app)).toContain("img-src data:");
@@ -155,7 +138,6 @@ test("SET-02 remote images", async ({ app, gmail }) => {
 const channels = (css: string): number[] =>
   (css.match(/\d+(\.\d+)?/g) ?? ["0", "0", "0"]).slice(0, 3).map(Number);
 
-/** Relative luminance of a CSS rgb() color (WCAG). */
 function luminance(css: string): number {
   const [r = 0, g = 0, b = 0] = channels(css).map((v) => {
     const c = v / 255;
@@ -164,13 +146,11 @@ function luminance(css: string): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-/** WCAG contrast ratio between two CSS colors. */
 function contrast(a: string, b: string): number {
   const [x, y] = [luminance(a), luminance(b)];
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
 
-// A color and a text size were both named `hint`; the color won, so hints were 13px and chip keys near-white.
 test("SET-03 hint text is 11px, the shortcut chips are readable, and the sheet's rows never overlap", async ({
   app,
   gmail,
@@ -203,7 +183,6 @@ test("SET-03 hint text is 11px, the shortcut chips are readable, and the sheet's
     expect(contrast(l.fg, l.bg), `${l.text} contrast`).toBeGreaterThanOrEqual(3);
   }
 
-  // The sheet's rows never overlap, even when a description wraps.
   const overlaps = await sheet.locator("kbd").evaluateAll((els) => {
     const rows = els.map((k) => k.parentElement).filter((r): r is HTMLElement => r !== null);
     const out: string[] = [];
@@ -221,7 +200,6 @@ test("SET-03 hint text is 11px, the shortcut chips are readable, and the sheet's
   expect(overlaps).toEqual([]);
 });
 
-// The message frame blocked only images, so a web font still told the sender, and the quote frame blocked nothing.
 test("SET-05 with remote images off, nothing remote loads in a message or a reply's quote", async ({
   app,
   gmail,
@@ -259,15 +237,12 @@ test("SET-05 with remote images off, nothing remote loads in a message or a repl
   expect(await imageHits(app)).toEqual([]);
 });
 
-// Esc in a field of the Split Inbox sheet did nothing, and with a composer
-// open, Esc went to the composer while Settings stayed open over it.
 test("SET-06 Esc closes a sheet from one of its fields, and a sheet open over a composer", async ({
   app,
   gmail,
 }) => {
   await seeds.standard(gmail, app);
 
-  // A field in the Split Inbox sheet has focus: Esc closes the sheet.
   await app.press("Meta+k");
   await app.type("Split Inbox settings");
   await app.press("Enter");
@@ -278,7 +253,6 @@ test("SET-06 Esc closes a sheet from one of its fields, and a sheet open over a 
   await app.press("Escape");
   await expect(splits).toHaveCount(0);
 
-  // Settings over a new message: Esc closes Settings, and the composer stays.
   const newMessage = app.page.getByRole("heading", { name: "New Message" });
   await app.compose();
   await app.press("Meta+,");
@@ -286,7 +260,6 @@ test("SET-06 Esc closes a sheet from one of its fields, and a sheet open over a 
   await app.press("Escape");
   await expect(app.sheet("Settings")).toHaveCount(0);
   await expect(newMessage).toBeVisible();
-  // Then the composer's own Esc, twice, closes it.
   await app.press("Escape", "Escape");
   await expect(newMessage).toHaveCount(0);
 });

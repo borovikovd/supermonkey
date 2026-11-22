@@ -1,5 +1,3 @@
-//! What a message is, as written and as read back.
-
 use rusqlite::Row;
 use sm_domain::{
     AccountId, Addr, AttachmentId, DraftId, GmailMessageId, LabelSet, MessageFacts, MessageId,
@@ -8,131 +6,75 @@ use sm_domain::{
 
 use crate::db::json_column;
 
-/// A message as a Gmail fetch gives it, parsed: everything but the body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewMessage {
-    /// Gmail's id.
     pub gmail_id: GmailMessageId,
-    /// Gmail's `internalDate`.
     pub date: Millis,
-    /// The `From` mailbox.
     pub from: Addr,
-    /// The `To` mailboxes.
     pub to: Vec<Addr>,
-    /// The `Cc` mailboxes.
     pub cc: Vec<Addr>,
-    /// The `Bcc` mailboxes.
     pub bcc: Vec<Addr>,
-    /// The `Reply-To` mailboxes.
     pub reply_to: Vec<Addr>,
-    /// The decoded `Subject`.
     pub subject: String,
-    /// Gmail's snippet.
     pub snippet: String,
-    /// The `Message-ID` header.
     pub message_id_header: Option<String>,
-    /// The `In-Reply-To` header.
     pub in_reply_to: Option<String>,
-    /// The `References` header, as is.
     pub references: String,
-    /// Has `List-Id` or `List-Unsubscribe`.
     pub is_list: bool,
-    /// A Gmail draft's message.
     pub is_draft: bool,
-    /// The `X-Supermonkey-Draft` header: the local draft this app wrote it as.
     pub sm_draft: Option<DraftId>,
-    /// Its own labels, as local label ids.
     pub labels: LabelSet,
-    /// Has an attachment that is not inline.
     pub has_attachments: bool,
 }
 
-/// A message's body as a full fetch gives it, sanitized.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct NewBody {
-    /// The sanitized HTML; `None` for plain-text mail.
     pub html: Option<String>,
-    /// The quoted history, sanitized, shown collapsed.
     pub quote_html: Option<String>,
-    /// The plain text, which search indexes.
     pub text: Option<String>,
-    /// Plain-text mail, shown in the app's own type.
     pub is_plain: bool,
-    /// Its parts that are files, inline ones included.
     pub attachments: Vec<NewAttachment>,
 }
 
-/// One part of a message that is a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewAttachment {
-    /// Gmail's `partId`, unique within the message.
     pub part_id: String,
-    /// The file name.
     pub filename: String,
-    /// The MIME type.
     pub mime_type: String,
-    /// The size in bytes.
     pub size: i64,
-    /// Gmail's attachment id, to download it.
     pub gmail_attachment_id: Option<String>,
-    /// The `Content-ID` of an inline part.
     pub content_id: Option<String>,
-    /// An inline image, shown in the body rather than as a file.
     pub is_inline: bool,
 }
 
-/// A stored message's headers and flags.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[expect(
     clippy::struct_excessive_bools,
     reason = "independent stored flags of one message"
 )]
 pub struct MessageRecord {
-    /// Its row.
     pub id: MessageId,
-    /// Its account.
     pub account: AccountId,
-    /// Its thread.
     pub thread: ThreadId,
-    /// Gmail's id.
     pub gmail_id: GmailMessageId,
-    /// Gmail's `internalDate`.
     pub date: Millis,
-    /// The `From` mailbox.
     pub from: Addr,
-    /// The `To` mailboxes.
     pub to: Vec<Addr>,
-    /// The `Cc` mailboxes.
     pub cc: Vec<Addr>,
-    /// The `Bcc` mailboxes.
     pub bcc: Vec<Addr>,
-    /// The `Reply-To` mailboxes.
     pub reply_to: Vec<Addr>,
-    /// The decoded `Subject`.
     pub subject: String,
-    /// Gmail's snippet.
     pub snippet: String,
-    /// The `Message-ID` header.
     pub message_id_header: Option<String>,
-    /// The `In-Reply-To` header.
     pub in_reply_to: Option<String>,
-    /// The `References` header.
     pub references: String,
-    /// List mail.
     pub is_list: bool,
-    /// A Gmail draft's message.
     pub is_draft: bool,
-    /// The local draft this app wrote it as.
     pub sm_draft: Option<DraftId>,
-    /// Its own labels.
     pub labels: LabelSet,
-    /// Has an attachment that is not inline.
     pub has_attachments: bool,
-    /// Its body is stored.
     pub has_body: bool,
-    /// Plain-text mail.
     pub is_plain: bool,
-    /// The `rev` of its last change.
     pub rev: Rev,
 }
 
@@ -156,54 +98,33 @@ impl MessageRecord {
     }
 }
 
-/// A stored body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BodyRecord {
-    /// The message.
     pub id: MessageId,
-    /// The sanitized HTML; `None` for plain-text mail.
     pub html: Option<String>,
-    /// The quoted history.
     pub quote_html: Option<String>,
-    /// The plain text.
     pub text: Option<String>,
-    /// Plain-text mail.
     pub is_plain: bool,
 }
 
-/// A stored attachment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentRecord {
-    /// Its id.
     pub id: AttachmentId,
-    /// The message it belongs to.
     pub message: MessageId,
-    /// Gmail's `partId`.
     pub part_id: String,
-    /// The file name.
     pub filename: String,
-    /// The MIME type.
     pub mime_type: String,
-    /// The size in bytes.
     pub size: i64,
-    /// Gmail's attachment id.
     pub gmail_attachment_id: Option<String>,
-    /// The `Content-ID` of an inline part.
     pub content_id: Option<String>,
-    /// Shown inline.
     pub is_inline: bool,
-    /// The downloaded file.
     pub local_path: Option<String>,
 }
 
-/// Where an attachment's bytes come from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AttachmentSource {
-    /// The attachment.
     pub attachment: AttachmentRecord,
-    /// Its message's account.
     pub account: AccountId,
-    /// Its message's Gmail id.
     pub message_gmail_id: GmailMessageId,
 }
 

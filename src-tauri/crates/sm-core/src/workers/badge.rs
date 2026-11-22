@@ -1,9 +1,3 @@
-//! The Dock badge (SPEC Notifications): unread Inbox threads across the
-//! accounts not muted, recounted after commits that may change it. Its own
-//! task, woken by a kick, so a burst of commits (the connect sync stores
-//! one per thread) costs one recount per wake, not one per commit, and the
-//! effect router never waits on a count.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -15,11 +9,8 @@ use crate::clock::Clock;
 use crate::read::read;
 use crate::views;
 
-/// How long the task waits for a kick before it counts again anyway.
 const LOOK_AGAIN: Duration = Duration::from_secs(3600);
 
-/// Recounts the badge on each kick until cancelled. Kicks that come while a
-/// count runs make one more count after it.
 pub(crate) async fn run(
     kick: Arc<Kick>,
     pool: Arc<ReadPool>,

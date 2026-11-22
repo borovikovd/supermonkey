@@ -1,8 +1,3 @@
-//! Mail actions: archive, trash, spam, star, read state, return to inbox,
-//! snooze, labels, and undo (SPEC Archive, trash, star, read; Labels;
-//! Snooze; Undo). Marking read on open is a `modify` that makes no undo
-//! entry (SPEC Reading).
-
 use std::collections::HashSet;
 
 use sm_domain::{
@@ -17,25 +12,14 @@ use crate::effects::Effect;
 use crate::ops::{ModifyOp, OpOrigin, queue_modify, queue_revert, revert};
 use crate::writer::WriterState;
 
-/// A label and snooze change to make to some of an account's threads.
 pub(crate) struct ThreadsChange {
-    /// The threads' account.
     pub(crate) account: AccountId,
-    /// What the change is, for its snooze rule and undo label.
     pub(crate) kind: ModifyKind,
-    /// The threads; repeats and threads gone since are skipped.
     pub(crate) threads: Vec<ThreadId>,
-    /// The labels to add and remove.
     pub(crate) delta: LabelDelta,
-    /// How the snooze changes, if it does.
     pub(crate) snooze: Option<SnoozeEdit>,
 }
 
-/// `modify`: applies a resolved label and snooze change to each thread's
-/// messages as they are now, records what really changed for undo, and
-/// queues one `batchModify` naming those messages, so a replay never
-/// touches mail that arrives later. The UI resolved any toggle; the webview
-/// is not trusted, so every label and thread must be the account's.
 pub(super) fn modify(ctx: &mut ActionCtx<'_, '_>, action: ModifyAction) -> Result<(), ActionError> {
     let ModifyAction {
         account,
@@ -75,10 +59,6 @@ pub(super) fn modify(ctx: &mut ActionCtx<'_, '_>, action: ModifyAction) -> Resul
     Ok(())
 }
 
-/// Makes `change` here and queues it for Gmail as made by `action` (`None`
-/// for the core's own, such as a snooze waking). Returns what really
-/// changed, per thread: the undo entry's payload. A snooze time set wakes
-/// the snooze timer.
 pub(crate) fn change_threads(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -98,7 +78,6 @@ pub(crate) fn change_threads(
     let mut messages = Vec::new();
     for thread in threads.into_iter().filter(|t| seen.insert(*t)) {
         let Some(row) = tx.read().threads().row(thread)? else {
-            // Gone since the UI saw it, say after a poll.
             continue;
         };
         if row.account != account {
@@ -147,11 +126,6 @@ pub(crate) fn change_threads(
     Ok(entry)
 }
 
-/// `undo`: reverts one entry of the account's history and removes it. An
-/// entry already gone is refused, so two quick undos never undo two entries
-/// by mistake (SPEC UI state, Actions). A mail entry reverts only the labels
-/// and snooze times it changed, where nothing has changed them since, and
-/// queues that revert for Gmail.
 pub(super) fn undo(
     ctx: &mut ActionCtx<'_, '_>,
     account: AccountId,

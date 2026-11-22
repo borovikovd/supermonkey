@@ -1,6 +1,3 @@
-//! An account's fetch queue (SPEC Sync): background reads from Gmail, in
-//! priority order and each queued once.
-
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
@@ -13,90 +10,70 @@ use sm_gmail::{HistoryId, PageToken, Priority};
 use crate::activity::{Activity, Kick};
 use crate::clock::Clock;
 
-/// Where a fetch stands in line: its Gmail priority, then a rank that orders
-/// the stages SPEC Sync lists within one priority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct Slot {
     pub(crate) priority: Priority,
     rank: u8,
 }
 
-/// The metadata of a thread a poll reported but could not read: priority 3,
-/// as the poll's own reads (SPEC Sync).
 pub(crate) const POLL_META: Slot = Slot {
     priority: Priority::P3,
     rank: 0,
 };
-/// Bodies of new messages from a poll or a full resync.
 pub(crate) const POLL_BODIES: Slot = Slot {
     priority: Priority::P4,
     rank: 0,
 };
-/// Inbox metadata, a full resync's Inbox refetch included.
 pub(crate) const INBOX_META: Slot = Slot {
     priority: Priority::P4,
     rank: 1,
 };
-/// Drafts and starred metadata.
 pub(crate) const OTHER_META: Slot = Slot {
     priority: Priority::P4,
     rank: 2,
 };
-/// Inbox bodies.
 pub(crate) const INBOX_BODIES: Slot = Slot {
     priority: Priority::P4,
     rank: 3,
 };
-/// Sent, the bodies of drafts, starred threads, and Gmail search hits, and a
-/// full resync's refetch of other threads.
 pub(crate) const LATE: Slot = Slot {
     priority: Priority::P5,
     rank: 0,
 };
-/// The contacts backfill.
 pub(crate) const BACKFILL: Slot = Slot {
     priority: Priority::P6,
     rank: 0,
 };
 
-/// A `threads.list` the connect sync reads: by label or by query.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Listing {
-    /// Threads with this label.
     Label(LabelId),
-    /// Threads matching a Gmail query.
     Query(&'static str),
 }
 
-/// One background read.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Work {
-    /// A `threads.list` page. Each thread it lists gets its metadata at
-    /// `meta`, then its bodies at `body`; the next page queues behind it.
     List {
         listing: Listing,
         page: Option<PageToken>,
         meta: Slot,
         body: Option<Slot>,
     },
-    /// A thread's metadata, skipped when the cached thread is already at
-    /// `history`; then its bodies at `body`.
     Meta {
         thread: GmailThreadId,
         history: Option<HistoryId>,
         body: Option<Slot>,
     },
-    /// Every body the thread is missing. Stored bodies are never fetched again.
-    Body { thread: GmailThreadId },
-    /// A page of the contacts backfill.
-    Backfill { page: Option<PageToken> },
+    Body {
+        thread: GmailThreadId,
+    },
+    Backfill {
+        page: Option<PageToken>,
+    },
 }
 
-/// How long an idle fetcher waits before looking at the queue again; a
-/// push wakes it sooner.
 const IDLE_WAIT: Duration = Duration::from_secs(3600);
 
-/// The queue: a priority heap, with each work item in it at most once.
 pub(crate) struct FetchQueue {
     inner: Mutex<Inner>,
     kick: Kick,
@@ -118,7 +95,6 @@ impl FetchQueue {
         }
     }
 
-    /// Queues `work` at `slot`, unless it is queued already.
     pub(crate) fn push(&self, slot: Slot, work: Work) {
         {
             let mut q = self.inner.lock();
@@ -142,8 +118,6 @@ impl FetchQueue {
         Some((slot, work))
     }
 
-    /// The next item, first by slot, then by arrival; waits while the queue
-    /// is empty, not busy.
     pub(crate) async fn next(&self, clock: &dyn Clock) -> (Slot, Work) {
         loop {
             if let Some(next) = self.pop() {

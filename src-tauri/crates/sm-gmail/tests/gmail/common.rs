@@ -1,5 +1,3 @@
-//! A fake Gmail and a client wired as the app wires it.
-
 use std::sync::Arc;
 
 use sm_fake_gmail::{FakeGmail, FakeUser};
@@ -7,7 +5,6 @@ use sm_gmail::{Gmail, HttpClient, OAuthConfig, QuotaConfig, RefreshToken, Schedu
 
 pub(crate) const ME: &str = "me@example.com";
 
-/// An OAuth config pointing at the fake, with dummy client credentials.
 pub(crate) fn oauth_config(fake: &FakeGmail) -> OAuthConfig {
     OAuthConfig {
         client_id: "test-client".into(),
@@ -18,7 +15,6 @@ pub(crate) fn oauth_config(fake: &FakeGmail) -> OAuthConfig {
     }
 }
 
-/// A fake with one user, and a client for that user.
 pub(crate) fn setup() -> (FakeGmail, FakeUser, Gmail) {
     let fake = FakeGmail::start();
     let user = fake.add_user(ME);
@@ -26,7 +22,6 @@ pub(crate) fn setup() -> (FakeGmail, FakeUser, Gmail) {
     (fake, user, gmail)
 }
 
-/// A client for `user` with production limits.
 pub(crate) fn client_for(fake: &FakeGmail, user: &FakeUser) -> Gmail {
     let http = HttpClient::new().unwrap();
     let tokens = Arc::new(Tokens::new(

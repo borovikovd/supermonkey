@@ -1,6 +1,3 @@
-//! The installed-app sign-in: consent in the system browser, back to a
-//! loopback port, PKCE, and a state check.
-
 use std::fmt;
 
 use oauth2::basic::BasicClient;
@@ -16,38 +13,20 @@ use super::{
 use crate::http::HttpClient;
 use crate::outcome::GmailError;
 
-/// Why a sign-in did not finish.
 #[derive(Debug, thiserror::Error)]
 pub enum SignInError {
-    /// The loopback port could not be opened.
     #[error("could not open the sign-in port: {0}")]
     Loopback(#[source] std::io::Error),
-    /// The config's consent URL is not a URL.
     #[error("the OAuth consent URL is not valid")]
     InvalidConfig,
-    /// The consent page answered with an error code, such as `access_denied`.
     #[error("Google did not authorize the app: {0}")]
     Denied(String),
-    /// Google's token answer had no refresh token.
     #[error("Google returned no refresh token")]
     NoRefreshToken,
-    /// Exchanging the code failed.
     #[error("could not exchange the sign-in code: {0}")]
     Exchange(#[from] GmailError),
 }
 
-/// A sign-in waiting for the browser.
-///
-/// ```no_run
-/// # async fn demo(config: &sm_gmail::OAuthConfig, http: &sm_gmail::HttpClient) -> Result<(), sm_gmail::SignInError> {
-/// let sign_in = sm_gmail::SignIn::start(config.clone()).await?;
-/// // Open `sign_in.consent_url()` in the system browser, then:
-/// let grant = sign_in.finish(http, std::future::ready(())).await?;
-/// # let _ = grant; Ok(()) }
-/// ```
-///
-/// There is no timeout: drop the [`SignIn::finish`] future to cancel a
-/// sign-in the user abandoned, which also closes the port.
 pub struct SignIn {
     config: OAuthConfig,
     loopback: Loopback,
@@ -58,9 +37,6 @@ pub struct SignIn {
 }
 
 impl SignIn {
-    /// Opens a loopback port on `127.0.0.1` and makes the consent URL: PKCE
-    /// S256, a random state, both scopes, offline access, and forced consent
-    /// so Google always returns a refresh token.
     pub async fn start(config: OAuthConfig) -> Result<Self, SignInError> {
         let loopback = Loopback::bind().await.map_err(SignInError::Loopback)?;
         let redirect_uri = loopback.redirect_uri();
@@ -90,17 +66,11 @@ impl SignIn {
         })
     }
 
-    /// The page to open in the system browser.
     #[must_use]
     pub fn consent_url(&self) -> &str {
         &self.consent_url
     }
 
-    /// Waits for the browser's redirect, checks its state, and trades the
-    /// code for tokens once `ready` resolves: a caller still revoking this
-    /// person's older grant holds the trade until that is done, since the
-    /// revoke would end the new grant too. The account's address is not part
-    /// of the grant: read it with `getProfile`.
     pub async fn finish(
         self,
         http: &HttpClient,

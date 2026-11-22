@@ -1,7 +1,3 @@
-// Mail commands shared by the keyboard, the palette, and buttons. Each
-// resolves its targets and sends a resolved action (never a toggle); the
-// highlight then moves on as SPEC Keyboard says (src/navigation.ts).
-
 import { toast } from "sonner";
 
 import { undoSend } from "./compose/sends";
@@ -22,11 +18,6 @@ import { accountSummary, undoTarget, viewLabel } from "./store/mirror-core";
 import { useMirror } from "./store/mirror";
 import { reportSignIn } from "./ui/signIn";
 
-/**
- * Threads an action applies to: the selection, else the open conversation,
- * else the highlight. On the list only rows still shown count, so a row a
- * poll took away is never acted on.
- */
 export function targets(): number[] {
   const bound = fixedTargets();
   if (bound) return stillShown(bound);
@@ -44,12 +35,6 @@ export function targets(): number[] {
   return [];
 }
 
-/**
- * Sends a mail change. `account` and `threads` name an account and its
- * threads taken earlier, before an await; by default they are the account
- * on screen and the targets now. The screen moves on only when its account
- * is the one acted on.
- */
 export function modify(
   kind: ModifyKind,
   add: string[],
@@ -80,16 +65,8 @@ export function modify(
   moveOn(threads);
 }
 
-/** The account on screen and the threads an action takes, read before it resolves. */
 type Acting = { account: number; threads: number[] };
 
-/**
- * Runs `resolve` on the targets once the mirror has every one's row: a
- * selection can hold threads whose rows the list never loaded (Select all
- * far below the window), and an action resolved against part of them would
- * resolve the wrong way (SPEC UI state, Actions). With every row in, it runs
- * at once.
- */
 function withRows(resolve: (acting: Acting) => void) {
   const { account } = useChrome.getState();
   const threads = targets();
@@ -111,7 +88,6 @@ function withRows(resolve: (acting: Acting) => void) {
 
 const isSnoozed = (threads: number[]) => threads.some((t) => rowOf(String(t))?.snoozeUntil != null);
 
-/** Archives and marks read, as Superhuman's Mark Done does; z restores both. */
 export const markDone = () => {
   if (currentView()?.kind === "done") return;
   withRows(({ account, threads }) =>
@@ -123,10 +99,6 @@ export const markDone = () => {
   );
 };
 
-/**
- * `Shift+E`: back to the Inbox. A thread in Trash or Spam leaves it, by its
- * own labels, wherever it was reached: its view, or a search for `in:trash`.
- */
 export const returnToInbox = () =>
   withRows(({ account, threads }) => {
     const rows = threads.map((t) => rowOf(String(t)));
@@ -166,7 +138,6 @@ export const toggleRead = () =>
     else modify("unread", ["UNREAD"], [], acting);
   });
 
-/** `l`: if every target has the label it is removed from all, else added to all. */
 export function applyLabel(labelId: string) {
   withRows((acting) => {
     const all = acting.threads.every((id) => rowOf(String(id))?.labels.includes(labelId));
@@ -175,10 +146,8 @@ export function applyLabel(labelId: string) {
   });
 }
 
-/** `y`: remove the current view's label when it can be removed. */
 export function removeViewLabel() {
   const view = currentView();
-  // Gmail does not let SENT be removed.
   const label = view && view.kind !== "sent" ? viewLabel(view) : null;
   if (!label) return;
   modify("removeLabel", [], [label]);
@@ -189,7 +158,6 @@ export function undo() {
   if (c.account === null) return;
   const entry = undoTarget(useMirror.getState(), c.account);
   if (entry === null) return;
-  // `z` on a send: the composer reopens as with the toast's Undo.
   const summary = accountSummary(useMirror.getState(), c.account);
   const outbox = summary?.undo.find((u) => u.id === entry)?.outbox;
   const row = outbox == null ? undefined : summary?.outbox.find((o) => o.id === outbox);
@@ -200,14 +168,8 @@ export function undo() {
   act({ type: "undo", account: c.account, entry });
 }
 
-/** What Unsubscribe does to the mail already in the Inbox, as in Superhuman. */
 export type UnsubscribeThen = "keep" | "done" | "trash";
 
-/**
- * Unsubscribes from the list the conversation on screen came from. "done"
- * and "trash" first archive or trash every Inbox conversation from that
- * sender, as ordinary undoable actions.
- */
 export async function unsubscribe(then: UnsubscribeThen) {
   const account = useChrome.getState().account;
   const [thread] = targets();
@@ -237,13 +199,6 @@ export async function unsubscribe(then: UnsubscribeThen) {
   }
 }
 
-/**
- * Blocks the sender (or its domain) of `thread` with a Gmail filter that
- * sends its mail to Trash, then trashes the conversation. With `asSpam`, the
- * conversation is marked spam first instead (Superhuman's "Mark spam, and
- * block"). An account signed in before filters were asked for is offered
- * Sign in again.
- */
 export async function block(thread: number, domain: boolean, asSpam = false) {
   const account = useChrome.getState().account;
   if (account === null) return;

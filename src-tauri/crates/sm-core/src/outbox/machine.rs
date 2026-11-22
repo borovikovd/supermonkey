@@ -1,51 +1,28 @@
-//! A send's state machine (SPEC Send and undo): what each thing the outbox
-//! runner sees does to an outbox row. Pure, so every transition is plain to
-//! read and to test; `resolve` writes the step it gives.
-
 use sm_domain::{DraftId, GmailDraftId, GmailMessageId, NoticeKind, OutboxState, ThreadId};
 use sm_store::Outbox;
 
-/// The notice a held undo that resolved as not sent leaves.
 pub(crate) const SEND_UNDONE: &str = "Send undone";
 
-/// What the outbox runner saw happen to a send.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Event {
-    /// Its undo window passed and the runner starts it. `late`: it missed
-    /// its time (offline, or across a quit), so it shows `Email delayed`.
     Start { late: bool },
-    /// The final version is in this Gmail draft, which `drafts.send` sends.
     Written(GmailDraftId),
-    /// Gmail could not be reached before `drafts.send` was called.
     Unreached,
-    /// A held undo, seen before `drafts.send` was called: it is not sent.
     Held,
-    /// Gmail accepted it, as this message; `None` when the message could
-    /// not be found (a send with no thread).
     Accepted(Option<GmailMessageId>),
-    /// Gmail refused the message, saying why.
     Rejected(String),
-    /// Its sent message is stored, on this thread.
     Stored(ThreadId),
 }
 
-/// What an event does to the row.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Step {
-    /// Nothing: the row is not where the event expects it (undone meanwhile,
-    /// or already taken).
     Ignore,
-    /// The row's new state.
     Write(Outbox),
-    /// It was sent. With `trash`, a held undo trashes that message; with
-    /// `drop_entry`, its undo entry goes, its toast already gone.
     Sent {
         row: Outbox,
         trash: Option<GmailMessageId>,
         drop_entry: bool,
     },
-    /// It was not sent: the row goes, and a notice puts its draft back in a
-    /// composer.
     Return {
         draft: DraftId,
         kind: NoticeKind,
@@ -53,15 +30,12 @@ pub(crate) enum Step {
     },
 }
 
-/// What `event` does to `row`.
 pub(crate) fn step(row: Outbox, event: Event) -> Step {
     let sending = row.state == OutboxState::Sending;
     match event {
         Event::Start { late } if row.state == OutboxState::Waiting => Step::Write(Outbox {
             state: OutboxState::Sending,
             delayed: row.delayed || late,
-            // Until this pass has written the final version, the Gmail draft
-            // may hold an older autosave: settling must not send that.
             gmail_draft_id: None,
             ..row
         }),
@@ -69,8 +43,6 @@ pub(crate) fn step(row: Outbox, event: Event) -> Step {
             gmail_draft_id: Some(draft),
             ..row
         }),
-        // Gmail never got it, or a held undo stopped it first: an undo held
-        // on it resolves as not sent.
         Event::Unreached | Event::Held if sending && row.undo_requested => Step::Return {
             draft: row.draft,
             kind: NoticeKind::SendUndone,

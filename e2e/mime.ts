@@ -1,26 +1,14 @@
-// A small MIME reader for checking what the app sent: the part tree, content
-// types, Content-IDs, and decoded bodies. Enough for messages the app and the
-// fake build; not a general parser.
-
 export type MimePart = {
-  /** Lower-cased header names; values unfolded, RFC 2047 words decoded. */
   headers: Record<string, string>;
-  /** Lower-cased `type/subtype`. */
   contentType: string;
-  /** Content-Type parameters, keys lower-cased. */
   params: Record<string, string>;
-  /** Without the angle brackets. */
   contentId: string | null;
-  /** `inline`, `attachment`, or null. */
   disposition: string | null;
   filename: string | null;
-  /** The decoded body of a leaf part; empty for multiparts. */
   body: Buffer;
-  /** Child parts of a multipart, in order. */
   parts: MimePart[];
 };
 
-/** Decodes RFC 2047 encoded words (`=?UTF-8?B?...?=`, `=?UTF-8?Q?...?=`). */
 export function decodeWords(value: string): string {
   return value
     .replace(/\?=\s+=\?/g, "?==?")
@@ -64,7 +52,6 @@ function parseHeaders(head: string): Record<string, string> {
   return out;
 }
 
-/** `type/sub; a=b; c="d"` into the value and its parameters. */
 function parseValue(value: string): [string, Record<string, string>] {
   const [first = "", ...rest] = value.split(";");
   const params: Record<string, string> = {};
@@ -91,7 +78,6 @@ function decodeBody(body: string, encoding: string): Buffer {
   }
 }
 
-/** Parses an RFC 822 message (Gmail's `raw`) into its part tree. */
 export function parseMime(raw: string): MimePart {
   const [head, body] = splitHead(raw);
   const headers = parseHeaders(head);
@@ -114,7 +100,6 @@ export function parseMime(raw: string): MimePart {
   if (contentType.startsWith("multipart/") && boundary) {
     const delimiter = `--${boundary}`;
     const chunks = body.split(new RegExp(`\\r?\\n?${escapeRegExp(delimiter)}`));
-    // Before the first delimiter is the preamble; after the closing one, the epilogue.
     for (const chunk of chunks.slice(1)) {
       if (chunk.startsWith("--")) break;
       part.parts.push(parseMime(chunk.replace(/^[ \t]*\r?\n/, "")));
@@ -129,12 +114,10 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/** Every leaf part, depth first. */
 export function leaves(part: MimePart): MimePart[] {
   return part.parts.length === 0 ? [part] : part.parts.flatMap(leaves);
 }
 
-/** The first leaf with this content type, or one matching `pred`. */
 export function findPart(
   part: MimePart,
   pred: string | ((p: MimePart) => boolean),
@@ -147,22 +130,16 @@ function allParts(part: MimePart): MimePart[] {
   return [part, ...part.parts.flatMap(allParts)];
 }
 
-/**
- * The tree's shape as text, e.g.
- * `multipart/mixed[multipart/related[multipart/alternative[text/plain,text/html],image/png],application/pdf]`.
- */
 export function shape(part: MimePart): string {
   return part.parts.length === 0
     ? part.contentType
     : `${part.contentType}[${part.parts.map(shape).join(",")}]`;
 }
 
-/** The decoded text of the first `text/html` part, or of `text/plain`. */
 export function htmlOf(part: MimePart): string {
   return (findPart(part, "text/html") ?? findPart(part, "text/plain"))?.body.toString("utf8") ?? "";
 }
 
-/** Attachments by file name: leaves with a filename. */
 export function attachments(part: MimePart): MimePart[] {
   return leaves(part).filter((p) => p.filename !== null);
 }

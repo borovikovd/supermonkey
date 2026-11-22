@@ -1,6 +1,3 @@
-//! Settings: on or off by key, global (account 0) or per account. Stored as
-//! the key's text and `on` or `off`.
-
 use rusqlite::named_params;
 use sm_domain::{AccountId, SettingKey};
 
@@ -8,12 +5,9 @@ use crate::db::Db;
 use crate::tx::WriteTx;
 use crate::{StoreError, Table};
 
-/// A setting turned on, as stored.
 const ON: &str = "on";
-/// A setting turned off, as stored.
 const OFF: &str = "off";
 
-/// Reads of settings.
 #[derive(Debug, Clone, Copy)]
 pub struct SettingReads<'c> {
     db: Db<'c>,
@@ -24,8 +18,6 @@ impl<'c> SettingReads<'c> {
         Self { db }
     }
 
-    /// Whether a setting is on; [`AccountId::NONE`] for a global one. One
-    /// never set has its default.
     pub fn is_on(self, account: AccountId, key: SettingKey) -> Result<bool, StoreError> {
         let value: Option<String> = self.db.optional(
             "read a setting",
@@ -41,7 +33,6 @@ impl<'c> SettingReads<'c> {
     }
 }
 
-/// Writes to settings.
 #[derive(Debug)]
 pub struct SettingWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
@@ -52,7 +43,6 @@ impl<'t, 'c> SettingWrites<'t, 'c> {
         Self { tx }
     }
 
-    /// Turns a setting on or off; [`AccountId::NONE`] for a global one.
     pub fn set(&mut self, account: AccountId, key: SettingKey, on: bool) -> Result<(), StoreError> {
         self.tx.db().execute(
             "store a setting",

@@ -1,13 +1,9 @@
-//! Split Inbox pins and the splits sheet (SPEC Split Inbox).
-
 use sm_domain::{AccountId, Pin, PinKind, SplitId, SplitKind, UndoEntryId, check_split_rule};
 use sm_ipc::SplitInfo;
 use sm_store::{SplitEdit, UndoAction};
 
 use super::{ActionCtx, ActionError};
 
-/// `pin`: routes a sender, domain, or label to a split, re-routing the
-/// Inbox. An undo entry keeps the pin it replaced.
 pub(super) fn pin(
     ctx: &mut ActionCtx<'_, '_>,
     account: AccountId,
@@ -42,8 +38,6 @@ pub(super) fn pin(
     Ok(())
 }
 
-/// Undoes a pin: the pin it replaced comes back, or, when there was none or
-/// its split is gone, the pin goes.
 pub(super) fn undo_pin(
     ctx: &mut ActionCtx<'_, '_>,
     account: AccountId,
@@ -62,10 +56,6 @@ pub(super) fn undo_pin(
     Ok(())
 }
 
-/// `saveSplits`: the splits sheet. Deletes the custom splits in `deleted`
-/// with their pins, saves the rest in the order given, and re-routes the
-/// Inbox. A custom split's rule must parse strictly; a blank one matches
-/// nothing. Important and Other can't be deleted, and Other stays on.
 pub(super) fn save_splits(
     ctx: &mut ActionCtx<'_, '_>,
     account: AccountId,

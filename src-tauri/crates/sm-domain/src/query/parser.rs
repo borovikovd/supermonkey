@@ -1,14 +1,8 @@
-//! A recursive-descent parser that always produces a query, and lists the
-//! problems a strict parse would refuse.
-
 use super::dates::{DateArg, age, day_or_epoch};
 use super::lexer::{Tok, TokKind, lex};
 use super::{Expr, Field, Query, RuleError, Term};
 use crate::{Millis, SystemLabel};
 
-/// Gmail operators this language does not evaluate. A word starting with one
-/// of these and `:` is [`Expr::Unsupported`]. Any other `word:word` (like
-/// `re:budget` or `10:30`) is a plain bare word.
 const GMAIL_ONLY_OPERATORS: &[&str] = &[
     "filename",
     "larger",
@@ -20,10 +14,8 @@ const GMAIL_ONLY_OPERATORS: &[&str] = &[
     "around",
 ];
 
-/// Places a date operator's value in time, or `None` when it can't.
 pub(super) type PlaceDate<'p> = dyn Fn(&DateArg) -> Option<Millis> + 'p;
 
-/// The best-effort query for `input`, and every problem found on the way.
 pub(super) fn parse(input: &str, place_date: &PlaceDate<'_>) -> (Query, Vec<RuleError>) {
     let mut parser = Parser {
         input,
@@ -49,7 +41,6 @@ impl<'a> Parser<'a, '_> {
         self.toks.get(self.pos).copied()
     }
 
-    /// `and_expr (OR and_expr)*`
     fn or_expr(&mut self, depth: usize) -> Option<Expr> {
         let mut alternatives = Vec::new();
         let first = self.and_expr(depth);
@@ -72,8 +63,6 @@ impl<'a> Parser<'a, '_> {
         combine(alternatives, false)
     }
 
-    /// `unary ((AND)? unary)*`, stopping at OR, a closing parenthesis inside
-    /// a group, or the end.
     fn and_expr(&mut self, depth: usize) -> Option<Expr> {
         let mut items = Vec::new();
         while let Some(tok) = self.peek() {
@@ -106,16 +95,11 @@ impl<'a> Parser<'a, '_> {
         combine(items, true)
     }
 
-    /// One term at the current token, which is not `)`: a group, a phrase,
-    /// a word, or `-` and the term it negates. `None` when there is nothing
-    /// to match on, such as `from:` with no value or a lone `&`.
     fn unary(&mut self, depth: usize) -> Option<Expr> {
         let tok = self.peek()?;
         self.pos += 1;
         match tok.kind {
             TokKind::Minus => {
-                // `-` is never last and never before `)`: the lexer makes
-                // those a word.
                 let negated = self.unary(depth)?;
                 let end = self.toks.get(self.pos - 1).map_or(tok.end, |t| t.end);
                 let input = self.input;
@@ -157,7 +141,6 @@ impl<'a> Parser<'a, '_> {
         }
     }
 
-    /// What one word token means.
     fn word(&mut self, word: &str, offset: usize, at_end: bool) -> Option<Expr> {
         let word = word.strip_prefix('+').unwrap_or(word);
         let Some((op, raw_value)) = word.split_once(':') else {
@@ -191,8 +174,6 @@ impl<'a> Parser<'a, '_> {
         }))
     }
 
-    /// An operator's value without its quotes, and whether it had a closing
-    /// one. `None`, noted, when it is blank.
     fn value<'v>(
         &mut self,
         raw_value: &'v str,
@@ -220,8 +201,6 @@ impl<'a> Parser<'a, '_> {
         Some((value, closed_quote))
     }
 
-    /// `is:`, `in:`, `has:`, `category:`, and the date operators, which
-    /// search evaluates and split rules refuse (`is:list` aside).
     fn search_operator(
         &mut self,
         word: &str,
@@ -248,7 +227,6 @@ impl<'a> Parser<'a, '_> {
             ("in", "anywhere") => Some(Expr::Anywhere),
             ("in", "draft" | "drafts") => label(SystemLabel::Draft),
             ("in", "chats") => label(SystemLabel::Chat),
-            // Gmail reads `in:` as `label:`: a system label or a user label name.
             ("in", _) => Some(label_term(value)),
             ("has", "attachment") => Some(Expr::HasAttachment),
             ("category", "primary") => label(SystemLabel::CategoryPersonal),
@@ -271,14 +249,11 @@ impl<'a> Parser<'a, '_> {
         })
     }
 
-    /// A date test, or `None` when the value is no date or can't be placed
-    /// in time.
     fn date(&self, after: bool, arg: Option<DateArg>) -> Option<Expr> {
         let at = (self.place_date)(&arg?)?;
         Some(Expr::Date { after, at })
     }
 
-    /// Notes a term that search evaluates and a split rule refuses.
     fn search_only(&mut self, term: &str, offset: usize) {
         self.errors.push(RuleError::Unsupported {
             offset,
@@ -292,7 +267,6 @@ impl<'a> Parser<'a, '_> {
     }
 }
 
-/// A `label:` test for a system id or a user label name.
 fn label_term(value: &str) -> Expr {
     Expr::Term(Term {
         field: Field::Label,
@@ -311,8 +285,6 @@ fn bare_word(word: &str, at_end: bool) -> Option<Expr> {
     })
 }
 
-/// One item stays itself; several become an `And` (or `Or`), flattening
-/// nested lists of the same kind.
 fn combine(items: Vec<Expr>, is_and: bool) -> Option<Expr> {
     if items.len() <= 1 {
         return items.into_iter().next();

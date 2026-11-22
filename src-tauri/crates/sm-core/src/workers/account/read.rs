@@ -1,6 +1,3 @@
-//! Reading threads from Gmail, and parsing and sanitizing them before they
-//! reach the writer thread (ARCHITECTURE.md, section 5.3; SPEC Reading).
-
 use std::collections::HashSet;
 
 use sm_domain::{Addr, GmailMessageId, GmailThreadId, LabelSet, Millis, SystemLabel};
@@ -10,7 +7,6 @@ use sm_store::{NewAttachment, NewBody, NewMessage};
 
 use super::ctx::AccountCtx;
 
-/// The headers a metadata read asks for: what the app stores.
 pub(crate) const METADATA_HEADERS: &[&str] = &[
     "From",
     "To",
@@ -27,36 +23,25 @@ pub(crate) const METADATA_HEADERS: &[&str] = &[
     "X-Supermonkey-Draft",
 ];
 
-/// A thread as Gmail gave it, parsed, its bodies sanitized: ready to store.
 #[derive(Debug, Clone)]
 pub(crate) struct ReadThread {
     pub(crate) gmail_id: GmailThreadId,
-    /// Gmail's `historyId` for the thread when it was read.
     pub(crate) history: Option<HistoryId>,
-    /// Every message of the thread, oldest first.
     pub(crate) messages: Vec<ReadMessage>,
 }
 
-/// One message of a [`ReadThread`].
 #[derive(Debug, Clone)]
 pub(crate) struct ReadMessage {
-    /// Headers and flags. Its labels are Gmail's ids until the writer maps
-    /// them to local ones.
     pub(crate) message: NewMessage,
-    /// The body, when the read had one the app does not store yet.
     pub(crate) body: Option<NewBody>,
 }
 
 impl ReadMessage {
-    /// Its Gmail id, and the body the read brought for it, if any.
     pub(crate) const fn brought(&self) -> (&GmailMessageId, Option<&NewBody>) {
         (&self.message.gmail_id, self.body.as_ref())
     }
 }
 
-/// Reads a thread at `priority` and parses it. With [`Format::Full`],
-/// messages in `stored` keep the body they have, which never changes: they
-/// are parsed without one, so their inline images are not fetched again.
 pub(crate) async fn read_thread(
     ctx: &AccountCtx,
     thread: &GmailThreadId,
@@ -91,8 +76,6 @@ pub(crate) async fn read_thread(
     })
 }
 
-/// The message's payload, parsed; an empty one when Gmail sent none or one
-/// that doesn't parse (logged).
 pub(crate) fn parse(m: &Message) -> ParsedMessage {
     let Some(payload) = &m.payload else {
         return ParsedMessage::default();
@@ -103,9 +86,6 @@ pub(crate) fn parse(m: &Message) -> ParsedMessage {
     })
 }
 
-/// The stored form of a message: what Gmail says of it, its parsed
-/// `headers`, and whether one of its `parts` is an attachment. Its labels
-/// are Gmail's ids.
 pub(crate) fn new_message(m: Message, headers: MessageHeaders, parts: &[Part]) -> NewMessage {
     let labels: LabelSet = m.label_ids.into_iter().collect();
     NewMessage {
@@ -129,9 +109,6 @@ pub(crate) fn new_message(m: Message, headers: MessageHeaders, parts: &[Part]) -
     }
 }
 
-/// The body of a full read of `message`: its inline images fetched (a
-/// missing one is left out), then rendered and sanitized off the async
-/// threads.
 async fn body(
     ctx: &AccountCtx,
     message: &GmailMessageId,
@@ -177,15 +154,9 @@ async fn body(
     })
 }
 
-/// A Gmail draft's message, parsed and sanitized for storing, and its HTML
-/// split at the `gmail_quote` element: the editor's part and the quote
-/// block (SPEC Addressing). Its inline images are not fetched: the composer
-/// shows only the text above the quote. Slow on a big draft: call it off
-/// the async threads.
 pub(crate) fn draft_message(m: Message) -> (ReadMessage, DraftBody) {
     let parsed = parse(&m);
     let message = new_message(m, parsed.headers, &parsed.parts);
-    // Before the render, which takes the body.
     let draft = parsed.body.to_draft();
     let rendered = parsed.body.render(&CidImages::new());
     let body = NewBody {

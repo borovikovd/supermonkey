@@ -1,14 +1,9 @@
-//! Gmail's ids that `sm-domain` has no newtype for: they live only between
-//! Gmail and the core, which converts them to raw values for SQL.
-
 use std::fmt;
 
 use serde::{Deserialize, Deserializer};
 
-/// Gmail's mailbox history cursor: one type from Gmail's JSON to SQLite.
 pub use sm_domain::HistoryId;
 
-/// Reads a `u64` that Gmail encodes as a JSON string (or, leniently, a number).
 pub(crate) fn string_u64<'de, D: Deserializer<'de>>(d: D) -> Result<u64, D::Error> {
     use serde::de::Error as _;
 
@@ -32,7 +27,6 @@ macro_rules! opaque_id {
         pub struct $name(pub String);
 
         impl $name {
-            /// The id as Gmail spells it.
             pub fn as_str(&self) -> &str {
                 &self.0
             }
@@ -58,11 +52,4 @@ macro_rules! opaque_id {
     )*};
 }
 
-opaque_id!(
-    /// A list call's cursor to its next page (`nextPageToken`).
-    PageToken,
-    /// Gmail's id of a message attachment (`body.attachmentId`).
-    GmailAttachmentId,
-    /// Gmail's id of a settings filter.
-    FilterId,
-);
+opaque_id!(PageToken, GmailAttachmentId, FilterId,);

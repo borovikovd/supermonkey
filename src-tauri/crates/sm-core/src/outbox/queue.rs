@@ -1,5 +1,3 @@
-//! Sends in their undo window: queueing, undoing, the toast, and launch.
-
 use std::time::Duration;
 
 use sm_domain::{
@@ -13,17 +11,10 @@ use crate::drafts::{lifecycle, queue_upsert};
 use crate::effects::Effect;
 use crate::writer::WriterState;
 
-/// The undo window: a fixed ten seconds, as in Superhuman, which does not
-/// let users change it.
 const SEND_DELAY: Duration = Duration::from_secs(10);
 
-/// The undo entry's label.
 const SENT: &str = "Sent";
 
-/// `sendDraft`: the draft goes into the outbox, waiting out its undo window,
-/// as undo entry `n`. Its queued upserts go: the outbox writes the final
-/// version itself. A draft with no recipient, or one that is not an
-/// address, is refused and stays a draft.
 pub(crate) fn send(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -71,10 +62,6 @@ pub(crate) fn send(
     Ok(())
 }
 
-/// Undoes a send (SPEC Send and undo). Waiting: it is cancelled and its
-/// draft is a draft again, never discarded as untouched and kept on Gmail.
-/// Sending: the undo is held until the send resolves. Sent: only that sent
-/// message is trashed.
 pub(crate) fn undo_send(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -96,7 +83,6 @@ pub(crate) fn undo_send(
                 let mut draft = draft.draft;
                 lifecycle::keep(&mut draft);
                 tx.drafts().put(&draft)?;
-                // A send made before any autosave never wrote it to Gmail.
                 queue_upsert(tx, state, account, &draft.id, now)?;
             }
         }
@@ -117,8 +103,6 @@ pub(crate) fn undo_send(
     Ok(())
 }
 
-/// Trashes only this sent message: here at once, and on Gmail through the
-/// queue. Other messages keep their labels.
 pub(crate) fn trash_sent(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -147,9 +131,6 @@ pub(crate) fn trash_sent(
     Ok(())
 }
 
-/// The user closed a send toast. A sent row's undo entry goes with it, so a
-/// stray `z` never trashes delivered mail. A row already gone is not an
-/// error.
 pub(crate) fn close_toast(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -169,8 +150,6 @@ pub(crate) fn close_toast(
     finish(tx, state, row.account)
 }
 
-/// Drops the account's finished sends: sent, the toast closed, and the
-/// message on its thread. Their drafts go, and their files after the commit.
 pub(crate) fn finish(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -186,9 +165,6 @@ pub(crate) fn finish(
     Ok(())
 }
 
-/// On launch: sends already sent lose their undo entries and their toasts,
-/// so a stray `z` never trashes delivered mail; sends that missed their
-/// time show `Email delayed`; finished ones go.
 pub(crate) fn on_launch(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,

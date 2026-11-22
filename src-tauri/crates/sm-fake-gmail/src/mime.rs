@@ -1,6 +1,3 @@
-//! Just enough MIME for the fake: build RFC 822 from simple fields, and parse RFC 822 into
-//! Gmail's `payload` JSON (part ids, headers, base64url bodies, attachment ids).
-
 use base64::Engine;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE};
 use serde_json::{Value, json};
@@ -9,17 +6,13 @@ use std::fmt::Write as _;
 
 use crate::{NewAttachment, NewMessage};
 
-/// A parsed message.
 pub(crate) struct Parsed {
     pub payload: Value,
     pub headers: Vec<(String, String)>,
-    /// Attachment id and bytes of every part with a filename.
     pub attachments: Vec<(String, Vec<u8>)>,
-    /// The first text/plain body, else the first text/html body without tags.
     pub text: String,
 }
 
-/// Parses RFC 822 bytes. `new_id` names attachments.
 pub(crate) fn parse(raw: &[u8], new_id: &mut dyn FnMut() -> String) -> Parsed {
     let mut ctx = Ctx {
         new_id,
@@ -40,8 +33,6 @@ pub(crate) fn parse(raw: &[u8], new_id: &mut dyn FnMut() -> String) -> Parsed {
     }
 }
 
-/// Marks a part whose bytes the payload carries, as Gmail serves some small
-/// parts. The fake's own header: left out of the payload's headers.
 const SERVED_INLINE: &str = "X-Fake-Gmail-Served-Inline";
 
 struct Ctx<'a> {
@@ -103,7 +94,6 @@ fn parse_part(bytes: &[u8], part_id: &str, ctx: &mut Ctx<'_>) -> (Value, Vec<(St
             }
             node["body"] = json!({ "size": data.len(), "data": URL_SAFE.encode(&data) });
         } else if header(&headers, SERVED_INLINE).is_some() {
-            // A file whose bytes the payload carries, with no attachment id.
             node["body"] = json!({ "size": data.len(), "data": URL_SAFE.encode(&data) });
         } else {
             let id = (ctx.new_id)();
@@ -126,7 +116,6 @@ fn split_head(bytes: &[u8]) -> (&[u8], &[u8]) {
     (bytes, &[])
 }
 
-/// Unfolds and splits a header block. Values have RFC 2047 words decoded.
 fn parse_headers(head: &str) -> Vec<(String, String)> {
     let mut headers: Vec<(String, String)> = Vec::new();
     for line in head.lines() {
@@ -147,7 +136,6 @@ fn parse_headers(head: &str) -> Vec<(String, String)> {
     headers
 }
 
-/// The first header named `name`, case-insensitively.
 pub(crate) fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
     headers
         .iter()
@@ -155,7 +143,6 @@ pub(crate) fn header<'a>(headers: &'a [(String, String)], name: &str) -> Option<
         .map(|(_, v)| v.as_str())
 }
 
-/// `type/sub; key=value; ...` into the lowercased type and its params.
 fn parse_params(value: &str) -> (String, Vec<(String, String)>) {
     let mut pieces = value.split(';');
     let first = pieces
@@ -197,7 +184,6 @@ fn split_multipart<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
         let line = line.trim_end();
         if line == delimiter || line == closing {
             if let Some(s) = start {
-                // The line break before a delimiter belongs to the delimiter.
                 let mut part_end = pos.max(s);
                 if part_end > s && body[part_end - 1] == b'\n' {
                     part_end -= 1;
@@ -262,7 +248,6 @@ fn decode_qp(body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Decodes RFC 2047 encoded words in UTF-8 or US-ASCII; others are left as they are.
 fn decode_words(value: &str) -> Cow<'_, str> {
     if !value.contains("=?") {
         return Cow::Borrowed(value);
@@ -323,8 +308,6 @@ fn strip_tags(html: &str) -> String {
     out
 }
 
-/// The snippet Gmail would show: collapsed whitespace, at most 200 characters,
-/// about what Gmail returns, so a snippet wraps over lines as real ones do.
 pub(crate) fn snippet(text: &str) -> String {
     text.split_whitespace()
         .collect::<Vec<_>>()
@@ -334,12 +317,10 @@ pub(crate) fn snippet(text: &str) -> String {
         .collect()
 }
 
-/// Builds RFC 822 bytes from simple fields. Every leaf is base64.
 pub(crate) fn build(msg: &NewMessage, date_ms: u64, message_id: &str) -> Vec<u8> {
     let mut out = String::new();
     let mut push = |name: &str, value: &str| {
         if !value.is_empty() {
-            // Writing to a String cannot fail.
             _ = write!(out, "{name}: {value}\r\n");
         }
     };
@@ -416,11 +397,9 @@ fn attachment(a: &NewAttachment) -> String {
     )
 }
 
-/// A part with headers and a base64 body.
 fn leaf(content_type: &str, data: &[u8], extra: &[(&str, String)]) -> String {
     let mut out = format!("Content-Type: {content_type}\r\nContent-Transfer-Encoding: base64\r\n");
     for (name, value) in extra {
-        // Writing to a String cannot fail.
         _ = write!(out, "{name}: {value}\r\n");
     }
     out.push_str("\r\n");
@@ -434,7 +413,6 @@ fn leaf(content_type: &str, data: &[u8], extra: &[(&str, String)]) -> String {
 
 fn multipart(subtype: &str, boundary: &str, parts: &[String]) -> String {
     let mut out = format!("Content-Type: multipart/{subtype}; boundary=\"{boundary}\"\r\n\r\n");
-    // Writing to a String cannot fail.
     for part in parts {
         _ = write!(out, "--{boundary}\r\n{part}\r\n");
     }
@@ -450,7 +428,6 @@ fn encode_word(text: &str) -> Cow<'_, str> {
     }
 }
 
-/// `Thu, 01 Jan 1970 00:00:00 +0000` for milliseconds since the epoch.
 fn rfc2822_date(ms: u64) -> String {
     const DAYS: [&str; 7] = ["Thu", "Fri", "Sat", "Sun", "Mon", "Tue", "Wed"];
     const MONTHS: [&str; 12] = [
@@ -459,7 +436,6 @@ fn rfc2822_date(ms: u64) -> String {
     let secs = ms / 1000;
     let days = i64::try_from(secs / 86_400).unwrap_or(0);
     let rem = secs % 86_400;
-    // Howard Hinnant's civil_from_days.
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z - era * 146_097;

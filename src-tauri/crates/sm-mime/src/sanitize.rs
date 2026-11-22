@@ -1,5 +1,3 @@
-//! The HTML sanitizer for received mail (SPEC Reading, Security).
-
 use std::borrow::Cow;
 use std::sync::LazyLock;
 
@@ -7,7 +5,6 @@ use regex::{Captures, Regex};
 
 use crate::cid::{CidImages, inline_cid_images};
 
-/// The policy: ammonia's defaults, plus what mail layout needs.
 static POLICY: LazyLock<ammonia::Builder<'static>> = LazyLock::new(|| {
     let mut policy = ammonia::Builder::default();
     policy
@@ -15,8 +12,6 @@ static POLICY: LazyLock<ammonia::Builder<'static>> = LazyLock::new(|| {
             "style", "font", "tfoot", "section", "article", "aside", "main", "address", "big",
             "label", "fieldset", "legend",
         ])
-        // Removed together with everything inside them. This replaces the
-        // default set, which holds `style`.
         .clean_content_tags(
             [
                 "script", "title", "noscript", "iframe", "object", "embed", "applet", "frameset",
@@ -67,11 +62,7 @@ static POLICY: LazyLock<ammonia::Builder<'static>> = LazyLock::new(|| {
     policy
 });
 
-/// `data:` URLs only for images, and only where an image goes (`<img src>`,
-/// `background`); `background` also takes http(s). ammonia checks the schemes of
-/// every other URL attribute.
 fn is_allowed_url(element: &str, attribute: &str, value: &str) -> bool {
-    // Read in place: a value can be a whole image as a `data:` URL.
     let url = value.trim_start();
     let is_image_slot = (element == "img" && attribute == "src") || attribute == "background";
     if has_scheme(url, "data:") && !(is_image_slot && has_scheme(url, "data:image/")) {
@@ -83,21 +74,12 @@ fn is_allowed_url(element: &str, attribute: &str, value: &str) -> bool {
         || has_scheme(url, "data:image/")
 }
 
-/// Whether `url` starts with `prefix`, which is ASCII, in any ASCII case.
 fn has_scheme(url: &str, prefix: &str) -> bool {
     url.as_bytes()
         .get(..prefix.len())
         .is_some_and(|start| start.eq_ignore_ascii_case(prefix.as_bytes()))
 }
 
-/// Sanitizes received HTML for storage and display.
-///
-/// First rewrites `cid:` references to the matching [`CidImages`]. Then cleans
-/// with ammonia: `style`, `class`, `id`, table and layout attributes, and
-/// `<style>` blocks stay, as do `data:image/*` URLs on `<img src>` and
-/// `background`. Scripts, event handlers, forms and their controls, iframes,
-/// objects, embeds, `<meta>`, `<base>`, `<link>`, SVG, `MathML`, and `javascript:`
-/// URLs go, including in CSS `url(…)`. Links get `rel="noopener noreferrer"`.
 pub fn sanitize_html(html: &str, images: &CidImages) -> String {
     let with_images = inline_cid_images(html, images);
     let clean = POLICY.clean(&with_images).to_string();
@@ -107,12 +89,9 @@ pub fn sanitize_html(html: &str, images: &CidImages) -> String {
     }
 }
 
-/// A CSS `url(…)`, quoted or not.
 static CSS_URL: LazyLock<Regex> =
     LazyLock::new(|| crate::regex(r#"(?i)url\(\s*('[^']*'|"[^"]*"|[^)'"]*)\s*\)"#));
 
-/// Empties CSS `url(…)`s with a script scheme, which ammonia leaves in `style`
-/// attributes and `<style>` blocks.
 fn defuse_css_urls(html: &str) -> Cow<'_, str> {
     CSS_URL.replace_all(html, |c: &Captures<'_>| {
         let whole = c.get(0).map_or("", |m| m.as_str());
@@ -125,9 +104,6 @@ fn defuse_css_urls(html: &str) -> Cow<'_, str> {
     })
 }
 
-/// Whether a CSS `url(…)` argument runs script. HTML entities (as attributes are
-/// serialized), CSS escapes, quotes, whitespace, and controls are removed before
-/// the scheme is read, as a browser would ignore or decode them.
 fn is_script_url(target: &str) -> bool {
     let decoded = html_escape::decode_html_entities(target);
     let scheme: String = decode_css_escapes(&decoded)
@@ -139,8 +115,6 @@ fn is_script_url(target: &str) -> bool {
     scheme.starts_with("javascript:") || scheme.starts_with("vbscript:")
 }
 
-/// Decodes CSS escapes: `\6a` and `\00006a ` (up to six hex digits and one
-/// optional space) are the code point, and `\x` is `x`.
 fn decode_css_escapes(s: &str) -> Cow<'_, str> {
     if !s.contains('\\') {
         return Cow::Borrowed(s);

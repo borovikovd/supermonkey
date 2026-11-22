@@ -1,38 +1,22 @@
-//! Recipient autocomplete (SPEC Recipients and autocomplete): matching,
-//! filtering, and ranking contacts.
-
 use crate::Millis;
 
-/// A contact last seen this many days ago counts half as much as one seen today.
 pub const RECENCY_HALF_LIFE_DAYS: f64 = 90.0;
 
 const MS_PER_DAY: f64 = 86_400_000.0;
 
-/// Which string a [`MatchSpan`] points into.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchField {
-    /// The display name.
     Name,
-    /// The address.
     Email,
 }
 
-/// The matched part of a suggestion, to show in bold: `start..end` is a byte
-/// range in the name or the address as passed in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MatchSpan {
-    /// Which string.
     pub field: MatchField,
-    /// First byte.
     pub start: usize,
-    /// Byte past the end.
     pub end: usize,
 }
 
-/// Whether `query` matches a contact, ignoring case, at the start of any word
-/// of the name, the start of the address, or the start of its domain, checked
-/// in that order. The query may run across words (`john sm` matches `John
-/// Smith`). A blank query matches nothing.
 #[must_use]
 pub fn contact_matches(query: &str, name: &str, email: &str) -> Option<MatchSpan> {
     let query = query.trim();
@@ -56,8 +40,6 @@ pub fn contact_matches(query: &str, name: &str, email: &str) -> Option<MatchSpan
     prefix_len(&email[domain..], query).map(|len| span(MatchField::Email, domain, len))
 }
 
-/// Byte offsets where a word starts: an alphanumeric character at the start
-/// or after a non-alphanumeric one (`Mary-Jane O'Brien` has four words).
 fn word_starts(s: &str) -> impl Iterator<Item = usize> + '_ {
     let mut prev_alnum = false;
     s.char_indices().filter_map(move |(i, c)| {
@@ -67,8 +49,6 @@ fn word_starts(s: &str) -> impl Iterator<Item = usize> + '_ {
     })
 }
 
-/// If `haystack` starts with `needle` ignoring case, the byte length of that
-/// prefix in `haystack`.
 fn prefix_len(haystack: &str, needle: &str) -> Option<usize> {
     let mut hay = haystack.char_indices();
     let mut len = 0;
@@ -82,7 +62,6 @@ fn prefix_len(haystack: &str, needle: &str) -> Option<usize> {
     Some(len)
 }
 
-/// Whether the local part of `email` contains `noreply` or `no-reply`, ignoring case.
 #[must_use]
 pub fn is_noreply(email: &str) -> bool {
     let local = email
@@ -92,40 +71,26 @@ pub fn is_noreply(email: &str) -> bool {
     local.contains("noreply") || local.contains("no-reply")
 }
 
-/// What autocomplete knows about one address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ContactStats {
-    /// Messages this account sent to it.
     pub sent: u32,
-    /// Messages this account received from it.
     pub received: u32,
-    /// Seen only on list mail.
     pub list_only: bool,
-    /// When it was last in a message.
     pub last_contact: Millis,
 }
 
-/// How a suggestion ranks: by `tier` ascending, then `score` descending.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContactRank {
-    /// 0: sent to; 1: received from only; 2: seen only as a co-recipient.
     pub tier: u8,
-    /// Sent count (tier 0) or received count (tier 1) times the recency
-    /// factor, or the factor alone (tier 2).
     pub score: f64,
 }
 
 impl ContactStats {
-    /// Whether the address may be suggested at all. Never: the account's own
-    /// addresses (`is_own`), `noreply` addresses, and addresses never sent to
-    /// that appeared only on list mail.
     #[must_use]
     pub fn is_suggestible(self, email: &str, is_own: bool) -> bool {
         !is_own && !is_noreply(email) && (self.sent != 0 || !self.list_only)
     }
 
-    /// The suggestion's rank at `now`. Ten messages sent last week outrank
-    /// fifty sent a year ago.
     #[must_use]
     pub fn rank(self, now: Millis) -> ContactRank {
         let recency = recency_factor(self.last_contact, now);
@@ -148,12 +113,9 @@ impl ContactStats {
     }
 }
 
-/// `0.5 ^ (age / 90 days)`: 1.0 for contact now, 0.5 at 90 days, 0.25 at
-/// 180. A last contact in the future counts as now.
 #[must_use]
 pub fn recency_factor(last_contact: Millis, now: Millis) -> f64 {
     let age_ms = now.since(last_contact).max(0);
-    // Whole seconds fit in f64 exactly for any span this ranking sees.
     let age_days =
         f64::from(u32::try_from(age_ms / 1000).unwrap_or(u32::MAX)) * 1000.0 / MS_PER_DAY;
     0.5f64.powf(age_days / RECENCY_HALF_LIFE_DAYS)

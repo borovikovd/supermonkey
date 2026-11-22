@@ -1,29 +1,18 @@
-//! A poll's `history.list` records, reduced to what changed (SPEC Sync).
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use sm_domain::{GmailMessageId, GmailThreadId, LabelSet, SystemLabel};
 use sm_gmail::{HistoryId, HistoryRecord, Message};
 
-/// What a run of history records says, net.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct HistoryBatch {
-    /// Each message's thread and its label set in the last record that named
-    /// it: records carry the whole set, so the last one wins.
     pub(crate) labels: BTreeMap<GmailMessageId, (GmailThreadId, LabelSet)>,
-    /// Messages added.
     pub(crate) added: BTreeSet<GmailMessageId>,
-    /// Messages deleted.
     pub(crate) deleted: BTreeSet<GmailMessageId>,
-    /// Each thread's newest record.
     pub(crate) newest: BTreeMap<GmailThreadId, HistoryId>,
-    /// A draft was added, or anything deleted (an old draft version):
-    /// drafts need reconciling (SPEC Drafts).
     pub(crate) drafts_changed: bool,
 }
 
 impl HistoryBatch {
-    /// Reduces records, oldest first.
     pub(crate) fn new(records: Vec<HistoryRecord>) -> Self {
         let mut batch = Self::default();
         for record in records {
@@ -60,9 +49,6 @@ impl HistoryBatch {
         *newest = (*newest).max(at);
     }
 
-    /// Threads that have a message the batch names and the app has not
-    /// stored, by `is_known`: they need a metadata read. Deleted messages
-    /// need none.
     pub(crate) fn threads_to_read(
         &self,
         is_known: impl Fn(&GmailMessageId) -> bool,

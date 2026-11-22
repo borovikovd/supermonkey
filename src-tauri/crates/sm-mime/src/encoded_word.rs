@@ -1,21 +1,12 @@
-//! RFC 2047 encoded-words in header values (`=?UTF-8?B?…?=`, `=?iso-8859-1?Q?…?=`).
-
 use std::borrow::Cow;
 
 use crate::charset::{decode_base64, decode_charset};
 
-/// Decodes the RFC 2047 encoded-words in a header value.
-///
-/// Whitespace between two encoded-words is dropped, as the RFC says. Adjacent
-/// words in one charset are decoded together, so a multi-byte character split
-/// across two words survives. Malformed words are kept as they are. Borrows when
-/// there is nothing to decode.
 pub fn decode_encoded_words(input: &str) -> Cow<'_, str> {
     if !input.contains("=?") {
         return Cow::Borrowed(input);
     }
     let mut out = String::with_capacity(input.len());
-    // Bytes of a run of adjacent words in one charset, decoded when the run ends.
     let mut run: Option<(&str, Vec<u8>)> = None;
     let mut rest = input;
     while let Some(start) = rest.find("=?") {
@@ -48,23 +39,19 @@ pub fn decode_encoded_words(input: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-/// Writes out a finished run of encoded-words.
 fn flush(out: &mut String, run: &mut Option<(&str, Vec<u8>)>) {
     if let Some((charset, bytes)) = run.take() {
         out.push_str(&decode_charset(bytes, Some(charset)));
     }
 }
 
-/// One decoded encoded-word.
 struct EncodedWord<'a> {
     charset: &'a str,
     bytes: Vec<u8>,
-    /// Bytes of input it spans, from `=?` through `?=`.
     len: usize,
 }
 
 impl<'a> EncodedWord<'a> {
-    /// Parses the encoded-word at the start of `s`, which starts with `=?`.
     fn parse(s: &'a str) -> Option<Self> {
         let inner = s.strip_prefix("=?")?;
         let (charset, after_charset) = inner.split_once('?')?;
@@ -91,7 +78,6 @@ impl<'a> EncodedWord<'a> {
     }
 }
 
-/// The `Q` encoding: `_` is a space and `=XX` a byte. A bad escape stays literal.
 fn decode_q(text: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(text.len());
     let mut rest = text.as_bytes();
@@ -112,7 +98,6 @@ fn decode_q(text: &str) -> Vec<u8> {
     out
 }
 
-/// Two hex digits as a byte; `None` for anything else, including a sign.
 fn hex_byte(pair: &[u8]) -> Option<u8> {
     let [hi, lo] = pair else { return None };
     let digit = |d: u8| {

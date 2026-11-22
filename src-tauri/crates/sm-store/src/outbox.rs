@@ -1,6 +1,3 @@
-//! The outbox: sends in their undo window, at Gmail, or done (SPEC Send and
-//! undo).
-
 use rusqlite::{Row, named_params};
 use sm_domain::{
     AccountId, Addr, DraftId, GmailDraftId, GmailMessageId, GmailThreadId, Millis, OutboxId,
@@ -13,63 +10,37 @@ use crate::db::{Db, json_column_opt};
 use crate::drafts::stamp_thread;
 use crate::tx::{WriteTx, require};
 
-/// An outbox row's state. Read it, change it, and write it back with
-/// `OutboxWrites::update`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outbox {
-    /// Its id, never reused.
     pub id: OutboxId,
-    /// Its account.
     pub account: AccountId,
-    /// The draft it sends.
     pub draft: DraftId,
-    /// The thread it replies on, or once sent, the thread it landed on.
     pub thread: Option<ThreadId>,
-    /// When the undo window ends.
     pub send_after: Millis,
-    /// Waiting, sending, or sent.
     pub state: OutboxState,
-    /// The Gmail draft the send wrote.
     pub gmail_draft_id: Option<GmailDraftId>,
-    /// The sent message's Gmail id.
     pub sent_message_id: Option<GmailMessageId>,
-    /// A held undo, applied when the send resolves.
     pub undo_requested: bool,
-    /// The toast was closed.
     pub toast_closed: bool,
-    /// It missed its time: the toast says `Email delayed`.
     pub delayed: bool,
-    /// Gmail's refusal, if it refused.
     pub error: Option<String>,
 }
 
-/// A stored outbox row, with what the toast and the pending message show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OutboxRecord {
-    /// Its state.
     pub outbox: Outbox,
-    /// The `rev` of its last change.
     pub rev: Rev,
-    /// The draft's `To`; empty when the draft is gone.
     pub to: Vec<Addr>,
-    /// The draft's subject.
     pub subject: String,
-    /// The draft's body as text.
     pub snippet: String,
-    /// The send's undo entry, while it is in the history.
     pub undo_entry: Option<UndoEntryId>,
 }
 
-/// A send to add, waiting out its undo window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewOutbox {
-    /// Its account.
     pub account: AccountId,
-    /// The draft it sends.
     pub draft: DraftId,
-    /// The thread it replies on.
     pub thread: Option<ThreadId>,
-    /// When the undo window ends.
     pub send_after: Millis,
 }
 
@@ -97,7 +68,6 @@ fn outbox_row(r: &Row<'_>) -> rusqlite::Result<OutboxRecord> {
     })
 }
 
-/// Reads of the outbox.
 #[derive(Debug, Clone, Copy)]
 pub struct OutboxReads<'c> {
     db: Db<'c>,
@@ -108,7 +78,6 @@ impl<'c> OutboxReads<'c> {
         Self { db }
     }
 
-    /// One row.
     pub fn get(self, id: OutboxId) -> Result<Option<OutboxRecord>, StoreError> {
         self.db.optional(
             "read an outbox row",
@@ -120,7 +89,6 @@ impl<'c> OutboxReads<'c> {
         )
     }
 
-    /// The account's rows, oldest first: the send toasts.
     pub fn for_account(self, account: AccountId) -> Result<Vec<OutboxRecord>, StoreError> {
         self.db.all(
             "read an account's outbox",
@@ -133,8 +101,6 @@ impl<'c> OutboxReads<'c> {
         )
     }
 
-    /// A thread's rows, less sent ones whose message the thread now holds:
-    /// the conversation shows the message from then on.
     pub fn for_thread(self, thread: ThreadId) -> Result<Vec<OutboxRecord>, StoreError> {
         self.db.all(
             "read a thread's outbox",
@@ -151,7 +117,6 @@ impl<'c> OutboxReads<'c> {
         )
     }
 
-    /// Rows not yet sent, by send time: the outbox runner's work.
     pub fn unsent(self, account: AccountId) -> Result<Vec<OutboxRecord>, StoreError> {
         self.db.all(
             "read the unsent outbox",
@@ -165,9 +130,6 @@ impl<'c> OutboxReads<'c> {
         )
     }
 
-    /// Sent rows whose toast is closed and whose message is stored, or that
-    /// have no message to wait for (no thread, or no message id): done, so
-    /// the row and its draft can go.
     pub fn finished(self, account: AccountId) -> Result<Vec<(OutboxId, DraftId)>, StoreError> {
         self.db.all(
             "read the finished outbox",
@@ -182,7 +144,6 @@ impl<'c> OutboxReads<'c> {
         )
     }
 
-    /// The Gmail thread a send goes to: its thread's, else its draft's.
     pub fn gmail_thread(self, id: OutboxId) -> Result<Option<GmailThreadId>, StoreError> {
         Ok(self
             .db
@@ -199,7 +160,6 @@ impl<'c> OutboxReads<'c> {
             .flatten())
     }
 
-    /// Gmail draft ids that sends hold, so draft sync leaves them alone.
     pub fn gmail_draft_ids(self, account: AccountId) -> Result<Vec<GmailDraftId>, StoreError> {
         self.db.all(
             "read the outbox's Gmail drafts",
@@ -211,7 +171,6 @@ impl<'c> OutboxReads<'c> {
     }
 }
 
-/// Writes to the outbox. Each stamps the row and its thread.
 #[derive(Debug)]
 pub struct OutboxWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
@@ -222,7 +181,6 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
         Self { tx }
     }
 
-    /// Adds a waiting send. Its id is never reused.
     pub fn insert(&mut self, new: NewOutbox) -> Result<OutboxId, StoreError> {
         let rev = self.tx.stamp();
         let id = OutboxId(self.tx.db().insert(
@@ -235,12 +193,10 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
             },
         )?);
         self.changed(new.account, [new.thread, None])?;
-        // The draft is in the outbox now.
         self.tx.record().drafts.insert(new.draft);
         Ok(id)
     }
 
-    /// Writes a row's state back. Its account and draft can't change.
     pub fn update(&mut self, row: &Outbox) -> Result<(), StoreError> {
         let (account, draft, thread) = require(self.placed(row.id)?, "outbox row", &row.id)?;
         if account != row.account || draft != row.draft {
@@ -268,7 +224,6 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
         self.changed(row.account, [thread, row.thread])
     }
 
-    /// Deletes a row. Unknown ids are skipped.
     pub fn delete(&mut self, id: OutboxId) -> Result<(), StoreError> {
         let Some((account, draft, thread)) = self.placed(id)? else {
             return Ok(());
@@ -280,12 +235,10 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
             [id],
         )?;
         self.changed(account, [thread, None])?;
-        // The draft, if kept, is out of the outbox.
         self.tx.record().drafts.insert(draft);
         Ok(())
     }
 
-    /// The account, draft, and thread of a stored row.
     fn placed(
         &self,
         id: OutboxId,

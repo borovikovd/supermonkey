@@ -1,38 +1,20 @@
-//! Turns the ids a list last sent and its ids now into a patch.
-//!
-//! The mirror applies a patch by removing `removed` and every moved key,
-//! then inserting each move, in order, right after its `after` key
-//! (`applyListPatch` in `src/store/mirror-core.ts`). Moves come in new-list
-//! order and `after` is always the key just before in the new list, so it is
-//! already in place when the move is applied.
-
 use std::collections::{HashMap, HashSet};
 
 use sm_ipc::{ListEntry, ListMove};
 
-/// What a list patch carries besides its rows. It lives until the patch is
-/// built: `changed` borrows the new list's keys.
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct ListDiff<'a> {
-    /// Keys no longer listed.
     pub(crate) removed: Vec<String>,
-    /// Keys inserted or moved, each after the key before it.
     pub(crate) moved: Vec<ListMove>,
-    /// Keys in the new list whose rows changed: their rows go with the
-    /// patch, inside the window or not.
     pub(crate) changed: Vec<&'a str>,
 }
 
 impl ListDiff<'_> {
-    /// Whether the patch would change nothing in the mirror.
     pub(crate) const fn is_empty(&self) -> bool {
         self.removed.is_empty() && self.moved.is_empty() && self.changed.is_empty()
     }
 }
 
-/// The patch from `old` to `new`. `changed` says whether a key's row changed.
-/// A key that stays in place but changes split counts as moved, so the patch
-/// carries its new split.
 pub(crate) fn diff<'a>(
     old: &[ListEntry],
     new: &'a [ListEntry],
@@ -48,9 +30,6 @@ pub(crate) fn diff<'a>(
         .filter(|e| !new_at.contains_key(e.key.as_str()))
         .map(|e| e.key.clone())
         .collect();
-    // Kept keys in old order, as positions in the new list. The longest
-    // increasing run of those positions can stay where it is, unless its
-    // split changed.
     let kept: Vec<(usize, &ListEntry)> = old
         .iter()
         .filter_map(|e| new_at.get(e.key.as_str()).map(|&at| (at, e)))
@@ -84,9 +63,7 @@ pub(crate) fn diff<'a>(
     }
 }
 
-/// A longest strictly increasing run of `items` by position. O(n log n).
 fn longest_increasing<'a>(items: &[(usize, &'a ListEntry)]) -> Vec<(usize, &'a ListEntry)> {
-    // `tails[k]`: the index in `items` of the smallest tail of a run of k + 1.
     let mut tails: Vec<usize> = Vec::new();
     let mut prev: Vec<Option<usize>> = vec![None; items.len()];
     for (i, &(at, _)) in items.iter().enumerate() {
@@ -127,8 +104,6 @@ mod tests {
             .collect()
     }
 
-    /// The mirror's `applyListPatch`, written out here rather than shared
-    /// with the diff, so a bug in both can't cancel out.
     fn apply(list: &[ListEntry], d: &ListDiff<'_>) -> Vec<ListEntry> {
         let mut out: Vec<ListEntry> = list
             .iter()
@@ -224,7 +199,6 @@ mod tests {
 
     #[test]
     fn any_reordering_rebuilds_the_new_list() {
-        // Every permutation of four keys, with one dropped and one added.
         let old = entries("a b c d");
         let perms = [
             "d c b a",

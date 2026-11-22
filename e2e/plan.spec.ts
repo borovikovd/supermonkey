@@ -1,8 +1,3 @@
-// Checks COVERAGE.md against SPEC.md and the specs: every case line parses,
-// ids are unique and sit in their file's group, every § is a SPEC heading,
-// every case has a test in its file, every test id is a case, and the lists
-// of what is covered elsewhere name only real cases and files. Runs in Node;
-// no app.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -12,10 +7,8 @@ const DIR = import.meta.dirname;
 const plan = readFileSync(path.join(DIR, "COVERAGE.md"), "utf8").split("\n");
 const spec = readFileSync(path.join(DIR, "..", "SPEC.md"), "utf8").split("\n");
 
-/** SPEC.md's headings, without their `#`s. */
 const headings = new Set(spec.flatMap((l) => /^#{2,4} (.+)$/.exec(l)?.[1]?.trim() ?? []));
 
-/** Lines under the `## title` heading, up to the next `## ` heading. */
 function section(title: string): string[] {
   const start = plan.indexOf(`## ${title}`);
   expect(start, `COVERAGE.md has a "## ${title}" section`).toBeGreaterThan(-1);
@@ -25,7 +18,6 @@ function section(title: string): string[] {
 
 type Case = { id: string; file: string; sections: string[] };
 
-/** `### file.spec.ts (PREFIX)` groups `- ID · Pn · title · §Section, …` lines. */
 function cases(): Case[] {
   const out: Case[] = [];
   let file = "";
@@ -49,7 +41,6 @@ function cases(): Case[] {
   return out;
 }
 
-/** Test ids per spec file, from `test("ID …"` titles (describe blocks excluded). */
 function testIds(): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
   for (const file of readdirSync(DIR).filter((f) => f.endsWith(".spec.ts"))) {

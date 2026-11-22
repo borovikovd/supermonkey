@@ -1,74 +1,28 @@
-//! Why a split rule is refused.
-
-/// Why [`Query::parse_rule`](super::Query::parse_rule) refused a rule. The
-/// message is a short sentence to show under the rule field.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RuleError {
-    /// Nothing but spaces.
     #[error("Enter a query")]
     Empty,
-    /// A `(` that is never closed.
     #[error("Missing )")]
-    MissingParen {
-        /// Byte offset of the `(`.
-        offset: usize,
-    },
-    /// A `)` with no `(`.
+    MissingParen { offset: usize },
     #[error("Unmatched )")]
-    UnmatchedParen {
-        /// Byte offset of the `)`.
-        offset: usize,
-    },
-    /// `()` with nothing to match inside.
+    UnmatchedParen { offset: usize },
     #[error("Empty parentheses")]
-    EmptyParens {
-        /// Byte offset of the `(`.
-        offset: usize,
-    },
-    /// A `"` that is never closed.
+    EmptyParens { offset: usize },
     #[error("Missing closing quote")]
-    MissingQuote {
-        /// Byte offset of the term with the quote.
-        offset: usize,
-    },
-    /// `OR` at the start of a group.
+    MissingQuote { offset: usize },
     #[error("OR needs a term before it")]
-    OrWithoutLeft {
-        /// Byte offset of the `OR`.
-        offset: usize,
-    },
-    /// `OR` at the end of a group.
+    OrWithoutLeft { offset: usize },
     #[error("OR needs a term after it")]
-    OrWithoutRight {
-        /// Byte offset of the `OR`.
-        offset: usize,
-    },
-    /// `AND` at the start or end of a group.
+    OrWithoutRight { offset: usize },
     #[error("AND needs a term on both sides")]
-    AndWithoutBoth {
-        /// Byte offset of the `AND`.
-        offset: usize,
-    },
-    /// `from:` and the like with nothing after the colon.
+    AndWithoutBoth { offset: usize },
     #[error("{operator}: needs a value")]
-    MissingValue {
-        /// Byte offset of the term.
-        offset: usize,
-        /// The operator, lowercased.
-        operator: String,
-    },
-    /// Gmail syntax a rule can't use, such as `has:attachment` or `-foo`.
+    MissingValue { offset: usize, operator: String },
     #[error("{term} isn't supported in split rules")]
-    Unsupported {
-        /// Byte offset of the term.
-        offset: usize,
-        /// The term as typed.
-        term: String,
-    },
+    Unsupported { offset: usize, term: String },
 }
 
 impl RuleError {
-    /// Byte offset in the rule where the problem is.
     #[must_use]
     pub const fn offset(&self) -> usize {
         match self {

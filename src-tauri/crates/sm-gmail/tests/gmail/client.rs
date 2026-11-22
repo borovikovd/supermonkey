@@ -1,6 +1,3 @@
-//! One-click unsubscribe posts only to `https` and follows no redirect (SPEC
-//! Security): a URL taken from mail is untrusted.
-
 use sm_gmail::{Outcome, one_click_unsubscribe};
 
 use crate::common::setup;
@@ -16,15 +13,12 @@ async fn one_click_unsubscribe_posts_only_to_https_or_loopback() {
         refused.outcome(),
         Outcome::Rejected { status: 0, .. }
     ));
-    // Debug builds allow loopback http; the fake answers 404 here, which
-    // shows the POST was sent.
     let sent = one_click_unsubscribe(&http, &format!("{}/unsubscribe", fake.base_url()))
         .await
         .unwrap_err();
     assert_eq!(sent.outcome(), &Outcome::NotFound);
 }
 
-/// A server that answers every connection with `response` and counts them.
 async fn answering(
     response: &'static str,
 ) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
@@ -40,7 +34,6 @@ async fn answering(
             let (mut socket, _) = listener.accept().await.unwrap();
             counted.fetch_add(1, Ordering::SeqCst);
             let mut request = [0u8; 4096];
-            // A client that has hung up is the test's to notice, not this stub's.
             _ = socket.read(&mut request).await;
             _ = socket.write_all(response.as_bytes()).await;
             _ = socket.shutdown().await;

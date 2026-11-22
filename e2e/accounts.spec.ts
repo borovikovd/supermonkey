@@ -1,5 +1,3 @@
-// First run, adding and switching accounts, avatars, removal, Sign in again,
-// and isolation between accounts.
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
@@ -8,7 +6,6 @@ import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A, B, C } from "./seeds.ts";
 
-/** A's Inbox in the `standard` seed, sorted. */
 const A_INBOX = [
   "Alias note",
   "Big sale",
@@ -35,21 +32,17 @@ const A_INBOX = [
   "Your receipt",
 ].toSorted();
 
-/** Senders of B's Inbox rows when B is added after A: b1 to b4, and `collide`. */
 const B_INBOX_SENDERS = ["Bea Blue", "Bo Brown", "Bill Black", "Bree Bell", "Cole Lide"];
 
-/** The labels of a message in Gmail. */
 async function labelsOf(gmail: Control, email: string, id: string): Promise<string[]> {
   const m = (await gmail.gmail(email)).messages.find((x) => x.id === id);
   if (!m) throw new Error(`no message ${id} in ${email}`);
   return m.labels;
 }
 
-/** The unread count on an account's avatar; hidden at zero. */
 const badge = (app: App, email: string): Locator =>
   app.account(email).locator("span", { hasText: /^\d+\+?$/ });
 
-/** Every avatar in the rail, top to bottom, by its title's address. */
 async function avatarOrder(app: App): Promise<string[]> {
   const titles = await app.page
     .getByRole("navigation")
@@ -58,11 +51,6 @@ async function avatarOrder(app: App): Promise<string[]> {
   return titles.map((t) => t.split(" ")[0] ?? "");
 }
 
-/**
- * Opens a conversation, then replies with `r`. Opening first keeps these cases
- * off a separate bug: `r` on the list can start more than one draft
- * (`whenLoaded` in src/compose/start.ts runs once per queued frame).
- */
 async function replyTo(app: App, subject: string): Promise<void> {
   await app.row(subject).click();
   await expect(app.conversationTitle).toHaveText(subject);
@@ -70,7 +58,6 @@ async function replyTo(app: App, subject: string): Promise<void> {
   await app.reply("r");
 }
 
-/** Highlights the row containing `text` with j / k from the current highlight. */
 async function highlight(app: App, text: string): Promise<void> {
   const at = await app.rows.evaluateAll(
     (rows, t) => ({
@@ -85,7 +72,6 @@ async function highlight(app: App, text: string): Promise<void> {
   await expect(app.highlighted).toContainText(text);
 }
 
-/** Runs the palette command `name`. */
 async function command(app: App, name: string): Promise<void> {
   await app.press("Meta+k");
   await expect(app.palette).toBeVisible();
@@ -94,7 +80,6 @@ async function command(app: App, name: string): Promise<void> {
   await app.press("Enter");
 }
 
-/** An account's block in the Settings sheet. */
 function settingsBlock(app: App, email: string): Locator {
   return app
     .sheet("Settings")
@@ -109,7 +94,6 @@ test("ACC-01 first run adds the first account; its token goes to a file only the
   gmail,
 }) => {
   await seeds.none(gmail, app);
-  // The first-run screen: no rail, no list.
   await expect(app.firstRunButton).toBeVisible();
   await expect(app.page.getByRole("navigation")).toHaveCount(0);
   await expect(app.list).toHaveCount(0);
@@ -119,14 +103,12 @@ test("ACC-01 first run adds the first account; its token goes to a file only the
   await expect(app.account(A)).toBeVisible();
   await app.settle();
 
-  // A's Inbox shows the same threads as Gmail's INBOX.
   await expect(app.rows).toHaveCount(A_INBOX.length);
   expect((await app.subjects()).toSorted()).toEqual(A_INBOX);
 
   const stored = await gmail.tokens();
   expect(stored.map((t) => t.account)).toEqual([A]);
   expect(await gmail.tokenFileMode(), "only the user can read the token file").toBe("600");
-  // The consent page opened in the system browser, with a loopback redirect, PKCE, and one scope.
   const { openedUrls } = await gmail.platform();
   expect(openedUrls).toHaveLength(1);
   const auth = new URL(openedUrls[0] ?? "");
@@ -152,12 +134,10 @@ test("ACC-02 add a second account from the palette; switch with Ctrl+1 and Ctrl+
   await expect(app.account(B)).toBeVisible();
   await app.settle();
 
-  // Rail order is the order added. B's initial comes from its sendAs name, Zed Bolt.
   expect(await avatarOrder(app)).toEqual([A, B]);
   await expect(app.account(B)).toHaveText(/^Z/);
   await expect(app.account(A)).toHaveText(/^A/);
   expect((await gmail.tokens()).map((k) => k.account).toSorted()).toEqual([A, B]);
-  // Avatar hues, in the order added.
   const hue = (email: string) =>
     app.account(email).evaluate((el) => {
       const span = el.querySelector("span");
@@ -174,7 +154,6 @@ test("ACC-02 add a second account from the palette; switch with Ctrl+1 and Ctrl+
   await expect(app.rows).toHaveCount(A_INBOX.length);
   expect((await app.subjects()).toSorted()).toEqual(A_INBOX);
 
-  // Out of range: nothing happens.
   await app.press("Control+3");
   await app.settle();
   await expect(app.rows).toHaveCount(A_INBOX.length);
@@ -186,19 +165,16 @@ test("ACC-03 switching closes overlays and returns each account to its own place
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app);
-  // Two more starred threads on A, so Starred has a second row.
   await gmail.modify(A, s.latest("p2").id, ["STARRED"], []);
   await gmail.modify(A, s.latest("p4").id, ["STARRED"], [], { poll: true });
   await app.settle();
 
-  // A: Starred, second row.
   await app.press("g", "s");
   await expect(app.row("Trip ideas")).toHaveCount(1);
   await expect(app.highlighted).toContainText("Person 2");
   await app.press("j");
   await expect(app.highlighted).toContainText("Person 4");
 
-  // B's first visit: Inbox, top row highlighted.
   await app.press("Control+2");
   await expect(app.splitTitles().first()).toBeVisible();
   await expect(app.highlighted).toContainText("Bea Blue");
@@ -207,7 +183,6 @@ test("ACC-03 switching closes overlays and returns each account to its own place
   await app.press("Meta+k");
   await expect(app.palette).toBeVisible();
 
-  // Back to A: the palette closes; A is on Starred, second row.
   await app.press("Control+1");
   await expect(app.palette).toHaveCount(0);
   await expect(app.row("Trip ideas")).toHaveCount(1);
@@ -216,20 +191,17 @@ test("ACC-03 switching closes overlays and returns each account to its own place
   await app.type("venue");
   await expect(app.page.getByPlaceholder("Search")).toHaveValue("venue");
 
-  // Back to B: search closes; B's Inbox list with the thread it had open highlighted.
   await app.press("Control+2");
   await expect(app.page.getByPlaceholder("Search")).toHaveCount(0);
   await expect(app.list).toBeVisible();
   await expect(app.conversationTitle).toHaveCount(0);
   await expect(app.highlighted).toContainText("Bo Brown");
 
-  // A click on A's avatar: A's last view (Starred, SPEC Switching), second row.
   await app.account(A).click();
   await expect(app.page.getByPlaceholder("Search")).toHaveCount(0);
   await expect(app.row("Trip ideas")).toHaveCount(1);
   await expect(app.highlighted).toContainText("Person 4");
 
-  // The palette's Switch account: B's list again.
   await command(app, "Switch account");
   const switcher = app.page.getByRole("dialog", { name: "Switch account" });
   await expect(switcher).toBeVisible();
@@ -251,7 +223,6 @@ test("ACC-04 switching with an open composer works like a second Esc", async ({ 
   };
   const draftsIn = async (email: string) => (await gmail.gmail(email)).drafts;
 
-  // A fresh r on p1, untouched: discarded.
   await replyTo(app, "Person 1");
   await roundTrip();
   await expect(app.list).toBeVisible();
@@ -264,7 +235,6 @@ test("ACC-04 switching with an open composer works like a second Esc", async ({ 
   await app.settle();
   await expect(draftStub).toHaveCount(0);
 
-  // A fresh r on p1 with a typed body: kept in A, not in B.
   await app.reply("r");
   await app.type("Kept across the switch");
   await app.press("Control+2");
@@ -286,7 +256,6 @@ test("ACC-04 switching with an open composer works like a second Esc", async ({ 
   await app.press("g", "d");
   await expect(app.row("Kept across the switch")).toHaveCount(1);
 
-  // c with a typed subject: kept in A's Drafts.
   await app.compose();
   await app.subject.fill("Subject kept");
   await roundTrip();
@@ -294,7 +263,6 @@ test("ACC-04 switching with an open composer works like a second Esc", async ({ 
   await expect(app.rows).toHaveCount(2);
   expect((await draftsIn(A)).map((d) => d.message.headers.subject)).toContain("Subject kept");
 
-  // The resumed draft, unchanged: kept.
   await app.row("Subject kept").click();
   await expect(app.page.getByRole("heading", { name: "New Message" })).toBeVisible();
   await app.settle();
@@ -310,7 +278,6 @@ test("ACC-05 avatar unread counts", async ({ app, gmail }) => {
   await expect(badge(app, A)).toHaveText("9");
   await expect(badge(app, B)).toHaveText("2");
 
-  // Reading b1 and b2 hides B's badge.
   await app.press("Control+2");
   await expect(app.highlighted).toContainText("Bea Blue");
   await app.press("Enter");
@@ -320,7 +287,6 @@ test("ACC-05 avatar unread counts", async ({ app, gmail }) => {
   await app.settle();
   await expect(badge(app, B)).toHaveCount(0);
 
-  // Two unread messages in one new thread count once.
   await app.press("Escape", "Control+1");
   await gmail.deliverMany([
     { account: B, from: "Una Two <una@two.test>", subject: "Two in one", poll: false },
@@ -329,7 +295,6 @@ test("ACC-05 avatar unread counts", async ({ app, gmail }) => {
   await app.settle();
   await expect(badge(app, B)).toHaveText("1");
 
-  // Unread mail outside Inbox does not count.
   await gmail.deliver({
     account: B,
     from: "Out Side <out@side.test>",
@@ -354,7 +319,6 @@ test("ACC-06 accounts off screen keep syncing, notifying, and sending", async ({
   await expect(app.toast("Sending")).toBeVisible();
 
   await gmail.deliver({ account: A, from: "Nia New <nia@new.test>", subject: "While on B" });
-  // In two steps: a single 10 s jump would also fire the Sent toast's own close timer.
   await app.advance(9_999);
   await expect(app.toast("Sending")).toBeVisible();
   await app.advance(1);
@@ -373,7 +337,6 @@ test("ACC-06 accounts off screen keep syncing, notifying, and sending", async ({
   expect(notifications[0]?.body).toContain(A);
   await expect(badge(app, A)).toHaveText("10");
 
-  // An archive made offline on A replays while B is on screen.
   await app.press("Control+1");
   await gmail.offline(true);
   await highlight(app, "Person 1");
@@ -393,7 +356,6 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   const settings = app.sheet("Settings");
   const tokens = Object.fromEntries((await gmail.tokens()).map((k) => [k.account, k.token]));
 
-  // d: Cancel changes nothing.
   await app.press("Meta+,");
   await settingsBlock(app, B).getByRole("button", { name: "Remove account" }).click();
   await settings.getByRole("button", { name: "Cancel" }).click();
@@ -404,7 +366,6 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   expect(await gmail.tokens()).toHaveLength(2);
   expect(await gmail.revocations()).toEqual([]);
 
-  // b: remove A while on screen, with 2 queued actions and 1 waiting send.
   await replyTo(app, "Person 2");
   await app.type("Never to be sent");
   await app.settle();
@@ -426,7 +387,6 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   await expect(confirmA).toContainText(/\b1\b[^.]*send/);
   await settings.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(app.account(A)).toHaveCount(0);
-  // The next account takes its place.
   await app.press("Escape");
   await expect(app.highlighted).toContainText("Bea Blue");
   await gmail.offline(false);
@@ -441,7 +401,6 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   ).toEqual([]);
   expect((await gmail.tokens()).map((k) => k.account)).toEqual([B]);
 
-  // Re-adding A: its Inbox matches Gmail again, and z has nothing to undo.
   await gmail.nextSignIn({ email: A });
   await command(app, "Add account");
   await expect(app.account(A)).toBeVisible();
@@ -456,7 +415,6 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   await expect(app.rows).toHaveCount(A_INBOX.length);
   expect(await gmail.requests("messages.batchModify", { account: A })).toHaveLength(modifies);
 
-  // a: remove B while A is on screen; nothing is queued.
   await app.press("Meta+,");
   await settingsBlock(app, B).getByRole("button", { name: "Remove account" }).click();
   await expect(settings.getByText(/^Remove ben@bolt\.test\?/)).toHaveText("Remove ben@bolt.test?");
@@ -469,7 +427,6 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   await expect(app.rows).toHaveCount(A_INBOX.length);
   await expect(app.account(A)).toBeVisible();
 
-  // c: removing the last account shows the first-run screen.
   await app.press("Meta+,");
   await settingsBlock(app, A).getByRole("button", { name: "Remove account" }).click();
   await settings.getByRole("button", { name: "Remove", exact: true }).click();
@@ -484,7 +441,6 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
   const s = await seeds.standard(gmail, app);
   const errors = (await app.errorToastsShown()).length;
 
-  // Offline, so the archive and the reply are still waiting when Google revokes the grant.
   await gmail.offline(true);
   await expect(app.highlighted).toContainText("Person 1");
   await app.press("e");
@@ -502,7 +458,6 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
   await app.advance(11_000);
   await app.settle();
 
-  // Signed out: the marker and its tooltip, and the panel says so in place of the mail.
   await expect(app.signInMarker(A)).toBeVisible();
   await expect(app.account(A)).toHaveAttribute("title", /Sign in again/);
   await expect(app.signInMarker(B)).toHaveCount(0);
@@ -511,11 +466,9 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
   await expect(app.rows).toHaveCount(0);
   await expect(app.conversationTitle).toHaveCount(0);
   await expect(app.page.getByText("Enter to sign in")).toBeVisible();
-  // Mail keys do nothing there.
   await app.press("j");
   await app.press("c");
   await expect(app.editor).toHaveCount(0);
-  // Nothing reached Gmail, and nothing was rejected.
   expect(await labelsOf(gmail, A, s.latest("p1").id)).toContain("INBOX");
   const sentOf = async () =>
     (await gmail.gmail(A)).messages.filter(
@@ -524,14 +477,12 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
   expect(await sentOf()).toEqual([]);
   await app.expectNoErrorToasts(errors);
 
-  // Settings shows Sign in again on A's block only.
   await app.press("Meta+,");
   const settings = app.sheet("Settings");
   await expect(settings.getByRole("button", { name: "Sign in again" })).toHaveCount(1);
   await expect(settingsBlock(app, A).getByRole("button", { name: "Sign in again" })).toBeVisible();
   await app.press("Escape");
 
-  // B keeps working.
   await app.press("Control+2");
   await expect(app.highlighted).toContainText("Bea Blue");
   await app.press("e");
@@ -539,7 +490,6 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
   expect(await labelsOf(gmail, B, s.latest("b1").id)).not.toContain("INBOX");
   await app.press("Control+1");
 
-  // Enter signs in again; the mail is back, and the queue and the outbox go out, once.
   await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
   await gmail.nextSignIn({ email: A });
   await gmail.invalidGrant(A, false);
@@ -567,7 +517,6 @@ test("ACC-09 a failed sign-in adds nothing", async ({ app, gmail }) => {
   await expect(app.page.getByRole("navigation")).toHaveCount(0);
   expect(await gmail.tokens()).toEqual([]);
 
-  // Abandoned in the browser: the attempt waits, and nothing is added.
   await gmail.nextSignIn({ abandon: true });
   await app.firstRunButton.click();
   await expect(app.page.getByText(/Waiting for Google in your browser/)).toBeVisible();
@@ -575,7 +524,6 @@ test("ACC-09 a failed sign-in adds nothing", async ({ app, gmail }) => {
   await expect(app.page.getByRole("navigation")).toHaveCount(0);
   expect(await gmail.tokens()).toEqual([]);
 
-  // A click while it waits starts over, and that attempt succeeds.
   await gmail.nextSignIn({ email: A });
   await app.firstRunButton.click();
   await expect(app.account(A)).toBeVisible();
@@ -584,8 +532,6 @@ test("ACC-09 a failed sign-in adds nothing", async ({ app, gmail }) => {
 
 test("ACC-10 accounts with the same Gmail thread id stay separate", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
-  // The seed's `collide` reuses p1's thread id, but the fake numbers threads per
-  // mailbox, so on B it joins b1's thread. Make a twin of a thread id A uses and B does not.
   const bThreads = new Set((await gmail.gmail(B)).messages.map((m) => m.threadId));
   const twinOf = ["addr", "replyto", "alias", "p6"].find(
     (key) => !bThreads.has(s.thread(key).threadId),
@@ -630,7 +576,6 @@ test("ACC-11 a task left from before Sign in again does not sign the account out
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  // A body fetch fails and backs off.
   await gmail.fault(
     { api: "threads.get", query: { format: "full" } },
     { kind: "status", status: 500 },
@@ -638,14 +583,12 @@ test("ACC-11 a task left from before Sign in again does not sign the account out
   const from = seeds.PERSONS[0] ?? "";
   await gmail.deliver({ account: A, from, subject: "Backing off", text: "Hi." });
   await app.settle();
-  // Meanwhile the grant is revoked: the next poll signs A out.
   await gmail.invalidGrant(A, true);
   await gmail.expireAccessTokens(A);
   await gmail.poll();
   await app.settle();
   await expect(app.signInMarker(A)).toBeVisible();
 
-  // Signing in again gives a fresh grant; the old one stays dead.
   await app.press("Meta+,");
   await gmail.nextSignIn({ email: A });
   await settingsBlock(app, A).getByRole("button", { name: "Sign in again" }).click();
@@ -654,7 +597,6 @@ test("ACC-11 a task left from before Sign in again does not sign the account out
   await app.press("Escape");
   await gmail.clearFaults();
 
-  // The old fetch's back-off ends: it must not retry on the dead grant.
   await app.advance(60_000);
   await app.settle();
   await expect(app.signInMarker(A)).toHaveCount(0);
@@ -669,7 +611,6 @@ test("ACC-12 re-adding an account while its removal is still revoking keeps the 
 }) => {
   await seeds.standard(gmail, app);
   const old = (await gmail.tokens()).find((k) => k.account === B)?.token;
-  // The removal's revoke is slow to answer.
   const revoke = await gmail.hold("oauth.revoke");
   await app.press("Meta+,");
   const settings = app.sheet("Settings");
@@ -681,10 +622,8 @@ test("ACC-12 re-adding an account while its removal is still revoking keeps the 
     .poll(async () => (await gmail.requests("oauth.revoke")).some((r) => r.held))
     .toBe(true);
 
-  // B is added again before the revoke answers.
   await gmail.nextSignIn({ email: B });
   await command(app, "Add account");
-  // The sign-in gets as far as it can while the revoke is held.
   await app.settle();
   await revoke.release();
   await expect(app.account(B)).toBeVisible();
@@ -694,7 +633,6 @@ test("ACC-12 re-adding an account while its removal is still revoking keeps the 
   const fresh = (await gmail.tokens()).find((k) => k.account === B)?.token;
   expect(fresh, "the new token stays in the token file").toBeDefined();
   expect(fresh).not.toBe(old);
-  // The new grant works: B refreshes its token and syncs.
   await gmail.expireAccessTokens(B);
   await gmail.deliver({
     account: B,
@@ -713,7 +651,6 @@ test("ACC-13 adding an account that is already signed in replays its queue once"
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app);
-  // The archive is on its way to Gmail when the account is added again.
   const modify = await gmail.hold("messages.batchModify");
   await expect(app.highlighted).toContainText("Person 1");
   await app.press("e");
@@ -723,7 +660,6 @@ test("ACC-13 adding an account that is already signed in replays its queue once"
   const lists = (await gmail.requests("threads.list", { account: A })).length;
   await gmail.nextSignIn({ email: A });
   await command(app, "Add account");
-  // The new runtime is running once it lists Inbox again.
   await expect
     .poll(async () => (await gmail.requests("threads.list", { account: A })).length)
     .toBeGreaterThan(lists);
@@ -738,7 +674,6 @@ test("ACC-13 adding an account that is already signed in replays its queue once"
   await expect(app.row("Person 1")).toHaveCount(0);
 });
 
-// Accounts signed in before tokens moved from the Keychain to the token file start with none.
 test("ACC-14 an account with no stored token at launch shows Sign in again", async ({
   app,
   gmail,
@@ -749,11 +684,9 @@ test("ACC-14 an account with no stored token at launch shows Sign in again", asy
   });
   await app.settle();
 
-  // A asks for a sign-in; B, whose token is there, does not.
   await expect(app.signInMarker(A)).toBeVisible();
   await expect(app.account(A)).toHaveAttribute("title", /Sign in again/);
   await expect(app.signInMarker(B)).toHaveCount(0);
-  // The sign-in screen is in place of A's mail.
   await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
   await expect(app.rows).toHaveCount(0);
 
@@ -763,14 +696,12 @@ test("ACC-14 an account with no stored token at launch shows Sign in again", asy
   await expect(app.signInMarker(A)).toHaveCount(0);
   await expect(app.row("Q4 plan")).toBeVisible();
   expect((await gmail.tokens()).map((t) => t.account).toSorted()).toEqual([A, B].toSorted());
-  // A syncs again: an archive reaches Gmail.
   await expect(app.highlighted).toContainText("Person 1");
   await app.press("e");
   await app.settle();
   expect(await labelsOf(gmail, A, s.latest("p1").id)).not.toContain("INBOX");
 });
 
-// With one account, its avatar did nothing on a click, so it looked broken.
 test("ACC-15 clicking the account on screen opens Settings; another account switches", async ({
   app,
   gmail,
@@ -807,12 +738,10 @@ test("ACC-16 a removal waiting on its revoke holds up no other account", async (
 
   await remove(B);
   await expect.poll(held).toBe(1);
-  // A sign-in waits for that revoke, as it must (ACC-12).
   await gmail.nextSignIn({ email: B });
   await command(app, "Add account");
   await app.settle();
 
-  // Another removal and an action on A go ahead while B's revoke is held.
   await remove(C);
   await expect.poll(held).toBe(2);
   const modifies = (await gmail.requests("messages.batchModify")).length;
@@ -837,8 +766,6 @@ test("ACC-17 a first sign-in shows the whole Inbox before reading the account's 
 }) => {
   test.slow();
   const s = await seeds.none(gmail, app, { open: false });
-  // Drafts made in Gmail: two replies on Inbox threads, and new messages.
-  // Reading them all costs more than the quota bucket holds.
   const DRAFTS = 14;
   const replies = ["p4", "plan"].map((key) => ({
     subject: `Re: ${s.thread(key).subject}`,
@@ -859,14 +786,11 @@ test("ACC-17 a first sign-in shows the whole Inbox before reading the account's 
   await gmail.nextSignIn({ email: A });
   await app.firstRunButton.click();
   await expect(app.account(A)).toBeVisible();
-  // The Inbox fills in at the production budget, its split tabs included.
   await expect.poll(() => app.splitHeader(), { timeout: 60_000 }).toBe("Important 16 · Other 7");
-  // Drafts are read behind the Inbox's metadata (SPEC Sync), not ahead of it.
   const drafts = await gmail.requests("drafts.get", { account: A });
   expect(drafts.length).toBeLessThan(DRAFTS / 2);
 });
 
-// The sign-in made a new row for A but started the worker for the removed row's id, so A never synced.
 test("ACC-18 an account removed while its Sign in again waits in the browser comes back and syncs", async ({
   app,
   gmail,
@@ -878,7 +802,6 @@ test("ACC-18 an account removed while its Sign in again waits in the browser com
   await app.settle();
   await expect(app.signInMarker(A)).toBeVisible();
 
-  // Sign in again; the consent page stays open.
   const consent = await gmail.hold("oauth.authorize");
   await gmail.nextSignIn({ email: A });
   await app.press("Meta+,");
@@ -888,9 +811,6 @@ test("ACC-18 an account removed while its Sign in again waits in the browser com
     .poll(async () => (await gmail.requests("oauth.authorize")).some((r) => r.held))
     .toBe(true);
 
-  // A is removed meanwhile, and its revoke is slow to reach Google. The
-  // person finishes the sign-in first: its code is not traded for tokens
-  // until the revoke is done, which would end the new grant with the old.
   const revoke = await gmail.hold("oauth.revoke");
   await settingsBlock(app, A).getByRole("button", { name: "Remove account" }).click();
   await settings.getByRole("button", { name: "Remove", exact: true }).click();
@@ -912,7 +832,6 @@ test("ACC-18 an account removed while its Sign in again waits in the browser com
     "one exchange, and no refresh of a grant the revoke ended",
   ).toBe(exchanges + 1);
 
-  // A is back as a new account, and it syncs.
   expect(await avatarOrder(app)).toEqual([B, A]);
   await expect(app.signInMarker(A)).toHaveCount(0);
   await gmail.deliver({
@@ -936,21 +855,18 @@ test("ACC-19 a reply open when its account signs out stays on screen until it is
   await expect(app.conversationTitle).toHaveText("Person 3");
   await app.reply("r");
   await app.type("Half a reply");
-  // Google revokes the grant; the autosave's upsert finds out.
   await gmail.invalidGrant(A, true);
   await gmail.expireAccessTokens(A);
   await app.advance(1_000);
   await app.settle();
   await expect(app.signInMarker(A)).toBeVisible();
 
-  // The reply stays, with its conversation, and only the composer's keys and hints apply.
   await expect(app.editor).toHaveText("Half a reply");
   await expect(app.conversationTitle).toHaveText("Person 3");
   await expect(app.hintBar).toHaveText(/to Send\s*·\s*Esc to close\s*·\s*⌘K for commands/);
   await app.type(", and the rest");
   await expect(app.editor).toHaveText("Half a reply, and the rest");
 
-  // Closing it shows the sign-in screen, whose Enter signs in again.
   await app.press("Escape", "Escape");
   await expect(app.editor).toHaveCount(0);
   await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
@@ -976,13 +892,11 @@ test("ACC-20 removing the account on screen while its reply is open leaves no co
   await settingsBlock(app, A).getByRole("button", { name: "Remove account" }).click();
   await settings.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(app.account(A)).toHaveCount(0);
-  // Settings stays open, as for any removal (ACC-07).
   await expect(settings).toBeVisible();
   await app.press("Escape");
   await expect(settings).toHaveCount(0);
   await app.settle();
 
-  // B's Inbox, with the list's hints and keys.
   await expect(app.editor).toHaveCount(0);
   await expect(app.hintBar).toHaveText(/E to Mark Done\s*·\s*H to snooze\s*·\s*⌘K for commands/);
   await expect(app.highlighted).toContainText("Bea Blue");
@@ -997,7 +911,6 @@ test("ACC-21 removing the account on screen shows the next account on the rail, 
   await seeds.standard(gmail, app, { connect: ["A", "B", "C"] });
   expect(await avatarOrder(app)).toEqual([A, B, C]);
   const settings = app.sheet("Settings");
-  /** Removes the account on screen from Settings, which stays open. */
   const removeOnScreen = async (email: string) => {
     await app.press("Meta+,");
     await settingsBlock(app, email).getByRole("button", { name: "Remove account" }).click();
@@ -1008,14 +921,12 @@ test("ACC-21 removing the account on screen shows the next account on the rail, 
     await expect(settings).toHaveCount(0);
   };
 
-  // C, last on the rail: B, before it, takes its place.
   await app.press("Control+3");
   await expect(app.row("Cy 1")).toHaveCount(1);
   await removeOnScreen(C);
   await expect(app.row("Bea Blue")).toHaveCount(1);
   await expect(app.row("Person 1")).toHaveCount(0);
 
-  // C again, added last; then B, in the middle: C, after it, takes its place.
   await gmail.nextSignIn({ email: C });
   await command(app, "Add account");
   await expect(app.account(C)).toBeVisible();
@@ -1028,7 +939,6 @@ test("ACC-21 removing the account on screen shows the next account on the rail, 
   await expect(app.row("Person 1")).toHaveCount(0);
 });
 
-/** Google revokes each account's grant and the next poll signs it out. */
 async function signOut(app: App, gmail: Control, ...emails: string[]): Promise<void> {
   await Promise.all(
     emails.map(async (email) => {
@@ -1042,7 +952,6 @@ async function signOut(app: App, gmail: Control, ...emails: string[]): Promise<v
   await Promise.all(emails.map((email) => gmail.invalidGrant(email, false)));
 }
 
-/** Waits until `n` requests to `api` are parked by a hold. */
 async function parked(gmail: Control, api: ApiMethod, n = 1) {
   await expect.poll(async () => (await gmail.requests(api)).filter((r) => r.held).length).toBe(n);
 }
@@ -1063,14 +972,12 @@ test("ACC-22 a sign-in left waiting while the user moves on finishes in the back
   await expect(app.page.getByText(WAITING)).toBeVisible();
   await parked(gmail, "oauth.authorize");
 
-  // The user moves on to B and opens and closes Settings.
   await app.press("Control+2");
   await expect(app.highlighted).toContainText("Bea Blue");
   await app.press("Meta+,");
   await expect(app.sheet("Settings")).toBeVisible();
   await app.press("Escape");
   await expect(app.sheet("Settings")).toHaveCount(0);
-  // Gmail changes meanwhile: new mail, and a thread trashed elsewhere.
   await gmail.deliver({
     account: A,
     from: seeds.PERSONS[0] ?? "",
@@ -1080,7 +987,6 @@ test("ACC-22 a sign-in left waiting while the user moves on finishes in the back
   });
   await gmail.modify(A, s.latest("p1").id, ["TRASH"], ["INBOX"]);
 
-  // The person finishes in the browser: A signs in, and B stays on screen.
   await consent.release();
   await expect(app.signInMarker(A)).toHaveCount(0);
   await app.settle();
@@ -1093,7 +999,6 @@ test("ACC-22 a sign-in left waiting while the user moves on finishes in the back
   await expect(app.page.getByText(WAITING)).toHaveCount(0);
 });
 
-// The cancelled sign-in's "Sign-in cancelled" showed as an error under its button.
 test("ACC-23 starting another sign-in cancels the waiting one, which shows no error", async ({
   app,
   gmail,
@@ -1105,7 +1010,6 @@ test("ACC-23 starting another sign-in cancels the waiting one, which shows no er
   const waiting = app.page.getByText(WAITING);
   const cancelled = app.page.getByText(/cancel/i);
 
-  // A's Sign in again waits in the browser; then B's starts.
   let consent = await gmail.hold("oauth.authorize");
   await gmail.nextSignIn({ email: A });
   await signIn.click();
@@ -1118,19 +1022,16 @@ test("ACC-23 starting another sign-in cancels the waiting one, which shows no er
   await expect(waiting).toBeVisible();
   await parked(gmail, "oauth.authorize", 2);
 
-  // A's was cancelled: its screen neither waits nor shows an error.
   await app.press("Control+1");
   await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
   await expect(waiting).toHaveCount(0);
   await expect(cancelled).toHaveCount(0);
-  // Both browser pages finish: only B's sign-in was still waiting for its answer.
   await consent.release(undefined, { min: 2 });
   await expect(app.signInMarker(B)).toHaveCount(0);
   await app.settle();
   await expect(app.signInMarker(A)).toBeVisible();
   await expect(cancelled).toHaveCount(0);
 
-  // The palette's Add account cancels a waiting Sign in again the same way.
   consent = await gmail.hold("oauth.authorize");
   await gmail.nextSignIn({ email: A });
   await signIn.click();
@@ -1146,7 +1047,6 @@ test("ACC-23 starting another sign-in cancels the waiting one, which shows no er
   await expect(cancelled).toHaveCount(0);
   await app.expectNoErrorToasts(errors);
 
-  // A fresh Sign in again for A works.
   await gmail.nextSignIn({ email: A });
   await signIn.click();
   await expect(app.signInMarker(A)).toHaveCount(0);
@@ -1159,7 +1059,6 @@ test("ACC-24 a sign-in cut off by a lost connection or a quit adds nothing, and 
 }) => {
   await seeds.none(gmail, app);
 
-  // The token exchange finds no connection: the sign-in fails and says so.
   await gmail.hold("oauth.token");
   await gmail.nextSignIn({ email: A });
   await app.firstRunButton.click();
@@ -1176,7 +1075,6 @@ test("ACC-24 a sign-in cut off by a lost connection or a quit adds nothing, and 
   await app.firstRunButton.click();
   await expect(app.account(A)).toBeVisible();
 
-  // A quit while the next sign-in waits in the browser.
   await gmail.nextSignIn({ abandon: true });
   await command(app, "Add account");
   await app.settle();
@@ -1199,7 +1097,6 @@ test("ACC-25 adding an account again while a send, a discard, and an undo are on
   const s = await seeds.standard(gmail, app);
   const errors = (await app.errorToastsShown()).length;
 
-  // A send whose drafts.send is on its way.
   const send = await gmail.hold("drafts.send");
   await replyTo(app, "Person 2");
   await app.type("Sent across a sign-in");
@@ -1210,13 +1107,11 @@ test("ACC-25 adding an account again while a send, a discard, and an undo are on
   await parked(gmail, "drafts.send");
   await app.press("Escape");
 
-  // An archive that landed, for an undo to revert.
   await highlight(app, "Person 4");
   await app.press("e");
   await app.settle();
   expect(await labelsOf(gmail, A, s.latest("p4").id)).not.toContain("INBOX");
 
-  // A discard whose drafts.delete is on its way, and the undo queued behind it.
   const discard = await gmail.hold("drafts.delete");
   await replyTo(app, "Person 3");
   await app.type("Discarded across a sign-in");
@@ -1233,7 +1128,6 @@ test("ACC-25 adding an account again while a send, a discard, and an undo are on
   await app.press("z");
   await expect(app.row("Person 4")).toHaveCount(1);
 
-  // A is added again, as already signed in: a new runtime takes over.
   const lists = (await gmail.requests("threads.list", { account: A })).length;
   await gmail.nextSignIn({ email: A });
   await command(app, "Add account");
@@ -1269,12 +1163,10 @@ test("ACC-26 a conversation and its reply still loading when the account signs o
   await seeds.standard(gmail, app);
   const errors = (await app.errorToastsShown()).length;
   const from = seeds.PERSONS[0] ?? "";
-  // Longer than a snippet, so only the downloaded body ends this way.
   const text = `${"The first lines arrive before the rest. ".repeat(6)}The end of the message.`;
   const draftsOn = async (threadId: string) =>
     (await gmail.gmail(A)).drafts.filter((d) => d.message.threadId === threadId);
 
-  // A signs out while the body downloads and a reply to it is open.
   let body = await gmail.hold({ api: "threads.get", query: { format: "full" } });
   const slow = await gmail.deliver({ account: A, from, subject: "Slow body", text });
   await expect
@@ -1289,20 +1181,17 @@ test("ACC-26 a conversation and its reply still loading when the account signs o
   await gmail.poll();
   await app.settle();
   await expect(app.signInMarker(A)).toBeVisible();
-  // The reply stays on screen with its conversation until it is closed.
   await expect(app.editor).toHaveText("Half a reply");
   await expect(app.conversationTitle).toHaveText("Slow body");
   await app.press("Escape", "Escape");
   await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
   await gmail.release({ id: body.id });
 
-  // After signing in again, the body loads and the reply quotes all of it.
   await gmail.invalidGrant(A, false);
   await gmail.nextSignIn({ email: A });
   await app.press("Enter");
   await expect(app.signInMarker(A)).toHaveCount(0);
   await app.settle();
-  // Back on the conversation it signed out on.
   await expect(app.conversationTitle).toHaveText("Slow body");
   await expect(
     app.conversation.locator("iframe[data-frame]").first().contentFrame().locator("body"),
@@ -1312,7 +1201,6 @@ test("ACC-26 a conversation and its reply still loading when the account signs o
   expect(draft?.message.raw).toContain("The end of the message.");
   await app.press("Escape");
 
-  // A is removed while another body downloads and a reply to it is open.
   body = await gmail.hold({ api: "threads.get", query: { format: "full" } });
   await gmail.deliver({ account: A, from, subject: "Slow again", text });
   await expect

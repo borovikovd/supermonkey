@@ -1,5 +1,3 @@
-//! One user's mailbox: labels, messages grouped into threads, drafts and history.
-
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use base64::Engine;
@@ -8,7 +6,6 @@ use serde_json::{Value, json};
 
 use crate::mime;
 
-/// Gmail's system labels.
 pub(crate) const SYSTEM_LABELS: &[&str] = &[
     "INBOX",
     "SENT",
@@ -70,34 +67,25 @@ pub(crate) struct Mailbox {
     pub email: String,
     pub send_as: Vec<SendAsEntry>,
     pub history_id: u64,
-    /// `history.list` with an older start answers 404.
     pub history_floor: u64,
     pub labels: Vec<Label>,
     pub messages: BTreeMap<String, Msg>,
-    /// Draft id to message id.
     pub drafts: BTreeMap<String, String>,
-    /// `settings.filters`, oldest first.
     pub filters: Vec<Filter>,
     history: Vec<HistoryRecord>,
     next_id: u64,
     clock_ms: u64,
 }
 
-/// A Gmail filter: mail from `from` gets `add` and loses `remove`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Filter {
-    /// Gmail's id of the filter.
     pub id: String,
-    /// An address, or `@domain`.
     pub from: String,
-    /// The label ids matching mail gets.
     pub add: Vec<String>,
-    /// The label ids matching mail loses.
     pub remove: Vec<String>,
 }
 
 impl Filter {
-    /// The filter as `settings.filters` serves it.
     #[must_use]
     pub fn json(&self) -> Value {
         json!({
@@ -107,8 +95,6 @@ impl Filter {
         })
     }
 
-    /// Gmail's `from:` match, as far as the app uses it: a whole address, or
-    /// `@domain` matching every address there.
     fn matches(&self, sender: &str) -> bool {
         let sender = sender.to_ascii_lowercase();
         let from = self.from.to_ascii_lowercase();
@@ -120,7 +106,6 @@ impl Filter {
     }
 }
 
-/// Returned when something is not there.
 #[derive(Debug)]
 pub(crate) struct Missing;
 
@@ -141,7 +126,6 @@ impl Label {
 }
 
 impl Msg {
-    /// The message in the shape `format` asks for.
     pub(crate) fn json(&self, format: &str, metadata_headers: &[&str]) -> Value {
         let mut out = json!({
             "id": self.id,
@@ -209,7 +193,6 @@ impl Mailbox {
         }
     }
 
-    /// Labels for incoming mail from `sender` after the mailbox's filters.
     pub(crate) fn filtered_labels(&self, sender: &str, mut labels: Vec<String>) -> Vec<String> {
         for f in self.filters.iter().filter(|f| f.matches(sender)) {
             labels.retain(|l| !f.remove.contains(l));
@@ -222,13 +205,11 @@ impl Mailbox {
         labels
     }
 
-    /// A fresh Gmail-looking hex id, never one another mailbox hands out.
     pub(crate) fn new_id(&mut self) -> String {
         self.next_id += 1;
         format!("{:x}", self.next_id)
     }
 
-    /// A strictly increasing `internalDate`, a minute apart.
     pub(crate) const fn next_date(&mut self) -> u64 {
         self.clock_ms += 60_000;
         self.clock_ms
@@ -238,7 +219,6 @@ impl Mailbox {
         self.labels.iter().find(|l| l.id == id)
     }
 
-    /// Creates a user label, or `None` if the name is taken.
     pub(crate) fn create_label(&mut self, name: &str) -> Option<String> {
         if self
             .labels
@@ -273,8 +253,6 @@ impl Mailbox {
         });
     }
 
-    /// Stores RFC 822 bytes as a new message and records `messagesAdded`.
-    /// Without a thread id the message starts its own thread.
     pub(crate) fn insert_raw(
         &mut self,
         raw: Vec<u8>,
@@ -306,7 +284,6 @@ impl Mailbox {
         id
     }
 
-    /// Removes a message and records `messagesDeleted`. Returns the message.
     pub(crate) fn delete(&mut self, id: &str) -> Result<Msg, Missing> {
         if !self.messages.contains_key(id) {
             return Err(Missing);
@@ -315,8 +292,6 @@ impl Mailbox {
         self.messages.remove(id).ok_or(Missing)
     }
 
-    /// Stores `raw` as a new draft's message (`DRAFT`), in `thread_id` or a new thread.
-    /// Returns the draft id.
     pub(crate) fn create_draft(
         &mut self,
         raw: Vec<u8>,
@@ -329,8 +304,6 @@ impl Mailbox {
         draft_id
     }
 
-    /// Replaces a draft's message, keeping its thread unless `thread_id` names another.
-    /// Returns the new message id.
     pub(crate) fn update_draft(
         &mut self,
         draft_id: &str,
@@ -349,8 +322,6 @@ impl Mailbox {
         Ok(message_id)
     }
 
-    /// Sends a draft: the draft and its message go, and a `SENT` message with `raw` (or the
-    /// draft's own bytes) joins the thread. Returns the sent message id.
     pub(crate) fn send_draft(
         &mut self,
         draft_id: &str,
@@ -363,13 +334,11 @@ impl Mailbox {
         Ok(self.insert_raw(raw, Some(gone.thread_id), vec!["SENT".into()], date))
     }
 
-    /// Deletes a draft and its message.
     pub(crate) fn delete_draft(&mut self, draft_id: &str) -> Result<(), Missing> {
         let message = self.drafts.remove(draft_id).ok_or(Missing)?;
         self.delete(&message).map(drop)
     }
 
-    /// Adds and removes labels, recording only real changes.
     pub(crate) fn modify<L: AsRef<str>>(
         &mut self,
         id: &str,
@@ -442,7 +411,6 @@ impl Mailbox {
         json!({ "sendAs": entries })
     }
 
-    /// A thread's messages, oldest first.
     pub(crate) fn thread_messages(&self, thread_id: &str) -> Vec<&Msg> {
         let mut messages: Vec<&Msg> = self
             .messages
@@ -468,8 +436,6 @@ impl Mailbox {
         Some(out)
     }
 
-    /// Thread ids matching `q` and `label_ids`, newest first. `now_ms` is what
-    /// `newer_than:` and `older_than:` count back from.
     pub(crate) fn search_threads(
         &self,
         q: &str,
@@ -509,7 +475,6 @@ impl Mailbox {
         thread_summary_json(thread_id, &self.thread_messages(thread_id))
     }
 
-    /// History records after `start`, or `Missing` if `start` is older than the floor.
     pub(crate) fn history_after(&self, start: u64) -> Result<Vec<&HistoryRecord>, Missing> {
         if start < self.history_floor {
             return Err(Missing);
@@ -518,7 +483,6 @@ impl Mailbox {
     }
 }
 
-/// `id`, `snippet` and `historyId` of a thread whose messages are `messages`, oldest first.
 fn thread_summary_json(thread_id: &str, messages: &[&Msg]) -> Value {
     json!({
         "id": thread_id,
@@ -548,9 +512,6 @@ impl HistoryRecord {
     }
 }
 
-/// A tiny subset of Gmail search: `in:`/`label:`/`is:` label filters, `from:`, `to:`,
-/// `subject:`, `newer_than:`/`older_than:` (`d`, `m`, `y`), `-` negation, and bare words
-/// matched against subject, from and snippet. Other operators are ignored.
 struct Query {
     terms: Vec<(bool, Term)>,
     wants_spam_trash: bool,
@@ -560,13 +521,10 @@ enum Term {
     Label(String),
     Header(&'static str, String),
     Word(String),
-    /// `internalDate` at or after this.
     Since(u64),
-    /// `internalDate` before this.
     Before(u64),
 }
 
-/// `7d`, `2m`, `1y` in milliseconds (a month is 30 days, a year 365).
 fn age_ms(text: &str) -> Option<u64> {
     let unit = text.chars().last()?;
     let n: u64 = text[..text.len() - unit.len_utf8()].parse().ok()?;
@@ -647,7 +605,6 @@ impl Query {
     }
 }
 
-/// A query label name to a label id. Unknown names give an id nothing carries.
 fn resolve_label(name: &str, mailbox: &Mailbox) -> String {
     let system = match name {
         "drafts" | "draft" => Some("DRAFT"),
@@ -666,8 +623,6 @@ fn resolve_label(name: &str, mailbox: &Mailbox) -> String {
         .map_or_else(|| format!("unknown:{name}"), |l| l.id.clone())
 }
 
-/// Where a mailbox's ids start. Real Gmail ids are unique across mailboxes,
-/// so each fake mailbox counts in its own range, fixed by its address (FNV-1a).
 fn id_base(email: &str) -> u64 {
     let hash = email.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
         (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)

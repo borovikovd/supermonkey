@@ -1,11 +1,7 @@
-// Links inside the open conversation's messages (SPEC Reading, Keyboard):
-// `Tab` cycles them, `Enter` opens the one reached, `Esc` clears it.
-
 import { useChrome } from "../store/chrome";
 
 const frames = () => Array.from(document.querySelectorAll<HTMLIFrameElement>("iframe[data-frame]"));
 
-/** Every link in the expanded messages, in order, with its message id. */
 function allLinks(): [number, HTMLAnchorElement][] {
   const links: [number, HTMLAnchorElement][] = [];
   for (const f of frames()) {
@@ -19,7 +15,6 @@ function allLinks(): [number, HTMLAnchorElement][] {
   return links;
 }
 
-/** Moves to the next link, or the previous one going back. */
 export function cycleLink(back: boolean) {
   const c = useChrome.getState();
   const links = allLinks();
@@ -42,7 +37,6 @@ export function cycleLink(back: boolean) {
   c.setLink([id, at - first]);
 }
 
-/** Opens the link reached with Tab, as a click would. */
 export function openLink() {
   const link = useChrome.getState().link;
   if (!link) return;
@@ -50,7 +44,6 @@ export function openLink() {
   f?.contentDocument?.querySelectorAll<HTMLAnchorElement>("a[href]")[link[1]]?.click();
 }
 
-/** Clears the link reached with Tab. */
 export function clearLink() {
   for (const f of frames()) {
     f.contentDocument

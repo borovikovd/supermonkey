@@ -1,20 +1,3 @@
-//! Supermonkey's mail model and the rules over it (ARCHITECTURE.md, section 3).
-//!
-//! Pure: nothing here does I/O, runs async, reads the clock, or knows SQL. The
-//! `sqlite` and `ts` features only add conversions for the newtypes and enums.
-//!
-//! - Model: ids and [`Millis`], [`Addr`], [`LabelSet`] and [`SystemLabel`],
-//!   [`MessageFacts`], [`Thread`] and its [`ThreadDigest`], [`Identity`].
-//! - Views: [`View::lists`], [`View::gmail_listing`].
-//! - Actions: [`LabelDelta`], [`plan_modify`], [`MessageChange`],
-//!   [`ThreadChange`], [`snooze_after`].
-//! - Compose: [`addressing`], [`DraftContent`], [`gmail_draft_kind`],
-//!   [`gmail_draft_aim`].
-//! - Split Inbox: [`Router`], [`STARTER_SPLITS`].
-//! - The query language: [`query`].
-//! - Snooze times: [`snooze`].
-//! - Autocomplete: [`contacts`].
-
 mod addr;
 mod addressing;
 pub mod contacts;

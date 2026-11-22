@@ -1,11 +1,3 @@
-// Chrome state: account on screen, each account's last view and highlight,
-// selected ids, palette, search, and the open conversation's view state (SPEC
-// UI state). The composer on screen is compose state (src/compose/session.ts).
-//
-// Only named actions change it. They are plain state changes; the rules that
-// go with a screen change (close the composer first, mark read on open) are in
-// src/navigation.ts, which is what the rest of the UI calls.
-
 import { create } from "zustand";
 
 import type { View } from "../ipc/types";
@@ -22,7 +14,6 @@ export type PaletteMode = (
   | { kind: "goLabel" }
   | { kind: "snooze" }
   | { kind: "unsubscribe" }
-  /** `of`: the conversation to block the sender of, named by a toast about it. */
   | { kind: "block"; of?: { account: number; thread: number } }
   | { kind: "spam" }
   | { kind: "blocked" }
@@ -30,7 +21,6 @@ export type PaletteMode = (
   | { kind: "addToSplit"; preset?: "important" | "other" }
   | { kind: "from" }
 ) & {
-  /** The threads a palette opened from another palette is bound to: the first one's. */
   threads?: number[];
 };
 
@@ -49,30 +39,20 @@ type ChromeState = {
   palette: PaletteMode | null;
   sheet: Sheet;
   search: { query: string; focus: "field" | "results" } | null;
-  /** The view and highlight search replaced, restored when it closes. */
   beforeSearch: { where: Where; highlight: string | null } | null;
-  /** Selected message in the open conversation. */
   selectedMessage: number | null;
-  /** Expanded messages in the open conversation (set when it opens). */
   expanded: number[];
-  /** Folded runs opened by the user. */
   unfolded: number[];
   expandAll: boolean;
-  /** A link reached with Tab inside a message, as [messageId, linkIndex]. */
   link: [number, number] | null;
-  /** A split shown by `g i` / `g o` even though it is empty and hidden. */
   forcedSplit: number | null;
 };
 
 type ChromeActions = {
   current: () => AccountChrome | null;
-  /** The account on screen; switching closes the palette and search and clears the selection. */
   setAccount: (account: number | null) => void;
-  /** A view or a search on the list: no highlight yet, no selection. */
   showList: (where: Where) => void;
-  /** The list of the current view, leaving an open conversation. */
   leaveConversation: () => void;
-  /** Opens a conversation from the list row `row`, which takes the highlight. */
   showConversation: (thread: number, trashMode: boolean, row: string) => void;
   setHighlight: (key: string | null) => void;
   setSelection: (keys: string[]) => void;
@@ -81,7 +61,6 @@ type ChromeActions = {
   openSearch: () => void;
   setSearchQuery: (query: string) => void;
   setSearchFocus: (focus: "field" | "results") => void;
-  /** Closes search and restores the view and highlight it replaced. */
   closeSearch: () => void;
 
   openPalette: (mode: PaletteMode) => void;
@@ -89,10 +68,8 @@ type ChromeActions = {
   openSheet: (sheet: Exclude<Sheet, null>) => void;
   closeSheet: () => void;
 
-  /** The open conversation's first load: what is expanded and selected. */
   layoutConversation: (expanded: number[], selected: number | null) => void;
   selectMessage: (id: number | null, unfold?: number[]) => void;
-  /** Expands or collapses a message; a click also selects it. */
   toggleExpanded: (id: number, select: boolean) => void;
   unfold: (ids: number[]) => void;
   toggleExpandAll: () => void;
@@ -107,14 +84,12 @@ export const defaultChrome = (): AccountChrome => ({
 
 const INBOX: Where = { kind: "view", view: { kind: "inbox" } };
 
-/** Adds `x` if missing, else removes it. */
 function toggled<T>(xs: readonly T[], x: T): T[] {
   const set = new Set(xs);
   if (!set.delete(x)) set.add(x);
   return [...set];
 }
 
-/** Fresh view state for a conversation that opens. */
 const conversationReset = {
   selectedMessage: null,
   expanded: [],
@@ -124,7 +99,6 @@ const conversationReset = {
 };
 
 export const useChrome = create<ChromeState & ChromeActions>((set, get) => {
-  /** Patches the account on screen's chrome; a new `where` drops a forced split. */
   const patchCurrent = (patch: Partial<AccountChrome>, more: Partial<ChromeState> = {}) =>
     set((s) => {
       if (s.account === null) return more;
@@ -151,7 +125,6 @@ export const useChrome = create<ChromeState & ChromeActions>((set, get) => {
     setAccount: (account) =>
       set((s) => {
         let perAccount = s.perAccount;
-        // A switch that closes search leaves the old account on the view search replaced.
         const left = s.account === null ? undefined : perAccount[s.account];
         if (s.account !== null && left && s.search && s.beforeSearch) {
           perAccount = { ...perAccount, [s.account]: { ...left, ...s.beforeSearch } };
@@ -204,7 +177,6 @@ export const useChrome = create<ChromeState & ChromeActions>((set, get) => {
           { search: { query, focus: "field" } },
         );
       } else {
-        // An emptied field shows the view search replaced.
         patchCurrent(beforeSearch ?? {}, { search: { query, focus: "field" } });
       }
     },

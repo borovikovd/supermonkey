@@ -1,5 +1,3 @@
-//! Accounts: who each one is, its rail place, and its sync state.
-
 use rusqlite::{Row, named_params};
 use sm_domain::{
     AccountId, HistoryId, IMPORTANT_POSITION, Identity, Millis, OTHER_POSITION, SendAsAddress,
@@ -11,43 +9,28 @@ use crate::routing;
 use crate::tx::WriteTx;
 use crate::{StoreError, Table};
 
-/// One account row, with its inbox unread count.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountRecord {
-    /// Its id.
     pub id: AccountId,
-    /// The sign-in address.
     pub email: String,
-    /// The display name, from the primary `sendAs` entry.
     pub display_name: String,
-    /// Gmail's `sendAs` addresses.
     pub send_as: Vec<SendAsAddress>,
-    /// Place on the rail.
     pub position: i32,
-    /// The avatar hue slot; [`AccountRecord::hue`] is its color.
     pub hue_slot: i64,
-    /// Gmail's history cursor.
     pub history_id: Option<HistoryId>,
-    /// When sync last stored a cursor.
     pub last_sync: Option<Millis>,
-    /// The stored sync state.
     pub sync_status: SyncStatus,
-    /// The refresh token was refused: the account shows Sign in again.
     pub needs_signin: bool,
-    /// The connect sync has stored its cursor.
     pub connected: bool,
-    /// Unread Inbox threads that are not snoozed.
     pub inbox_unread: u32,
 }
 
 impl AccountRecord {
-    /// Who the account is, for "mail from me" and From defaults.
     #[must_use]
     pub fn into_identity(self) -> Identity {
         Identity::new(self.email, self.display_name, self.send_as)
     }
 
-    /// The sync state the rail shows: Sign in again overrides the rest.
     #[must_use]
     pub const fn status(&self) -> SyncStatus {
         if self.needs_signin {
@@ -57,7 +40,6 @@ impl AccountRecord {
         }
     }
 
-    /// The avatar color.
     #[must_use]
     pub fn hue(&self) -> &'static str {
         avatar_hue(self.hue_slot)
@@ -81,7 +63,6 @@ fn account_row(r: &Row<'_>) -> rusqlite::Result<AccountRecord> {
     })
 }
 
-/// Reads of accounts.
 #[derive(Debug, Clone, Copy)]
 pub struct AccountReads<'c> {
     db: Db<'c>,
@@ -92,7 +73,6 @@ impl<'c> AccountReads<'c> {
         Self { db }
     }
 
-    /// Every account, in rail order.
     pub fn all(self) -> Result<Vec<AccountRecord>, StoreError> {
         self.db.all(
             "read the accounts",
@@ -107,7 +87,6 @@ impl<'c> AccountReads<'c> {
         )
     }
 
-    /// One account.
     pub fn get(self, id: AccountId) -> Result<Option<AccountRecord>, StoreError> {
         self.db.optional(
             "read an account",
@@ -122,7 +101,6 @@ impl<'c> AccountReads<'c> {
         )
     }
 
-    /// The account signed in as `email`, ignoring case.
     pub fn by_email(self, email: &str) -> Result<Option<AccountId>, StoreError> {
         self.db.optional(
             "find an account by address",
@@ -132,7 +110,6 @@ impl<'c> AccountReads<'c> {
         )
     }
 
-    /// Who the account is.
     pub fn identity(self, id: AccountId) -> Result<Option<Identity>, StoreError> {
         self.db.optional(
             "read an account's addresses",
@@ -149,7 +126,6 @@ impl<'c> AccountReads<'c> {
     }
 }
 
-/// Writes to accounts.
 #[derive(Debug)]
 pub struct AccountWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
@@ -160,9 +136,6 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
         Self { tx }
     }
 
-    /// Adds an account signed in as `email`, last on the rail with the next
-    /// hue, with the seeded system labels and the Important and Other
-    /// splits (SPEC Split Inbox). Its id is never reused.
     pub fn create(&mut self, email: &str, display_name: &str) -> Result<AccountId, StoreError> {
         let db = self.tx.db();
         let (position, hue): (i32, i64) = db.one(
@@ -203,12 +176,8 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
         Ok(id)
     }
 
-    /// Removes the account and every row of it: mail, drafts, outbox, ops,
-    /// undo history, notices, splits, contacts, and settings. The commit
-    /// records every table of the account, but not the ids of its rows.
     pub fn remove(&mut self, id: AccountId) -> Result<(), StoreError> {
         let db = self.tx.db();
-        // The index is contentless, so it can't cascade; drop its rows first.
         db.execute(
             "drop a removed account's search index",
             "DELETE FROM messages_fts WHERE rowid IN (SELECT id FROM messages WHERE account_id = ?1)",
@@ -231,9 +200,6 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
         Ok(())
     }
 
-    /// Stores the display name and `sendAs` list from Gmail. A change of
-    /// addresses re-routes the Inbox, since "from me" decides which message
-    /// rules read.
     pub fn set_profile(
         &mut self,
         id: AccountId,
@@ -254,7 +220,6 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
         Ok(())
     }
 
-    /// Stores Gmail's history cursor and when it was read.
     pub fn set_history(
         &mut self,
         id: AccountId,
@@ -270,7 +235,6 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
         Ok(())
     }
 
-    /// Marks the connect sync done: its cursor is stored.
     pub fn set_connected(&mut self, id: AccountId) -> Result<(), StoreError> {
         self.tx.db().execute(
             "mark an account connected",
@@ -281,7 +245,6 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
         Ok(())
     }
 
-    /// Stores the sync state; false, and no write, when it is already that.
     pub fn set_sync_status(
         &mut self,
         id: AccountId,
@@ -298,8 +261,6 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
         Ok(changed)
     }
 
-    /// Sets or clears Sign in again. Clearing it also resets the sync state
-    /// to idle.
     pub fn set_needs_signin(&mut self, id: AccountId, needs: bool) -> Result<(), StoreError> {
         self.tx.db().execute(
             "store an account's sign-in state",

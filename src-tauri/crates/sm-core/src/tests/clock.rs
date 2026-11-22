@@ -1,7 +1,3 @@
-//! App time and activity, ported from the old `clock.rs` tests: tasks are
-//! busy until they park, kicks and fired timers carry their own activity,
-//! and the manual clock fires each due timer once.
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -14,7 +10,6 @@ fn busy(activity: &Activity, label: &str) -> usize {
     activity.snapshot().get(label).copied().unwrap_or(0)
 }
 
-/// Yields until `done`, failing instead of hanging when it never happens.
 async fn until(what: &str, done: impl Fn() -> bool) {
     for _ in 0..1000 {
         if done() {
@@ -45,7 +40,6 @@ async fn a_task_is_busy_until_it_parks_and_again_once_kicked() {
     })
     .await;
     kick.kick();
-    // Busy from the kick until the task has resumed and finished.
     assert!(busy(&activity, "test-kick") + busy(&activity, "kick") >= 1);
     assert_eq!(rx.recv().await, Some(1), "busy again once resumed");
     group.stop().await;
@@ -145,8 +139,6 @@ async fn stopping_a_group_waits_for_the_tasks_of_the_groups_inside_it() {
     let inner = root.child().child();
     let (started, running) = std::sync::mpsc::channel();
     let (release, released) = std::sync::mpsc::channel::<()>();
-    // Mid-step when the stop comes, as a task is between two awaits: the
-    // cancel can only drop it once this step returns.
     inner.spawn("mid-step", async move {
         started.send(()).unwrap();
         released.recv().unwrap();

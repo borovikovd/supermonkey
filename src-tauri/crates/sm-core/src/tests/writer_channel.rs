@@ -1,12 +1,3 @@
-//! Writer and channel properties (SPEC Testing), ported from the old
-//! `tests/writer_channel.rs`: random sequences of UI actions, mail changes,
-//! sync results, subscribes, and closes. After every channel message, a list
-//! built from its first load plus patches equals a fresh read of that list
-//! at that `rev`.
-//!
-//! `Modify` and `Undo` are the real UI actions, so the property covers
-//! lists changed by the user's own actions as the core makes them.
-
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -31,12 +22,7 @@ enum Op {
     Unsubscribe(usize),
     Modify(ModifyKind, Vec<usize>),
     Undo,
-    /// A sync result: another client adds or removes a label on a thread's
-    /// latest message. `INBOX` moves it in and out of views; a category
-    /// moves it between the Important and Other splits.
     Remote(usize, &'static str, bool),
-    /// A sync result: a thread's latest message becomes the newest of all,
-    /// so the thread moves up past the threads it followed.
     Bump(usize),
 }
 
@@ -79,7 +65,6 @@ fn op() -> impl Strategy<Value = Op> {
     ]
 }
 
-/// The labels and snooze change of a mail action kind, as the UI sends it.
 fn delta(kind: ModifyKind) -> (LabelDelta, Option<SnoozeEdit>) {
     let labels = |ids: &[&str]| ids.iter().copied().collect::<LabelSet>();
     match kind {
@@ -103,17 +88,12 @@ fn delta(kind: ModifyKind) -> (LabelDelta, Option<SnoozeEdit>) {
     }
 }
 
-/// The mirror's side: lists rebuilt from first loads and patches.
 #[derive(Default)]
 struct Rebuilt {
     lists: HashMap<SubId, Vec<ListEntry>>,
     failures: Vec<String>,
 }
 
-/// Applies a patch as the UI mirror does (`applyListPatch` in
-/// `src/store/mirror-core.ts`), written out here rather than borrowed from
-/// the core, so a bug shared by the core's diff and its own apply can't
-/// cancel out.
 fn apply(list: &[ListEntry], removed: &[String], moved: &[ListMove]) -> Vec<ListEntry> {
     let mut out: Vec<ListEntry> = list
         .iter()
@@ -139,8 +119,6 @@ fn apply(list: &[ListEntry], removed: &[String], moved: &[ListMove]) -> Vec<List
     out
 }
 
-/// A view's list as a fresh first load would have it, read straight from
-/// the store.
 fn fresh(pool: &ReadPool, account: AccountId, view: &View) -> Vec<ListEntry> {
     pool.with(|r| r.threads().list(account, view))
         .unwrap()
@@ -152,7 +130,6 @@ fn fresh(pool: &ReadPool, account: AccountId, view: &View) -> Vec<ListEntry> {
         .collect()
 }
 
-/// Every open list that differs from a fresh first load.
 fn stale_lists(
     pool: &ReadPool,
     account: AccountId,
@@ -168,7 +145,6 @@ fn stale_lists(
         .collect()
 }
 
-/// The message a thread's latest one becomes when it is redated to `date`.
 fn redated(m: &sm_store::MessageRecord, date: i64) -> NewMessage {
     NewMessage {
         gmail_id: m.gmail_id.clone(),
@@ -191,8 +167,6 @@ fn redated(m: &sm_store::MessageRecord, date: i64) -> NewMessage {
     }
 }
 
-/// Replays `ops` and returns the lists rebuilt from patches, by
-/// subscription id (`s1`, `s2`, … in subscribe order).
 #[expect(
     clippy::too_many_lines,
     reason = "the property harness: set up, replay ops, check"
@@ -235,7 +209,6 @@ async fn run(ops: Vec<Op>) -> Result<HashMap<SubId, Vec<ListEntry>>, TestCaseErr
                         st.lists.insert(sub.clone(), next);
                     }
                 }
-                // Every open list against a fresh first load at this rev.
                 let stale = stale_lists(&pool, account, &st.lists, &views.lock());
                 for s in stale {
                     st.failures.push(format!("rev {}: {s} differs", msg.rev));
@@ -245,7 +218,6 @@ async fn run(ops: Vec<Op>) -> Result<HashMap<SubId, Vec<ListEntry>>, TestCaseErr
             .unwrap();
     }
     let writer = h.app.writer();
-    // The undo entries made so far, newest last: each is its action's number.
     let mut undo: Vec<UndoEntryId> = Vec::new();
     let mut jobs: Vec<Pending<(), StoreError>> = Vec::new();
     let mut n = h.app.actions().last_received().0;
@@ -267,7 +239,6 @@ async fn run(ops: Vec<Op>) -> Result<HashMap<SubId, Vec<ListEntry>>, TestCaseErr
                 if slots.contains_key(&slot) {
                     continue;
                 }
-                // Like the UI, never reuse a subscription id.
                 seq += 1;
                 let sub = SubId(format!("s{seq}"));
                 slots.insert(slot, sub.clone());
@@ -279,7 +250,6 @@ async fn run(ops: Vec<Op>) -> Result<HashMap<SubId, Vec<ListEntry>>, TestCaseErr
             }
             Op::Unsubscribe(slot) => {
                 if let Some(sub) = slots.remove(&slot) {
-                    // The mirror drops a closed subscription; stop checking it.
                     views.lock().remove(&sub);
                     rebuilt.lock().lists.remove(&sub);
                     submit(Action::Unsubscribe { sub });
@@ -335,14 +305,12 @@ async fn run(ops: Vec<Op>) -> Result<HashMap<SubId, Vec<ListEntry>>, TestCaseErr
             }
         }
     }
-    // A background job runs after everything queued before it.
     h.app.actions().drained().await.unwrap();
     for job in jobs {
         job.await.unwrap();
     }
     let st = rebuilt.lock();
     prop_assert!(st.failures.is_empty(), "{:?}", st.failures);
-    // A change whose patch never came shows only here, after the last message.
     let stale = stale_lists(&pool, account, &st.lists, &views.lock());
     prop_assert!(stale.is_empty(), "after the last message: {stale:?}");
     Ok(st.lists.clone())
@@ -368,9 +336,6 @@ fn sub(name: &str) -> SubId {
     SubId(name.to_owned())
 }
 
-/// The property holds trivially if changes never reach the lists. The
-/// fixture puts its first 25 threads in Inbox; Done on all 40 empties it,
-/// and undo brings the 25 back, all through patches to the open list.
 #[test]
 fn done_and_undo_reach_an_open_inbox_through_patches() {
     let all: Vec<usize> = (0..40).collect();
@@ -391,10 +356,6 @@ fn done_and_undo_reach_an_open_inbox_through_patches() {
     assert_eq!(undone[&sub("s1")].len(), 25);
 }
 
-/// Alone in Inbox, a thread that moves from Important to Other keeps its
-/// place, so the patch must carry the new split without any reordering.
-/// (Thread 3 has one message, from someone else, so the category lands on
-/// the message routing reads.)
 #[test]
 fn a_section_change_in_place_reaches_the_mirror() {
     let others: Vec<usize> = (0..40).filter(|&i| i != 3).collect();
@@ -414,9 +375,6 @@ fn a_section_change_in_place_reaches_the_mirror() {
     assert_ne!(before[&sub("s1")][0].split, after[&sub("s1")][0].split);
 }
 
-/// Shrunk cases proptest found against the old core
-/// (`writer_channel.proptest-regressions`), kept as plain tests: the
-/// strategy changed, so the stored seeds no longer replay them.
 #[test]
 fn a_closed_list_then_another_view_rebuilds() {
     block_on(run(vec![
@@ -437,7 +395,6 @@ fn a_snooze_after_a_closed_list_rebuilds() {
     .unwrap();
 }
 
-/// Holds the writer busy until the returned sender sends.
 fn hold(h: &Harness) -> (std::sync::mpsc::SyncSender<()>, Pending<(), StoreError>) {
     let (started_tx, started) = std::sync::mpsc::sync_channel(0);
     let (release, release_rx) = std::sync::mpsc::sync_channel::<()>(0);
@@ -450,15 +407,10 @@ fn hold(h: &Harness) -> (std::sync::mpsc::SyncSender<()>, Pending<(), StoreError
     (release, held)
 }
 
-/// A reloaded page continues action numbers from the last one Rust has
-/// received, not the last one committed: actions queued behind a slow job
-/// would otherwise share numbers with the new page's reset and first
-/// subscribe, and the writer would drop the new page's ones.
 #[tokio::test]
 async fn launch_numbers_continue_after_actions_still_queued() {
     let h = Harness::start().await;
     let last = h.app.actions().last_received().0;
-    // A long job holds the writer while the old page's actions arrive.
     let (release, held) = hold(&h);
     let old = sub("old");
     h.app.actions().submit(vec![
@@ -492,10 +444,6 @@ async fn launch_numbers_continue_after_actions_still_queued() {
     assert_eq!(launch.last_action, ActionNo(last + 2));
 }
 
-/// A commit that fails must not leave the subscriptions believing its
-/// messages went out: a subscription whose first load was lost gets one
-/// with the next commit, instead of waiting for it forever. And `ack`
-/// still moves past the failed batch, so the mirror drops its actions.
 #[tokio::test]
 async fn a_first_load_lost_to_a_failed_commit_is_sent_again() {
     let mut h = Harness::start().await;
@@ -536,9 +484,6 @@ async fn a_first_load_lost_to_a_failed_commit_is_sent_again() {
     assert_eq!(firsts, [sub("app")], "one first load, after the failure");
 }
 
-/// A batch whose commit fails keeps the subscriptions it opened, so the
-/// work they asked for must go out too. A search whose Gmail listing was
-/// dropped with the failed commit would say it is searching forever.
 #[tokio::test]
 async fn a_search_opened_in_a_failed_batch_still_settles() {
     let mut h = Harness::start().await;
@@ -559,7 +504,6 @@ async fn a_search_opened_in_a_failed_batch_still_settles() {
         },
     }])
     .await;
-    // The account has no worker, so its listing settles at once, empty.
     let settled = || {
         h.messages.lock().iter().flat_map(|m| &m.updates).any(|u| {
             matches!(u, SubUpdate::List { sub: s, searching: false, .. } if *s == sub("search"))
@@ -568,9 +512,6 @@ async fn a_search_opened_in_a_failed_batch_still_settles() {
     eventually("the search stops searching", settled).await;
 }
 
-/// Two reads of the labels answer out of order. The newer one's store rolls
-/// back: its answer was never stored, so the older one's, stored next, must
-/// not be dropped as stale.
 #[tokio::test]
 async fn a_read_stored_in_a_job_that_rolled_back_is_not_the_newest() {
     let h = Harness::start().await;
@@ -597,7 +538,6 @@ async fn a_read_stored_in_a_job_that_rolled_back_is_not_the_newest() {
         .await
         .unwrap();
     assert!(stored, "the older read's answer is the newest stored");
-    // A later job that rolls back leaves the committed store alone.
     let failed = h
         .app
         .writer()
@@ -619,9 +559,6 @@ async fn a_read_stored_in_a_job_that_rolled_back_is_not_the_newest() {
     assert!(!stored, "the older read is stored already");
 }
 
-/// A commit whose updates can't be sent (the sink panicked) still releases
-/// its effects and lets the core go idle: `settle()` would wait forever
-/// otherwise, and the effects would leave with some later commit.
 #[tokio::test]
 async fn a_panic_after_a_commit_still_releases_its_work() {
     let mut h = Harness::start().await;
@@ -636,15 +573,11 @@ async fn a_panic_after_a_commit_still_releases_its_work() {
         .connect(Box::new(|_| panic!("the page's channel is gone")))
         .await
         .unwrap();
-    // A commit with a patch to send, and an effect (the badge).
     h.write(move |tx| tx.accounts().set_needs_signin(account, true))
         .await;
     eventually("the core goes idle", || h.activity.is_idle()).await;
 }
 
-/// A batch whose commit failed is rejected by a later job that moves `ack`
-/// past it. A batch queued behind the failed one commits first, with higher
-/// numbers: `ack` must not then go back to the failed batch's last number.
 #[tokio::test]
 async fn ack_never_moves_back_after_a_failed_batch() {
     let h = Harness::start().await;
@@ -669,7 +602,6 @@ async fn ack_never_moves_back_after_a_failed_batch() {
             })
             .collect()
     };
-    // The second batch is queued before the first one's failure is seen.
     h.app.actions().submit(batch(start + 1));
     h.app.actions().submit(batch(start + 3));
     eventually("the failed batch is rejected", || h.activity.is_idle()).await;
@@ -681,9 +613,6 @@ async fn ack_never_moves_back_after_a_failed_batch() {
         "ack went back: {acks:?}"
     );
     assert_eq!(acks.last(), Some(&(start + 4)));
-    // The failed batch's actions are refused, and the page hears so no later
-    // than the message whose `ack` first covers them: otherwise it would
-    // take them for applied.
     let covering = messages
         .iter()
         .position(|m| m.ack.0 > start)

@@ -1,34 +1,23 @@
-//! The picker's free-text field: `fri 9am`, `in 2 hours`, `dec 24`, ...
-
 use chrono::{
     DateTime, Datelike, Days, NaiveDate, NaiveTime, TimeDelta, TimeZone, Timelike, Weekday,
 };
 
 use super::options::{LATER_TODAY, MORNING, at_hour, resolve_local};
 
-/// What to do when the parsed time is not in the future.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Roll {
-    /// The text named an exact moment; a past one is invalid.
     Never,
-    /// Only a time was typed: take it tomorrow.
     Day,
-    /// A weekday was typed and it is today: take next week's.
     Week,
-    /// A month and day without a year: take next year's.
     Year,
 }
 
-/// The span after `in`.
 #[derive(Debug, Clone, Copy)]
 enum Span {
-    /// Minutes or hours: an exact offset from now.
     Minutes(i64),
-    /// Days or weeks: a later date at the current time of day.
     Days(u64),
 }
 
-/// What the text has set so far. Setting a date or a time twice is an error.
 #[derive(Debug, Clone, Copy, Default)]
 struct Parsed {
     date: Option<NaiveDate>,
@@ -45,23 +34,6 @@ impl Parsed {
     }
 }
 
-/// Parses the picker's date-and-time text relative to `now`. `None` unless
-/// the text is understood completely and names a future instant.
-///
-/// Understood, ignoring case, in any order, with `at`, `on`, `next`, `this`,
-/// and commas ignored:
-/// - durations: `in 2 hours`, `in 30m`, `in an hour`, `in 3 days`, `in 2 weeks`
-///   (minutes and hours are exact; days and weeks keep the time of day)
-/// - days: `today`, `tomorrow` (`tmrw`, `tmr`, `tom`), weekday names (`fri`,
-///   `friday`), meaning the next such day, or today if that time is still ahead
-/// - dates: `dec 24`, `24 dec`, `december 24th 2026`, `2026-12-01`; without a
-///   year, this year's date, or next year's once it has passed
-/// - times: `9am`, `9 am`, `9:30pm`, `14:00`, `9` (24-hour), `noon`,
-///   `morning` (08:00), `afternoon` (13:00), `evening` (18:00)
-///
-/// A date without a time means 08:00. A time without a date means today, or
-/// tomorrow once it has passed. Numeric dates like `12/24` are refused,
-/// because day/month order is ambiguous.
 pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: &DateTime<Tz>) -> Option<DateTime<Tz>> {
     let lower = text.to_lowercase().replace(',', " ");
     let toks: Vec<&str> = lower.split_whitespace().collect();
@@ -133,9 +105,6 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: &DateTime<Tz>) -> Option
     resolve(now, parsed, default_time, roll)
 }
 
-/// `in 30m` or `in 2 hours`: exactly that long after `now`. `None` when the
-/// text also set a date or a time, or more than `at` and `on` follows in
-/// `rest`.
 fn after_minutes<Tz: TimeZone>(
     now: &DateTime<Tz>,
     minutes: i64,
@@ -150,7 +119,6 @@ fn after_minutes<Tz: TimeZone>(
         .checked_add_signed(TimeDelta::try_minutes(minutes)?)
 }
 
-/// How many days ahead `today` or `tomorrow` (in any spelling) is.
 fn relative_day(t: &str) -> Option<u64> {
     match t {
         "today" => Some(0),
@@ -159,8 +127,6 @@ fn relative_day(t: &str) -> Option<u64> {
     }
 }
 
-/// The next instant after `now` that the parsed date and time name, rolling
-/// forward by a day, week, or year when that moment has passed.
 fn resolve<Tz: TimeZone>(
     now: &DateTime<Tz>,
     parsed: Parsed,
@@ -188,7 +154,6 @@ fn resolve<Tz: TimeZone>(
     (at > *now).then_some(at)
 }
 
-/// `2 hours`, `2h`, `2hours`, `an hour`, `a day`: the span and the tokens used.
 fn parse_span(toks: &[&str]) -> Option<(Span, usize)> {
     let first = *toks.first()?;
     let (amount, unit, used) = if first == "a" || first == "an" {
@@ -218,13 +183,10 @@ fn parse_span(toks: &[&str]) -> Option<(Span, usize)> {
     Some((span, used))
 }
 
-/// `dec 24 [2026]` or `24 dec [2026]` at the start of `toks`: the date, the
-/// tokens used, and whether it rolls to next year (no year given).
 fn parse_month_day(toks: &[&str], today: NaiveDate) -> Option<(NaiveDate, usize, bool)> {
     let first = *toks.first()?;
     let second = toks.get(1).copied();
     let (m, d) = match (month(first), day_number(first), second) {
-        // Not `dec 9 am`: a bare hour after a month is ambiguous.
         (Some(m), _, Some(n)) if !toks.get(2).copied().is_some_and(is_meridiem) => {
             (m, day_number(n)?)
         }
@@ -241,7 +203,6 @@ fn is_meridiem(t: &str) -> bool {
     matches!(t, "am" | "pm" | "a.m." | "p.m.")
 }
 
-/// `9`, `9am`, `9:30pm`, `14:00`, or `9` with a separate `am` or `pm` token.
 fn parse_time(token: &str, meridiem: Option<&str>) -> Option<NaiveTime> {
     let (body, pm) = match meridiem {
         Some(m) => (token, Some(m.starts_with('p'))),
@@ -327,7 +288,6 @@ fn month(t: &str) -> Option<u32> {
     })
 }
 
-/// `24`, `24th`, `1st`, `2nd`, `3rd`.
 fn day_number(t: &str) -> Option<u32> {
     let digits = ["st", "nd", "rd", "th"]
         .iter()
@@ -362,7 +322,6 @@ mod tests {
     use super::*;
     use crate::snooze::options::tests::ny;
 
-    /// Monday 2026-11-02 10:00 New York.
     fn now() -> DateTime<Tz> {
         ny(2026, 11, 2, 10, 0)
     }
@@ -411,7 +370,6 @@ mod tests {
         assert_eq!(parse_at("friday"), Some(ny(2026, 11, 6, 8, 0)));
         assert_eq!(parse_at("next Fri, 9am"), Some(ny(2026, 11, 6, 9, 0)));
         assert_eq!(parse_at("sun"), Some(ny(2026, 11, 8, 8, 0)));
-        // Today is Monday: later today counts, a past time rolls a week.
         assert_eq!(parse_at("mon 5pm"), Some(ny(2026, 11, 2, 17, 0)));
         assert_eq!(parse_at("mon"), Some(ny(2026, 11, 9, 8, 0)));
         assert_eq!(parse_at("9am fri"), Some(ny(2026, 11, 6, 9, 0)));
@@ -484,14 +442,11 @@ mod tests {
 
     #[test]
     fn text_across_dst() {
-        // Saturday before spring forward: "in 24 hours" is exact, so 11:00 EDT;
-        // "in 1 day" keeps the wall time.
         let sat = ny(2026, 3, 7, 10, 0);
         let exact = parse_snooze_text("in 24 hours", &sat).unwrap();
         assert_eq!(exact.naive_local().to_string(), "2026-03-08 11:00:00");
         let calendar = parse_snooze_text("in 1 day", &sat).unwrap();
         assert_eq!(calendar.naive_local().to_string(), "2026-03-08 10:00:00");
-        // 2:30am on the spring-forward day does not exist: first instant after the gap.
         let gap = parse_snooze_text("tomorrow 2:30am", &sat).unwrap();
         assert_eq!(gap.naive_local().to_string(), "2026-03-08 03:00:00");
     }

@@ -16,16 +16,12 @@ import {
 type MirrorStore = MirrorState & {
   receive: (msg: ChannelMessage) => void;
   pend: (p: Pending) => void;
-  /** Forgets pending actions Rust will never apply: they were never delivered. */
   dropPending: (ns: number[]) => void;
   addSub: (id: string, sub: Sub) => void;
-  /** Closes a subscription and drops its rows unless something else holds them. */
   dropSub: (id: string) => void;
-  /** Rows fetched outside the pushed window; kept unless ours are newer. */
   putRows: (rows: ListRow[]) => void;
 };
 
-/** Rows the selection holds, kept until it clears (SPEC UI state → Actions). */
 const selected = () => new Set(useChrome.getState().selection);
 
 export const useMirror = create<MirrorStore>((set) => ({

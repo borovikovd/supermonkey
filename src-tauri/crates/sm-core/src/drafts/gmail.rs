@@ -1,7 +1,3 @@
-//! What Gmail's copy of a draft changes here (SPEC Drafts, Gmail errors):
-//! the ids an upsert returns, a Gmail draft read back, a draft deleted on
-//! Gmail, and the copies the `X-Supermonkey-Draft` header identifies.
-
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -18,27 +14,18 @@ use crate::effects::Effect;
 use crate::workers::{ReadMessage, store_draft_message};
 use crate::writer::WriterState;
 
-/// The toast for a draft open in a composer whose Gmail draft went.
 const GONE_ELSEWHERE: &str = "Draft was sent or deleted elsewhere";
 
-/// A Gmail draft as `drafts.get` (`format=full`) gave it, parsed and
-/// sanitized off the writer thread.
 #[derive(Debug, Clone)]
 pub(crate) struct GmailDraft {
-    /// Gmail's draft id.
     pub(crate) id: GmailDraftId,
-    /// Its Gmail thread.
     pub(crate) thread: GmailThreadId,
-    /// Its message, with its body and attachments.
     pub(crate) message: ReadMessage,
-    /// The HTML above the `gmail_quote` element: the editor's.
     pub(crate) editor_html: String,
-    /// The `gmail_quote` element onward: the quote block.
     pub(crate) quote_html: Option<String>,
 }
 
 impl GmailDraft {
-    /// Its Gmail ids, taken: the rest of it goes.
     fn into_ids(self) -> GmailIds {
         GmailIds {
             draft: self.id,
@@ -48,31 +35,20 @@ impl GmailDraft {
     }
 }
 
-/// What a draft reconcile knows and since when (SPEC Drafts). Gmail's
-/// answers are only as new as the request: a local draft that changed
-/// after the first request, or is being written to Gmail, is left for the
-/// next reconcile.
 #[derive(Debug, Clone)]
 pub(crate) struct Reconcile {
-    /// The account whose drafts are reconciled.
     pub(crate) account: AccountId,
-    /// The account's Gmail draft ids, as `drafts.list` gave them.
     pub(crate) live: Arc<HashSet<GmailDraftId>>,
-    /// The last `rev` committed before the first request.
     pub(crate) started: Rev,
-    /// The account's draft writes.
     pub(crate) writing: Arc<DraftsWriting>,
 }
 
 impl Reconcile {
-    /// Whether the local draft changed or is being written since the start.
     fn moved(&self, draft: &DraftId, rev: Rev) -> bool {
         self.writing.is_busy(draft) || rev > self.started
     }
 }
 
-/// Stores the Gmail ids a write returned on its draft. Returns false when
-/// the draft is gone, and the ids with it.
 pub(crate) fn store_ids(
     tx: &mut WriteTx<'_>,
     local: &DraftId,
@@ -87,7 +63,6 @@ pub(crate) fn store_ids(
     Ok(true)
 }
 
-/// Queues the delete of a Gmail draft no local draft owns, once.
 pub(crate) fn delete_gmail_draft(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -111,12 +86,6 @@ pub(crate) fn delete_gmail_draft(
     Ok(())
 }
 
-/// Drafts whose Gmail draft `drafts.list` no longer has (sent from a phone,
-/// say) are deleted, unless a composer has one open or its upsert is
-/// queued: then it keeps its text and loses its Gmail ids, so its next
-/// upsert creates one with the edit Gmail has not seen; an open one's
-/// composer gets a notice. A draft that changed since the list was read is
-/// not gone.
 pub(crate) fn drop_gone(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -156,9 +125,6 @@ pub(crate) fn drop_gone(
     Ok(())
 }
 
-/// A Gmail change to a draft open in a composer is not read over the text
-/// being edited: it is read when the composer closes. Returns whether the
-/// draft is open.
 pub(crate) fn defer_if_open(
     tx: &mut WriteTx<'_>,
     state: &WriterState,
@@ -176,12 +142,6 @@ pub(crate) fn defer_if_open(
     Ok(true)
 }
 
-/// Creates or updates the local draft for a Gmail draft (SPEC Drafts, Reply
-/// composer). One this app wrote is found by its Gmail id, or else by its
-/// `X-Supermonkey-Draft` header: then it is the local draft, whose text is
-/// kept and gets the Gmail ids, unless that draft already has a live Gmail
-/// draft and this is an extra copy, which is deleted. A draft new to the
-/// app gets its kind and target once, from its thread's stored messages.
 pub(crate) fn apply_gmail_draft(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -196,8 +156,6 @@ pub(crate) fn apply_gmail_draft(
     }
     let header = gmail.message.message.sm_draft.as_ref();
     let existing = local_for(reads, account, &gmail.id, header)?;
-    // A copy of a draft discarded or sent this run, read before its delete
-    // landed or missed by it: deleted, never brought back.
     if existing.is_none()
         && let Some(local) = header
         && state.is_draft_gone(account, local)
@@ -220,12 +178,9 @@ pub(crate) fn apply_gmail_draft(
                 lifecycle::written(&mut adopted, gmail.into_ids());
                 return tx.drafts().put(&adopted);
             }
-            // An edit Gmail has not confirmed (its upsert waits to run or to
-            // retry) wins over what Gmail has: the upsert writes it over it.
             if tx.read().ops().upserts_draft(&local.id)? {
                 return Ok(());
             }
-            // Opened since the list was read: read once its composer closes.
             if defer_if_open(tx, state, &local.id)? {
                 return Ok(());
             }
@@ -247,8 +202,6 @@ pub(crate) fn apply_gmail_draft(
         record.draft
     } else {
         let draft = new_gmail_draft(reads, account, &gmail, thread)?;
-        // Its id may be one whose files went before (its account removed,
-        // then added back): it takes files again.
         state.effect(Effect::DraftBack(draft.id.clone()));
         draft
     };
@@ -256,9 +209,6 @@ pub(crate) fn apply_gmail_draft(
     tx.drafts().put(&draft)
 }
 
-/// Replaces the draft's content with what Gmail has: its Gmail ids, its
-/// mailboxes, subject, and text, and `attachments`, on `thread` unless it is
-/// a new message.
 fn take_gmail_content(
     draft: &mut Draft,
     gmail: GmailDraft,
@@ -291,33 +241,24 @@ fn take_gmail_content(
     draft.updated_at = message.date;
 }
 
-/// Whether a Gmail draft is not read at all, because something already
-/// queued or in flight settles it: its delete, the delete of its draft's
-/// copies, or a write of the draft it names.
 fn is_settled_elsewhere(
     reads: Reads<'_>,
     gmail: &GmailDraft,
     reconcile: &Reconcile,
 ) -> Result<bool, StoreError> {
     let account = reconcile.account;
-    // Discarded here, and its delete has not reached Gmail yet.
     if reads.ops().deletes_gmail_draft(account, &gmail.id)? {
         return Ok(true);
     }
     let header = gmail.message.message.sm_draft.as_ref();
-    // A copy of a draft discarded while its create had no answer: the queued
-    // delete removes it from Gmail.
     if let Some(local) = header
         && reads.ops().deletes_copies_of(account, local)?
     {
         return Ok(true);
     }
-    // A write of the draft it names is in flight: its answer settles it.
     Ok(header.is_some_and(|d| reconcile.writing.is_busy(d)))
 }
 
-/// The local draft of a Gmail draft: by its Gmail id, else by the local id
-/// its header names, in the same account.
 fn local_for(
     reads: Reads<'_>,
     account: AccountId,
@@ -336,8 +277,6 @@ fn local_for(
         .filter(|r| r.draft.account == account))
 }
 
-/// A draft for a Gmail draft the app has no local draft for: its kind, and
-/// the message it is aimed at, from its thread's messages.
 fn new_gmail_draft(
     reads: Reads<'_>,
     account: AccountId,
@@ -355,7 +294,6 @@ fn new_gmail_draft(
         None => None,
     };
     let aim = gmail_draft_aim(&facts, by_reply, message.date);
-    // A header naming a draft of another account is not this app's draft.
     let id = match &message.sm_draft {
         Some(id) if reads.drafts().get(id)?.is_none() => id.clone(),
         _ => DraftId::from(format!("g-{}", gmail.id)),

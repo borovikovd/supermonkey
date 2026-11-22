@@ -1,6 +1,3 @@
-//! Text forms of the small enums, for storage: `as_str`, `FromStr`, and with
-//! the `sqlite` feature `ToSql` and `FromSql` as that text.
-
 use std::fmt;
 use std::str::FromStr;
 
@@ -9,20 +6,16 @@ use crate::{
     UndoKind,
 };
 
-/// Stored text that names no value of the enum it was read as.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("unknown {kind} {value:?}")]
 pub struct UnknownKind {
-    /// The enum's name.
     pub kind: &'static str,
-    /// The text read.
     pub value: String,
 }
 
 macro_rules! text_enum {
     ($($ty:ident { $($variant:ident => $text:literal),+ $(,)? })*) => {$(
         impl $ty {
-            /// The value's stored text.
             pub const fn as_str(self) -> &'static str {
                 match self {
                     $(Self::$variant => $text,)+
@@ -106,7 +99,6 @@ text_enum! {
 }
 
 impl ModifyKind {
-    /// What the undo toast and history call the action.
     #[must_use]
     pub const fn undo_label(self) -> &'static str {
         match self {

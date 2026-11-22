@@ -1,5 +1,3 @@
-//! The app state and account summaries (SPEC UI state, Subscriptions).
-
 use sm_domain::{AVATAR_HUES, AccountId, SettingKey, SyncStatus};
 use sm_ipc::{
     AccountInfo, AccountSummary, AppState, GlobalSettings, LabelInfo, Notice, PinInfo, SendAs,
@@ -9,18 +7,11 @@ use sm_store::{AccountRecord, Reads, StoreError, Table};
 
 use super::outbox_row;
 
-/// What [`app_state`] reads, of every account: the rail's account rows and
-/// their unread Inbox counts (from the threads), each account's mute, and
-/// the global settings ([`AccountId::NONE`]).
 pub(crate) const APP_READS: &[Table] = &[Table::Account, Table::Threads, Table::Settings];
 
-/// What [`account_summary`] reads, of its own account. Keep it in step with
-/// the summary's fields: a table left out leaves the mirror stale.
 pub(crate) const SUMMARY_READS: &[Table] = &[
     Table::Account,
-    // The unread Inbox count.
     Table::Threads,
-    // The mute.
     Table::Settings,
     Table::Labels,
     Table::Splits,
@@ -28,19 +19,15 @@ pub(crate) const SUMMARY_READS: &[Table] = &[
     Table::Outbox,
     Table::Undo,
     Table::Notices,
-    // The queued op count.
     Table::Ops,
 ];
 
-/// What [`badge_count`] reads, of every account.
 pub(crate) const BADGE_READS: &[Table] = &[Table::Account, Table::Threads, Table::Settings];
 
-/// Whether the account's notifications are muted.
 fn is_muted(reads: Reads<'_>, account: AccountId) -> Result<bool, StoreError> {
     reads.settings().is_on(account, SettingKey::Muted)
 }
 
-/// An account as the rail shows it.
 fn account_info(record: AccountRecord, muted: bool) -> AccountInfo {
     let hue = record.hue().to_owned();
     let sync_status = record.status();
@@ -67,7 +54,6 @@ fn account_info(record: AccountRecord, muted: bool) -> AccountInfo {
     }
 }
 
-/// The rail, the global settings, and whether Gmail is reachable.
 pub(crate) fn app_state(reads: Reads<'_>, online: bool) -> Result<AppState, StoreError> {
     let accounts = reads
         .accounts()
@@ -88,7 +74,6 @@ pub(crate) fn app_state(reads: Reads<'_>, online: bool) -> Result<AppState, Stor
     })
 }
 
-/// An account's summary, or `None` when the account does not exist.
 pub(crate) fn account_summary(
     reads: Reads<'_>,
     account: AccountId,
@@ -149,7 +134,6 @@ pub(crate) fn account_summary(
     }))
 }
 
-/// The account's undo history, as the page lists it.
 fn undo_entries(reads: Reads<'_>, account: AccountId) -> Result<Vec<UndoEntryInfo>, StoreError> {
     let entries = reads.undo().entries(account)?;
     Ok(entries
@@ -164,7 +148,6 @@ fn undo_entries(reads: Reads<'_>, account: AccountId) -> Result<Vec<UndoEntryInf
         .collect())
 }
 
-/// The account's notices, as the page shows them.
 fn notices(reads: Reads<'_>, account: AccountId) -> Result<Vec<Notice>, StoreError> {
     let notices = reads.notices().for_account(account)?;
     Ok(notices
@@ -179,8 +162,6 @@ fn notices(reads: Reads<'_>, account: AccountId) -> Result<Vec<Notice>, StoreErr
         .collect())
 }
 
-/// The first load of a summary for an account that does not exist (yet):
-/// patches start once it does.
 pub(crate) fn empty_summary(account: AccountId) -> AccountSummary {
     AccountSummary {
         account: AccountInfo {
@@ -205,8 +186,6 @@ pub(crate) fn empty_summary(account: AccountId) -> AccountSummary {
     }
 }
 
-/// The Dock badge (SPEC Notifications): unread Inbox threads across the
-/// accounts that are not muted.
 pub(crate) fn badge_count(reads: Reads<'_>) -> Result<u32, StoreError> {
     let mut count = 0u32;
     for record in reads.accounts().all()? {

@@ -1,6 +1,3 @@
-// What is on screen, read from the chrome store and the mirror outside React:
-// the current list, its rows, and the open conversation's data.
-
 import { subIdFor } from "../ipc/bridge";
 import type { ConversationData, SubKey, View } from "../ipc/types";
 import { useChrome, type Where } from "./chrome";
@@ -24,7 +21,6 @@ export function currentView(): View | null {
   return where?.kind === "view" ? where.view : null;
 }
 
-/** The list on screen with pending actions applied, once it is subscribed. */
 export function currentListView(): ListView | null {
   const key = currentListKey();
   const id = key ? subIdFor(key) : undefined;
@@ -35,7 +31,6 @@ export function visibleIds(): string[] {
   return currentListView()?.ids.map((e) => e.key) ?? [];
 }
 
-/** Whether the list on screen has had its first load, so its rows are the truth. */
 export function currentListLoaded(): boolean {
   const key = currentListKey();
   const id = key ? subIdFor(key) : undefined;
@@ -43,11 +38,6 @@ export function currentListLoaded(): boolean {
   return sub?.type === "list" && sub.loaded;
 }
 
-/**
- * Whether a conversation opened from the list on screen lists its messages in
- * trash and spam: from Trash or Spam, or from a search that looks there
- * (SPEC Reading).
- */
 export function listShowsTrash(): boolean {
   const where = useChrome.getState().current()?.where;
   if (where?.kind === "view") return where.view.kind === "trash" || where.view.kind === "spam";
@@ -61,7 +51,6 @@ export function rowOf(key: string) {
   return (currentListView()?.rows ?? useMirror.getState().rows)[key];
 }
 
-/** A conversation's data: the open subscription's, else a prefetched one's. */
 export function conversationData(
   s: MirrorState,
   thread: number,
@@ -82,14 +71,12 @@ export function conversationData(
   return prefetched;
 }
 
-/** The open conversation's data, once loaded. */
 export function openConversationData(): ConversationData | null {
   const screen = useChrome.getState().current()?.screen;
   if (screen?.kind !== "conversation") return null;
   return conversationData(useMirror.getState(), screen.thread, screen.trashMode);
 }
 
-/** The enabled split of this kind in the account on screen. */
 export function splitIdOf(kind: "important" | "other"): number | null {
   const { account } = useChrome.getState();
   if (account === null) return null;

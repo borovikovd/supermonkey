@@ -1,6 +1,3 @@
-// Snooze (SPEC §Snooze): the picker, snoozing, the wake
-// triggers, the clearing rules, the history echo, and undo. The clock starts
-// on Monday 2026-11-02 10:00 in New York.
 import type { App } from "./app.ts";
 import type { Control } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
@@ -10,7 +7,6 @@ import { A, B, dates } from "./seeds.ts";
 const TUE_8AM = "Nov 3";
 const FRI_9AM = "Nov 6";
 
-/** Runs `step` on each item, one after another. */
 async function inOrder<T>(items: readonly T[], step: (item: T) => Promise<void>): Promise<void> {
   await items.reduce((prev, item) => prev.then(() => step(item)), Promise.resolve());
 }
@@ -19,7 +15,6 @@ function picker(app: App) {
   return app.page.getByRole("dialog", { name: /^Snooze until/ });
 }
 
-/** Presses `h` and picks a named option ("Later today", …). */
 async function snoozeNamed(app: App, name: string): Promise<void> {
   await app.press("h");
   await expect(picker(app)).toBeVisible();
@@ -29,7 +24,6 @@ async function snoozeNamed(app: App, name: string): Promise<void> {
   await expect(picker(app)).toHaveCount(0);
 }
 
-/** Presses `h`, types a date-and-time phrase (SPEC Snooze), and picks what it offers. */
 async function snoozeTyped(app: App, phrase: string, offered: string): Promise<void> {
   await app.press("h");
   await expect(picker(app)).toBeVisible();
@@ -39,7 +33,6 @@ async function snoozeTyped(app: App, phrase: string, offered: string): Promise<v
   await expect(picker(app)).toHaveCount(0);
 }
 
-/** Moves the list highlight onto the row with this subject with `j` / `k`. */
 async function highlightRow(app: App, subject: string): Promise<void> {
   await expect(app.row(subject)).toHaveCount(1);
   const subjects = await app.subjects();
@@ -61,7 +54,6 @@ const RAIL: Partial<Record<ViewKey, string | RegExp>> = {
 };
 const PALETTE: Partial<Record<ViewKey, string>> = { "#": "Go to Trash", "!": "Go to Spam" };
 
-/** Opens a view from the rail or the palette. */
 async function goView(app: App, view: ViewKey): Promise<void> {
   const rail = RAIL[view];
   if (rail !== undefined) {
@@ -73,7 +65,6 @@ async function goView(app: App, view: ViewKey): Promise<void> {
   await expect(app.palette).toHaveCount(0);
 }
 
-/** Polls until a history poll of A has really run. */
 async function pollA(app: App, gmail: Control): Promise<void> {
   const polls = async () =>
     (await gmail.requests("history.list", { account: A })).filter((r) => r.answer === 200).length;
@@ -87,11 +78,9 @@ async function pollA(app: App, gmail: Control): Promise<void> {
     .toBeGreaterThan(before);
 }
 
-/** Opens a view with `g` and a key, and says whether a row with this subject is listed. */
 async function listed(app: App, view: ViewKey, subject: string): Promise<boolean> {
   await goView(app, view);
   await app.settle();
-  // The view's first load is in: rows, or its empty state.
   await expect(
     app.rows.first().or(app.page.getByText(/^(You're all done\.|Nothing here\.)$/)),
   ).toBeVisible();
@@ -107,7 +96,6 @@ async function expectNotIn(app: App, view: ViewKey, subject: string): Promise<vo
   expect(await listed(app, view, subject), `${subject} not in g ${view}`).toBe(false);
 }
 
-/** Whether any non-draft message of the thread has `INBOX` in Gmail. */
 async function gmailInbox(gmail: Control, threadId: string, account = A): Promise<boolean> {
   const state = await gmail.gmail(account);
   return state.messages
@@ -124,7 +112,6 @@ test("SNZ-01 the snooze picker at a normal hour", async ({ app, gmail }) => {
   await expect(app.highlighted).toContainText("Person 1");
   await app.press("h");
   await expect(picker(app)).toBeVisible();
-  // Today is Monday, so next week is the Monday after.
   await expect(picker(app).getByRole("option")).toHaveText([
     /^Later today\b.*Mon Nov 2, 6:00 PM$/,
     /^Tomorrow morning\b.*Tue Nov 3, 8:00 AM$/,
@@ -135,7 +122,6 @@ test("SNZ-01 the snooze picker at a normal hour", async ({ app, gmail }) => {
   await app.press("Escape");
   await expect(picker(app)).toHaveCount(0);
   await app.settle();
-  // Only the picker closed: still on the Inbox list, the row untouched.
   await expect(app.list).toBeVisible();
   await expect(app.row("Person 1")).toHaveCount(1);
   await expect(app.highlighted).toContainText("Person 1");
@@ -162,7 +148,6 @@ test("SNZ-03 snoozing takes the thread out of Inbox, here and in Gmail", async (
   await app.press("x", "Shift+J");
   await expect(app.selected).toHaveCount(2);
   await snoozeNamed(app, "Tomorrow morning");
-  // Both rows leave before Gmail answers.
   await expect(app.row("Person 1")).toHaveCount(0);
   await expect(app.row("Person 2")).toHaveCount(0);
   await hold.release();
@@ -181,14 +166,12 @@ test("SNZ-03 snoozing takes the thread out of Inbox, here and in Gmail", async (
     const msgs = state.messages.filter((m) => m.threadId === s.thread(key).threadId);
     expect(msgs.length).toBeGreaterThan(0);
     for (const m of msgs) {
-      // No INBOX, and no label marks the snooze.
       expect(m.labels).not.toContain("INBOX");
       expect(m.labels.every((l) => l === "CATEGORY_PERSONAL" || l === "UNREAD")).toBe(true);
     }
   }
   expect(state.labels).toEqual(labelsBefore);
 
-  // One z brings both back.
   await goView(app, "i");
   await app.press("z");
   await expect(app.row("Person 1")).toHaveCount(1);
@@ -208,7 +191,6 @@ test("SNZ-04 snoozed threads wake on time, on launch, and after sleep, even offl
   const p3 = s.thread("p3").threadId;
   const p4 = s.thread("p4").threadId;
 
-  // Mac wake: p2 until 10:05, then the Mac sleeps 10 minutes; no timer fires.
   await highlightRow(app, "Person 2");
   await snoozeTyped(app, "10:05", "Mon Nov 2, 10:05 AM");
   await expect(app.row("Person 2")).toHaveCount(0);
@@ -219,7 +201,6 @@ test("SNZ-04 snoozed threads wake on time, on launch, and after sleep, even offl
   await expectIn(app, "i", "Person 2");
   await expectNotIn(app, "h", "Person 2");
 
-  // Timer: p1 until Later today, then the clock reaches 18:00.
   await goView(app, "i");
   await highlightRow(app, "Person 1");
   await snoozeNamed(app, "Later today");
@@ -233,7 +214,6 @@ test("SNZ-04 snoozed threads wake on time, on launch, and after sleep, even offl
   await app.settle();
   expect(await gmailInbox(gmail, p1)).toBe(true);
 
-  // Offline at wake: p3 until 19:00; the local Inbox has it at once, Gmail later.
   await goView(app, "i");
   await highlightRow(app, "Person 3");
   await snoozeTyped(app, "7pm", "Mon Nov 2, 7:00 PM");
@@ -247,13 +227,11 @@ test("SNZ-04 snoozed threads wake on time, on launch, and after sleep, even offl
   await app.settle();
   await expect.poll(() => gmailInbox(gmail, p3)).toBe(true);
 
-  // Launch: p4 until 20:00; the app is down past it.
   await goView(app, "i");
   await highlightRow(app, "Person 4");
   const p4Key = await app.rowKey("Person 4");
   await snoozeTyped(app, "8pm", "Mon Nov 2, 8:00 PM");
   await app.settle();
-  // Record the rows of the first painted list after the relaunch.
   await app.page.addInitScript(() => {
     if (!location.href.startsWith("http")) return;
     const w = window as Window & { e2eFirstRows?: string[] };
@@ -272,7 +250,6 @@ test("SNZ-04 snoozed threads wake on time, on launch, and after sleep, even offl
     () => (window as Window & { e2eFirstRows?: string[] }).e2eFirstRows ?? [],
   );
   expect(firstRows, "the first painted Inbox has p4").toContain(p4Key);
-  // Gmail gets INBOX once the queued wake runs.
   await expect.poll(() => gmailInbox(gmail, p4)).toBe(true);
   await expect(app.row("Person 4")).toHaveCount(1);
   await expectNotIn(app, "h", "Person 4");
@@ -317,31 +294,26 @@ test("SNZ-05 INBOX added from outside clears a snooze; your own reply does not",
     poll: false,
   });
 
-  // A new message from Carol arrives with INBOX.
   await snoozeP3();
   await gmail.deliver(reply("Carol Chen <carol@corp.test>"));
   await pollA(app, gmail);
   await expectCleared("Carol's message");
 
-  // Mail from A's other account.
   await snoozeP3();
   await gmail.deliver(reply(`Zed Bolt <${B}>`));
   await pollA(app, gmail);
   await expectCleared("mail from ben@bolt.test");
 
-  // Another client moves it to the inbox.
   await snoozeP3();
   await gmail.modify(A, s.message("p3", 1).id, ["INBOX"], []);
   await pollA(app, gmail);
   await expectCleared("moved to inbox elsewhere");
 
-  // Another client stars it.
   await snoozeP3();
   await gmail.modify(A, s.message("p3", 1).id, ["STARRED"], []);
   await pollA(app, gmail);
   await expectKept("starred elsewhere");
 
-  // A reply sent from this app, opened from Snoozed.
   await goView(app, "h");
   await highlightRow(app, "Person 3");
   await app.press("Enter");
@@ -374,13 +346,11 @@ test("SNZ-06 the app's own label changes, echoed by history, do not clear a newe
   await app.settle();
   expect(await gmailInbox(gmail, p4), "the undo reached Gmail").toBe(true);
 
-  // Before any poll, snooze it again.
   await highlightRow(app, "Person 4");
   await snoozeTyped(app, "fri 9am", "Fri Nov 6, 9:00 AM");
   await app.settle();
   expect(await gmailInbox(gmail, p4)).toBe(false);
 
-  // One poll returns both of the app's changes: +INBOX, then −INBOX.
   await pollA(app, gmail);
   await app.settle();
   expect(await listed(app, "i", "Person 4"), "not in Inbox").toBe(false);
@@ -403,7 +373,6 @@ test("SNZ-07 undo, Shift+E, e, #, and ! on snoozed threads", async ({ app, gmail
     await highlightRow(app, "Person 1");
   };
 
-  // h, then z: back in Inbox with no snooze; Gmail has INBOX.
   await snoozeNamed(app, "Tomorrow morning");
   await app.settle();
   await app.press("z");
@@ -412,7 +381,6 @@ test("SNZ-07 undo, Shift+E, e, #, and ! on snoozed threads", async ({ app, gmail
   await app.settle();
   expect(await gmailInbox(gmail, p1)).toBe(true);
 
-  // h (Tue 08:00), h again from Snoozed (Fri 09:00), then z: Tue 08:00 again.
   await fromInbox();
   await snoozeNamed(app, "Tomorrow morning");
   await fromSnoozed();
@@ -423,13 +391,11 @@ test("SNZ-07 undo, Shift+E, e, #, and ! on snoozed threads", async ({ app, gmail
   await app.press("z");
   await expect(wakeTime(app, "Person 1")).toHaveText(TUE_8AM);
   await expectNotIn(app, "i", "Person 1");
-  // Back to a plain Inbox thread: undo the first snooze too.
   await app.press("z");
   await expectIn(app, "i", "Person 1");
   await app.settle();
   expect(await gmailInbox(gmail, p1)).toBe(true);
 
-  // h, then Shift+E from Snoozed: cleared, in Inbox, Gmail INBOX.
   await fromInbox();
   await snoozeNamed(app, "Tomorrow morning");
   await app.settle();
@@ -442,7 +408,6 @@ test("SNZ-07 undo, Shift+E, e, #, and ! on snoozed threads", async ({ app, gmail
   await app.settle();
   expect(await gmailInbox(gmail, p1)).toBe(true);
 
-  // h, then e from Snoozed, then z: Done, then Snoozed until Tue 08:00 again.
   await fromInbox();
   await snoozeNamed(app, "Tomorrow morning");
   await fromSnoozed();
@@ -459,7 +424,6 @@ test("SNZ-07 undo, Shift+E, e, #, and ! on snoozed threads", async ({ app, gmail
   await app.settle();
   expect(await gmailInbox(gmail, p1)).toBe(false);
 
-  // # and ! from Snoozed clear it: Trash, Spam.
   const clearing = [
     ["#", "Person 5"],
     ["!", "Person 6"],
@@ -487,7 +451,6 @@ test("SNZ-08 Enter before the typed time's options arrive snoozes until that tim
   await expect(app.highlighted).toContainText("Person 1");
   await app.press("h");
   await expect(picker(app).getByRole("option").first()).toContainText("Later today");
-  // The options for anything typed wait, so the screen still shows the named ones.
   const release = await app.park("snooze_options", (body) => body.includes("fri"));
   await app.type("fri 9am");
   await app.press("Enter");

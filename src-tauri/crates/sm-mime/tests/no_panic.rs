@@ -1,6 +1,3 @@
-//! Random input built from the characters these parsers care about must never
-//! panic (e2e/COVERAGE.md, kept unit tests).
-
 use serde_json::json;
 use sm_mime::{
     CidImages, RawBody, decode_encoded_words, html_to_text, list_unsubscribe, parse_address_list,
@@ -75,7 +72,6 @@ fn parsers_never_panic() {
     let mut images = CidImages::new();
     images.insert("a", "image/png", &[0]);
     for input in random_inputs() {
-        // Only that each returns: what it returns is not checked here.
         _ = parse_address_list(&input);
         _ = decode_encoded_words(&input);
         _ = html_to_text(&input);

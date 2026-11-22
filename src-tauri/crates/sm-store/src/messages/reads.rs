@@ -1,5 +1,3 @@
-//! Reads of messages, their bodies, and their attachments.
-
 use sm_domain::{
     AccountId, AttachmentId, DraftId, GmailMessageId, GmailThreadId, MessageFacts, MessageId,
     ThreadId,
@@ -11,7 +9,6 @@ use super::model::{
 use crate::StoreError;
 use crate::db::{Db, id_list};
 
-/// Reads of messages.
 #[derive(Debug, Clone, Copy)]
 pub struct MessageReads<'c> {
     db: Db<'c>,
@@ -22,7 +19,6 @@ impl<'c> MessageReads<'c> {
         Self { db }
     }
 
-    /// One message.
     pub fn get(self, id: MessageId) -> Result<Option<MessageRecord>, StoreError> {
         self.db.optional(
             "read a message",
@@ -36,7 +32,6 @@ impl<'c> MessageReads<'c> {
         )
     }
 
-    /// The message Gmail knows as `gmail_id`.
     pub fn by_gmail_id(
         self,
         account: AccountId,
@@ -54,7 +49,6 @@ impl<'c> MessageReads<'c> {
         )
     }
 
-    /// A thread's messages, drafts included, oldest first (by date, then id).
     pub fn for_thread(self, thread: ThreadId) -> Result<Vec<MessageRecord>, StoreError> {
         self.db.all(
             "read a thread's messages",
@@ -68,8 +62,6 @@ impl<'c> MessageReads<'c> {
         )
     }
 
-    /// A thread's messages as the domain rules read them, oldest first.
-    /// `Thread::new` over them gives the thread.
     pub fn facts(self, thread: ThreadId) -> Result<Vec<MessageFacts>, StoreError> {
         Ok(self
             .for_thread(thread)?
@@ -78,8 +70,6 @@ impl<'c> MessageReads<'c> {
             .collect())
     }
 
-    /// The thread's non-draft message whose `Message-ID` is `header`, for a
-    /// draft's `In-Reply-To`.
     pub fn by_header_id(
         self,
         thread: ThreadId,
@@ -95,7 +85,6 @@ impl<'c> MessageReads<'c> {
         )
     }
 
-    /// The Gmail draft messages that carry this local draft's id.
     pub fn draft_copies(
         self,
         account: AccountId,
@@ -109,8 +98,6 @@ impl<'c> MessageReads<'c> {
         )
     }
 
-    /// Stored bodies for these messages, in the order asked; messages with
-    /// no stored body are left out.
     pub fn bodies(self, ids: &[MessageId]) -> Result<Vec<BodyRecord>, StoreError> {
         self.db.all(
             "read bodies",
@@ -130,7 +117,6 @@ impl<'c> MessageReads<'c> {
         )
     }
 
-    /// A message's plain text, empty when no body is stored.
     pub fn body_text(self, id: MessageId) -> Result<String, StoreError> {
         Ok(self
             .db
@@ -144,7 +130,6 @@ impl<'c> MessageReads<'c> {
             .unwrap_or_default())
     }
 
-    /// A message's attachments, inline parts included, in part order.
     pub fn attachments(self, message: MessageId) -> Result<Vec<AttachmentRecord>, StoreError> {
         self.db.all(
             "read a message's attachments",
@@ -156,7 +141,6 @@ impl<'c> MessageReads<'c> {
         )
     }
 
-    /// An attachment with what downloading it needs.
     pub fn attachment(self, id: AttachmentId) -> Result<Option<AttachmentSource>, StoreError> {
         self.db.optional(
             "read an attachment",
@@ -175,8 +159,6 @@ impl<'c> MessageReads<'c> {
         )
     }
 
-    /// The Gmail ids of a thread's messages whose bodies are stored, so a
-    /// fetch skips them ("stored bodies are never fetched again").
     pub fn gmail_ids_with_body(
         self,
         account: AccountId,
@@ -191,8 +173,6 @@ impl<'c> MessageReads<'c> {
         )
     }
 
-    /// Whether a thread needs a body fetch: it is not stored, or a message of
-    /// it has no body.
     pub fn thread_needs_bodies(
         self,
         account: AccountId,

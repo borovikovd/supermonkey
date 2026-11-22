@@ -1,5 +1,3 @@
-// The conversation view (SPEC Reading): expansion, folds,
-// scroll, selection, quotes, read on open, arrivals, and links.
 import type { App } from "./app.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
@@ -8,12 +6,10 @@ import { A } from "./seeds.ts";
 type Block = {
   id: string;
   kind: "collapsed" | "expanded" | "fold";
-  /** A collapsed line's text, an expanded message's body text, or the fold's text. */
   text: string;
   selected: boolean;
 };
 
-/** The open conversation's messages and folds, top to bottom. */
 function readBlocks(app: App): Promise<Block[]> {
   return app.conversation.evaluate((main) => {
     const out: Block[] = [];
@@ -36,13 +32,8 @@ function readBlocks(app: App): Promise<Block[]> {
   });
 }
 
-/** `Plan message 7.` → `7`; `?` while a body has not rendered. */
 const numbered = (text: string) => /message (\d+)\./.exec(text)?.[1] ?? "?";
 
-/**
- * The layout as short tags: `c3` collapsed, `E10` expanded, `fold7` a fold of
- * seven, `*` on the selected message.
- */
 async function layout(app: App, name: (text: string) => string = numbered): Promise<string[]> {
   return (await readBlocks(app)).map((b) =>
     b.kind === "fold"
@@ -51,7 +42,6 @@ async function layout(app: App, name: (text: string) => string = numbered): Prom
   );
 }
 
-/** The `data-message` id of the block named `tag` (without its marks). */
 async function messageId(
   app: App,
   tag: string,
@@ -62,9 +52,6 @@ async function messageId(
   return b.id;
 }
 
-/**
- * How far the conversation's scroller is from having message `id` at its top, in px.
- */
 function scrollOffset(app: App, id: string): Promise<number> {
   return app.page.evaluate((mid) => {
     const el = document.querySelector(`[data-message="${mid}"]`);
@@ -77,7 +64,6 @@ function scrollOffset(app: App, id: string): Promise<number> {
   }, id);
 }
 
-/** Whether message `id` lies wholly inside its scroller's viewport. */
 function inView(app: App, id: string): Promise<boolean> {
   return app.page.evaluate((mid) => {
     const el = document.querySelector(`[data-message="${mid}"]`);
@@ -91,37 +77,28 @@ function inView(app: App, id: string): Promise<boolean> {
   }, id);
 }
 
-/** The unread count on an account's avatar; 0 when it shows none. */
 async function avatarCount(app: App, email: string): Promise<number> {
   const badge = app.account(email).locator("span.tabular");
   return (await badge.count()) === 0 ? 0 : Number(await badge.innerText());
 }
 
-/** Gmail labels of a message, by id. */
 async function labelsOf(app: App, email: string, id: string): Promise<string[]> {
   const m = (await app.gmail.gmail(email)).messages.find((x) => x.id === id);
   if (!m) throw new Error(`no Gmail message ${id}`);
   return m.labels;
 }
 
-/** Messages of `own`: Kim's, then Ana's reply. */
 const ownNames = (t: string) =>
   t.includes("Here is the budget draft") ? "kim" : t.includes("Thanks, looks fine") ? "ana" : "?";
 
-/** Messages of `p2`: Quin's, then the replies delivered by CONV-09. */
 const p2Names = (t: string) =>
   t.includes("Hello from Quin") ? "q" : (/Reply (\w+)\./.exec(t)?.[1] ?? "?");
 
-/** Messages of `trashedLatest`. */
 const latestRuleNames = (t: string) =>
   t.includes("The first word") ? "m1" : t.includes("A trashed reply") ? "m2" : "?";
 
 const PLAN_DEFAULT = ["c1", "fold7", "c9", "E10", "E11", "E12*"];
 
-/**
- * Short enough that each opened conversation can scroll its target message to
- * the top, even before its bodies load, so where it lands is observable.
- */
 const SHORT = { width: 1280, height: 200 };
 
 test.describe("conversation", () => {
@@ -134,7 +111,6 @@ test.describe("conversation", () => {
     const avatar = await avatarCount(app, A);
     await app.row("Q4 plan").click();
 
-    // Oldest first; read messages collapsed, the run of seven folded; selection on m12.
     await expect.poll(() => layout(app)).toEqual(PLAN_DEFAULT);
     const m1 = app.messages.first();
     await expect(m1).toHaveAttribute("aria-expanded", "false");
@@ -144,7 +120,6 @@ test.describe("conversation", () => {
     await expect(app.conversation.locator("iframe[data-frame]")).toHaveCount(3);
     await expect(app.conversation.locator("button[data-message] iframe")).toHaveCount(0);
 
-    // Scrolled to the first unread (m10), with m1 above it.
     const m10 = await messageId(app, "10");
     await expect.poll(() => scrollOffset(app, m10)).toBeLessThanOrEqual(2);
 
@@ -168,7 +143,6 @@ test.describe("conversation", () => {
       .poll(async () => scrollOffset(app, await messageId(app, "5")))
       .toBeLessThanOrEqual(2);
 
-    // Variant: the all-read `own` thread expands only its latest message.
     await app.press("Escape");
     await app.row("Budget draft").click();
     await expect.poll(() => layout(app, ownNames)).toEqual(["ckim", "Eana*"]);
@@ -183,7 +157,6 @@ test.describe("conversation", () => {
     await app.row("Q4 plan").click();
     await expect.poll(() => layout(app)).toEqual(PLAN_DEFAULT);
     await app.settle();
-    // The read change does not collapse m10 and m11.
     await expect.poll(() => layout(app)).toEqual(PLAN_DEFAULT);
 
     await app.press("p");
@@ -191,7 +164,6 @@ test.describe("conversation", () => {
     await app.press("Escape");
     await expect(app.highlighted).toContainText("Q4 plan");
     await app.press("Enter");
-    // Reopened all read: only the latest expands, and the selection is back on it.
     await expect.poll(() => layout(app)).toEqual(["c1", "fold9", "c11", "E12*"]);
     await expect
       .poll(async () => scrollOffset(app, await messageId(app, "12")))
@@ -203,21 +175,17 @@ test.describe("conversation", () => {
     await app.row("Q4 plan").click();
     await expect.poll(() => layout(app)).toEqual(PLAN_DEFAULT);
 
-    // A click on a collapsed line expands and selects it.
     await app.messages.first().click();
     await expect.poll(() => layout(app)).toEqual(["E1*", "c2", "fold6", "c9", "E10", "E11", "E12"]);
-    // A click on an expanded message's header collapses it.
     await app.messages.first().getByRole("button", { expanded: true }).click();
     await expect.poll(() => layout(app)).toEqual(["c1*", "fold7", "c9", "E10", "E11", "E12"]);
 
-    // A click on the fold shows each folded message as a collapsed line.
     await app.folds.click();
     await expect(app.folds).toHaveCount(0);
     await expect
       .poll(async () => (await layout(app)).map((t) => t.replace("*", "")))
       .toEqual(["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "E10", "E11", "E12"]);
 
-    // A click inside a body selects that message.
     const m11 = await messageId(app, "11");
     await app.conversation
       .locator(`iframe[data-frame="${m11}"]`)
@@ -232,7 +200,6 @@ test.describe("conversation", () => {
     await seeds.standard(gmail, app);
     await app.row("Q4 plan").click();
     await expect.poll(() => layout(app)).toEqual(PLAN_DEFAULT);
-    // A reply draft on the thread: it shows as a stub and is never selected.
     await app.reply("r");
     await app.type("x");
     await app.settle();
@@ -248,7 +215,6 @@ test.describe("conversation", () => {
     await expect.poll(() => layout(app)).toEqual(["c1", "fold7", "c9", "E10*", "E11", "E12"]);
     await app.press("p");
     await expect.poll(() => layout(app)).toEqual(["c1", "fold7", "c9*", "E10", "E11", "E12"]);
-    // m8 is inside the fold: selecting it opens the fold and scrolls it into view.
     await app.press("p");
     const opened = ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8*", "c9", "E10", "E11", "E12"];
     await expect.poll(() => layout(app)).toEqual(opened);
@@ -322,7 +288,6 @@ test.describe("conversation", () => {
     expect((await gmail.platform()).badge).toBe(badge - 1);
     expect(await labelsOf(app, A, s.message("p1", 1).id)).not.toContain("UNREAD");
 
-    // Offline: read locally at once, on Gmail once the network returns.
     await gmail.offline(true);
     await app.row("Person 3").click();
     await expect(app.conversationTitle).toHaveText("Person 3");
@@ -354,7 +319,6 @@ test.describe("conversation", () => {
     await app.row("Person 2").click();
     await expect.poll(() => layout(app, p2Names)).toEqual(["Eq*"]);
 
-    // Selection on the latest, window focused: selected, read, no notification.
     const one = await reply("Reply one.");
     await expect.poll(() => layout(app, p2Names)).toEqual(["Eq", "Eone*"]);
     await app.settle();
@@ -365,13 +329,11 @@ test.describe("conversation", () => {
     expect(await layout(app, p2Names)).toEqual(["Eq", "Eone*"]);
     expect(await p2Notes()).toEqual([]);
 
-    // Selection on an earlier message: the new one expands; the selection stays.
     await app.press("p");
     await expect.poll(() => layout(app, p2Names)).toEqual(["Eq*", "Eone"]);
     await reply("Reply two.");
     await expect.poll(() => layout(app, p2Names)).toEqual(["Eq*", "Eone", "Etwo"]);
 
-    // Window unfocused: selected, stays unread, notifies.
     await app.press("n", "n");
     await expect.poll(() => layout(app, p2Names)).toEqual(["Eq", "Eone", "Etwo*"]);
     await app.focus(false);
@@ -398,18 +360,15 @@ test.describe("conversation", () => {
   }) => {
     const s = await seeds.standard(gmail, app);
 
-    // From Inbox: the trashed reply is not listed.
     await app.row("Latest rule").click();
     await expect.poll(() => layout(app, latestRuleNames)).toEqual(["Em1*"]);
     await app.press("Escape");
 
-    // From Trash: every non-draft message is.
     await app.press("g", "#");
     await app.row("Latest rule").click();
     await expect.poll(() => layout(app, latestRuleNames)).toEqual(["cm1", "Em2*"]);
     await app.press("Escape");
 
-    // A message another client moved to Spam: hidden from Inbox, listed from Spam.
     await gmail.modify(A, s.message("plan", 11).id, ["SPAM"], ["INBOX"], { poll: true });
     await app.press("g", "i");
     await app.row("Q4 plan").click();
@@ -421,7 +380,6 @@ test.describe("conversation", () => {
     await expect(app.messages).toHaveCount(12);
     await app.press("Escape");
 
-    // A reply draft is never one of the messages; it shows as a collapsed stub.
     await app.press("g", "i");
     await app.row("Person 4").click();
     await expect(app.messages).toHaveCount(1);
@@ -430,7 +388,6 @@ test.describe("conversation", () => {
     await app.settle();
     await app.press("Escape", "Escape");
     await expect(app.editor).toHaveCount(0);
-    // The poll brings the Gmail draft message into the thread's messages.
     await gmail.poll();
     await app.settle();
     await expect(app.messages).toHaveCount(1);
@@ -464,7 +421,6 @@ test.describe("conversation", () => {
     await app.press("Enter");
     await app.settle();
     expect(app.page.url()).toBe(url);
-    // Enter opened the link, not a reply composer.
     await expect(app.editor).toHaveCount(0);
 
     await app.press("Escape");
@@ -529,12 +485,10 @@ test.describe("conversation", () => {
     gmail,
   }) => {
     const s = await seeds.standard(gmail, app);
-    // Page timers wait for the test, so nothing prefetches Person 5 on the way.
     await app.page.clock.pauseAt(await app.now());
     await app.press("j", "j", "j", "j");
     await expect(app.highlighted).toContainText("Person 5");
     await expect(app.row("Person 5")).toHaveAttribute("data-unread");
-    // Opened and left before its data arrives; the list prefetches it after.
     const release = await app.park("submit");
     await app.press("Enter", "Escape");
     await expect(app.list).toBeVisible();
@@ -572,21 +526,17 @@ test.describe("conversation", () => {
     await seeds.standard(gmail, app);
     const header = () => app.selectedMessage.locator('button[aria-expanded="true"]');
 
-    // Others by first name (or the address's local part), then Me last.
     await app.row("Offsite venue").click();
     await expect(header()).toContainText("Carol Chen to dave, erin & Me");
     await app.press("Escape");
-    // An alias of the account is Me too.
     await app.row("Guild meetup").click();
     await expect(header()).toContainText("Gus Grant to hal & Me");
     await app.press("Escape");
-    // Mail only to this account names just the sender.
     await app.row("Person 1").click();
     await expect(header()).toContainText("Pia");
     await expect(header()).not.toContainText(" to ");
     await app.press("Escape");
 
-    // The account's own message is from Me; the collapsed one keeps the full name.
     await app.row("Budget draft").click();
     await expect(header()).toContainText("Me to Kim & lee");
     const [kim, ana] = [app.messages.first(), app.messages.last()];
@@ -601,7 +551,6 @@ test.describe("conversation", () => {
     await expect(kim).toHaveAttribute("aria-current", "true");
     expect(await raised(kim)).toBe(true);
     expect(await raised(ana)).toBe(false);
-    // Raising a message into a card never moves its text.
     expect(await textLeft()).toBe(before);
   });
 
@@ -627,7 +576,6 @@ test.describe("conversation", () => {
   }) => {
     await seeds.standard(gmail, app);
     await app.page.emulateMedia({ colorScheme: "dark" });
-    // Google Calendar invites ship rules like these; on the white card they make the text vanish.
     await gmail.deliver({
       account: A,
       from: "Calendar <calendar@corp.test>",
@@ -647,14 +595,11 @@ test.describe("conversation", () => {
     await expect(text).toHaveCSS("color", "rgb(60, 64, 67)");
   });
 
-  // In one batch the writer kept the first of two equal body-read effects, so the reopened conversation read nothing.
   test("CONV-20 a conversation opened, closed, and opened again in one batch still reads its body", async ({
     app,
     gmail,
   }) => {
     await seeds.standard(gmail, app);
-    // The new thread's body read in the background fails and backs off on
-    // the app's clock, so only opening the conversation reads it now.
     await gmail.fault(
       { api: "threads.get", query: { format: "full" } },
       { kind: "status", status: 500 },
@@ -675,16 +620,13 @@ test.describe("conversation", () => {
       ).length;
     const before = await fullReads();
 
-    // One submit carries the first open's close, the open, the close, and the open again.
     await expect(app.highlighted).toContainText("Person 1");
-    // Page timers wait for the test, so nothing prefetches on the way.
     await app.page.clock.pauseAt(await app.now());
     const release = await app.park("submit");
     await app.press("Enter");
     await expect(app.conversationTitle).toHaveText("Person 1");
     await app.press("Escape", "k");
     await expect(app.highlighted).toContainText("Opened twice");
-    // Its data has not arrived, so the conversation shows no title yet.
     await app.press("Enter");
     await expect(app.list).toHaveCount(0);
     await app.press("Escape");
@@ -702,7 +644,6 @@ test.describe("conversation", () => {
   });
 });
 
-// The message used to show only a faint "Downloading message…" line, which read as an empty email.
 test("CONV-21 a message still downloading shows its snippet and a loading bar, then its body, growing in one step", async ({
   app,
   gmail,
@@ -714,7 +655,6 @@ test("CONV-21 a message still downloading shows its snippet and a loading bar, t
     account: A,
     from: seeds.PERSONS[0] ?? "",
     subject: "Slow body",
-    // Long enough that its snippet wraps over several lines.
     text: `The first lines arrive before the rest. ${"Then the rest follows, line after line. ".repeat(40)}`,
   });
   await expect
@@ -727,8 +667,6 @@ test("CONV-21 a message still downloading shows its snippet and a loading bar, t
   await expect(loading).toContainText("The first lines arrive before the rest.");
   await expect(app.conversation.locator("iframe[data-frame]")).toHaveCount(0);
 
-  // The snippet is set as the body's text will be, where it will start: the
-  // bar above it takes no room.
   const snippet = loading.locator("p");
   const snippetStyle = await snippet.evaluate((p) => {
     const s = getComputedStyle(p);
@@ -737,8 +675,6 @@ test("CONV-21 a message still downloading shows its snippet and a loading bar, t
     return { size: s.fontSize, line: s.lineHeight, color: s.color, top: top - from };
   });
 
-  // The message's height after every change to it from here on, measured
-  // as each change lands, so no state between two paints goes unseen.
   const message = app.conversation.locator("[data-message]").last();
   await message.evaluate((el) => {
     const heights = [el.getBoundingClientRect().height];
@@ -757,7 +693,6 @@ test("CONV-21 a message still downloading shows its snippet and a loading bar, t
   );
   await expect(loading).toHaveCount(0);
 
-  // The message never shrinks on the way to its full height.
   const heights = await page.evaluate((): number[] => {
     const log: unknown = Reflect.get(window, "__heights");
     return Array.isArray(log) ? log.filter((h) => typeof h === "number") : [];
@@ -786,7 +721,6 @@ test("CONV-21 a message still downloading shows its snippet and a loading bar, t
   expect(frameTop).toBe(snippetStyle.top);
 });
 
-// UTF-8 bytes decoded as the declared KOI8-R showed as box-drawing characters ("п■п╬п╠").
 test("CONV-22 a message labelled with a legacy charset but served as UTF-8 reads correctly", async ({
   app,
   gmail,
@@ -816,8 +750,6 @@ test("CONV-23 an address added to the account in Gmail is Me in a conversation a
   await app.row("Offsite venue").click();
   await expect(header()).toContainText("Carol Chen to dave, erin & Me");
 
-  // Gmail now lists dave@ as one of the account's addresses; a focus reads
-  // them again. The open conversation follows without any change to it.
   await gmail.sendAs(A, "dave@corp.test", "Dave");
   await app.focus(false);
   await app.focus(true);
@@ -833,16 +765,13 @@ test("CONV-24 r, Enter, and f do nothing in a conversation that is gone", async 
   await app.row("Person 3").click();
   await expect(app.conversationTitle).toHaveText("Person 3");
   await app.settle();
-  // Deleted forever in Gmail while open.
   await gmail.deleteThread(A, s.thread("p3").threadId, { poll: true });
   await app.settle();
   await expect(app.conversation.getByText("This conversation is gone.")).toBeVisible();
 
-  // No composer opens to take the keys, and the hints offer no reply.
   await app.press("r", "Enter", "f");
   await app.settle();
   await expect(app.hintBar).toHaveText(/^E to Mark Done\s*·\s*⌘K for commands$/);
-  // One Esc goes back to the list, where the keys work.
   await app.press("Escape");
   await expect(app.list).toBeVisible();
   await expect(app.highlighted).toContainText("Person 4");
@@ -852,8 +781,6 @@ test("CONV-24 r, Enter, and f do nothing in a conversation that is gone", async 
   expect((await gmail.gmail(A)).drafts).toEqual([]);
 });
 
-// The gone conversation drew no composer, but its reply stayed the one on
-// screen: its keys and hints applied, and Cmd+Enter sent what no one saw.
 test("CONV-25 a reply open when its conversation turns gone closes as a second Esc would", async ({
   app,
   gmail,
@@ -864,12 +791,10 @@ test("CONV-25 a reply open when its conversation turns gone closes as a second E
   await expect(app.conversationTitle).toHaveText("Person 3");
   await app.reply("r");
   await app.type("Words to keep");
-  // Deleted forever in Gmail while the reply is open.
   await gmail.deleteThread(A, p3, { poll: true });
   await app.settle();
   await expect(app.conversation.getByText("This conversation is gone.")).toBeVisible();
 
-  // The gone conversation's own hints and keys: Cmd+Enter sends nothing, one Esc goes back.
   await expect(app.hintBar).toHaveText(/^E to Mark Done\s*·\s*⌘K for commands$/);
   await app.press("Meta+Enter");
   await app.advance(10_000);
@@ -879,7 +804,6 @@ test("CONV-25 a reply open when its conversation turns gone closes as a second E
   await app.settle();
   const sent = (await gmail.gmail(A)).messages.filter((m) => m.labels.includes("SENT"));
   expect(sent.map((m) => m.threadId)).not.toContain(p3);
-  // The typed text is kept in the draft.
   await app.press("g", "d");
   await expect(app.row("Words to keep")).toHaveCount(1);
 });
@@ -894,7 +818,6 @@ test("CONV-26 a conversation still downloading follows Gmail: a reply joins it, 
   const heldBodies = async () =>
     (await gmail.requests("threads.get")).some((r) => r.held && r.params.format === "full");
 
-  // A reply arrives while the conversation's body downloads.
   let body = await gmail.hold({ api: "threads.get", query: { format: "full" } });
   const first = await gmail.deliver({
     account: A,
@@ -923,7 +846,6 @@ test("CONV-26 a conversation still downloading follows Gmail: a reply joins it, 
   await expect(frames.last().contentFrame().locator("body")).toContainText("Message two.");
   await app.press("Escape");
 
-  // The thread is deleted in Gmail while its body downloads.
   body = await gmail.hold({ api: "threads.get", query: { format: "full" } });
   const doomed = await gmail.deliver({ account: A, from, subject: "Doomed", text: "Soon gone." });
   await expect.poll(heldBodies).toBe(true);
@@ -943,7 +865,6 @@ test("CONV-27 z while the conversation that opened after e still loads undoes th
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app);
-  // Page timers wait for the test, so nothing prefetches Person 5 first.
   await app.page.clock.pauseAt(await app.now());
   await app.press("j", "j", "j");
   await expect(app.highlighted).toContainText("Person 4");
@@ -952,7 +873,6 @@ test("CONV-27 z while the conversation that opened after e still loads undoes th
 
   const release = await app.park("submit");
   await app.press("e");
-  // Person 5 is opening: its data has not arrived, so it shows no messages yet.
   await expect(app.conversationTitle).toHaveText(s.thread("p5").subject);
   await expect(app.messages).toHaveCount(0);
   await app.press("z");
@@ -975,12 +895,10 @@ test("CONV-28 a conversation still loading when the app quits stays unread", asy
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app);
-  // Page timers wait for the test, so nothing prefetches Person 5 on the way.
   await app.page.clock.pauseAt(await app.now());
   await app.press("j", "j", "j", "j");
   await expect(app.highlighted).toContainText("Person 5");
   await expect(app.row("Person 5")).toHaveAttribute("data-unread");
-  // The open never reaches Rust: the quit stops waiting for it.
   const submit = /\/invoke\/submit$/;
   await app.page.route(submit, () => undefined);
   await app.press("Enter");
