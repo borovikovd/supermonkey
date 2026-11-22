@@ -194,7 +194,7 @@ impl IntoResponse for Fail {
 
 impl<E: std::error::Error + 'static> From<E> for Fail {
     fn from(e: E) -> Self {
-        Self(sm_bridge::commands::message(&e))
+        Self(sm_bridge::commands::chain(&e))
     }
 }
 

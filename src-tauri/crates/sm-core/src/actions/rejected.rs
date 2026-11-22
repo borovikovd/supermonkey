@@ -31,7 +31,7 @@ pub(super) fn refuse(
     state.refuse(Rejection {
         n,
         message: error.message(),
-        split: error.split(),
+        reason: error.reason(),
     });
     Ok(())
 }

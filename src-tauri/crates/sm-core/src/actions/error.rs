@@ -1,4 +1,5 @@
 use sm_domain::{ModifyError, RuleError, SplitId};
+use sm_ipc::RejectReason;
 use sm_store::StoreError;
 
 pub(crate) const NOT_SAVED: &str = "Couldn't save that change. Try again.";
@@ -45,10 +46,12 @@ impl ActionError {
         }
     }
 
-    pub(crate) const fn split(&self) -> Option<SplitId> {
+    pub(crate) const fn reason(&self) -> RejectReason {
         match self {
-            Self::Rule { split, .. } => Some(*split),
-            Self::Store(_) | Self::Invalid(_) | Self::Modify(_) | Self::Unsendable(_) => None,
+            Self::Rule { split, .. } => RejectReason::SplitRule { split: *split },
+            Self::Store(_) | Self::Invalid(_) | Self::Modify(_) | Self::Unsendable(_) => {
+                RejectReason::Other
+            }
         }
     }
 }

@@ -6,6 +6,8 @@ export type { Action } from "../bindings/Action";
 export type { Addr } from "../bindings/Addr";
 export type { AppEvent } from "../bindings/AppEvent";
 export type { Command } from "../bindings/Command";
+export type { CommandError } from "../bindings/CommandError";
+export type { ErrorKind } from "../bindings/ErrorKind";
 export type { CommandReply } from "../bindings/CommandReply";
 export type { AppState } from "../bindings/AppState";
 export type { AttachmentInfo } from "../bindings/AttachmentInfo";

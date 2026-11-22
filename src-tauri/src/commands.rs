@@ -23,7 +23,7 @@ pub(crate) async fn connect(
         .lifecycle()
         .connect(sink)
         .await
-        .map_err(|e| cmd::message(&e))?;
+        .map_err(|e| cmd::failed(&e))?;
     shell
         .connected
         .store(true, std::sync::atomic::Ordering::Release);

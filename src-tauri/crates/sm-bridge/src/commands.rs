@@ -1,11 +1,13 @@
 use base64::Engine as _;
-use sm_core::{App, MAX_ATTACHMENT_BYTES, NewAttachment, attachment_too_large};
+use sm_core::{App, Error, MAX_ATTACHMENT_BYTES, NewAttachment, attachment_too_large};
 use sm_domain::DraftId;
-use sm_ipc::DraftAttachment;
+use sm_ipc::{CommandError, DraftAttachment, ErrorKind};
 
-pub type CmdResult<T> = Result<T, String>;
+pub type CmdResult<T> = Result<T, CommandError>;
 
-pub fn message(error: &(dyn std::error::Error + 'static)) -> String {
+const INTERNAL: &str = "Something went wrong inside Supermonkey";
+
+pub fn chain(error: &(dyn std::error::Error + 'static)) -> String {
     let mut text = error.to_string();
     let mut cause = error.source();
     while let Some(e) = cause {
@@ -19,8 +21,38 @@ pub fn message(error: &(dyn std::error::Error + 'static)) -> String {
     text
 }
 
-pub(crate) fn shown<T>(result: Result<T, sm_core::Error>) -> CmdResult<T> {
-    result.map_err(|e| message(&e))
+#[must_use]
+pub fn failed(error: &Error) -> CommandError {
+    let kind = match error {
+        Error::SignInCancelled => ErrorKind::SignInCancelled,
+        Error::DraftGone => ErrorKind::DraftGone,
+        Error::Invalid(_) | Error::Platform(_) | Error::SignIn(_) | Error::Gmail(_) => {
+            ErrorKind::Other
+        }
+        Error::Store(_)
+        | Error::ReadTask(_)
+        | Error::NoRuntime(_)
+        | Error::Tokens(_)
+        | Error::GmailEndpoint(_)
+        | Error::Http(_)
+        | Error::Io(_) => return internal(&chain(error)),
+    };
+    CommandError {
+        kind,
+        message: error.to_string(),
+    }
+}
+
+pub(crate) fn internal(detail: &str) -> CommandError {
+    tracing::error!(error = detail, "a command failed inside the core");
+    CommandError {
+        kind: ErrorKind::Other,
+        message: INTERNAL.to_owned(),
+    }
+}
+
+pub(crate) fn shown<T>(result: Result<T, Error>) -> CmdResult<T> {
+    result.map_err(|e| failed(&e))
 }
 
 pub async fn add_attachment(
@@ -41,11 +73,11 @@ pub async fn add_attachment(
 
 fn decode_file(data: &str) -> CmdResult<Vec<u8>> {
     if base64::decoded_len_estimate(data.len()) > MAX_ATTACHMENT_BYTES + 2 {
-        return Err(message(&attachment_too_large()));
+        return Err(failed(&attachment_too_large()));
     }
     base64::engine::general_purpose::STANDARD
         .decode(data)
-        .map_err(|e| format!("the file's content is not base64: {e}"))
+        .map_err(|e| internal(&format!("the file's content is not base64: {e}")))
 }
 
 pub fn perf_report(action: &str, ms: f64, budget: f64) {

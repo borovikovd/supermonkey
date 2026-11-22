@@ -98,6 +98,10 @@ fn web_routes() -> Router<Arc<Server>> {
             "/__test/draft-folders",
             get(web::draft_folders).post(web::leave_draft_folder),
         )
+        .route(
+            "/__test/draft-folders/block",
+            post(web::block_draft_folders),
+        )
         .route("/img/{name}", get(web::remote_image))
         .route("/sink/{*rest}", any(web::sink))
         .fallback(get(web::static_file))

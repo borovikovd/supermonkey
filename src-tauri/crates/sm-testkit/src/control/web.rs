@@ -144,6 +144,16 @@ pub(crate) async fn leave_draft_folder(
     Ok(done())
 }
 
+pub(crate) async fn block_draft_folders(State(s): State<Arc<Server>>) -> Ctl {
+    let drafts = s.data_dir.join("drafts");
+    match tokio::fs::remove_dir_all(&drafts).await {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+        _ => {}
+    }
+    tokio::fs::write(&drafts, b"not a folder").await?;
+    Ok(done())
+}
+
 pub(crate) async fn static_file(State(s): State<Arc<Server>>, uri: Uri) -> Response {
     let rel = uri.path().trim_start_matches('/');
     let safe = !rel.split('/').any(|segment| segment == "..");

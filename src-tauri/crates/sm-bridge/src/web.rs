@@ -262,7 +262,7 @@ async fn invoke(
             bridge.0.quit.notify_waiters();
             Json(Value::Null).into_response()
         }
-        Err(e) => (StatusCode::BAD_REQUEST, Json(json!(e))).into_response(),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(e)).into_response(),
     }
 }
 

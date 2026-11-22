@@ -15,7 +15,8 @@ pub enum Answer {
     reason = "one exhaustive arm per IPC command, each a single core call; splitting needs a catch-all arm"
 )]
 pub async fn dispatch(app: &App, name: &str, args: Value) -> CmdResult<Answer> {
-    let reply = match Command::parse(name, args)? {
+    let command = Command::parse(name, args).map_err(|e| commands::internal(&e))?;
+    let reply = match command {
         Command::Connect { reply } => reply.send(app.lifecycle().launch_info()),
         Command::Submit { actions, reply } => {
             app.actions().submit(actions);
@@ -85,5 +86,5 @@ pub async fn dispatch(app: &App, name: &str, args: Value) -> CmdResult<Answer> {
     };
     reply
         .map(Answer::Reply)
-        .map_err(|e| format!("couldn't encode the result: {e}"))
+        .map_err(|e| commands::internal(&format!("couldn't encode the result: {e}")))
 }

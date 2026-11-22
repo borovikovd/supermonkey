@@ -260,6 +260,7 @@ The end-to-end cases, one line each. The test code holds each case's setup, step
 - ATT-19 · P1 · An address typed but not yet a chip goes with a close or send that waits for a file
 - ATT-20 · P1 · Removing the account while its composer's send or close waits for a file leaves nothing behind
 - ATT-21 · P2 · A file attaching when the draft is deleted in Gmail joins the draft written again
+- ATT-23 · P2 · A file that can't be stored says so in plain words, without the system's error
 
 ### drafts.spec.ts (DRF)
 

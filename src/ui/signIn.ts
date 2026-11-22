@@ -1,13 +1,11 @@
 import { toast } from "sonner";
 import { create } from "zustand";
 
-import { addAccount, signInAgain } from "../ipc/bridge";
+import { addAccount, errorText, failedWith, signInAgain } from "../ipc/bridge";
 import { useChrome } from "../store/chrome";
 
-function failure(e: unknown): string | null {
-  const message = String(e);
-  return message.includes("Sign-in cancelled") ? null : message;
-}
+const failure = (e: unknown): string | null =>
+  failedWith(e, "signInCancelled") ? null : errorText(e);
 
 export function reportSignIn(signIn: Promise<unknown>) {
   signIn.catch((e: unknown) => {

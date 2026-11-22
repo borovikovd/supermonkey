@@ -9,7 +9,9 @@ import type {
   AppEvent,
   ChannelMessage,
   Command,
+  CommandError,
   CommandReply,
+  ErrorKind,
   LaunchInfo,
   NumberedAction,
   Rejection,
@@ -22,14 +24,42 @@ const BRIDGE = import.meta.env.DEV ? "http://127.0.0.1:1430" : "";
 const pending = { invokes: 0, signIns: 0, timers: 0, rev: 0, ack: 0 };
 const SIGN_INS = new Set<CommandName>(["add_account", "sign_in_again"]);
 
-class Refused extends Error {}
+const KINDS: Record<ErrorKind, true> = { signInCancelled: true, draftGone: true, other: true };
+const isKind = (kind: unknown): kind is ErrorKind =>
+  typeof kind === "string" && Object.hasOwn(KINDS, kind);
+
+class CommandFailed extends Error {
+  readonly kind: ErrorKind;
+
+  constructor({ kind, message }: CommandError) {
+    super(message);
+    this.kind = kind;
+  }
+}
+
+function commandFailed(body: unknown): CommandFailed | null {
+  if (typeof body !== "object" || body === null) return null;
+  if (!("kind" in body) || !("message" in body)) return null;
+  const { kind, message } = body;
+  if (!isKind(kind) || typeof message !== "string") return null;
+  return new CommandFailed({ kind, message });
+}
+
+export const failedWith = (e: unknown, kind: ErrorKind): boolean =>
+  e instanceof CommandFailed && e.kind === kind;
+
+export const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 type CommandName = Command["command"];
 type ArgsOf<K extends CommandName> = Extract<Command, { command: K }>["args"];
 type ReplyOf<K extends CommandName> = Extract<CommandReply, { command: K }>["reply"];
 
 async function invoke<K extends CommandName>(command: K, args: ArgsOf<K>): Promise<ReplyOf<K>> {
-  if (inTauri) return tauriInvoke<ReplyOf<K>>("dispatch", { command, args });
+  if (inTauri) {
+    return tauriInvoke<ReplyOf<K>>("dispatch", { command, args }).catch((e: unknown) => {
+      throw commandFailed(e) ?? e;
+    });
+  }
   const kind = SIGN_INS.has(command) ? "signIns" : "invokes";
   pending[kind]++;
   try {
@@ -39,9 +69,9 @@ async function invoke<K extends CommandName>(command: K, args: ArgsOf<K>): Promi
       body: JSON.stringify(args),
     });
     const body: unknown = await r.json();
-    const text = typeof body === "string" ? body : JSON.stringify(body);
-    if (r.status === 400) throw new Refused(text);
-    if (!r.ok) throw new Error(text);
+    const failed = r.status === 400 ? commandFailed(body) : null;
+    if (failed) throw failed;
+    if (!r.ok) throw new Error(typeof body === "string" ? body : JSON.stringify(body));
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the debug bridge answers with this command's reply, serialized by Rust
     return body as ReplyOf<K>;
   } finally {
@@ -87,7 +117,7 @@ async function flush(): Promise<void> {
     await invoke("submit", { actions });
     retryMs = 0;
   } catch (e) {
-    if (inTauri || e instanceof Refused) {
+    if (inTauri || e instanceof CommandFailed) {
       console.error(`submit of actions ${ns.join(", ")} refused; dropping them`, e);
       refuseUnsent(actions);
       return;
@@ -164,7 +194,7 @@ function refuseUnsent(actions: NumberedAction[]): void {
   before.dropPending(actions.map((a) => a.n));
   for (const { n, action } of actions) {
     dropped.add(n);
-    const refusal: Rejection = { n, message: UNREADABLE, split: null };
+    const refusal: Rejection = { n, message: UNREADABLE, reason: { kind: "other" } };
     const settled = settling.get(n);
     settling.delete(n);
     if (settled) settled({ refusal, before });

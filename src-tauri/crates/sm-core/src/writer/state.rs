@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use sm_domain::{AccountId, ActionNo, DraftId, Millis};
-use sm_ipc::{ChannelMessage, Rejection};
+use sm_ipc::{ChannelMessage, RejectReason, Rejection};
 
 use crate::actions::NOT_SAVED;
 use crate::activity::{Activity, Busy, Tracked};
@@ -130,7 +130,7 @@ impl WriterState {
                 self.rejected.push(Rejection {
                     n,
                     message: NOT_SAVED.to_owned(),
-                    split: None,
+                    reason: RejectReason::Other,
                 });
             }
         }

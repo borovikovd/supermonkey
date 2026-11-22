@@ -161,6 +161,22 @@ impl Reply {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CommandError {
+    pub kind: ErrorKind,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum ErrorKind {
+    SignInCancelled,
+    DraftGone,
+    Other,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(tag = "event", content = "payload", rename_all = "kebab-case")]
 #[ts(export)]

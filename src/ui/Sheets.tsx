@@ -211,10 +211,10 @@ function Splits() {
       setSaving(false);
       if (refusal === null) {
         if (useChrome.getState().sheet === "splits") closeSheet();
-      } else if (refusal.split === null) {
-        toast.error(refusal.message);
+      } else if (refusal.reason.kind === "splitRule") {
+        setRefused({ [refusal.reason.split]: refusal.message });
       } else {
-        setRefused({ [refusal.split]: refusal.message });
+        toast.error(refusal.message);
       }
     });
   };

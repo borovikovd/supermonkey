@@ -6,7 +6,14 @@ import { stillShown, withFixedTargets } from "../acting";
 import { allLabeled, applyLabel, block, snooze, spam, targets, unsubscribe } from "../commands";
 import { formatAddr } from "../compose/RecipientField";
 import { mountedComposer } from "../compose/session";
-import { act, blockedSenders, signInAgain, snoozeOptions, unblockSender } from "../ipc/bridge";
+import {
+  act,
+  blockedSenders,
+  errorText,
+  signInAgain,
+  snoozeOptions,
+  unblockSender,
+} from "../ipc/bridge";
 import type { BlockedSenders, PinKind, SnoozeChoice } from "../ipc/types";
 import { registerKeys } from "../keyboard/dispatch";
 import { measure } from "../keyboard/meter";
@@ -91,7 +98,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
     let live = true;
     blockedSenders(account)
       .then((b) => live && setBlocked(b))
-      .catch((err: unknown) => live && setBlocked({ kind: "error", message: String(err) }));
+      .catch((err: unknown) => live && setBlocked({ kind: "error", message: errorText(err) }));
     return () => {
       live = false;
     };
@@ -245,7 +252,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
             if (account === null) return;
             unblockSender(account, b.id)
               .then(() => toast(`Unblocked ${b.from}`))
-              .catch((err: unknown) => toast.error(`Couldn't unblock: ${String(err)}`));
+              .catch((err: unknown) => toast.error(`Couldn't unblock: ${errorText(err)}`));
           },
         })),
         placeholder: blocked.senders.length > 0 ? "Blocked senders" : "No blocked senders",

@@ -405,4 +405,8 @@ export class Control {
   async leaveDraftFolder(name: string): Promise<void> {
     await this.call("POST", "/__test/draft-folders", { name });
   }
+
+  async blockDraftFolders(): Promise<void> {
+    await this.call("POST", "/__test/draft-folders/block");
+  }
 }

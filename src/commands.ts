@@ -4,6 +4,7 @@ import { undoSend } from "./compose/sends";
 import {
   act,
   blockSender,
+  errorText,
   fetchRows,
   senderThreads,
   signInAgain,
@@ -80,7 +81,7 @@ function withRows(resolve: (acting: Acting) => void) {
       resolve({ account, threads });
     })
     .catch((err: unknown) => {
-      toast.error(`Couldn't read the selected conversations: ${String(err)}`);
+      toast.error(`Couldn't read the selected conversations: ${errorText(err)}`);
     });
 }
 
@@ -193,7 +194,7 @@ export async function unsubscribe(then: UnsubscribeThen) {
     } else if (r.kind === "openedPage") toast(`Opened the unsubscribe page of ${r.sender}`);
     else toast(`Unsubscribed from ${r.sender}`);
   } catch (err: unknown) {
-    toast.error(`Couldn't unsubscribe: ${String(err)}`);
+    toast.error(`Couldn't unsubscribe: ${errorText(err)}`);
   }
 }
 
@@ -212,6 +213,6 @@ export async function block(thread: number, domain: boolean, asSpam = false) {
     if (!asSpam) modify("trash", ["TRASH"], ["INBOX", "SPAM"], { account, threads: [thread] });
     toast(`Blocked ${r.from}`);
   } catch (err: unknown) {
-    toast.error(`Couldn't block: ${String(err)}`);
+    toast.error(`Couldn't block: ${errorText(err)}`);
   }
 }

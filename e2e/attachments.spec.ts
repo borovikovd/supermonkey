@@ -717,4 +717,22 @@ test.describe("attachments", () => {
     await app.settle();
     expect(await gmail.draftFolders()).toEqual(kept);
   });
+
+  test("ATT-23 a file that can't be stored says so in plain words, without the system's error", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    await newMessage(app, "Nowhere to keep it", "See attached.");
+    await gmail.blockDraftFolders();
+    await app.chooseFiles(() => app.press("Meta+Shift+a"), [files.notesTxt]);
+    await app.settle();
+
+    const refused = app.errorToasts.filter({ hasText: "Couldn't attach notes.txt" });
+    await expect(refused).toContainText(
+      "Couldn't attach notes.txt: Something went wrong inside Supermonkey",
+    );
+    await expect(refused).not.toContainText(/error|directory/i);
+    await expect(app.page.getByRole("button", { name: "Remove notes.txt" })).toHaveCount(0);
+  });
 });

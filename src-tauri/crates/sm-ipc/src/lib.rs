@@ -14,8 +14,8 @@ pub use actions::{
     Action, ModifyAction, NumberedAction, Setting, SnoozeChange, Submitted, Unreadable,
 };
 pub use commands::{
-    AppEvent, BlockResult, BlockedSender, BlockedSenders, Command, CommandReply, ContactSuggestion,
-    LaunchInfo, Replier, Reply, SnoozeChoice, Unsubscribed,
+    AppEvent, BlockResult, BlockedSender, BlockedSenders, Command, CommandError, CommandReply,
+    ContactSuggestion, ErrorKind, LaunchInfo, Replier, Reply, SnoozeChoice, Unsubscribed,
 };
 pub use compose::{DraftAttachment, DraftFields, DraftSave, DraftState};
 pub use conversation::{
@@ -27,4 +27,4 @@ pub use sm_domain::Addr;
 pub use sm_domain::{
     DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SplitKind, SyncStatus, View,
 };
-pub use subscriptions::{ChannelMessage, Rejection, SubKey, SubUpdate};
+pub use subscriptions::{ChannelMessage, RejectReason, Rejection, SubKey, SubUpdate};

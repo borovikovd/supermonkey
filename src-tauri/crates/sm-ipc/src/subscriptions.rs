@@ -86,5 +86,13 @@ pub struct ChannelMessage {
 pub struct Rejection {
     pub n: ActionNo,
     pub message: String,
-    pub split: Option<SplitId>,
+    pub reason: RejectReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[ts(export)]
+pub enum RejectReason {
+    SplitRule { split: SplitId },
+    Other,
 }

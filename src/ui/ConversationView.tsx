@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { Composer } from "../compose/Composer";
 import { composerOnScreen, useComposeState } from "../compose/session";
 import { resumeDraftById } from "../compose/start";
-import { openAttachment } from "../ipc/bridge";
+import { errorText, openAttachment } from "../ipc/bridge";
 import { useCommand, type CommandId } from "../keyboard/table";
 import type { AttachmentInfo, DraftSummary, MessageSummary, OutboxRow } from "../ipc/types";
 import { markReadOnOpen } from "../navigation";
@@ -329,7 +329,7 @@ function Attachments({ files }: { files: AttachmentInfo[] }) {
           key={a.id}
           onClick={() => {
             openAttachment(a.id).catch((err: unknown) => {
-              toast.error(`Couldn't open ${a.filename}: ${String(err)}`);
+              toast.error(`Couldn't open ${a.filename}: ${errorText(err)}`);
             });
           }}
           className="flex items-center gap-2 rounded-md border border-border px-2 py-1 text-row hover:bg-fill-half"

@@ -4,6 +4,8 @@ import { create } from "zustand";
 import {
   act,
   addAttachment,
+  errorText,
+  failedWith,
   forgetSub,
   launch,
   resubscribe,
@@ -98,8 +100,6 @@ const uploads = new Map<string, Set<Promise<boolean>>>();
 let attachSeq = 0;
 const gone = new Set<string>();
 
-const DRAFT_GONE = "The draft is gone";
-
 async function readFile(file: File): Promise<string> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
@@ -137,8 +137,8 @@ export function attachFiles(draft: string, files: File[]) {
         try {
           return await addAttachment(draft, file.name, file.type, await readFile(file));
         } catch (err) {
-          if (String(err).includes(DRAFT_GONE)) gone.add(draft);
-          else toast.error(`Couldn't attach ${file.name}: ${String(err)}`);
+          if (failedWith(err, "draftGone")) gone.add(draft);
+          else toast.error(`Couldn't attach ${file.name}: ${errorText(err)}`);
           return null;
         }
       }),
