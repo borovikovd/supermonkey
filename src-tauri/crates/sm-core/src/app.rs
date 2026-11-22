@@ -15,7 +15,7 @@ use crate::effects::{EffectReceiver, Router};
 use crate::lifecycle::{Lifecycle, LifecycleDeps};
 use crate::mail::Mail;
 use crate::queries::Queries;
-use crate::workers::{AccountWorkers, Network, Notifier, Searches, WorkerDeps, badge};
+use crate::workers::{AccountWorkers, DraftFiles, Network, Notifier, Searches, WorkerDeps, badge};
 use crate::writer::CoreWriter;
 use crate::{Error, Platform};
 
@@ -118,9 +118,11 @@ impl App {
         let network = Arc::new(Network::new(writer.clone(), Arc::clone(&activity)));
         let notifier = Arc::new(Notifier::new(Arc::clone(&platform), Arc::clone(&clock)));
         let snoozes = Arc::new(Kick::new(Arc::clone(&activity)));
+        let draft_files = Arc::new(DraftFiles::new(&config.data_dir, tasks.clone()));
         let workers = AccountWorkers::new(
             Arc::new(WorkerDeps {
                 data_dir: config.data_dir,
+                draft_files: Arc::clone(&draft_files),
                 writer: writer.clone(),
                 pool: Arc::clone(&pool),
                 clock: Arc::clone(&clock),
@@ -133,21 +135,28 @@ impl App {
             tasks.clone(),
         );
         let badge = Arc::new(Kick::new(Arc::clone(&activity)));
-        let deps = LifecycleDeps {
-            writer,
-            pool,
-            received,
-            clock,
-            tasks,
-            workers,
-            notifier,
-            snoozes,
+        let parts = Parts {
+            core: LifecycleDeps {
+                writer,
+                pool,
+                received,
+                clock,
+                tasks,
+                workers,
+                notifier,
+                snoozes,
+            },
+            draft_files,
         };
-        start_effects(&deps, from_writers, badge, &platform);
-        Ok(Self::assemble(deps, platform, config.debug))
+        start_effects(&parts, from_writers, badge, &platform);
+        Ok(Self::assemble(parts, platform, config.debug))
     }
 
-    fn assemble(deps: LifecycleDeps, platform: Arc<dyn Platform>, debug: bool) -> Self {
+    fn assemble(parts: Parts, platform: Arc<dyn Platform>, debug: bool) -> Self {
+        let Parts {
+            core: deps,
+            draft_files,
+        } = parts;
         let actions = Actions::new(
             deps.writer.clone(),
             Arc::clone(&deps.received),
@@ -160,7 +169,12 @@ impl App {
             Arc::clone(&deps.workers),
             Arc::clone(&platform),
         );
-        let mail = Mail::new(platform, Arc::clone(&deps.workers), Arc::clone(&deps.pool));
+        let mail = Mail::new(
+            platform,
+            Arc::clone(&deps.workers),
+            Arc::clone(&deps.pool),
+            draft_files,
+        );
         #[cfg(test)]
         let writer = deps.writer.clone();
         Self {
@@ -211,15 +225,22 @@ fn resume_numbering(pool: &ReadPool, writer: &CoreWriter) -> Result<Arc<Received
     Ok(received)
 }
 
+struct Parts {
+    core: LifecycleDeps,
+    draft_files: Arc<DraftFiles>,
+}
+
 fn start_effects(
-    deps: &LifecycleDeps,
+    parts: &Parts,
     effects: EffectReceiver,
     badge: Arc<Kick>,
     platform: &Arc<dyn Platform>,
 ) {
+    let deps = &parts.core;
     let router = Router {
         workers: Arc::clone(&deps.workers),
         searches: Searches::default(),
+        draft_files: Arc::clone(&parts.draft_files),
         notifier: Arc::clone(&deps.notifier),
         snoozes: Arc::clone(&deps.snoozes),
         badge: Arc::clone(&badge),

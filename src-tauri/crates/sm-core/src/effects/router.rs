@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 
 use super::Effect;
 use crate::activity::{Kick, Tracked, parked};
-use crate::workers::{AccountWorkers, GmailPage, Notifier, Searches};
+use crate::workers::{AccountWorkers, DraftFiles, GmailPage, Notifier, Searches};
 
 pub(crate) type EffectSender = mpsc::UnboundedSender<Tracked<Effect>>;
 pub(crate) type EffectReceiver = mpsc::UnboundedReceiver<Tracked<Effect>>;
@@ -12,6 +12,7 @@ pub(crate) type EffectReceiver = mpsc::UnboundedReceiver<Tracked<Effect>>;
 pub(crate) struct Router {
     pub(crate) workers: Arc<AccountWorkers>,
     pub(crate) searches: Searches,
+    pub(crate) draft_files: Arc<DraftFiles>,
     pub(crate) notifier: Arc<Notifier>,
     pub(crate) snoozes: Arc<Kick>,
     pub(crate) badge: Arc<Kick>,
@@ -70,8 +71,8 @@ impl Router {
                     worker.read_draft(draft);
                 }
             }
-            Effect::DraftFilesGone(draft) => self.workers.delete_draft_files(draft),
-            Effect::DraftBack(draft) => self.workers.draft_back(&draft),
+            Effect::DraftFilesGone(draft) => self.draft_files.delete(draft),
+            Effect::DraftBack(draft) => self.draft_files.back(&draft),
             Effect::Notify(notification) => self.notifier.show(notification),
             Effect::Snoozes => self.snoozes.kick(),
         }

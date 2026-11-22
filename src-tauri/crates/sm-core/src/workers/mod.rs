@@ -19,7 +19,7 @@ pub(crate) mod unwanted;
 pub(crate) use account::Freshness;
 pub(crate) use account::{AccountWorker, ReadMessage, WorkerDeps, store_draft_message};
 pub(crate) use attachments::open_attachment;
-pub(crate) use files::safe_name;
+pub(crate) use files::DraftFiles;
 pub(crate) use grants::Grant;
 pub(crate) use network::Network;
 pub(crate) use notifications::Notifier;

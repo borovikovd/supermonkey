@@ -14,7 +14,7 @@ use crate::drafts::settle;
 use crate::read::read;
 use crate::workers::account::{AccountCtx, fetch_thread, parse};
 use crate::workers::attachments::{DownloadError, ensure};
-use crate::workers::files::{attachments_dir, draft_dir, is_inside};
+use crate::workers::files::{DraftFiles, attachments_dir, is_inside};
 use sm_store::ReadPool;
 use std::sync::Arc;
 
@@ -310,7 +310,14 @@ async fn attachment_bytes(
     for a in &draft.attachments {
         let path = match (&a.path, a.source) {
             (Some(path), source)
-                if kept_file(&ctx.deps.data_dir, draft, path, source.is_some()).await =>
+                if kept_file(
+                    &ctx.deps.draft_files,
+                    &ctx.deps.data_dir,
+                    draft,
+                    path,
+                    source.is_some(),
+                )
+                .await =>
             {
                 PathBuf::from(path)
             }
@@ -332,9 +339,15 @@ async fn attachment_bytes(
     Ok(out)
 }
 
-async fn kept_file(data_dir: &Path, draft: &Draft, path: &str, carried: bool) -> bool {
+async fn kept_file(
+    files: &DraftFiles,
+    data_dir: &Path,
+    draft: &Draft,
+    path: &str,
+    carried: bool,
+) -> bool {
     let path = PathBuf::from(path);
-    let added = draft_dir(data_dir, &draft.id);
+    let added = files.dir(&draft.id);
     let downloaded = carried.then(|| attachments_dir(data_dir, draft.account));
     tokio::task::spawn_blocking(move || {
         is_inside(&path, &added) || downloaded.is_some_and(|dir| is_inside(&path, &dir))

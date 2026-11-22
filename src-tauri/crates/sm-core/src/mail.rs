@@ -1,5 +1,4 @@
 use std::fmt;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use sm_domain::{AccountId, AttachmentId, DraftId, ThreadId};
@@ -9,13 +8,14 @@ use url::Url;
 
 use sm_gmail::FilterId;
 
-use crate::workers::{AccountWorker, AccountWorkers, open_attachment, safe_name, unwanted};
+use crate::workers::{AccountWorker, AccountWorkers, DraftFiles, open_attachment, unwanted};
 use crate::{Error, Platform};
 
 pub struct Mail {
     platform: Arc<dyn Platform>,
     workers: Arc<AccountWorkers>,
     pool: Arc<ReadPool>,
+    draft_files: Arc<DraftFiles>,
 }
 
 impl fmt::Debug for Mail {
@@ -38,11 +38,13 @@ impl Mail {
         platform: Arc<dyn Platform>,
         workers: Arc<AccountWorkers>,
         pool: Arc<ReadPool>,
+        draft_files: Arc<DraftFiles>,
     ) -> Self {
         Self {
             platform,
             workers,
             pool,
+            draft_files,
         }
     }
 
@@ -67,7 +69,6 @@ impl Mail {
         draft: DraftId,
         file: NewAttachment,
     ) -> Result<DraftAttachment, Error> {
-        let dir = self.workers.draft_dir(&draft);
         let NewAttachment {
             filename,
             mime_type,
@@ -78,13 +79,7 @@ impl Mail {
         }
         let size = i64::try_from(data.len())
             .map_err(|e| Error::Invalid(format!("The file is too large: {e}")))?;
-        let name = safe_name(&filename);
-        let (id, path) =
-            tokio::task::spawn_blocking(move || keep_file(&dir, &name, &data)).await??;
-        if self.workers.draft_files_gone(&draft) {
-            self.workers.delete_draft_files(draft);
-            return Err(Error::DraftGone);
-        }
+        let (id, path) = self.draft_files.keep(draft, &filename, data).await?;
         Ok(DraftAttachment {
             id,
             filename,
@@ -142,24 +137,3 @@ pub fn attachment_too_large() -> Error {
 }
 
 const OCTET_STREAM: &str = "application/octet-stream";
-
-fn keep_file(dir: &Path, name: &str, data: &[u8]) -> Result<(String, PathBuf), std::io::Error> {
-    std::fs::create_dir_all(dir)?;
-    for n in 1u32.. {
-        let slot = dir.join(n.to_string());
-        #[expect(
-            clippy::create_dir,
-            reason = "the folder must be new: making it reserves its number, and `create_dir_all` would take one that is there"
-        )]
-        match std::fs::create_dir(&slot) {
-            Ok(()) => {
-                let path = slot.join(name);
-                std::fs::write(&path, data)?;
-                return Ok((format!("file-{n}"), path));
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(e),
-        }
-    }
-    Err(std::io::Error::other("no free slot for the file"))
-}

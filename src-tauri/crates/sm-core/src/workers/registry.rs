@@ -1,16 +1,16 @@
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use parking_lot::Mutex;
-use sm_domain::{AccountId, DraftId, ThreadId};
+use sm_domain::{AccountId, ThreadId};
 use sm_gmail::{Gmail, HttpClient, RefreshToken, Scheduler, TokenFile, Tokens};
 use sm_store::{AccountRecord, Priority};
 use tokio::sync::{mpsc, watch};
 
 use super::account::{AccountWorker, SignOutSender, WorkerDeps, WorkerId, WorkerParts};
-use super::files::{ATTACHMENTS_DIR, attachments_dir, draft_dir, draft_folder, drafts_dir};
+use super::files::{ATTACHMENTS_DIR, attachments_dir, delete_folders, folders};
 use super::grants::{Grant, Grants};
 use super::ops::OpsLane;
 use crate::activity::{Tasks, Tracked, parked};
@@ -31,7 +31,6 @@ pub(crate) struct AccountWorkers {
     next_id: AtomicU64,
     launched: AtomicBool,
     removals: watch::Sender<usize>,
-    gone_drafts: Mutex<HashSet<DraftId>>,
 }
 
 struct Live {
@@ -80,7 +79,6 @@ impl AccountWorkers {
             next_id: AtomicU64::new(0),
             launched: AtomicBool::new(false),
             removals: watch::Sender::new(0),
-            gone_drafts: Mutex::default(),
         })
     }
 
@@ -102,36 +100,6 @@ impl AccountWorkers {
 
     pub(crate) fn grants(&self) -> &Arc<Grants> {
         &self.live.grants
-    }
-
-    pub(crate) fn draft_dir(&self, draft: &DraftId) -> PathBuf {
-        draft_dir(&self.deps.data_dir, draft)
-    }
-
-    pub(crate) fn delete_draft_files(&self, draft: DraftId) {
-        let dir = self.draft_dir(&draft);
-        self.gone_drafts.lock().insert(draft);
-        self.tasks.spawn("delete draft files", async move {
-            let deleted =
-                tokio::task::spawn_blocking(move || match std::fs::remove_dir_all(&dir) {
-                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
-                    _ => Ok(()),
-                })
-                .await;
-            match deleted {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => tracing::warn!(error = %e, "couldn't delete a draft's files"),
-                Err(e) => tracing::warn!(error = %e, "deleting a draft's files failed"),
-            }
-        });
-    }
-
-    pub(crate) fn draft_back(&self, draft: &DraftId) {
-        self.gone_drafts.lock().remove(draft);
-    }
-
-    pub(crate) fn draft_files_gone(&self, draft: &DraftId) -> bool {
-        self.gone_drafts.lock().contains(draft)
     }
 
     pub(crate) fn get(&self, account: AccountId) -> Option<AccountWorker> {
@@ -156,7 +124,7 @@ impl AccountWorkers {
                 }
             };
             workers.sweep(&accounts).await;
-            workers.sweep_draft_files().await;
+            workers.deps.draft_files.sweep(&workers.deps.pool).await;
             for record in accounts.into_iter().filter(|a| !a.needs_signin) {
                 let grant = workers.live.grants.current(record.id);
                 if let Err(e) = workers.start_stored(record.id, &record.email, grant).await {
@@ -179,28 +147,6 @@ impl AccountWorkers {
         if let Err(e) = swept {
             tracing::warn!(error = %e, "the launch clean-up failed");
         }
-    }
-
-    async fn sweep_draft_files(&self) {
-        if let Err(e) = self.delete_left_draft_files().await {
-            tracing::warn!(error = %e, "the launch clean-up of draft files failed; keeping them");
-        }
-    }
-
-    async fn delete_left_draft_files(&self) -> Result<(), Error> {
-        let dir = drafts_dir(&self.deps.data_dir);
-        let scanned = dir.clone();
-        let found = tokio::task::spawn_blocking(move || folders(&scanned)).await?;
-        if found.is_empty() {
-            return Ok(());
-        }
-        let kept: HashSet<String> = read(&self.deps.pool, |r| r.drafts().ids())
-            .await?
-            .iter()
-            .map(draft_folder)
-            .collect();
-        tokio::task::spawn_blocking(move || delete_folders(&dir, found, &kept)).await?;
-        Ok(())
     }
 
     pub(crate) async fn registered(
@@ -412,25 +358,6 @@ fn delete_swept_token(tokens: &TokenFile, email: &str) {
         |e| tracing::warn!(error = %e, "couldn't delete a removed account's token"),
         |()| tracing::info!("deleted the token of an account removed before a quit"),
     );
-}
-
-fn folders(dir: &Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .filter(|entry| entry.file_type().is_ok_and(|t| t.is_dir()))
-        .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .collect()
-}
-
-fn delete_folders(dir: &Path, found: Vec<String>, kept: &HashSet<String>) {
-    for name in found.into_iter().filter(|name| !kept.contains(name)) {
-        if let Err(e) = std::fs::remove_dir_all(dir.join(name)) {
-            tracing::warn!(error = %e, "couldn't delete files left behind");
-        }
-    }
 }
 
 struct Removal(watch::Sender<usize>);

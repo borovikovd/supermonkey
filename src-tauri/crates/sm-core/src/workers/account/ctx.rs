@@ -13,6 +13,7 @@ use super::queue::FetchQueue;
 use crate::Error;
 use crate::activity::{Kick, Tasks, Tracked};
 use crate::clock::Clock;
+use crate::workers::files::DraftFiles;
 use crate::workers::network::Network;
 use crate::workers::notifications::Notifier;
 use crate::workers::ops::OpsLane;
@@ -22,6 +23,7 @@ pub(crate) const OFFLINE_RETRY: Duration = Duration::from_secs(10);
 
 pub(crate) struct WorkerDeps {
     pub(crate) data_dir: PathBuf,
+    pub(crate) draft_files: Arc<DraftFiles>,
     pub(crate) writer: CoreWriter,
     pub(crate) pool: Arc<ReadPool>,
     pub(crate) clock: Arc<dyn Clock>,
