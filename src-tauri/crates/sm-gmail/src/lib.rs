@@ -70,7 +70,7 @@ pub use oauth::{
 };
 pub use outcome::{GmailError, Outcome};
 pub use quota::{AccountScheduler, Permit, Priority, QuotaConfig, Scheduler, Units};
-pub use retry::{Backoff, backoff};
+pub use retry::Backoff;
 pub use token_store::{TokenFile, TokenStoreError};
 pub use unsubscribe::one_click_unsubscribe;
 pub use wire::{

@@ -18,7 +18,7 @@ const MAX: Duration = Duration::from_secs(60);
 /// The wait before retry number `attempt` (0 for the first): 1 s doubling to
 /// 60 s, each with ±20% jitter and never above 60 s. A `Retry-After` wins.
 #[must_use]
-pub fn backoff(attempt: u32, retry_after: Option<Duration>) -> Duration {
+fn backoff(attempt: u32, retry_after: Option<Duration>) -> Duration {
     if let Some(wait) = retry_after {
         return wait;
     }

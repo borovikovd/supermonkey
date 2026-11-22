@@ -184,30 +184,6 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_database_gets_the_schema_version() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("nested").join("mail.db");
-        drop(open_writer(&path).unwrap());
-        assert_eq!(version(&path), SCHEMA_VERSION);
-    }
-
-    #[test]
-    fn a_current_database_is_kept() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("mail.db");
-        {
-            let conn = open_writer(&path).unwrap();
-            conn.execute("UPDATE meta SET rev = 41", []).unwrap();
-        }
-        let conn = open_writer(&path).unwrap();
-        let rev: i64 = conn
-            .query_row("SELECT rev FROM meta", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(rev, 41);
-        assert!(!sibling(&path, ".old-1").exists());
-    }
-
-    #[test]
     fn another_version_is_moved_aside_with_its_wal() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("mail.db");

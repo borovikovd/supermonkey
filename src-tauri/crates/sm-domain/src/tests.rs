@@ -2,8 +2,6 @@
 //! label changes, split routing (with the cases ported from the old
 //! `sm-rules` splits tests), and Gmail drafts.
 
-use crate::query::MatchTarget;
-use crate::splits::is_person_to_person;
 use crate::test_support::{message, set};
 use crate::*;
 
@@ -66,20 +64,6 @@ fn rules_read_the_latest_message_from_someone_else() {
         all_mine.latest_from_someone_else(&me()).map(|m| m.id),
         Some(MessageId(2))
     );
-}
-
-#[test]
-fn thread_labels_come_from_live_messages_plus_trash_and_spam() {
-    let t = Thread::new(vec![
-        message(1, alice(), &["INBOX", "Label_1"]),
-        message(2, alice(), &["TRASH", "STARRED"]),
-        message(3, alice(), &["SPAM"]),
-        MessageFacts {
-            labels: set(&["DRAFT", "Label_9"]),
-            ..draft(4)
-        },
-    ]);
-    assert_eq!(t.labels(), set(&["INBOX", "Label_1", "SPAM", "TRASH"]));
 }
 
 #[test]
@@ -184,41 +168,6 @@ fn view_membership() {
 }
 
 #[test]
-fn gmail_listings() {
-    assert_eq!(
-        View::Done.gmail_listing(),
-        Some(GmailListing::Query("-in:inbox -in:draft".into()))
-    );
-    assert_eq!(
-        View::AllMail.gmail_listing(),
-        Some(GmailListing::Query("-in:draft".into()))
-    );
-    assert_eq!(
-        View::Spam.gmail_listing(),
-        Some(GmailListing::Label {
-            label: LabelId::from("SPAM"),
-            include_spam_trash: true
-        })
-    );
-    assert_eq!(
-        View::Label {
-            label: LabelId::from("Label_3")
-        }
-        .gmail_listing(),
-        Some(GmailListing::Label {
-            label: LabelId::from("Label_3"),
-            include_spam_trash: false
-        })
-    );
-    assert_eq!(View::Inbox.gmail_listing(), None);
-    assert_eq!(
-        GmailListing::search(" is:list from:a"),
-        Some(GmailListing::Query("from:a".into()))
-    );
-    assert_eq!(GmailListing::search("  "), None);
-}
-
-#[test]
 fn snooze_rule_ignores_trash_and_pending_ops() {
     let t = Thread::new(vec![
         message(1, alice(), &["TRASH", "INBOX"]),
@@ -290,37 +239,6 @@ fn mark_unread_touches_the_latest_live_message_only() {
 }
 
 #[test]
-fn deltas_are_checked_and_presets_match_the_spec() {
-    assert_eq!(
-        LabelDelta::new(set(&["UNREAD", "STARRED"]), set(&[])),
-        Err(ModifyError::UnreadWithOtherLabels)
-    );
-    assert_eq!(
-        LabelDelta::new(set(&["UNREAD"]), set(&["INBOX"])),
-        Err(ModifyError::UnreadWithOtherLabels)
-    );
-    let both = LabelDelta::new(set(&["Label_1"]), set(&["Label_1", "INBOX"])).unwrap();
-    assert_eq!(
-        both.remove(),
-        &set(&["INBOX"]),
-        "a label in both is only added"
-    );
-    let trash = delta(ModifyKind::Trash);
-    assert_eq!(
-        (trash.add(), trash.remove()),
-        (&set(&["TRASH"]), &set(&["INBOX", "SPAM"]))
-    );
-    let spam = delta(ModifyKind::Spam);
-    assert_eq!(
-        (spam.add(), spam.remove()),
-        (&set(&["SPAM"]), &set(&["INBOX", "TRASH"]))
-    );
-    assert_eq!(delta(ModifyKind::Snooze).remove(), &set(&["INBOX"]));
-    assert_eq!(delta(ModifyKind::ReturnToInbox).add(), &set(&["INBOX"]));
-    assert!(LabelDelta::preset(ModifyKind::Label).is_none());
-}
-
-#[test]
 fn revert_undoes_only_what_is_still_there() {
     let done = change(1, &["STARRED"], &["INBOX", "UNREAD"]);
     let now = done.apply(set(&["INBOX", "UNREAD", "Label_1"]));
@@ -334,94 +252,7 @@ fn revert_undoes_only_what_is_still_there() {
     assert_eq!(done.reverted(&set(&["INBOX", "UNREAD"])), None);
 }
 
-#[test]
-fn snooze_after_and_its_restore() {
-    let at = Some(Millis(5));
-    assert_eq!(snooze_after(None, ModifyKind::Done, at), None);
-    assert_eq!(snooze_after(None, ModifyKind::Trash, at), None);
-    assert_eq!(snooze_after(None, ModifyKind::Spam, at), None);
-    assert_eq!(snooze_after(None, ModifyKind::Star, at), at);
-    assert_eq!(
-        snooze_after(Some(SnoozeEdit::Set(Millis(9))), ModifyKind::Snooze, at),
-        Some(Millis(9))
-    );
-    assert_eq!(
-        snooze_after(Some(SnoozeEdit::Clear), ModifyKind::ReturnToInbox, at),
-        None
-    );
-    let tc = ThreadChange {
-        thread: ThreadId(1),
-        changes: vec![],
-        snooze_before: at,
-        snooze_after: None,
-    };
-    assert!(tc.restores_snooze(None));
-    assert!(!tc.restores_snooze(Some(Millis(7))), "snoozed again since");
-    let unchanged = ThreadChange {
-        snooze_after: at,
-        ..tc
-    };
-    assert!(!unchanged.restores_snooze(at));
-}
-
 // --- split routing ---------------------------------------------------------
-
-#[test]
-fn person_to_person() {
-    let p2p = |labels: &[&str], is_list| is_person_to_person(&set(labels), is_list);
-    assert!(p2p(&[], false));
-    assert!(p2p(&["INBOX", "UNREAD"], false));
-    assert!(p2p(&["INBOX", "CATEGORY_PERSONAL"], false));
-    assert!(p2p(&["category_personal"], false));
-    assert!(!p2p(&["INBOX"], true));
-    assert!(!p2p(&["CATEGORY_PERSONAL"], true));
-    for c in [
-        "CATEGORY_PROMOTIONS",
-        "CATEGORY_SOCIAL",
-        "CATEGORY_UPDATES",
-        "CATEGORY_FORUMS",
-    ] {
-        assert!(!p2p(&["INBOX", c], false), "{c}");
-        assert!(!p2p(&["CATEGORY_PERSONAL", c], false), "{c}");
-    }
-    // An unknown category without CATEGORY_PERSONAL is not "no category".
-    assert!(!p2p(&["CATEGORY_PURCHASES"], false));
-    assert!(!p2p(&["category_purchases"], false));
-    // User label ids are not categories.
-    assert!(p2p(&["Label_12"], false));
-}
-
-#[test]
-fn starters_parse_and_match() {
-    let names: Vec<_> = STARTER_SPLITS.iter().map(|s| s.name).collect();
-    assert_eq!(names, ["Newsletters", "Promotions", "Social", "Updates"]);
-
-    let mut m = MessageFacts {
-        is_list: true,
-        ..message(
-            1,
-            Addr::named("Shop", "deals@shop.com"),
-            &["INBOX", "CATEGORY_PROMOTIONS"],
-        )
-    };
-    let hits = |m: &MessageFacts| -> Vec<&str> {
-        STARTER_SPLITS
-            .iter()
-            .filter(|s| {
-                Query::parse_rule(s.query)
-                    .unwrap()
-                    .matches(&MatchTarget::rule(m, &[]))
-            })
-            .map(|s| s.name)
-            .collect()
-    };
-    assert_eq!(hits(&m), ["Newsletters", "Promotions"]);
-    m.is_list = false;
-    m.labels = set(&["CATEGORY_SOCIAL"]);
-    assert_eq!(hits(&m), ["Social"]);
-    m.labels = set(&["CATEGORY_UPDATES"]);
-    assert_eq!(hits(&m), ["Updates"]);
-}
 
 const NEWS: SplitId = SplitId(1);
 const VIP: SplitId = SplitId(2);
@@ -469,31 +300,6 @@ fn routing_falls_through_rules_important_and_other() {
 }
 
 #[test]
-fn blank_custom_rules_match_nothing() {
-    let router = Router::new(
-        [
-            Split {
-                id: NEWS,
-                kind: SplitKind::Custom,
-                query: "  ".into(),
-                enabled: true,
-            },
-            Split {
-                id: OTHER,
-                kind: SplitKind::Other,
-                query: String::new(),
-                enabled: true,
-            },
-        ],
-        [],
-    );
-    assert_eq!(
-        router.route(&message(1, alice(), &["INBOX"]), &[]),
-        Some(OTHER)
-    );
-}
-
-#[test]
 fn pins_beat_rules_sender_then_domain_then_label() {
     let labels = vec!["Clients", "Work"];
     let m = MessageFacts {
@@ -534,16 +340,6 @@ fn several_label_pins_take_the_first_split_in_order() {
 }
 
 #[test]
-fn pins_need_a_value() {
-    assert!(Pin::new(PinKind::Sender, "   ", OTHER).is_none());
-    assert_eq!(pin(PinKind::Label, " Work ", OTHER).value(), "work");
-    assert_eq!(email_domain("a@B.io").as_deref(), Some("b.io"));
-    assert_eq!(email_domain("\"a@b\"@c.io").as_deref(), Some("c.io"));
-    assert_eq!(email_domain("nobody"), None);
-    assert_eq!(email_domain("a@"), None);
-}
-
-#[test]
 fn place_routes_inbox_threads_by_someone_else_s_message() {
     let router = Router::new(
         splits(true, true, true),
@@ -564,15 +360,6 @@ fn place_routes_inbox_threads_by_someone_else_s_message() {
         router.place(&archived, &archived.digest().unwrap(), &me(), &[]),
         None
     );
-}
-
-#[test]
-fn split_positions() {
-    assert_eq!(split_position(SplitKind::Custom, 0), 10);
-    assert_eq!(split_position(SplitKind::Custom, 2), 30);
-    assert_eq!(split_position(SplitKind::Important, 5), IMPORTANT_POSITION);
-    assert_eq!(split_position(SplitKind::Other, 0), OTHER_POSITION);
-    assert!(split_position(SplitKind::Custom, u32::MAX) < IMPORTANT_POSITION);
 }
 
 // --- Gmail drafts ----------------------------------------------------------

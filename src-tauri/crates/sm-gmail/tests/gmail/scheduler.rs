@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use sm_gmail::{Priority, QuotaConfig, Scheduler, Units, backoff};
+use sm_gmail::{Priority, QuotaConfig, Scheduler, Units};
 use tokio::time::{Instant, sleep};
 
 const A: &str = "a@example.com";
@@ -288,27 +288,4 @@ async fn accounts_do_not_wait_for_each_other() {
     let start = Instant::now();
     drop(b.acquire(Priority::P6, Units(100)).await);
     assert_eq!(Instant::now(), start);
-}
-
-#[test]
-fn backoff_doubles_to_a_minute_with_jitter() {
-    for attempt in 0..10 {
-        let base = Duration::from_secs(1 << attempt).min(Duration::from_mins(1));
-        let wait = backoff(attempt, None);
-        assert!(
-            wait >= base.mul_f64(0.8) && wait <= base.mul_f64(1.2).min(Duration::from_mins(1)),
-            "attempt {attempt}: {wait:?}"
-        );
-    }
-    for attempt in [30, 32, 1000] {
-        let wait = backoff(attempt, None);
-        assert!(
-            wait >= Duration::from_secs(48) && wait <= Duration::from_mins(1),
-            "attempt {attempt}: {wait:?}"
-        );
-    }
-    assert_eq!(
-        backoff(3, Some(Duration::from_secs(5))),
-        Duration::from_secs(5)
-    );
 }

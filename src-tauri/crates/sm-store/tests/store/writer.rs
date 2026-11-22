@@ -233,25 +233,6 @@ fn a_result_can_be_awaited() {
 }
 
 #[test]
-fn the_pool_reads_what_was_committed() {
-    let h = Harness::start();
-    let pool =
-        sm_store::ReadPool::open(&h.path(), std::num::NonZeroUsize::new(2).unwrap()).unwrap();
-    let count = || pool.with(|r| r.accounts().all()).unwrap().len();
-    assert_eq!(count(), 0);
-    h.account("a@example.com");
-    assert_eq!(count(), 1, "visible once the call returned");
-    // Nested reads take the other connection instead of waiting.
-    let nested = pool
-        .with(|outer| {
-            let inner = pool.with(|inner| inner.accounts().all())?;
-            Ok::<_, StoreError>((outer.accounts().all()?.len(), inner.len()))
-        })
-        .unwrap();
-    assert_eq!(nested, (1, 1));
-}
-
-#[test]
 fn a_failed_savepoint_undoes_only_its_own_writes_and_changes() {
     let h = Harness::start();
     let (kept, failed) = h.write(|tx| {

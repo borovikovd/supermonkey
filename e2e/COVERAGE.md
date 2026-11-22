@@ -563,7 +563,7 @@ Events: close, repeat, send, discard, undo, quit, elsewhere, account, offline.
 Unit tests only for complex algorithms, security properties, and races the suite can't reach (AGENTS.md); the suite doesn't repeat their partitions. Paths are under `src-tauri/`.
 
 - `crates/sm-domain/src/query/tests.rs`: lenient and strict parsing and its errors, operator case and precedence, search operators and scope, split rules refusing search terms, FTS5 translation and escaping, `is:list` stripped for Gmail (E2E: SRC-02, SRC-11, SRC-12, SPL-06).
-- `crates/sm-domain/src/tests.rs`: person-to-person over categories and list mail, the starters, pin precedence, the latest message from someone else (SPL-01, SPL-03, SPL-07).
+- `crates/sm-domain/src/tests.rs`: a thread's latest message, digest and views, label changes and their undo, split routing and pin precedence, the latest message from someone else, and which message a Gmail draft answers (SPL-03, SPL-07).
 - `crates/sm-domain/src/snooze/options.rs` and `crates/sm-domain/src/snooze/text.rs`: options before and after 18:00 and on every weekday, DST gaps and folds, the phrase grammar (SNZ-01, SNZ-02).
 - `crates/sm-domain/src/contacts.rs`: autocomplete matching, ranking, and no-reply addresses.
 - `crates/sm-mime/tests/sanitize.rs`: the hostile fixture, what is kept and dropped, `rel=noopener`, `cid:` to `data:`, text extraction (SEC-01).
@@ -572,7 +572,7 @@ Unit tests only for complex algorithms, security properties, and races the suite
 - `crates/sm-mime/tests/addresses.rs`: `is_valid_email` against the address table the composer's copy of the rule is held to (RCP-11).
 - `crates/sm-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser and when one-click applies.
 - `crates/sm-mime/src/outgoing.rs`: user text can't add headers to an outgoing message.
-- `crates/sm-gmail/tests/gmail/scheduler.rs`: priorities, concurrency, quota, back-off, and a removed account starting afresh.
+- `crates/sm-gmail/tests/gmail/scheduler.rs`: priorities, concurrency, quota, and a removed account starting afresh.
 - `crates/sm-gmail/tests/gmail/oauth.rs`: the `state` check, one refresh shared by concurrent 401s, secrets out of debug output.
 - `crates/sm-gmail/tests/gmail/client.rs`: one-click unsubscribe posts only to `https` and follows no redirect.
 - `crates/sm-fake-gmail/tests/holds.rs`: a release racing a held reply never strands it.
@@ -580,7 +580,7 @@ Unit tests only for complex algorithms, security properties, and races the suite
 - `crates/sm-store/src/open.rs`: a database of another schema version, or not a database, is moved aside and a fresh one made; a locked one, or one that can't be opened, is left in place and the open fails.
 - `crates/sm-core/src/tests/writer_channel.rs`: proptest that a list built from its first load and patches equals a fresh load at that `rev`; action numbers after a reload, first loads after a failed commit, `ack` never moving back and a failed batch's actions refused no later than the message that acks them, a panicking commit still going idle, searches and label reads whose commit failed (UIC-01).
 - `crates/sm-core/src/subs/diff.rs`: list diffs as moves.
-- `crates/sm-core/src/tests/clock.rs`: the activity tracking `settle()` relies on, a closed `Kick` waking a loop, and a stopping task group waiting for the groups inside it.
+- `crates/sm-core/src/tests/clock.rs`: the activity tracking `settle()` relies on, and a stopping task group waiting for the groups inside it.
 - `crates/sm-core/src/outbox/machine.rs`: every send event in every outbox state.
 - `crates/sm-core/src/drafts/lifecycle/state.rs`: every draft transition in every stage: the untouched rule, waits for parts and a target's body, Gmail's ids and a create in question, a skipped Gmail change.
 - `crates/sm-core/src/tests/perf.rs` (ignored; needs `SUPERMONKEY_PERF_DB`): local search and autocomplete against §Performance.
