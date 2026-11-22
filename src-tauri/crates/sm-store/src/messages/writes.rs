@@ -12,7 +12,7 @@ use crate::routing;
 use crate::tx::{WriteTx, require};
 
 const STORE_BODY: &str = "UPDATE messages SET has_body = 1, body_html = :html, quote_html = :quote,
-         body_text = :text, is_plain = :plain, rev = :rev
+         body_text = :text, rev = :rev
      WHERE id = :id";
 
 const PUT_ATTACHMENT: &str = "INSERT INTO attachments (message_id, part_id, filename, mime_type,
@@ -113,7 +113,7 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
             STORE_BODY,
             named_params! {
                 ":id": id, ":html": body.html, ":quote": body.quote_html,
-                ":text": body.text, ":plain": body.is_plain, ":rev": rev,
+                ":text": body.text, ":rev": rev,
             },
         )?;
         replace_attachments(db, id, &body.attachments)?;

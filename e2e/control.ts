@@ -144,7 +144,6 @@ type Recorded = {
   badge: number | null;
   openedUrls: string[];
   openedFiles: string[];
-  focusRequests: number;
 };
 
 type TokenItem = { account: string; token: string };

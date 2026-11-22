@@ -66,7 +66,6 @@ fn queue_create(
             label: id,
             name: name.to_owned(),
         },
-        created_at: ctx.now,
     })?;
     ctx.state.effect(Effect::Ops(account));
     Ok(())

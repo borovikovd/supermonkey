@@ -2,8 +2,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use sm_domain::{
-    AccountId, DraftId, DraftKind, GmailDraftId, GmailThreadId, Millis, NoticeKind, Rev, Thread,
-    ThreadId, gmail_draft_aim, gmail_draft_kind,
+    AccountId, DraftId, DraftKind, GmailDraftId, GmailThreadId, NoticeKind, Rev, Thread, ThreadId,
+    gmail_draft_aim, gmail_draft_kind,
 };
 use sm_store::{
     Draft, DraftAttachment, DraftRecord, NewNotice, NewOp, OpKind, Reads, StoreError, WriteTx,
@@ -70,7 +70,6 @@ pub(crate) fn delete_gmail_draft(
     state: &mut WriterState,
     account: AccountId,
     gmail: &GmailDraftId,
-    now: Millis,
 ) -> Result<(), StoreError> {
     if tx.read().ops().deletes_gmail_draft(account, gmail)? {
         return Ok(());
@@ -82,7 +81,6 @@ pub(crate) fn delete_gmail_draft(
         draft: None,
         gmail_draft: Some(gmail),
         payload: &(),
-        created_at: now,
     })?;
     state.effect(Effect::Ops(account));
     Ok(())
@@ -93,7 +91,6 @@ pub(crate) fn drop_gone(
     state: &mut WriterState,
     gone: Vec<DraftId>,
     reconcile: &Reconcile,
-    now: Millis,
 ) -> Result<(), StoreError> {
     for id in gone {
         let Some(record) = tx.read().drafts().get(&id)? else {
@@ -116,7 +113,6 @@ pub(crate) fn drop_gone(
                     message: GONE_ELSEWHERE.to_owned(),
                     draft: Some(draft.id),
                     thread: None,
-                    created_at: now,
                 })?;
             }
         } else {
@@ -149,7 +145,6 @@ pub(crate) fn apply_gmail_draft(
     state: &mut WriterState,
     gmail: GmailDraft,
     reconcile: &Reconcile,
-    now: Millis,
 ) -> Result<(), StoreError> {
     let account = reconcile.account;
     let reads = tx.read();
@@ -162,7 +157,7 @@ pub(crate) fn apply_gmail_draft(
         && let Some(local) = header
         && state.is_draft_gone(account, local)
     {
-        return delete_gmail_draft(tx, state, account, &gmail.id, now);
+        return delete_gmail_draft(tx, state, account, &gmail.id);
     }
     let existing = match existing {
         Some(record) => {
@@ -174,7 +169,7 @@ pub(crate) fn apply_gmail_draft(
                 let other_live = lifecycle::gmail_draft(local)
                     .is_some_and(|other| reconcile.live.contains(other));
                 if other_live {
-                    return delete_gmail_draft(tx, state, account, &gmail.id, now);
+                    return delete_gmail_draft(tx, state, account, &gmail.id);
                 }
                 let mut adopted = record.draft;
                 lifecycle::written(&mut adopted, gmail.into_ids());

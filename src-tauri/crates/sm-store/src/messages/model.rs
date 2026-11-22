@@ -32,7 +32,6 @@ pub struct NewBody {
     pub html: Option<String>,
     pub quote_html: Option<String>,
     pub text: Option<String>,
-    pub is_plain: bool,
     pub attachments: Vec<NewAttachment>,
 }
 
@@ -74,7 +73,6 @@ pub struct MessageRecord {
     pub labels: LabelSet,
     pub has_attachments: bool,
     pub has_body: bool,
-    pub is_plain: bool,
     pub rev: Rev,
 }
 
@@ -104,7 +102,6 @@ pub struct BodyRecord {
     pub html: Option<String>,
     pub quote_html: Option<String>,
     pub text: Option<String>,
-    pub is_plain: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,7 +151,6 @@ pub(super) fn message_row(r: &Row<'_>) -> rusqlite::Result<MessageRecord> {
         labels: json_column(r, "label_ids")?,
         has_attachments: r.get("has_attachments")?,
         has_body: r.get("has_body")?,
-        is_plain: r.get("is_plain")?,
         rev: r.get("rev")?,
     })
 }

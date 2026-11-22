@@ -297,17 +297,17 @@ fn refused(e: GmailError) -> Result<Answer, Failure> {
 }
 
 async fn write(ctx: &AccountCtx, id: OpId, answer: Answer) -> Result<(), Error> {
-    let (account, now, lane) = (ctx.account, ctx.clock().now(), Arc::clone(&ctx.lane));
+    let (account, lane) = (ctx.account, Arc::clone(&ctx.lane));
     ctx.writer()
         .call(WritePriority::Sync, move |tx, state| match answer {
-            Answer::Rejected(message) => reject(tx, id, message, now),
+            Answer::Rejected(message) => reject(tx, id, message),
             Answer::Unreadable => tx.ops().delete(id),
             Answer::Done(Landing::Draft { draft, written }) => {
                 if let Some(written) = written {
                     let ids = GmailIds::of(*written);
                     let made = ids.draft.clone();
                     if !store_ids(tx, &draft, ids)? {
-                        delete_gmail_draft(tx, state, account, &made, now)?;
+                        delete_gmail_draft(tx, state, account, &made)?;
                     }
                 }
                 tx.ops().delete(id)

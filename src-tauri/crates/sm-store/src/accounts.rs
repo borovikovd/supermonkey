@@ -1,7 +1,7 @@
 use rusqlite::{Row, named_params};
 use sm_domain::{
-    AccountId, HistoryId, IMPORTANT_POSITION, Identity, Millis, OTHER_POSITION, SendAsAddress,
-    SplitKind, SyncStatus, SystemLabel, avatar_hue,
+    AccountId, HistoryId, IMPORTANT_POSITION, Identity, OTHER_POSITION, SendAsAddress, SplitKind,
+    SyncStatus, SystemLabel, avatar_hue,
 };
 
 use crate::db::{Db, json_column, to_json};
@@ -18,7 +18,6 @@ pub struct AccountRecord {
     pub position: i32,
     pub hue_slot: i64,
     pub history_id: Option<HistoryId>,
-    pub last_sync: Option<Millis>,
     pub sync_status: SyncStatus,
     pub needs_signin: bool,
     pub connected: bool,
@@ -55,7 +54,6 @@ fn account_row(r: &Row<'_>) -> rusqlite::Result<AccountRecord> {
         position: r.get("position")?,
         hue_slot: r.get("hue")?,
         history_id: r.get("history_id")?,
-        last_sync: r.get("last_sync")?,
         sync_status: r.get("sync_status")?,
         needs_signin: r.get("needs_signin")?,
         connected: r.get("connected")?,
@@ -77,7 +75,7 @@ impl<'c> AccountReads<'c> {
         self.db.all(
             "read the accounts",
             "SELECT a.id, a.email, a.display_name, a.send_as, a.position, a.hue, a.history_id,
-                    a.last_sync, a.sync_status, a.needs_signin, a.connected,
+                    a.sync_status, a.needs_signin, a.connected,
                     (SELECT count(*) FROM threads t
                      WHERE t.account_id = a.id AND t.in_inbox = 1 AND t.unread = 1
                        AND t.snooze_until IS NULL) AS inbox_unread
@@ -91,7 +89,7 @@ impl<'c> AccountReads<'c> {
         self.db.optional(
             "read an account",
             "SELECT a.id, a.email, a.display_name, a.send_as, a.position, a.hue, a.history_id,
-                    a.last_sync, a.sync_status, a.needs_signin, a.connected,
+                    a.sync_status, a.needs_signin, a.connected,
                     (SELECT count(*) FROM threads t
                      WHERE t.account_id = a.id AND t.in_inbox = 1 AND t.unread = 1
                        AND t.snooze_until IS NULL) AS inbox_unread
@@ -220,16 +218,11 @@ impl<'t, 'c> AccountWrites<'t, 'c> {
         Ok(())
     }
 
-    pub fn set_history(
-        &mut self,
-        id: AccountId,
-        history_id: HistoryId,
-        synced_at: Millis,
-    ) -> Result<(), StoreError> {
+    pub fn set_history(&mut self, id: AccountId, history_id: HistoryId) -> Result<(), StoreError> {
         self.tx.db().execute(
             "store an account's history cursor",
-            "UPDATE accounts SET history_id = :history, last_sync = :at WHERE id = :id",
-            named_params! { ":id": id, ":history": history_id, ":at": synced_at },
+            "UPDATE accounts SET history_id = :history WHERE id = :id",
+            named_params! { ":id": id, ":history": history_id },
         )?;
         self.tx.touch(id, Table::SyncCursor);
         Ok(())

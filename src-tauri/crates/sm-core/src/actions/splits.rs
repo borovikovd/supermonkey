@@ -11,15 +11,15 @@ pub(super) fn pin(
     value: &str,
     split: SplitId,
 ) -> Result<(), ActionError> {
-    let Some(target) = ctx
+    if ctx
         .tx
         .read()
         .splits()
         .get(split)?
-        .filter(|s| s.account == account)
-    else {
+        .is_none_or(|s| s.account != account)
+    {
         return Err(ActionError::Invalid("That split no longer exists"));
-    };
+    }
     let Some(pin) = Pin::new(kind, value, split) else {
         return Err(ActionError::Invalid("There is nothing to pin"));
     };
@@ -27,7 +27,6 @@ pub(super) fn pin(
     ctx.tx.undo().record(
         account,
         UndoEntryId(ctx.n.0),
-        &format!("Moved to {}", target.name),
         &UndoAction::Pin {
             pin_kind: kind,
             value: pin.into_value(),

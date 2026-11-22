@@ -49,7 +49,7 @@ pub(crate) fn update(
     lifecycle::edited(&mut draft);
     tx.drafts().put(&draft)?;
     if !lifecycle::discards_on_close(&draft) {
-        queue_upsert(tx, state, draft.account, id, now)?;
+        queue_upsert(tx, state, draft.account, id)?;
     }
     Ok(())
 }
@@ -88,7 +88,6 @@ pub(crate) fn queue_upsert(
     state: &mut WriterState,
     account: AccountId,
     draft: &DraftId,
-    now: Millis,
 ) -> Result<(), StoreError> {
     tx.ops().delete_draft_upserts(draft)?;
     tx.ops().push(&NewOp {
@@ -98,7 +97,6 @@ pub(crate) fn queue_upsert(
         draft: Some(draft),
         gmail_draft: None,
         payload: &(),
-        created_at: now,
     })?;
     state.effect(Effect::Ops(account));
     Ok(())

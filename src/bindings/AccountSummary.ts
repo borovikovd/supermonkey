@@ -3,8 +3,7 @@ import type { AccountInfo } from "./AccountInfo";
 import type { LabelInfo } from "./LabelInfo";
 import type { Notice } from "./Notice";
 import type { OutboxRow } from "./OutboxRow";
-import type { PinInfo } from "./PinInfo";
 import type { SplitInfo } from "./SplitInfo";
 import type { UndoEntryInfo } from "./UndoEntryInfo";
 
-export type AccountSummary = { account: AccountInfo, labels: Array<LabelInfo>, splits: Array<SplitInfo>, pins: Array<PinInfo>, outbox: Array<OutboxRow>, undo: Array<UndoEntryInfo>, notices: Array<Notice>, queuedOps: number, };
+export type AccountSummary = { account: AccountInfo, labels: Array<LabelInfo>, splits: Array<SplitInfo>, outbox: Array<OutboxRow>, undo: Array<UndoEntryInfo>, notices: Array<Notice>, queuedOps: number, };

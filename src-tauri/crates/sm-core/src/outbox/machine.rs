@@ -106,7 +106,6 @@ mod tests {
             undo_requested: false,
             toast_closed: false,
             delayed: false,
-            error: None,
         }
     }
 

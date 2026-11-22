@@ -33,7 +33,7 @@ pub use ids::{
 };
 pub use kinds::{
     DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SettingKey, SplitKind, SyncStatus,
-    UndoKind, View,
+    View,
 };
 pub use kinds_text::UnknownKind;
 pub use labels::{LabelSet, SystemLabel};

@@ -1,4 +1,4 @@
-use sm_domain::{AccountId, Rev, SystemLabel, ThreadId};
+use sm_domain::{Rev, SystemLabel, ThreadId};
 use sm_ipc::{
     AttachmentInfo, ConversationData, DraftSummary, MessageBody, MessageSummary, OutboxRow,
 };
@@ -11,9 +11,7 @@ pub(crate) fn outbox_row(record: OutboxRecord) -> OutboxRow {
         account: o.account,
         draft: o.draft,
         thread: o.thread,
-        send_after: o.send_after,
         state: o.state,
-        sent_message_gmail_id: o.sent_message_id,
         undo_requested: o.undo_requested,
         toast_closed: o.toast_closed,
         delayed: o.delayed,
@@ -33,8 +31,6 @@ fn message_summary(entry: ConversationMessage) -> MessageSummary {
         id: m.id,
         unread: m.labels.has(SystemLabel::Unread),
         starred: m.labels.has(SystemLabel::Starred),
-        in_trash: m.labels.has(SystemLabel::Trash),
-        in_spam: m.labels.has(SystemLabel::Spam),
         from: m.from,
         to: m.to,
         cc: m.cc,
@@ -43,7 +39,6 @@ fn message_summary(entry: ConversationMessage) -> MessageSummary {
         snippet: m.snippet,
         date: m.date,
         has_body: m.has_body,
-        plain: m.is_plain,
         attachments: attachments
             .into_iter()
             .map(|a| AttachmentInfo {
@@ -52,7 +47,6 @@ fn message_summary(entry: ConversationMessage) -> MessageSummary {
                 mime_type: a.mime_type,
                 size: a.size,
                 inline: a.is_inline,
-                downloaded: a.local_path.is_some(),
             })
             .collect(),
         rev: m.rev,
@@ -67,10 +61,7 @@ pub(crate) fn conversation(
     let Some(rows) = reads.threads().conversation(thread, trash_mode)? else {
         return Ok(ConversationData {
             thread,
-            account: AccountId::NONE,
             subject: String::new(),
-            labels: Vec::new(),
-            snooze_until: None,
             messages: Vec::new(),
             drafts: Vec::new(),
             outbox: Vec::new(),
@@ -96,10 +87,7 @@ pub(crate) fn conversation(
         .collect();
     Ok(ConversationData {
         thread,
-        account: rows.thread.account,
         subject: rows.thread.subject,
-        labels: rows.thread.labels.into_iter().collect(),
-        snooze_until: rows.thread.snooze_until,
         messages: rows.messages.into_iter().map(message_summary).collect(),
         drafts,
         outbox: rows.outbox.into_iter().map(outbox_row).collect(),

@@ -25,7 +25,7 @@ impl<'c> MessageReads<'c> {
             "SELECT id, account_id, thread_id, gmail_id, internal_date, from_name, from_email,
                     to_addrs, cc_addrs, bcc_addrs, reply_to, subject, snippet, message_id_hdr,
                     in_reply_to, references_hdr, is_list, is_draft, sm_draft_id, label_ids,
-                    has_attachments, has_body, is_plain, rev
+                    has_attachments, has_body, rev
              FROM messages WHERE id = ?1",
             [id],
             message_row,
@@ -42,7 +42,7 @@ impl<'c> MessageReads<'c> {
             "SELECT id, account_id, thread_id, gmail_id, internal_date, from_name, from_email,
                     to_addrs, cc_addrs, bcc_addrs, reply_to, subject, snippet, message_id_hdr,
                     in_reply_to, references_hdr, is_list, is_draft, sm_draft_id, label_ids,
-                    has_attachments, has_body, is_plain, rev
+                    has_attachments, has_body, rev
              FROM messages WHERE account_id = ?1 AND gmail_id = ?2",
             (account, gmail_id),
             message_row,
@@ -55,7 +55,7 @@ impl<'c> MessageReads<'c> {
             "SELECT id, account_id, thread_id, gmail_id, internal_date, from_name, from_email,
                     to_addrs, cc_addrs, bcc_addrs, reply_to, subject, snippet, message_id_hdr,
                     in_reply_to, references_hdr, is_list, is_draft, sm_draft_id, label_ids,
-                    has_attachments, has_body, is_plain, rev
+                    has_attachments, has_body, rev
              FROM messages WHERE thread_id = ?1 ORDER BY internal_date, id",
             [thread],
             message_row,
@@ -101,7 +101,7 @@ impl<'c> MessageReads<'c> {
     pub fn bodies(self, ids: &[MessageId]) -> Result<Vec<BodyRecord>, StoreError> {
         self.db.all(
             "read bodies",
-            "SELECT m.id, m.body_html, m.quote_html, m.body_text, m.is_plain
+            "SELECT m.id, m.body_html, m.quote_html, m.body_text
              FROM json_each(?1) j JOIN messages m ON m.id = j.value
              WHERE m.has_body = 1 ORDER BY j.key",
             [id_list(ids)?],
@@ -111,7 +111,6 @@ impl<'c> MessageReads<'c> {
                     html: r.get("body_html")?,
                     quote_html: r.get("quote_html")?,
                     text: r.get("body_text")?,
-                    is_plain: r.get("is_plain")?,
                 })
             },
         )

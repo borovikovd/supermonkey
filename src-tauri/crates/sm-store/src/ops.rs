@@ -5,7 +5,7 @@ use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, 
 use rusqlite::{Row, named_params};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use sm_domain::{AccountId, ActionNo, DraftId, GmailDraftId, Millis, UnknownKind};
+use sm_domain::{AccountId, ActionNo, DraftId, GmailDraftId, UnknownKind};
 
 use crate::db::{Db, to_json};
 use crate::tx::WriteTx;
@@ -114,7 +114,6 @@ pub struct NewOp<'a, P> {
     pub draft: Option<&'a DraftId>,
     pub gmail_draft: Option<&'a GmailDraftId>,
     pub payload: &'a P,
-    pub created_at: Millis,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,7 +125,6 @@ pub struct OpRecord {
     pub draft: Option<DraftId>,
     pub gmail_draft: Option<GmailDraftId>,
     pub payload_json: String,
-    pub created_at: Millis,
 }
 
 impl OpRecord {
@@ -144,7 +142,6 @@ fn op_row(r: &Row<'_>) -> rusqlite::Result<OpRecord> {
         draft: r.get("draft_id")?,
         gmail_draft: r.get("gmail_draft_id")?,
         payload_json: r.get("payload")?,
-        created_at: r.get("created_at")?,
     })
 }
 
@@ -161,8 +158,7 @@ impl<'c> OpReads<'c> {
     pub fn next(self, account: AccountId, queue: OpQueue) -> Result<Option<OpRecord>, StoreError> {
         self.db.optional(
             "read the next op",
-            "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload,
-                    created_at
+            "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload
              FROM ops WHERE account_id = ?1 AND (kind IN (?2, ?3)) = ?4 ORDER BY id LIMIT 1",
             (
                 account,
@@ -177,8 +173,7 @@ impl<'c> OpReads<'c> {
     pub fn get(self, id: OpId) -> Result<Option<OpRecord>, StoreError> {
         self.db.optional(
             "read an op",
-            "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload,
-                    created_at
+            "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload
              FROM ops WHERE id = ?1",
             [id],
             op_row,
@@ -188,8 +183,7 @@ impl<'c> OpReads<'c> {
     pub fn of_kind(self, account: AccountId, kind: OpKind) -> Result<Vec<OpRecord>, StoreError> {
         self.db.all(
             "read queued ops",
-            "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload,
-                    created_at
+            "SELECT id, account_id, action, kind, draft_id, gmail_draft_id, payload
              FROM ops WHERE account_id = ?1 AND kind = ?2 ORDER BY id",
             (account, kind),
             op_row,
@@ -270,13 +264,12 @@ impl<'t, 'c> OpWrites<'t, 'c> {
     pub fn push<P: Serialize>(&mut self, op: &NewOp<'_, P>) -> Result<OpId, StoreError> {
         let id = OpId(self.tx.db().insert(
             "queue an op",
-            "INSERT INTO ops (account_id, action, kind, draft_id, gmail_draft_id, payload,
-                 created_at)
-             VALUES (:account, :action, :kind, :draft, :gmail_draft, :payload, :created_at)",
+            "INSERT INTO ops (account_id, action, kind, draft_id, gmail_draft_id, payload)
+             VALUES (:account, :action, :kind, :draft, :gmail_draft, :payload)",
             named_params! {
                 ":account": op.account, ":action": op.action, ":kind": op.kind,
                 ":draft": op.draft, ":gmail_draft": op.gmail_draft,
-                ":payload": to_json("payload", op.payload)?, ":created_at": op.created_at,
+                ":payload": to_json("payload", op.payload)?,
             },
         )?);
         self.tx.touch(op.account, Table::Ops);
@@ -299,9 +292,8 @@ impl<'t, 'c> OpWrites<'t, 'c> {
     pub fn requeue(&mut self, id: OpId) -> Result<(), StoreError> {
         self.tx.db().execute(
             "queue an op again",
-            "INSERT INTO ops (account_id, action, kind, draft_id, gmail_draft_id, payload,
-                 created_at)
-             SELECT account_id, action, kind, draft_id, gmail_draft_id, payload, created_at
+            "INSERT INTO ops (account_id, action, kind, draft_id, gmail_draft_id, payload)
+             SELECT account_id, action, kind, draft_id, gmail_draft_id, payload
              FROM ops WHERE id = ?1",
             [id],
         )?;

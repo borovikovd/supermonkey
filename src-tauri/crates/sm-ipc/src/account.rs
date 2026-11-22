@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sm_domain::{
-    AccountId, DraftId, LabelId, NoticeId, NoticeKind, OutboxId, PinKind, SplitId, SplitKind,
-    SyncStatus, ThreadId, UndoEntryId, UndoKind,
+    AccountId, DraftId, LabelId, NoticeId, NoticeKind, OutboxId, SplitId, SplitKind, SyncStatus,
+    ThreadId, UndoEntryId,
 };
 use ts_rs::TS;
 
@@ -31,7 +31,6 @@ pub struct AccountInfo {
     pub email: String,
     pub name: String,
     pub hue: String,
-    pub position: i32,
     pub inbox_unread: u32,
     pub needs_signin: bool,
     pub muted: bool,
@@ -45,8 +44,6 @@ pub struct AccountInfo {
 pub struct SendAs {
     pub email: String,
     pub name: String,
-    pub is_default: bool,
-    pub is_primary: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -56,7 +53,6 @@ pub struct AccountSummary {
     pub account: AccountInfo,
     pub labels: Vec<LabelInfo>,
     pub splits: Vec<SplitInfo>,
-    pub pins: Vec<PinInfo>,
     pub outbox: Vec<OutboxRow>,
     pub undo: Vec<UndoEntryInfo>,
     pub notices: Vec<Notice>,
@@ -82,16 +78,6 @@ pub struct SplitInfo {
     pub query: String,
     pub enabled: bool,
     pub hide_when_empty: bool,
-    pub position: i32,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(export)]
-pub struct PinInfo {
-    pub kind: PinKind,
-    pub value: String,
-    pub split: SplitId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -99,10 +85,6 @@ pub struct PinInfo {
 #[ts(export)]
 pub struct UndoEntryInfo {
     pub id: UndoEntryId,
-    pub kind: UndoKind,
-    pub label: String,
-    #[ts(type = "number[]")]
-    pub threads: Vec<ThreadId>,
     pub outbox: Option<OutboxId>,
 }
 

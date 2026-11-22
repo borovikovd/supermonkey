@@ -125,11 +125,11 @@ fn go_on(
 }
 
 async fn step(ctx: &AccountCtx, row: &Outbox, event: Event) -> Result<bool, Error> {
-    let (id, now) = (row.id, ctx.clock().now());
+    let id = row.id;
     Ok(ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
-            resolve(tx, state, id, event, now)
+            resolve(tx, state, id, event)
         })
         .await?)
 }
@@ -157,14 +157,14 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Error> {
         Ok(None) => return Ok(()),
         Err(failure) => return write_failed(ctx, row, failure).await,
     };
-    let (id, now, local) = (row.id, ctx.clock().now(), row.draft.clone());
+    let (id, local) = (row.id, row.draft.clone());
     let ids = GmailIds::of(written);
     let (gmail, to_send) = (ids.draft.clone(), ids.draft.clone());
     let applied = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
             store_ids(tx, &local, ids)?;
-            resolve(tx, state, id, Event::Written(gmail), now)
+            resolve(tx, state, id, Event::Written(gmail))
         })
         .await?;
     if !applied {

@@ -238,11 +238,10 @@ async fn store(ctx: &AccountCtx, full: sm_gmail::Draft, reconcile: Reconcile) {
     }) else {
         return;
     };
-    let now = ctx.clock().now();
     let stored: Result<(), Error> = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
-            apply_gmail_draft(tx, state, gmail, &reconcile, now)
+            apply_gmail_draft(tx, state, gmail, &reconcile)
         })
         .await
         .map_err(|e: StoreError| Error::Store(e));
@@ -328,11 +327,10 @@ async fn read_local(
 
 async fn forget_gone(ctx: &AccountCtx, reconcile: Reconcile, gone: Vec<DraftId>) {
     let account = ctx.account;
-    let now = ctx.clock().now();
     let dropped = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
-            drop_gone(tx, state, gone, &reconcile, now)
+            drop_gone(tx, state, gone, &reconcile)
         })
         .await;
     if let Err(e) = dropped {

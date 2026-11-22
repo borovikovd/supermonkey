@@ -122,7 +122,6 @@ async fn body(
         html: Some(rendered.html),
         quote_html: rendered.quote,
         text: Some(rendered.text),
-        is_plain: rendered.is_plain,
         attachments,
     })
 }
@@ -168,7 +167,6 @@ async fn render(raw: RawBody, images: CidImages) -> sm_mime::Body {
                 html: String::new(),
                 quote: None,
                 text: String::new(),
-                is_plain: true,
             }
         }
     }
@@ -183,7 +181,6 @@ pub(crate) fn draft_message(m: Message) -> (ReadMessage, DraftBody) {
         html: Some(rendered.html),
         quote_html: rendered.quote,
         text: Some(rendered.text),
-        is_plain: rendered.is_plain,
         attachments: parsed.parts.iter().map(new_attachment).collect(),
     };
     (

@@ -1,4 +1,4 @@
-use sm_domain::{AccountId, DraftId, Millis, OutboxId, ThreadId};
+use sm_domain::{AccountId, DraftId, OutboxId, ThreadId};
 use sm_store::{NewNotice, StoreError, WriteTx};
 
 use super::machine::{Event, Step, step};
@@ -12,7 +12,6 @@ pub(crate) fn resolve(
     state: &mut WriterState,
     outbox: OutboxId,
     event: Event,
-    now: Millis,
 ) -> Result<bool, StoreError> {
     let Some(record) = tx.read().outbox().get(outbox)? else {
         return Ok(false);
@@ -34,7 +33,7 @@ pub(crate) fn resolve(
             let copies = tx.read().messages().draft_copies(account, &row.draft)?;
             tx.messages().delete(&copies)?;
             if let Some(message) = &trash {
-                trash_sent(tx, state, account, message, now)?;
+                trash_sent(tx, state, account, message)?;
             }
             if drop_entry {
                 tx.undo().delete_for_outbox(outbox)?;
@@ -47,14 +46,13 @@ pub(crate) fn resolve(
         } => {
             tx.undo().delete_for_outbox(outbox)?;
             tx.outbox().delete(outbox)?;
-            let thread = keep_draft(tx, state, account, &draft, now)?;
+            let thread = keep_draft(tx, state, account, &draft)?;
             tx.notices().add(&NewNotice {
                 account,
                 kind,
                 message,
                 draft: Some(draft),
                 thread,
-                created_at: now,
             })?;
         }
     }
@@ -69,7 +67,6 @@ fn keep_draft(
     state: &mut WriterState,
     account: AccountId,
     draft: &DraftId,
-    now: Millis,
 ) -> Result<Option<ThreadId>, StoreError> {
     let Some(record) = tx.read().drafts().get(draft)? else {
         return Ok(None);
@@ -77,6 +74,6 @@ fn keep_draft(
     let mut kept = record.draft;
     lifecycle::keep(&mut kept);
     tx.drafts().put(&kept)?;
-    queue_upsert(tx, state, account, &kept.id, now)?;
+    queue_upsert(tx, state, account, &kept.id)?;
     Ok(kept.thread)
 }

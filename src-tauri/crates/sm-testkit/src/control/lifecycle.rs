@@ -171,7 +171,6 @@ pub(crate) async fn platform(State(s): State<Arc<Server>>) -> Ctl {
         "badge": recorded.badge,
         "openedUrls": recorded.opened_urls,
         "openedFiles": recorded.opened_files,
-        "focusRequests": recorded.focus_requests,
     })))
 }
 

@@ -8,7 +8,7 @@ use crate::effects::{Effect, GmailQuery};
 
 pub(super) fn reset(ctx: &mut ActionCtx<'_, '_>) -> Result<(), ActionError> {
     for draft in ctx.state.subs.composer_drafts() {
-        crate::drafts::close(ctx.tx, ctx.state, &draft, ctx.now)?;
+        crate::drafts::close(ctx.tx, ctx.state, &draft)?;
     }
     for (id, key) in ctx.state.subs.close_all() {
         ctx.state.sub_effect(Effect::CancelSub(id));

@@ -23,7 +23,7 @@ pub(crate) fn wake_due(
             delta,
             snooze: Some(SnoozeEdit::Clear),
         };
-        change_threads(tx, state, change, None, now)?;
+        change_threads(tx, state, change, None)?;
     }
     if count > 0 {
         tracing::info!(count, "woke due snoozes");

@@ -7,8 +7,8 @@ mod list;
 mod subscriptions;
 
 pub use account::{
-    AccountInfo, AccountSummary, AppState, GlobalSettings, LabelInfo, Notice, PinInfo, SendAs,
-    SplitInfo, UndoEntryInfo,
+    AccountInfo, AccountSummary, AppState, GlobalSettings, LabelInfo, Notice, SendAs, SplitInfo,
+    UndoEntryInfo,
 };
 pub use actions::{
     Action, ModifyAction, NumberedAction, Setting, SnoozeChange, Submitted, Unreadable,
@@ -24,6 +24,6 @@ pub use conversation::{
 pub use list::{ListEntry, ListMove, ListRow};
 pub use sm_domain::Addr;
 pub use sm_domain::{
-    DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SplitKind, SyncStatus, UndoKind, View,
+    DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SplitKind, SyncStatus, View,
 };
 pub use subscriptions::{ChannelMessage, Rejection, SubKey, SubUpdate};

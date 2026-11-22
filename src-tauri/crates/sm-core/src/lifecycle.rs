@@ -82,7 +82,7 @@ impl Lifecycle {
         let settled = deps.writer.call(Priority::Ui, move |tx, state| {
             crate::snooze::wake_due(tx, state, now)?;
             crate::outbox::on_launch(tx, state, now)?;
-            crate::drafts::on_launch(tx, state, now)?;
+            crate::drafts::on_launch(tx, state)?;
             Ok::<_, ActionError>(())
         });
         let launching = Arc::clone(deps);

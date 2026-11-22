@@ -185,7 +185,7 @@ fn write_account(
     plan: Plan,
     email: String,
 ) -> Result<(), StoreError> {
-    let owner = create_owner(tx, plan.now, email)?;
+    let owner = create_owner(tx, email)?;
     write_threads(tx, rng, plan, &owner)?;
     write_contacts(tx, rng, plan, owner.account)?;
     tracing::info!(
@@ -196,7 +196,7 @@ fn write_account(
     Ok(())
 }
 
-fn create_owner(tx: &mut WriteTx<'_>, now: Millis, email: String) -> Result<Owner, StoreError> {
+fn create_owner(tx: &mut WriteTx<'_>, email: String) -> Result<Owner, StoreError> {
     let name = email.split('@').next().unwrap_or(&email).to_owned();
     let account = tx.accounts().create(&email, &name)?;
     tx.accounts().set_profile(
@@ -211,7 +211,7 @@ fn create_owner(tx: &mut WriteTx<'_>, now: Millis, email: String) -> Result<Owne
     )?;
     let me = Addr::named(name, email);
     tx.accounts()
-        .set_history(account, sm_domain::HistoryId(1), now)?;
+        .set_history(account, sm_domain::HistoryId(1))?;
     tx.accounts().set_connected(account)?;
     let labels = sync_labels(tx, account)?;
     Ok(Owner {
@@ -426,7 +426,6 @@ const fn html_body(html: String, text: String) -> NewBody {
         html: Some(html),
         quote_html: None,
         text: Some(text),
-        is_plain: false,
         attachments: Vec::new(),
     }
 }

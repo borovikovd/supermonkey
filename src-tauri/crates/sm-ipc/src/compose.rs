@@ -22,7 +22,6 @@ pub struct DraftState {
     pub body_html: String,
     pub quote_html: Option<String>,
     pub attachments: Vec<DraftAttachment>,
-    pub resumed: bool,
     pub gone: bool,
     pub rev: Rev,
 }

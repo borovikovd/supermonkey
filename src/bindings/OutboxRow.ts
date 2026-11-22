@@ -2,4 +2,4 @@
 import type { Addr } from "./Addr";
 import type { OutboxState } from "./OutboxState";
 
-export type OutboxRow = { id: number, account: number, draft: string, thread: number | null, sendAfter: number, state: OutboxState, sentMessageGmailId: string | null, undoRequested: boolean, toastClosed: boolean, delayed: boolean, to: Array<Addr>, snippet: string, subject: string, undoEntry: number | null, };
+export type OutboxRow = { id: number, account: number, draft: string, thread: number | null, state: OutboxState, undoRequested: boolean, toastClosed: boolean, delayed: boolean, to: Array<Addr>, snippet: string, subject: string, undoEntry: number | null, };

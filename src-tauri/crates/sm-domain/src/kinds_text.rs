@@ -3,7 +3,6 @@ use std::str::FromStr;
 
 use crate::{
     DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SettingKey, SplitKind, SyncStatus,
-    UndoKind,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -74,13 +73,11 @@ text_enum! {
         Retrying => "retrying",
         NeedsSignin => "needs_signin",
     }
-    UndoKind { Mail => "mail", Send => "send", Pin => "pin" }
     NoticeKind {
         Rejected => "rejected",
         SendFailed => "send_failed",
         SendUndone => "send_undone",
         DraftGone => "draft_gone",
-        Info => "info",
     }
     ModifyKind {
         Done => "done",
@@ -96,23 +93,4 @@ text_enum! {
         RemoveLabel => "remove_label",
     }
     SettingKey { RemoteImages => "remote_images", Muted => "muted" }
-}
-
-impl ModifyKind {
-    #[must_use]
-    pub const fn undo_label(self) -> &'static str {
-        match self {
-            Self::Done => "Marked done",
-            Self::ReturnToInbox => "Moved to inbox",
-            Self::Snooze => "Snoozed",
-            Self::Trash => "Moved to trash",
-            Self::Spam => "Marked as spam",
-            Self::Star => "Starred",
-            Self::Unstar => "Unstarred",
-            Self::Read => "Marked read",
-            Self::Unread => "Marked unread",
-            Self::Label => "Labeled",
-            Self::RemoveLabel => "Label removed",
-        }
-    }
 }

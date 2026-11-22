@@ -17,7 +17,6 @@ pub struct Body {
     pub html: String,
     pub quote: Option<String>,
     pub text: String,
-    pub is_plain: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -27,23 +26,22 @@ pub struct DraftBody {
 }
 
 impl RawBody {
-    fn into_html(self) -> (String, Option<String>, bool) {
+    fn into_html(self) -> (String, Option<String>) {
         match (self.html, self.text) {
-            (Some(html), text) => (html, text, false),
-            (None, Some(text)) => (text_to_html(&text), Some(text), true),
-            (None, None) => (String::new(), None, true),
+            (Some(html), text) => (html, text),
+            (None, Some(text)) => (text_to_html(&text), Some(text)),
+            (None, None) => (String::new(), None),
         }
     }
 
     #[must_use]
     pub fn render(self, images: &CidImages) -> Body {
-        let (html, text, is_plain) = self.into_html();
+        let (html, text) = self.into_html();
         let (visible, quote) = split_quoted_history(&html);
         Body {
             html: sanitize_html(visible, images),
             quote: quote.map(|q| sanitize_html(q, images)),
             text: text.unwrap_or_else(|| html_to_text(&html)),
-            is_plain,
         }
     }
 

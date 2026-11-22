@@ -51,7 +51,7 @@ pub(super) fn close_composer(
     ctx: &mut ActionCtx<'_, '_>,
     draft: &DraftId,
 ) -> Result<(), ActionError> {
-    drafts::close(ctx.tx, ctx.state, draft, ctx.now)?;
+    drafts::close(ctx.tx, ctx.state, draft)?;
     ctx.state.subs.close_composers(draft);
     Ok(())
 }
@@ -66,7 +66,7 @@ pub(super) fn discard_draft(
     ctx: &mut ActionCtx<'_, '_>,
     draft: &DraftId,
 ) -> Result<(), ActionError> {
-    drafts::discard(ctx.tx, ctx.state, draft, ctx.now)?;
+    drafts::discard(ctx.tx, ctx.state, draft)?;
     ctx.state.subs.close_composers(draft);
     Ok(())
 }

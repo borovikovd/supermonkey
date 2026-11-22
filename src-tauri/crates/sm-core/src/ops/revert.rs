@@ -1,5 +1,5 @@
 use serde::de::DeserializeOwned;
-use sm_domain::{AccountId, ActionNo, LabelId, Millis, NoticeKind, ThreadChange, UndoEntryId};
+use sm_domain::{AccountId, ActionNo, LabelId, NoticeKind, ThreadChange, UndoEntryId};
 use sm_store::{NewNotice, NewOp, OpId, OpKind, OpRecord, StoreError, UndoAction, WriteTx};
 
 use super::payload::relabel_changes;
@@ -11,7 +11,6 @@ use crate::writer::WriterState;
 pub(crate) struct OpOrigin {
     pub(crate) account: AccountId,
     pub(crate) action: Option<ActionNo>,
-    pub(crate) now: Millis,
 }
 
 pub(crate) fn queue_modify(
@@ -20,11 +19,7 @@ pub(crate) fn queue_modify(
     origin: OpOrigin,
     op: &ModifyOp,
 ) -> Result<(), StoreError> {
-    let OpOrigin {
-        account,
-        action,
-        now,
-    } = origin;
+    let OpOrigin { account, action } = origin;
     tx.ops().push(&NewOp {
         account,
         action,
@@ -32,7 +27,6 @@ pub(crate) fn queue_modify(
         draft: None,
         gmail_draft: None,
         payload: op,
-        created_at: now,
     })?;
     state.effect(Effect::Ops(account));
     Ok(())
@@ -125,12 +119,7 @@ pub(crate) fn queue_revert(
     Ok(())
 }
 
-pub(crate) fn reject(
-    tx: &mut WriteTx<'_>,
-    id: OpId,
-    message: String,
-    now: Millis,
-) -> Result<(), StoreError> {
+pub(crate) fn reject(tx: &mut WriteTx<'_>, id: OpId, message: String) -> Result<(), StoreError> {
     let Some(op) = tx.read().ops().get(id)? else {
         return Ok(());
     };
@@ -157,7 +146,6 @@ pub(crate) fn reject(
         message,
         draft: op.draft,
         thread: None,
-        created_at: now,
     })?;
     Ok(())
 }
@@ -211,8 +199,7 @@ pub(crate) fn relabel(
             continue;
         };
         if relabel_changes(threads, from, to) {
-            tx.undo()
-                .record(account, entry.id, &entry.label, &entry.action)?;
+            tx.undo().record(account, entry.id, &entry.action)?;
         }
     }
     Ok(())

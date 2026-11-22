@@ -2,4 +2,4 @@
 import type { Addr } from "./Addr";
 import type { AttachmentInfo } from "./AttachmentInfo";
 
-export type MessageSummary = { id: number, from: Addr, to: Array<Addr>, cc: Array<Addr>, bcc: Array<Addr>, subject: string, snippet: string, date: number, unread: boolean, starred: boolean, inTrash: boolean, inSpam: boolean, hasBody: boolean, plain: boolean, attachments: Array<AttachmentInfo>, rev: number, };
+export type MessageSummary = { id: number, from: Addr, to: Array<Addr>, cc: Array<Addr>, bcc: Array<Addr>, subject: string, snippet: string, date: number, unread: boolean, starred: boolean, hasBody: boolean, attachments: Array<AttachmentInfo>, rev: number, };

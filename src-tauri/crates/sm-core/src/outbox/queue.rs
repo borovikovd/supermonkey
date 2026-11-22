@@ -13,8 +13,6 @@ use crate::writer::WriterState;
 
 const SEND_DELAY: Duration = Duration::from_secs(10);
 
-const SENT: &str = "Sent";
-
 pub(crate) fn send(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -55,7 +53,6 @@ pub(crate) fn send(
     tx.undo().record(
         draft.account,
         UndoEntryId(n.0),
-        SENT,
         &UndoAction::Send { outbox },
     )?;
     state.effect(Effect::Outbox(draft.account));
@@ -67,7 +64,6 @@ pub(crate) fn undo_send(
     state: &mut WriterState,
     account: AccountId,
     outbox: OutboxId,
-    now: Millis,
 ) -> Result<(), ActionError> {
     let Some(record) = tx.read().outbox().get(outbox)? else {
         return Err(ActionError::Invalid("That send can no longer be undone"));
@@ -83,7 +79,7 @@ pub(crate) fn undo_send(
                 let mut draft = draft.draft;
                 lifecycle::keep(&mut draft);
                 tx.drafts().put(&draft)?;
-                queue_upsert(tx, state, account, &draft.id, now)?;
+                queue_upsert(tx, state, account, &draft.id)?;
             }
         }
         OutboxState::Sending => {
@@ -92,7 +88,7 @@ pub(crate) fn undo_send(
         }
         OutboxState::Sent => {
             if let Some(message) = &row.sent_message_id {
-                trash_sent(tx, state, account, message, now)?;
+                trash_sent(tx, state, account, message)?;
             }
             tx.outbox().delete(outbox)?;
             tx.drafts().delete(&row.draft)?;
@@ -108,7 +104,6 @@ pub(crate) fn trash_sent(
     state: &mut WriterState,
     account: AccountId,
     message: &GmailMessageId,
-    now: Millis,
 ) -> Result<(), StoreError> {
     if let Some(record) = tx.read().messages().by_gmail_id(account, message)? {
         let gone: LabelSet = [SystemLabel::Inbox, SystemLabel::Spam]
@@ -125,7 +120,6 @@ pub(crate) fn trash_sent(
         draft: None,
         gmail_draft: None,
         payload: message,
-        created_at: now,
     })?;
     state.effect(Effect::Ops(account));
     Ok(())

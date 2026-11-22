@@ -13,7 +13,6 @@ CREATE TABLE accounts (
   position     INTEGER NOT NULL,
   hue          INTEGER NOT NULL,
   history_id   TEXT,
-  last_sync    INTEGER,
   sync_status  TEXT NOT NULL DEFAULT 'idle',
   needs_signin INTEGER NOT NULL DEFAULT 0,
   connected    INTEGER NOT NULL DEFAULT 0
@@ -108,12 +107,10 @@ CREATE TABLE messages (
   body_html       TEXT,
   quote_html      TEXT,
   body_text       TEXT,
-  is_plain        INTEGER NOT NULL DEFAULT 0,
   rev             INTEGER NOT NULL,
   UNIQUE (account_id, gmail_id)
 );
 CREATE INDEX messages_thread ON messages (thread_id, internal_date);
-CREATE INDEX messages_msgid  ON messages (account_id, message_id_hdr);
 CREATE INDEX messages_draft  ON messages (account_id, sm_draft_id) WHERE sm_draft_id IS NOT NULL;
 
 CREATE TABLE attachments (
@@ -174,7 +171,7 @@ CREATE TABLE drafts (
   references_hdr     TEXT NOT NULL,
   updated_at         INTEGER NOT NULL,
   stage              TEXT NOT NULL
-                     CHECK (stage IN ('fresh', 'opened', 'kept')),
+                     CHECK (stage IN ('fresh', 'kept')),
   defaults           TEXT,
   waits_for          TEXT
                      CHECK (waits_for IN ('parts', 'target_body')),
@@ -202,7 +199,6 @@ CREATE TABLE outbox (
   undo_requested  INTEGER NOT NULL DEFAULT 0,
   toast_closed    INTEGER NOT NULL DEFAULT 0,
   delayed         INTEGER NOT NULL DEFAULT 0,
-  error           TEXT,
   rev             INTEGER NOT NULL
 );
 CREATE INDEX outbox_account ON outbox (account_id);
@@ -216,16 +212,13 @@ CREATE TABLE ops (
   kind           TEXT NOT NULL,
   draft_id       TEXT,
   gmail_draft_id TEXT,
-  payload        TEXT NOT NULL,
-  created_at     INTEGER NOT NULL
+  payload        TEXT NOT NULL
 );
 CREATE INDEX ops_account ON ops (account_id, id);
 
 CREATE TABLE undo_entries (
   id         INTEGER PRIMARY KEY,
   account_id INTEGER NOT NULL REFERENCES accounts (id) ON DELETE CASCADE,
-  kind       TEXT NOT NULL,
-  label      TEXT NOT NULL,
   outbox_id  INTEGER,
   payload    TEXT NOT NULL
 );
@@ -237,8 +230,7 @@ CREATE TABLE notices (
   kind       TEXT NOT NULL,
   message    TEXT NOT NULL,
   draft_id   TEXT,
-  thread_id  INTEGER,
-  created_at INTEGER NOT NULL
+  thread_id  INTEGER
 );
 CREATE INDEX notices_account ON notices (account_id, id);
 

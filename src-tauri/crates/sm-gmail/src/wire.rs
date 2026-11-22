@@ -93,8 +93,6 @@ pub struct ThreadPage {
     pub threads: Vec<Thread>,
     #[serde(default)]
     pub next_page_token: Option<PageToken>,
-    #[serde(default)]
-    pub result_size_estimate: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -106,16 +104,12 @@ pub struct HistoryMessage {
 #[serde(rename_all = "camelCase")]
 pub struct HistoryLabelChange {
     pub message: Message,
-    #[serde(default)]
-    pub label_ids: Vec<LabelId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryRecord {
     pub id: HistoryId,
-    #[serde(default)]
-    pub messages: Vec<Message>,
     #[serde(default)]
     pub messages_added: Vec<HistoryMessage>,
     #[serde(default)]
@@ -173,8 +167,6 @@ pub struct FilterCriteria {
 pub struct FilterAction {
     #[serde(default)]
     pub add_label_ids: Vec<LabelId>,
-    #[serde(default)]
-    pub remove_label_ids: Vec<LabelId>,
     #[serde(flatten)]
     pub other: serde_json::Map<String, Value>,
 }

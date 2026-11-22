@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use sm_domain::{
-    AccountId, GmailMessageId, GmailThreadId, LabelId, LabelSet, MessageId, Millis, SystemLabel,
-    Thread, ThreadId,
+    AccountId, GmailMessageId, GmailThreadId, LabelId, LabelSet, MessageId, SystemLabel, Thread,
+    ThreadId,
 };
 use sm_gmail::HistoryId;
 use sm_store::{FetchedThread, NewBody, NewMessage, Reads, StoreError, WriteTx};
@@ -131,7 +131,6 @@ pub(crate) struct Polled<'a> {
     pub(crate) read: Vec<(GmailThreadId, Option<ReadThread>)>,
     pub(crate) deferred: &'a [GmailThreadId],
     pub(crate) cursor: HistoryId,
-    pub(crate) now: Millis,
     pub(crate) ticket: &'a ReadTicket,
 }
 
@@ -146,7 +145,6 @@ pub(crate) fn apply_history(
         read,
         deferred,
         cursor,
-        now,
         ticket,
     } = polled;
     let local = LocalChanges::load(tx.read(), account, ticket.landed())?;
@@ -172,7 +170,7 @@ pub(crate) fn apply_history(
     for &thread in &touched {
         wake_if_back_in_inbox(tx, thread, &local)?;
     }
-    tx.accounts().set_history(account, cursor, now)?;
+    tx.accounts().set_history(account, cursor)?;
     if relabeled.unknown {
         state.effect(Effect::RefreshLabels(account));
     }

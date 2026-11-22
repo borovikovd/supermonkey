@@ -5,7 +5,7 @@ use rusqlite::{Connection, OpenFlags};
 
 use crate::StoreError;
 
-pub const SCHEMA_VERSION: i32 = 7;
+pub const SCHEMA_VERSION: i32 = 8;
 
 const SCHEMA: &str = include_str!("schema.sql");
 

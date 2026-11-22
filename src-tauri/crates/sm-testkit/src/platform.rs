@@ -11,7 +11,6 @@ pub(crate) struct Recorded {
     pub(crate) badge: Option<u32>,
     pub(crate) opened_urls: Vec<String>,
     pub(crate) opened_files: Vec<String>,
-    pub(crate) focus_requests: usize,
 }
 
 #[derive(Debug, Default)]
@@ -48,7 +47,6 @@ impl RecordingPlatform {
         r.notifications.clear();
         r.opened_urls.clear();
         r.opened_files.clear();
-        r.focus_requests = 0;
     }
 
     pub(crate) fn next_sign_in(&self, mode: SignInMode) {
@@ -106,7 +104,5 @@ impl Platform for RecordingPlatform {
         self.recorded.lock().badge = count;
     }
 
-    fn focus_window(&self) {
-        self.recorded.lock().focus_requests += 1;
-    }
+    fn focus_window(&self) {}
 }

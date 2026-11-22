@@ -47,12 +47,11 @@ pub(super) fn modify(ctx: &mut ActionCtx<'_, '_>, action: ModifyAction) -> Resul
         delta,
         snooze,
     };
-    let entry = change_threads(ctx.tx, ctx.state, change, Some(ctx.n), ctx.now)?;
+    let entry = change_threads(ctx.tx, ctx.state, change, Some(ctx.n))?;
     if undoable && !entry.is_empty() {
         ctx.tx.undo().record(
             account,
             UndoEntryId(ctx.n.0),
-            kind.undo_label(),
             &UndoAction::Mail { threads: entry },
         )?;
     }
@@ -64,7 +63,6 @@ pub(crate) fn change_threads(
     state: &mut WriterState,
     change: ThreadsChange,
     action: Option<ActionNo>,
-    now: Millis,
 ) -> Result<Vec<ThreadChange>, ActionError> {
     let ThreadsChange {
         account,
@@ -106,11 +104,7 @@ pub(crate) fn change_threads(
     let relabels = entry.iter().any(|t| !t.changes.is_empty());
     if relabels && !messages.is_empty() {
         let op = relabel_op(delta, messages, entry);
-        let origin = OpOrigin {
-            account,
-            action,
-            now,
-        };
+        let origin = OpOrigin { account, action };
         queue_modify(tx, state, origin, &op)?;
         return Ok(op.threads);
     }
@@ -165,7 +159,6 @@ pub(super) fn undo(
             let origin = OpOrigin {
                 account,
                 action: Some(ctx.n),
-                now: ctx.now,
             };
             queue_revert(ctx.tx, ctx.state, origin, reverted)?;
             Ok(())
@@ -176,8 +169,6 @@ pub(super) fn undo(
             split: _,
             replaced,
         } => splits::undo_pin(ctx, account, pin_kind, &value, replaced),
-        UndoAction::Send { outbox } => {
-            crate::outbox::undo_send(ctx.tx, ctx.state, account, outbox, ctx.now)
-        }
+        UndoAction::Send { outbox } => crate::outbox::undo_send(ctx.tx, ctx.state, account, outbox),
     }
 }

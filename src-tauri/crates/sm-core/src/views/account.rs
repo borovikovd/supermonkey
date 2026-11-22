@@ -1,7 +1,7 @@
 use sm_domain::{AVATAR_HUES, AccountId, SettingKey, SyncStatus};
 use sm_ipc::{
-    AccountInfo, AccountSummary, AppState, GlobalSettings, LabelInfo, Notice, PinInfo, SendAs,
-    SplitInfo, UndoEntryInfo,
+    AccountInfo, AccountSummary, AppState, GlobalSettings, LabelInfo, Notice, SendAs, SplitInfo,
+    UndoEntryInfo,
 };
 use sm_store::{AccountRecord, Reads, StoreError, Table};
 
@@ -15,7 +15,6 @@ pub(crate) const SUMMARY_READS: &[Table] = &[
     Table::Settings,
     Table::Labels,
     Table::Splits,
-    Table::Pins,
     Table::Outbox,
     Table::Undo,
     Table::Notices,
@@ -36,7 +35,6 @@ fn account_info(record: AccountRecord, muted: bool) -> AccountInfo {
         email: record.email,
         name: record.display_name,
         hue,
-        position: record.position,
         inbox_unread: record.inbox_unread,
         needs_signin: record.needs_signin,
         muted,
@@ -47,8 +45,6 @@ fn account_info(record: AccountRecord, muted: bool) -> AccountInfo {
             .map(|s| SendAs {
                 email: s.email,
                 name: s.name,
-                is_default: s.is_default,
-                is_primary: s.is_primary,
             })
             .collect(),
     }
@@ -83,23 +79,12 @@ pub(crate) fn account_summary(
     };
     let labels = labels(reads, account)?;
     let splits = splits(reads, account)?;
-    let pins = reads
-        .splits()
-        .pins(account)?
-        .into_iter()
-        .map(|p| PinInfo {
-            kind: p.kind,
-            split: p.split,
-            value: p.into_value(),
-        })
-        .collect();
     let undo = undo_entries(reads, account)?;
     let notices = notices(reads, account)?;
     Ok(Some(AccountSummary {
         account: account_info(record, is_muted(reads, account)?),
         labels,
         splits,
-        pins,
         outbox: reads
             .outbox()
             .for_account(account)?
@@ -137,7 +122,6 @@ fn splits(reads: Reads<'_>, account: AccountId) -> Result<Vec<SplitInfo>, StoreE
             query: s.query,
             enabled: s.enabled,
             hide_when_empty: s.hide_when_empty,
-            position: s.position,
         })
         .collect())
 }
@@ -148,10 +132,7 @@ fn undo_entries(reads: Reads<'_>, account: AccountId) -> Result<Vec<UndoEntryInf
         .into_iter()
         .map(|e| UndoEntryInfo {
             id: e.id,
-            kind: e.action.kind(),
-            threads: e.action.threads(),
             outbox: e.action.outbox(),
-            label: e.label,
         })
         .collect())
 }
@@ -177,7 +158,6 @@ pub(crate) fn empty_summary(account: AccountId) -> AccountSummary {
             email: String::new(),
             name: String::new(),
             hue: AVATAR_HUES[0].to_owned(),
-            position: 0,
             inbox_unread: 0,
             needs_signin: false,
             muted: false,
@@ -186,7 +166,6 @@ pub(crate) fn empty_summary(account: AccountId) -> AccountSummary {
         },
         labels: Vec::new(),
         splits: Vec::new(),
-        pins: Vec::new(),
         outbox: Vec::new(),
         undo: Vec::new(),
         notices: Vec::new(),

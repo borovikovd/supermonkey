@@ -58,9 +58,6 @@ pub enum DraftStage {
     Fresh {
         defaults: DraftContent,
     },
-    Opened {
-        defaults: DraftContent,
-    },
     #[default]
     Kept,
 }
@@ -69,14 +66,13 @@ impl DraftStage {
     const fn as_str(&self) -> &'static str {
         match self {
             Self::Fresh { .. } => "fresh",
-            Self::Opened { .. } => "opened",
             Self::Kept => "kept",
         }
     }
 
     const fn defaults(&self) -> Option<&DraftContent> {
         match self {
-            Self::Fresh { defaults } | Self::Opened { defaults } => Some(defaults),
+            Self::Fresh { defaults } => Some(defaults),
             Self::Kept => None,
         }
     }
@@ -84,7 +80,6 @@ impl DraftStage {
     fn from_columns(stage: &str, defaults: Option<DraftContent>) -> rusqlite::Result<Self> {
         match (stage, defaults) {
             ("fresh", Some(defaults)) => Ok(Self::Fresh { defaults }),
-            ("opened", Some(defaults)) => Ok(Self::Opened { defaults }),
             ("kept", None) => Ok(Self::Kept),
             (stage, defaults) => Err(rusqlite::Error::FromSqlConversionFailure(
                 0,

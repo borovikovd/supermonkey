@@ -3,4 +3,4 @@ import type { Addr } from "./Addr";
 import type { DraftAttachment } from "./DraftAttachment";
 import type { DraftKind } from "./DraftKind";
 
-export type DraftState = { id: string, account: number, kind: DraftKind, replyAll: boolean, thread: number | null, target: number | null, from: Addr | null, to: Array<Addr>, cc: Array<Addr>, bcc: Array<Addr>, subject: string, bodyHtml: string, quoteHtml: string | null, attachments: Array<DraftAttachment>, resumed: boolean, gone: boolean, rev: number, };
+export type DraftState = { id: string, account: number, kind: DraftKind, replyAll: boolean, thread: number | null, target: number | null, from: Addr | null, to: Array<Addr>, cc: Array<Addr>, bcc: Array<Addr>, subject: string, bodyHtml: string, quoteHtml: string | null, attachments: Array<DraftAttachment>, gone: boolean, rev: number, };

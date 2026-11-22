@@ -38,7 +38,7 @@ pub(crate) const fn is_fresh(draft: &Draft) -> bool {
 
 fn is_untouched(draft: &Draft) -> bool {
     match &draft.lifecycle.stage {
-        DraftStage::Fresh { defaults } | DraftStage::Opened { defaults } => {
+        DraftStage::Fresh { defaults } => {
             defaults.is_untouched_by(draft.content(), is_blank(&draft.body_html))
         }
         DraftStage::Kept => false,
@@ -50,11 +50,10 @@ pub(crate) fn discards_on_close(draft: &Draft) -> bool {
 }
 
 pub(crate) fn composer_closed(draft: &mut Draft) -> bool {
-    let DraftStage::Fresh { defaults } = &mut draft.lifecycle.stage else {
+    if !is_fresh(draft) {
         return false;
-    };
-    let defaults = std::mem::take(defaults);
-    draft.lifecycle.stage = DraftStage::Opened { defaults };
+    }
+    keep(draft);
     true
 }
 
@@ -72,9 +71,7 @@ pub(crate) fn awaits_target_body(draft: &Draft) -> bool {
 
 pub(crate) fn body_landed(draft: &mut Draft, added: &[DraftAttachment]) {
     target_body_gone(draft);
-    if let DraftStage::Fresh { defaults } | DraftStage::Opened { defaults } =
-        &mut draft.lifecycle.stage
-    {
+    if let DraftStage::Fresh { defaults } = &mut draft.lifecycle.stage {
         defaults
             .attachments
             .extend(added.iter().map(|a| a.id.clone()));
@@ -185,12 +182,6 @@ mod tests {
         d
     }
 
-    fn opened() -> Draft {
-        let mut d = fresh();
-        composer_closed(&mut d);
-        d
-    }
-
     fn kept() -> Draft {
         draft()
     }
@@ -238,22 +229,19 @@ mod tests {
     }
 
     #[test]
-    fn closing_the_first_composer_ends_fresh_and_keeps_the_defaults() {
+    fn closing_the_first_composer_keeps_the_draft() {
         let mut d = fresh();
         assert!(composer_closed(&mut d));
-        assert!(!is_fresh(&d));
-        assert!(is_untouched(&d), "still as it started");
+        assert_eq!(d.lifecycle.stage, DraftStage::Kept);
         assert!(!discards_on_close(&d), "only a fresh draft is discarded");
-        for mut other in [opened(), kept()] {
-            let before = other.lifecycle.clone();
-            assert!(!composer_closed(&mut other));
-            assert_eq!(other.lifecycle, before);
-        }
+        let before = d.lifecycle.clone();
+        assert!(!composer_closed(&mut d));
+        assert_eq!(d.lifecycle, before);
     }
 
     #[test]
     fn a_kept_draft_is_never_untouched() {
-        for mut d in [fresh(), opened(), kept()] {
+        for mut d in [fresh(), kept()] {
             keep(&mut d);
             assert_eq!(d.lifecycle.stage, DraftStage::Kept);
             assert!(!is_fresh(&d) && !is_untouched(&d) && !discards_on_close(&d));
@@ -262,15 +250,14 @@ mod tests {
 
     #[test]
     fn a_landed_body_ends_the_wait_and_its_attachments_count_as_defaults() {
-        for mut d in [fresh(), opened()] {
-            await_target_body(&mut d);
-            assert!(awaits_target_body(&d) && !awaits_parts(&d));
-            let added = [attachment("a1")];
-            body_landed(&mut d, &added);
-            d.attachments.extend(added);
-            assert!(!awaits_target_body(&d));
-            assert!(is_untouched(&d), "an untouched forward stays untouched");
-        }
+        let mut d = fresh();
+        await_target_body(&mut d);
+        assert!(awaits_target_body(&d) && !awaits_parts(&d));
+        let added = [attachment("a1")];
+        body_landed(&mut d, &added);
+        d.attachments.extend(added);
+        assert!(!awaits_target_body(&d));
+        assert!(is_untouched(&d), "an untouched forward stays untouched");
         let mut d = kept();
         await_target_body(&mut d);
         body_landed(&mut d, &[attachment("a1")]);
@@ -315,19 +302,19 @@ mod tests {
 
     #[test]
     fn a_gmail_draft_gone_while_open_loses_its_ids_but_not_its_thread() {
-        let mut d = opened();
+        let mut d = fresh();
         written(&mut d, ids("1"));
         gmail_gone(&mut d);
         assert_eq!(gmail_draft(&d), None);
         assert_eq!(gmail_message(&d), None);
         assert_eq!(gmail_thread(&d), Some(&GmailThreadId::from("t1")));
         assert_eq!(gmail_write(&d), GmailWrite::Create);
-        assert!(!is_fresh(&d) && is_untouched(&d), "its stage stays");
+        assert!(is_fresh(&d) && is_untouched(&d), "its stage stays");
     }
 
     #[test]
     fn a_skipped_gmail_change_is_read_unless_an_edit_wins() {
-        let mut d = opened();
+        let mut d = kept();
         assert!(gmail_changed(&mut d));
         assert!(!gmail_changed(&mut d), "already skipped");
         assert!(has_skipped_gmail_change(&d));

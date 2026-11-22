@@ -240,7 +240,6 @@ function Splits() {
         query,
         enabled: true,
         hideWhenEmpty: true,
-        position: 0,
       };
       return fixed < 0 ? [...r, s] : [...r.slice(0, fixed), s, ...r.slice(fixed)];
     });

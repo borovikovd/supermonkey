@@ -1,5 +1,5 @@
 use rusqlite::{Row, named_params};
-use sm_domain::{AccountId, DraftId, Millis, NoticeId, NoticeKind, ThreadId};
+use sm_domain::{AccountId, DraftId, NoticeId, NoticeKind, ThreadId};
 
 use crate::db::Db;
 use crate::tx::WriteTx;
@@ -12,7 +12,6 @@ pub struct NewNotice {
     pub message: String,
     pub draft: Option<DraftId>,
     pub thread: Option<ThreadId>,
-    pub created_at: Millis,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,7 +22,6 @@ pub struct NoticeRecord {
     pub message: String,
     pub draft: Option<DraftId>,
     pub thread: Option<ThreadId>,
-    pub created_at: Millis,
 }
 
 fn notice_row(r: &Row<'_>) -> rusqlite::Result<NoticeRecord> {
@@ -34,7 +32,6 @@ fn notice_row(r: &Row<'_>) -> rusqlite::Result<NoticeRecord> {
         message: r.get("message")?,
         draft: r.get("draft_id")?,
         thread: r.get("thread_id")?,
-        created_at: r.get("created_at")?,
     })
 }
 
@@ -51,7 +48,7 @@ impl<'c> NoticeReads<'c> {
     pub fn for_account(self, account: AccountId) -> Result<Vec<NoticeRecord>, StoreError> {
         self.db.all(
             "read the notices",
-            "SELECT id, account_id, kind, message, draft_id, thread_id, created_at
+            "SELECT id, account_id, kind, message, draft_id, thread_id
              FROM notices WHERE account_id = ?1 ORDER BY id",
             [account],
             notice_row,
@@ -72,12 +69,11 @@ impl<'t, 'c> NoticeWrites<'t, 'c> {
     pub fn add(&mut self, notice: &NewNotice) -> Result<NoticeId, StoreError> {
         let id = NoticeId(self.tx.db().insert(
             "add a notice",
-            "INSERT INTO notices (account_id, kind, message, draft_id, thread_id, created_at)
-             VALUES (:account, :kind, :message, :draft, :thread, :created_at)",
+            "INSERT INTO notices (account_id, kind, message, draft_id, thread_id)
+             VALUES (:account, :kind, :message, :draft, :thread)",
             named_params! {
                 ":account": notice.account, ":kind": notice.kind, ":message": notice.message,
                 ":draft": notice.draft, ":thread": notice.thread,
-                ":created_at": notice.created_at,
             },
         )?);
         self.tx.touch(notice.account, Table::Notices);

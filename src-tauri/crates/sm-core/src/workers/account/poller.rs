@@ -187,7 +187,7 @@ async fn reconcile_on_connect(
 }
 
 async fn store_connect_cursor(ctx: &AccountCtx, cursor: HistoryId) {
-    let (account, now) = (ctx.account, ctx.clock().now());
+    let account = ctx.account;
     let stored = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, _| {
@@ -195,7 +195,7 @@ async fn store_connect_cursor(ctx: &AccountCtx, cursor: HistoryId) {
                 return Ok(());
             };
             if record.history_id.is_none() {
-                tx.accounts().set_history(account, cursor, now)?;
+                tx.accounts().set_history(account, cursor)?;
             }
             Ok::<_, sm_store::StoreError>(())
         })
@@ -324,7 +324,6 @@ async fn apply_poll(
     ticket: ReadTicket,
 ) -> Option<Vec<GmailThreadId>> {
     let account = ctx.account;
-    let now = ctx.clock().now();
     let notifier = Arc::clone(&ctx.deps.notifier);
     let PollReads { read, deferred } = reads;
     let applied = ctx
@@ -336,7 +335,6 @@ async fn apply_poll(
                 read,
                 deferred: &deferred,
                 cursor,
-                now,
                 ticket: &ticket,
             };
             let added = apply_history(tx, state, polled)?;
@@ -482,11 +480,11 @@ async fn history_since(
 }
 
 pub(crate) async fn store_cursor(ctx: &AccountCtx, cursor: HistoryId) {
-    let (account, now) = (ctx.account, ctx.clock().now());
+    let account = ctx.account;
     let stored = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, _| {
-            tx.accounts().set_history(account, cursor, now)
+            tx.accounts().set_history(account, cursor)
         })
         .await;
     if let Err(e) = stored {

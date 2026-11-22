@@ -1,8 +1,6 @@
 use rusqlite::{Row, named_params};
 use serde::{Deserialize, Serialize};
-use sm_domain::{
-    AccountId, OutboxId, PinKind, SplitId, ThreadChange, ThreadId, UndoEntryId, UndoKind,
-};
+use sm_domain::{AccountId, OutboxId, PinKind, SplitId, ThreadChange, UndoEntryId};
 
 use crate::db::{Db, json_column, to_json};
 use crate::tx::WriteTx;
@@ -29,23 +27,6 @@ pub enum UndoAction {
 
 impl UndoAction {
     #[must_use]
-    pub const fn kind(&self) -> UndoKind {
-        match self {
-            Self::Mail { .. } => UndoKind::Mail,
-            Self::Send { .. } => UndoKind::Send,
-            Self::Pin { .. } => UndoKind::Pin,
-        }
-    }
-
-    #[must_use]
-    pub fn threads(&self) -> Vec<ThreadId> {
-        match self {
-            Self::Mail { threads } => threads.iter().map(|t| t.thread).collect(),
-            Self::Send { .. } | Self::Pin { .. } => Vec::new(),
-        }
-    }
-
-    #[must_use]
     pub const fn outbox(&self) -> Option<OutboxId> {
         match self {
             Self::Send { outbox } => Some(*outbox),
@@ -58,7 +39,6 @@ impl UndoAction {
 pub struct UndoRecord {
     pub id: UndoEntryId,
     pub account: AccountId,
-    pub label: String,
     pub action: UndoAction,
 }
 
@@ -66,7 +46,6 @@ fn undo_row(r: &Row<'_>) -> rusqlite::Result<UndoRecord> {
     Ok(UndoRecord {
         id: r.get("id")?,
         account: r.get("account_id")?,
-        label: r.get("label")?,
         action: json_column(r, "payload")?,
     })
 }
@@ -84,7 +63,7 @@ impl<'c> UndoReads<'c> {
     pub fn entries(self, account: AccountId) -> Result<Vec<UndoRecord>, StoreError> {
         self.db.all(
             "read the undo history",
-            "SELECT id, account_id, label, payload FROM undo_entries
+            "SELECT id, account_id, payload FROM undo_entries
              WHERE account_id = ?1 ORDER BY id",
             [account],
             undo_row,
@@ -98,7 +77,7 @@ impl<'c> UndoReads<'c> {
     ) -> Result<Option<UndoRecord>, StoreError> {
         self.db.optional(
             "read an undo entry",
-            "SELECT id, account_id, label, payload FROM undo_entries
+            "SELECT id, account_id, payload FROM undo_entries
              WHERE id = ?1 AND account_id = ?2",
             (id, account),
             undo_row,
@@ -130,17 +109,16 @@ impl<'t, 'c> UndoWrites<'t, 'c> {
         &mut self,
         account: AccountId,
         id: UndoEntryId,
-        label: &str,
         action: &UndoAction,
     ) -> Result<(), StoreError> {
         let db = self.tx.db();
         db.execute(
             "add an undo entry",
-            "INSERT OR REPLACE INTO undo_entries (id, account_id, kind, label, outbox_id, payload)
-             VALUES (:id, :account, :kind, :label, :outbox, :payload)",
+            "INSERT OR REPLACE INTO undo_entries (id, account_id, outbox_id, payload)
+             VALUES (:id, :account, :outbox, :payload)",
             named_params! {
-                ":id": id, ":account": account, ":kind": action.kind(), ":label": label,
-                ":outbox": action.outbox(), ":payload": to_json("payload", action)?,
+                ":id": id, ":account": account, ":outbox": action.outbox(),
+                ":payload": to_json("payload", action)?,
             },
         )?;
         db.execute(

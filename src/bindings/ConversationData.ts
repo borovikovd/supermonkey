@@ -3,4 +3,4 @@ import type { DraftSummary } from "./DraftSummary";
 import type { MessageSummary } from "./MessageSummary";
 import type { OutboxRow } from "./OutboxRow";
 
-export type ConversationData = { thread: number, account: number, subject: string, labels: Array<string>, snoozeUntil: number | null, messages: Array<MessageSummary>, drafts: Array<DraftSummary>, outbox: Array<OutboxRow>, gone: boolean, rev: number, };
+export type ConversationData = { thread: number, subject: string, messages: Array<MessageSummary>, drafts: Array<DraftSummary>, outbox: Array<OutboxRow>, gone: boolean, rev: number, };

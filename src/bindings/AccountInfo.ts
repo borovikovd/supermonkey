@@ -2,4 +2,4 @@
 import type { SendAs } from "./SendAs";
 import type { SyncStatus } from "./SyncStatus";
 
-export type AccountInfo = { id: number, email: string, name: string, hue: string, position: number, inboxUnread: number, needsSignin: boolean, muted: boolean, syncStatus: SyncStatus, sendAs: Array<SendAs>, };
+export type AccountInfo = { id: number, email: string, name: string, hue: string, inboxUnread: number, needsSignin: boolean, muted: boolean, syncStatus: SyncStatus, sendAs: Array<SendAs>, };

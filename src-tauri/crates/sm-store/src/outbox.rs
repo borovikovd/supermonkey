@@ -23,7 +23,6 @@ pub struct Outbox {
     pub undo_requested: bool,
     pub toast_closed: bool,
     pub delayed: bool,
-    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -58,7 +57,6 @@ fn outbox_row(r: &Row<'_>) -> rusqlite::Result<OutboxRecord> {
             undo_requested: r.get("undo_requested")?,
             toast_closed: r.get("toast_closed")?,
             delayed: r.get("delayed")?,
-            error: r.get("error")?,
         },
         rev: r.get("rev")?,
         to: json_column_opt(r, "to_addrs")?.unwrap_or_default(),
@@ -210,15 +208,13 @@ impl<'t, 'c> OutboxWrites<'t, 'c> {
             "store an outbox row",
             "UPDATE outbox SET thread_id = :thread, send_after = :send_after, state = :state,
                  gmail_draft_id = :gmail_draft, sent_message_id = :sent,
-                 undo_requested = :undo, toast_closed = :closed, delayed = :delayed,
-                 error = :error, rev = :rev
+                 undo_requested = :undo, toast_closed = :closed, delayed = :delayed, rev = :rev
              WHERE id = :id",
             named_params! {
                 ":id": row.id, ":thread": row.thread, ":send_after": row.send_after,
                 ":state": row.state, ":gmail_draft": row.gmail_draft_id,
                 ":sent": row.sent_message_id, ":undo": row.undo_requested,
-                ":closed": row.toast_closed, ":delayed": row.delayed, ":error": row.error,
-                ":rev": rev,
+                ":closed": row.toast_closed, ":delayed": row.delayed, ":rev": rev,
             },
         )?;
         self.changed(row.account, [thread, row.thread])

@@ -1,4 +1,4 @@
-use sm_domain::{DraftId, Millis};
+use sm_domain::DraftId;
 use sm_store::{NewOp, OpKind, StoreError, WriteTx};
 
 use super::lifecycle::{self, GmailWrite};
@@ -9,7 +9,6 @@ pub(crate) fn close(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
     id: &DraftId,
-    now: Millis,
 ) -> Result<(), StoreError> {
     let Some(record) = tx.read().drafts().get(id)? else {
         return Ok(());
@@ -19,7 +18,7 @@ pub(crate) fn close(
     }
     let mut draft = record.draft;
     if lifecycle::discards_on_close(&draft) {
-        return discard(tx, state, id, now);
+        return discard(tx, state, id);
     }
     if lifecycle::composer_closed(&mut draft) {
         tx.drafts().put(&draft)?;
@@ -37,7 +36,6 @@ pub(crate) fn discard(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
     id: &DraftId,
-    now: Millis,
 ) -> Result<(), StoreError> {
     let Some(record) = tx.read().drafts().get(id)? else {
         return Ok(());
@@ -61,7 +59,6 @@ pub(crate) fn discard(
             draft: Some(id),
             gmail_draft: gmail,
             payload: &(),
-            created_at: now,
         })?;
         state.effect(Effect::Ops(draft.account));
     }
@@ -72,13 +69,9 @@ pub(crate) fn discard(
     Ok(())
 }
 
-pub(crate) fn on_launch(
-    tx: &mut WriteTx<'_>,
-    state: &mut WriterState,
-    now: Millis,
-) -> Result<(), StoreError> {
+pub(crate) fn on_launch(tx: &mut WriteTx<'_>, state: &mut WriterState) -> Result<(), StoreError> {
     for id in tx.read().drafts().fresh()? {
-        close(tx, state, &id, now)?;
+        close(tx, state, &id)?;
     }
     Ok(())
 }

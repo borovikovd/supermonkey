@@ -2,14 +2,11 @@ use sm_domain::{AccountId, DraftId, DraftKind, Rev};
 use sm_ipc::{DraftAttachment, DraftState};
 use sm_store::{Reads, StoreError};
 
-use crate::drafts::lifecycle;
-
 pub(crate) fn draft_state(reads: Reads<'_>, id: &DraftId) -> Result<DraftState, StoreError> {
     let Some(record) = reads.drafts().get(id)? else {
         return Ok(gone(id.clone()));
     };
     let d = record.draft;
-    let resumed = !lifecycle::is_fresh(&d);
     Ok(DraftState {
         id: d.id,
         account: d.account,
@@ -36,7 +33,6 @@ pub(crate) fn draft_state(reads: Reads<'_>, id: &DraftId) -> Result<DraftState, 
                 source: a.source,
             })
             .collect(),
-        resumed,
         gone: false,
         rev: record.rev,
     })
@@ -58,7 +54,6 @@ const fn gone(id: DraftId) -> DraftState {
         body_html: String::new(),
         quote_html: None,
         attachments: Vec::new(),
-        resumed: false,
         gone: true,
         rev: Rev(0),
     }
