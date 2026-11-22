@@ -1,28 +1,8 @@
-import type { Route } from "@playwright/test";
-
-import type { App } from "./app.ts";
-import type { Control, GmailState } from "./control.ts";
+import type { Control } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
+import { has, threadHas } from "./helpers.ts";
 import * as seeds from "./seeds.ts";
 import { A, B, type Seeded } from "./seeds.ts";
-
-function threadHas(state: GmailState, threadId: string, label: string): boolean {
-  const msgs = state.messages.filter((m) => m.threadId === threadId && !m.labels.includes("DRAFT"));
-  if (label === "TRASH" || label === "SPAM") return msgs.some((m) => m.labels.includes(label));
-  return msgs.some(
-    (m) => !m.labels.includes("TRASH") && !m.labels.includes("SPAM") && m.labels.includes(label),
-  );
-}
-
-async function has(
-  gmail: Control,
-  s: Seeded,
-  key: string,
-  label: string,
-  account = A,
-): Promise<boolean> {
-  return threadHas(await gmail.gmail(account), s.thread(key).threadId, label);
-}
 
 async function labelsOf(gmail: Control, s: Seeded, keys: string[]) {
   const state = await gmail.gmail(A);
@@ -34,33 +14,7 @@ async function labelsOf(gmail: Control, s: Seeded, keys: string[]) {
   );
 }
 
-async function highlight(app: App, text: string): Promise<void> {
-  await expect(app.row(text)).toHaveCount(1);
-  await expect(app.highlighted).toHaveCount(1);
-  const texts = await app.rows.allInnerTexts();
-  const target = texts.findIndex((t) => t.includes(text));
-  const at = await app.rows.evaluateAll((els) =>
-    els.findIndex((el) => el.getAttribute("aria-selected") === "true"),
-  );
-  const delta = target - at;
-  const key = delta >= 0 ? "j" : "k";
-  await app.press(...Array.from({ length: Math.abs(delta) }, () => key));
-  await expect(app.highlighted).toContainText(text);
-}
-
 const repeat = (key: string, n: number) => Array.from({ length: n }, () => key);
-
-async function parkSubmits(app: App): Promise<() => Promise<void>> {
-  const parked: Route[] = [];
-  let open = false;
-  const submit = /\/invoke\/submit$/;
-  await app.page.route(submit, (route) => (open ? route.continue() : parked.push(route)));
-  return async () => {
-    open = true;
-    await Promise.all(parked.map((r) => r.continue()));
-    await app.page.unroute(submit);
-  };
-}
 
 test("UND-01 z walks back through the stack", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
@@ -96,7 +50,7 @@ test("UND-01 z walks back through the stack", async ({ app, gmail }) => {
   expect(await has(gmail, s, "p2", "TRASH")).toBe(false);
   expect(await has(gmail, s, "p2", "INBOX")).toBe(true);
 
-  const release = await parkSubmits(app);
+  const release = await app.park("submit");
   await app.press("z");
   await expect.poll(() => app.subjects()).toEqual(order);
   await release();
@@ -130,7 +84,7 @@ test("UND-02 undo reverts only the labels the action changed", async ({ app, gma
   expect(m1?.labels).toEqual(expect.arrayContaining(["INBOX", "STARRED", "UNREAD"]));
 
   const travel = s.label(A, "Travel");
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2");
   await app.press("s");
   await expect(app.row("Person 2")).toHaveAttribute("data-starred", "true");
   await app.settle();
@@ -150,7 +104,7 @@ test("UND-03 actions that make no entry are skipped by z", async ({ app, gmail }
   await app.press("e");
   await expect(app.row("Person 1")).toHaveCount(0);
 
-  await highlight(app, "Person 3");
+  await app.highlight("Person 3");
   await expect(app.row("Person 3")).toHaveAttribute("data-unread", "true");
   await app.press("Enter");
   await expect(app.conversationTitle).toHaveText("Person 3");
@@ -207,7 +161,7 @@ test("UND-04 each account has its own undo history", async ({ app, gmail }) => {
   expect(await gmail.requests("messages.batchModify", { account: B })).toEqual([]);
   expect(await has(gmail, s, "p1", "INBOX")).toBe(false);
 
-  await highlight(app, "Bea Blue");
+  await app.highlight("Bea Blue");
   await app.press("e");
   await expect(app.row("Bea Blue")).toHaveCount(0);
   await app.press("z");
@@ -218,7 +172,7 @@ test("UND-04 each account has its own undo history", async ({ app, gmail }) => {
   await app.settle();
   expect(await gmail.requests("messages.batchModify", { account: B })).toHaveLength(bRequests);
 
-  await highlight(app, "Bea Blue");
+  await app.highlight("Bea Blue");
   await app.press("e");
   await expect(app.row("Bea Blue")).toHaveCount(0);
 
@@ -241,10 +195,10 @@ test("UND-04 each account has its own undo history", async ({ app, gmail }) => {
 
 test("UND-05 a quick e followed by z z undoes the right entries", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
-  await highlight(app, "Person 6");
+  await app.highlight("Person 6");
   await app.press("s");
   await expect(app.row("Person 6")).toHaveAttribute("data-starred", "true");
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1");
   await app.press("e");
   await expect(app.row("Person 1")).toHaveCount(0);
   await app.settle();
@@ -324,7 +278,7 @@ test("UND-08 undoing a trash does not bring back a reply whose send was undone",
 }) => {
   const s = await seeds.standard(gmail, app);
   const addr = s.thread("addr");
-  await highlight(app, "Offsite venue");
+  await app.highlight("Offsite venue");
   await app.reply("r");
   await app.type("Count me in.");
   await app.settle();
@@ -383,7 +337,7 @@ test("UND-09 z while the action it undoes is on its way to Gmail, or queued offl
 
   const p1 = s.message("p1", 1).id;
   const modify = await gmail.hold("messages.batchModify");
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1");
   await app.press("e");
   await expect(app.row("Person 1")).toHaveCount(0);
   await expect
@@ -402,7 +356,7 @@ test("UND-09 z while the action it undoes is on its way to Gmail, or queued offl
 
   const p2 = s.message("p2", 1).id;
   await gmail.offline(true);
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2");
   await app.press("e");
   await expect(app.row("Person 2")).toHaveCount(0);
   await app.press("z");

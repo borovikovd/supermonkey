@@ -4,36 +4,6 @@ import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A, A_ALIAS, B } from "./seeds.ts";
 
-async function highlight(app: App, subject: string): Promise<void> {
-  await expect(app.rows.filter({ hasText: subject }).first()).toBeVisible();
-  await app.settle();
-  const { subjects, at } = await app.list.evaluate((list) => {
-    const rows = Array.from(list.querySelectorAll("[data-row]"))
-      .map((el) => ({ el, top: el.getBoundingClientRect().top }))
-      .toSorted((a, b) => a.top - b.top);
-    return {
-      subjects: rows.map(
-        (r) => r.el.querySelector(".flex-1 > .truncate")?.firstChild?.textContent ?? "",
-      ),
-      at: rows.findIndex((r) => r.el.getAttribute("aria-selected") === "true"),
-    };
-  });
-  const to = subjects.indexOf(subject);
-  if (to < 0) throw new Error(`no row "${subject}" in ${JSON.stringify(subjects)}`);
-  const from = Math.max(at, 0);
-  await app.press(...Array.from({ length: Math.abs(to - from) }, () => (to > from ? "j" : "k")));
-  await expect(app.highlighted).toContainText(subject);
-}
-
-async function pick(app: App, key: string, query = ""): Promise<void> {
-  await app.press(key);
-  await expect(app.palette).toBeVisible();
-  if (query) await app.type(query);
-  await expect(app.palette.locator("[cmdk-item]").first()).toBeVisible();
-  await app.press("Enter");
-  await expect(app.palette).toHaveCount(0);
-}
-
 async function goToLabel(app: App, name: string): Promise<void> {
   await app.press("g", "l");
   await expect(app.palette).toBeVisible();
@@ -252,8 +222,8 @@ test("SYN-04 history too old: a full resync that sends no notifications", async 
   await page.setViewportSize({ width: 1280, height: 2000 });
   const s = await seeds.standard(gmail, app);
 
-  await highlight(app, "Person 6");
-  await pick(app, "h");
+  await app.highlight("Person 6", { settle: true });
+  await app.pick("h");
   await expect(app.row("Person 6")).toHaveCount(0);
   await app.settle();
 

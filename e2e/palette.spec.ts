@@ -17,14 +17,6 @@ async function run(app: App, label: string, query = label): Promise<void> {
   await item(app, label).click();
 }
 
-async function labelsOf(app: App, id: string): Promise<string[]> {
-  const m = (await app.gmail.gmail(A)).messages.find((x) => x.id === id);
-  if (!m) throw new Error(`no message ${id}`);
-  return m.labels;
-}
-
-const viewTitle = (app: App): Locator => app.page.locator("div:has(> button[title='Search (/)'])");
-
 test("PAL-01 open, filter, run, and close the palette", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   await app.press("Meta+k");
@@ -47,7 +39,7 @@ test("PAL-01 open, filter, run, and close the palette", async ({ app, gmail }) =
 
   await item(app, "Go to Starred").click();
   await expect(app.palette).toHaveCount(0);
-  await expect(viewTitle(app)).toHaveText("Starred");
+  await expect(app.viewTitle).toHaveText("Starred");
   await expect(app.row("Trip ideas")).toHaveCount(1);
 
   const rows = await app.subjects();
@@ -58,7 +50,7 @@ test("PAL-01 open, filter, run, and close the palette", async ({ app, gmail }) =
   await expect(app.palette).toHaveCount(0);
   await app.settle();
   expect(await app.subjects()).toEqual(rows);
-  await expect(viewTitle(app)).toHaveText("Starred");
+  await expect(app.viewTitle).toHaveText("Starred");
   expect(await gmail.requests("messages.batchModify")).toEqual([]);
 });
 
@@ -80,9 +72,9 @@ test("PAL-02 palette commands do what their keys do", async ({ app, gmail }) => 
   await run(app, "Mark read or unread", "Mark read");
   await expect(app.highlighted).not.toHaveAttribute("data-unread");
   await app.settle();
-  expect(await labelsOf(app, s.latest("p1").id)).not.toContain("INBOX");
-  expect(await labelsOf(app, s.latest("p2").id)).toContain("TRASH");
-  const p3 = await labelsOf(app, s.latest("p3").id);
+  expect(await app.gmail.labelsOf(A, s.latest("p1").id)).not.toContain("INBOX");
+  expect(await app.gmail.labelsOf(A, s.latest("p2").id)).toContain("TRASH");
+  const p3 = await app.gmail.labelsOf(A, s.latest("p3").id);
   expect(p3).toContain("STARRED");
   expect(p3).not.toContain("UNREAD");
 
@@ -90,7 +82,7 @@ test("PAL-02 palette commands do what their keys do", async ({ app, gmail }) => 
   await expect(app.highlighted).toHaveAttribute("data-unread");
   await expect(app.highlighted).toHaveAttribute("data-starred");
   await app.settle();
-  expect(await labelsOf(app, s.latest("p3").id)).toContain("UNREAD");
+  expect(await app.gmail.labelsOf(A, s.latest("p3").id)).toContain("UNREAD");
 
   await app.press("Enter");
   await expect(app.conversationTitle).toHaveText("Person 3");
@@ -116,7 +108,7 @@ test("PAL-02 palette commands do what their keys do", async ({ app, gmail }) => 
   await expect(app.page.getByPlaceholder("Search")).toHaveCount(0);
 
   await run(app, "Go to Done");
-  await expect(viewTitle(app)).toHaveText("Done");
+  await expect(app.viewTitle).toHaveText("Done");
   await expect(app.row("Person 1")).toHaveCount(1);
 
   await run(app, "Split Inbox settings");
@@ -202,14 +194,14 @@ test("PAL-03 the palette lists only the commands that work where it opened", asy
   await app.press("Escape");
 
   await app.press("g", "e");
-  await expect(viewTitle(app)).toHaveText("Done");
+  await expect(app.viewTitle).toHaveText("Done");
   await expect(app.highlighted).toHaveCount(1);
   shown = await listed(app);
   expect(shown).toContain("Return to inbox");
   expect(shown).not.toContain("Mark done");
 
   await app.press("g", "d");
-  await expect(viewTitle(app)).toHaveText("Drafts");
+  await expect(app.viewTitle).toHaveText("Drafts");
   shown = await listed(app);
   for (const label of ["Mark done", "Trash", "Star or unstar", "Reply", "Forward"]) {
     expect(shown, label).not.toContain(label);

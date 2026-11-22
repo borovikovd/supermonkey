@@ -34,12 +34,6 @@ const A_INBOX = [
 
 const B_INBOX_SENDERS = ["Bea Blue", "Bo Brown", "Bill Black", "Bree Bell", "Cole Lide"];
 
-async function labelsOf(gmail: Control, email: string, id: string): Promise<string[]> {
-  const m = (await gmail.gmail(email)).messages.find((x) => x.id === id);
-  if (!m) throw new Error(`no message ${id} in ${email}`);
-  return m.labels;
-}
-
 const badge = (app: App, email: string): Locator =>
   app.account(email).locator("span", { hasText: /^\d+\+?$/ });
 
@@ -56,37 +50,6 @@ async function replyTo(app: App, subject: string): Promise<void> {
   await expect(app.conversationTitle).toHaveText(subject);
   await app.settle();
   await app.reply("r");
-}
-
-async function highlight(app: App, text: string): Promise<void> {
-  const at = await app.rows.evaluateAll(
-    (rows, t) => ({
-      from: rows.findIndex((r) => r.getAttribute("aria-selected") === "true"),
-      to: rows.findIndex((r) => (r.textContent ?? "").includes(t)),
-    }),
-    text,
-  );
-  if (at.to < 0) throw new Error(`no row with ${text}`);
-  const delta = at.to - at.from;
-  await app.press(...Array.from({ length: Math.abs(delta) }, () => (delta > 0 ? "j" : "k")));
-  await expect(app.highlighted).toContainText(text);
-}
-
-async function command(app: App, name: string): Promise<void> {
-  await app.press("Meta+k");
-  await expect(app.palette).toBeVisible();
-  await app.type(name);
-  await expect(app.palette.locator("[cmdk-item]").first()).toContainText(name);
-  await app.press("Enter");
-}
-
-function settingsBlock(app: App, email: string): Locator {
-  return app
-    .sheet("Settings")
-    .locator("div")
-    .filter({ has: app.page.getByText(email, { exact: true }) })
-    .filter({ has: app.page.getByRole("button", { name: "Remove account" }) })
-    .last();
 }
 
 test("ACC-01 first run adds the first account; its token goes to a file only the user can read", async ({
@@ -130,7 +93,7 @@ test("ACC-02 add a second account from the palette; switch with Ctrl+1 and Ctrl+
   await expect(app.account(B)).toHaveCount(0);
 
   await gmail.nextSignIn({ email: B });
-  await command(app, "Add account");
+  await app.command("Add account");
   await expect(app.account(B)).toBeVisible();
   await app.settle();
 
@@ -202,7 +165,7 @@ test("ACC-03 switching closes overlays and returns each account to its own place
   await expect(app.row("Trip ideas")).toHaveCount(1);
   await expect(app.highlighted).toContainText("Person 4");
 
-  await command(app, "Switch account");
+  await app.command("Switch account");
   const switcher = app.page.getByRole("dialog", { name: "Switch account" });
   await expect(switcher).toBeVisible();
   await switcher.locator("[cmdk-item]", { hasText: B }).click();
@@ -339,14 +302,14 @@ test("ACC-06 accounts off screen keep syncing, notifying, and sending", async ({
 
   await app.press("Control+1");
   await gmail.offline(true);
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1");
   await app.press("e");
   await expect(app.row("Person 1")).toHaveCount(0);
   await app.press("Control+2");
   await expect(app.highlighted).toContainText("Bea Blue");
   await gmail.offline(false);
   await app.settle();
-  expect(await labelsOf(gmail, A, s.latest("p1").id)).not.toContain("INBOX");
+  expect(await gmail.labelsOf(A, s.latest("p1").id)).not.toContain("INBOX");
   await expect(app.highlighted).toContainText("Bea Blue");
 });
 
@@ -357,7 +320,7 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   const tokens = Object.fromEntries((await gmail.tokens()).map((k) => [k.account, k.token]));
 
   await app.press("Meta+,");
-  await settingsBlock(app, B).getByRole("button", { name: "Remove account" }).click();
+  await app.settingsBlock(B).getByRole("button", { name: "Remove account" }).click();
   await settings.getByRole("button", { name: "Cancel" }).click();
   await expect(settings.getByRole("button", { name: "Remove", exact: true })).toHaveCount(0);
   await app.press("Escape");
@@ -380,7 +343,7 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   await app.press("s");
   await app.settle();
   await app.press("Meta+,");
-  await settingsBlock(app, A).getByRole("button", { name: "Remove account" }).click();
+  await app.settingsBlock(A).getByRole("button", { name: "Remove account" }).click();
   const confirmA = settings.getByText(/^Remove ana@acme\.test\?/);
   await expect(confirmA).toBeVisible();
   await expect(confirmA).toContainText(/\b2\b[^.]*actions/);
@@ -402,7 +365,7 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   expect((await gmail.tokens()).map((k) => k.account)).toEqual([B]);
 
   await gmail.nextSignIn({ email: A });
-  await command(app, "Add account");
+  await app.command("Add account");
   await expect(app.account(A)).toBeVisible();
   await app.settle();
   expect(await avatarOrder(app)).toEqual([B, A]);
@@ -416,7 +379,7 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   expect(await gmail.requests("messages.batchModify", { account: A })).toHaveLength(modifies);
 
   await app.press("Meta+,");
-  await settingsBlock(app, B).getByRole("button", { name: "Remove account" }).click();
+  await app.settingsBlock(B).getByRole("button", { name: "Remove account" }).click();
   await expect(settings.getByText(/^Remove ben@bolt\.test\?/)).toHaveText("Remove ben@bolt.test?");
   await settings.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(app.account(B)).toHaveCount(0);
@@ -428,7 +391,7 @@ test("ACC-07 remove an account", async ({ app, gmail }) => {
   await expect(app.account(A)).toBeVisible();
 
   await app.press("Meta+,");
-  await settingsBlock(app, A).getByRole("button", { name: "Remove account" }).click();
+  await app.settingsBlock(A).getByRole("button", { name: "Remove account" }).click();
   await settings.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(app.firstRunButton).toBeVisible();
   await expect(app.page.getByRole("navigation")).toHaveCount(0);
@@ -469,7 +432,7 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
   await app.press("j");
   await app.press("c");
   await expect(app.editor).toHaveCount(0);
-  expect(await labelsOf(gmail, A, s.latest("p1").id)).toContain("INBOX");
+  expect(await gmail.labelsOf(A, s.latest("p1").id)).toContain("INBOX");
   const sentOf = async () =>
     (await gmail.gmail(A)).messages.filter(
       (m) => m.threadId === s.thread("p2").threadId && m.labels.includes("SENT"),
@@ -480,14 +443,14 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
   await app.press("Meta+,");
   const settings = app.sheet("Settings");
   await expect(settings.getByRole("button", { name: "Sign in again" })).toHaveCount(1);
-  await expect(settingsBlock(app, A).getByRole("button", { name: "Sign in again" })).toBeVisible();
+  await expect(app.settingsBlock(A).getByRole("button", { name: "Sign in again" })).toBeVisible();
   await app.press("Escape");
 
   await app.press("Control+2");
   await expect(app.highlighted).toContainText("Bea Blue");
   await app.press("e");
   await app.settle();
-  expect(await labelsOf(gmail, B, s.latest("b1").id)).not.toContain("INBOX");
+  expect(await gmail.labelsOf(B, s.latest("b1").id)).not.toContain("INBOX");
   await app.press("Control+1");
 
   await expect(app.page.getByText(`You're signed out of ${A}.`)).toBeVisible();
@@ -503,7 +466,7 @@ test("ACC-08 invalid_grant shows Sign in again; the queue and outbox wait, then 
   await app.press("Escape");
   await app.advance(10_000);
   await app.settle();
-  expect(await labelsOf(gmail, A, s.latest("p1").id)).not.toContain("INBOX");
+  expect(await gmail.labelsOf(A, s.latest("p1").id)).not.toContain("INBOX");
   const sent = await sentOf();
   expect(sent).toHaveLength(1);
   expect(sent[0]?.raw).toContain("Waiting for sign-in");
@@ -548,7 +511,7 @@ test("ACC-10 accounts with the same Gmail thread id stay separate", async ({ app
   });
   expect(twin.threadId).toBe(aThread.threadId);
   await app.settle();
-  const aBefore = await labelsOf(gmail, A, s.latest(twinOf).id);
+  const aBefore = await gmail.labelsOf(A, s.latest(twinOf).id);
 
   await app.press("Control+2");
   await app.row("B twin").click();
@@ -557,18 +520,18 @@ test("ACC-10 accounts with the same Gmail thread id stay separate", async ({ app
   await expect(app.messageBody(0).getByText("Same thread id as one of Ana's.")).toBeVisible();
   await app.press("e");
   await app.settle();
-  expect(await labelsOf(gmail, B, twin.id)).not.toContain("INBOX");
+  expect(await gmail.labelsOf(B, twin.id)).not.toContain("INBOX");
 
   await app.press("Escape", "Control+1");
   await app.settle();
-  expect(await labelsOf(gmail, A, s.latest(twinOf).id)).toEqual(aBefore);
+  expect(await gmail.labelsOf(A, s.latest(twinOf).id)).toEqual(aBefore);
   await expect(app.row(aThread.subject)).toHaveCount(1);
   await app.row(aThread.subject).click();
   await expect(app.conversationTitle).toHaveText(aThread.subject);
   await expect(app.messages).toHaveCount(1);
   await expect(app.conversation).not.toContainText("Cole Lide");
   await app.settle();
-  expect(await labelsOf(gmail, A, s.latest(twinOf).id)).toContain("INBOX");
+  expect(await gmail.labelsOf(A, s.latest(twinOf).id)).toContain("INBOX");
 });
 
 test("ACC-11 a task left from before Sign in again does not sign the account out again", async ({
@@ -591,7 +554,7 @@ test("ACC-11 a task left from before Sign in again does not sign the account out
 
   await app.press("Meta+,");
   await gmail.nextSignIn({ email: A });
-  await settingsBlock(app, A).getByRole("button", { name: "Sign in again" }).click();
+  await app.settingsBlock(A).getByRole("button", { name: "Sign in again" }).click();
   await app.settle();
   await expect(app.signInMarker(A)).toHaveCount(0);
   await app.press("Escape");
@@ -614,7 +577,7 @@ test("ACC-12 re-adding an account while its removal is still revoking keeps the 
   const revoke = await gmail.hold("oauth.revoke");
   await app.press("Meta+,");
   const settings = app.sheet("Settings");
-  await settingsBlock(app, B).getByRole("button", { name: "Remove account" }).click();
+  await app.settingsBlock(B).getByRole("button", { name: "Remove account" }).click();
   await settings.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(app.account(B)).toHaveCount(0);
   await app.press("Escape");
@@ -623,7 +586,7 @@ test("ACC-12 re-adding an account while its removal is still revoking keeps the 
     .toBe(true);
 
   await gmail.nextSignIn({ email: B });
-  await command(app, "Add account");
+  await app.command("Add account");
   await app.settle();
   await revoke.release();
   await expect(app.account(B)).toBeVisible();
@@ -659,14 +622,14 @@ test("ACC-13 adding an account that is already signed in replays its queue once"
     .toBe(true);
   const lists = (await gmail.requests("threads.list", { account: A })).length;
   await gmail.nextSignIn({ email: A });
-  await command(app, "Add account");
+  await app.command("Add account");
   await expect
     .poll(async () => (await gmail.requests("threads.list", { account: A })).length)
     .toBeGreaterThan(lists);
 
   await modify.release();
   await app.settle();
-  expect(await labelsOf(gmail, A, s.latest("p1").id)).not.toContain("INBOX");
+  expect(await gmail.labelsOf(A, s.latest("p1").id)).not.toContain("INBOX");
   expect(
     await gmail.requests("messages.batchModify", { account: A }),
     "the queued archive went out once",
@@ -699,7 +662,7 @@ test("ACC-14 an account with no stored token at launch shows Sign in again", asy
   await expect(app.highlighted).toContainText("Person 1");
   await app.press("e");
   await app.settle();
-  expect(await labelsOf(gmail, A, s.latest("p1").id)).not.toContain("INBOX");
+  expect(await gmail.labelsOf(A, s.latest("p1").id)).not.toContain("INBOX");
 });
 
 test("ACC-15 clicking the account on screen opens Settings; another account switches", async ({
@@ -711,7 +674,7 @@ test("ACC-15 clicking the account on screen opens Settings; another account swit
 
   await app.account(A).click();
   await expect(app.sheet("Settings")).toBeVisible();
-  await expect(settingsBlock(app, A)).toBeVisible();
+  await expect(app.settingsBlock(A)).toBeVisible();
   await app.press("Escape");
   await expect(app.sheet("Settings")).toHaveCount(0);
 
@@ -730,7 +693,7 @@ test("ACC-16 a removal waiting on its revoke holds up no other account", async (
   const remove = async (email: string) => {
     await app.press("Meta+,");
     const settings = app.sheet("Settings");
-    await settingsBlock(app, email).getByRole("button", { name: "Remove account" }).click();
+    await app.settingsBlock(email).getByRole("button", { name: "Remove account" }).click();
     await settings.getByRole("button", { name: "Remove", exact: true }).click();
     await expect(app.account(email)).toHaveCount(0);
     await app.press("Escape");
@@ -739,7 +702,7 @@ test("ACC-16 a removal waiting on its revoke holds up no other account", async (
   await remove(B);
   await expect.poll(held).toBe(1);
   await gmail.nextSignIn({ email: B });
-  await command(app, "Add account");
+  await app.command("Add account");
   await app.settle();
 
   await remove(C);
@@ -806,13 +769,13 @@ test("ACC-18 an account removed while its Sign in again waits in the browser com
   await gmail.nextSignIn({ email: A });
   await app.press("Meta+,");
   const settings = app.sheet("Settings");
-  await settingsBlock(app, A).getByRole("button", { name: "Sign in again" }).click();
+  await app.settingsBlock(A).getByRole("button", { name: "Sign in again" }).click();
   await expect
     .poll(async () => (await gmail.requests("oauth.authorize")).some((r) => r.held))
     .toBe(true);
 
   const revoke = await gmail.hold("oauth.revoke");
-  await settingsBlock(app, A).getByRole("button", { name: "Remove account" }).click();
+  await app.settingsBlock(A).getByRole("button", { name: "Remove account" }).click();
   await settings.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(app.account(A)).toHaveCount(0);
   await expect
@@ -889,7 +852,7 @@ test("ACC-20 removing the account on screen while its reply is open leaves no co
   await app.type("Half a reply");
   await app.press("Meta+,");
   const settings = app.sheet("Settings");
-  await settingsBlock(app, A).getByRole("button", { name: "Remove account" }).click();
+  await app.settingsBlock(A).getByRole("button", { name: "Remove account" }).click();
   await settings.getByRole("button", { name: "Remove", exact: true }).click();
   await expect(app.account(A)).toHaveCount(0);
   await expect(settings).toBeVisible();
@@ -913,7 +876,7 @@ test("ACC-21 removing the account on screen shows the next account on the rail, 
   const settings = app.sheet("Settings");
   const removeOnScreen = async (email: string) => {
     await app.press("Meta+,");
-    await settingsBlock(app, email).getByRole("button", { name: "Remove account" }).click();
+    await app.settingsBlock(email).getByRole("button", { name: "Remove account" }).click();
     await settings.getByRole("button", { name: "Remove", exact: true }).click();
     await expect(app.account(email)).toHaveCount(0);
     await expect(settings).toBeVisible();
@@ -928,7 +891,7 @@ test("ACC-21 removing the account on screen shows the next account on the rail, 
   await expect(app.row("Person 1")).toHaveCount(0);
 
   await gmail.nextSignIn({ email: C });
-  await command(app, "Add account");
+  await app.command("Add account");
   await expect(app.account(C)).toBeVisible();
   await app.settle();
   expect(await avatarOrder(app)).toEqual([A, B, C]);
@@ -1038,7 +1001,7 @@ test("ACC-23 starting another sign-in cancels the waiting one, which shows no er
   await expect(waiting).toBeVisible();
   await parked(gmail, "oauth.authorize");
   await gmail.nextSignIn({ email: B });
-  await command(app, "Add account");
+  await app.command("Add account");
   await expect(waiting).toHaveCount(0);
   await expect(cancelled).toHaveCount(0);
   await consent.release(undefined, { min: 2 });
@@ -1076,7 +1039,7 @@ test("ACC-24 a sign-in cut off by a lost connection or a quit adds nothing, and 
   await expect(app.account(A)).toBeVisible();
 
   await gmail.nextSignIn({ abandon: true });
-  await command(app, "Add account");
+  await app.command("Add account");
   await app.settle();
   await app.quit();
   await app.launch();
@@ -1085,7 +1048,7 @@ test("ACC-24 a sign-in cut off by a lost connection or a quit adds nothing, and 
   await expect(app.page.getByText(WAITING)).toHaveCount(0);
   expect((await gmail.tokens()).map((k) => k.account)).toEqual([A]);
   await gmail.nextSignIn({ email: B });
-  await command(app, "Add account");
+  await app.command("Add account");
   await expect(app.account(B)).toBeVisible();
   expect((await gmail.tokens()).map((k) => k.account).toSorted()).toEqual([A, B].toSorted());
 });
@@ -1107,10 +1070,10 @@ test("ACC-25 adding an account again while a send, a discard, and an undo are on
   await parked(gmail, "drafts.send");
   await app.press("Escape");
 
-  await highlight(app, "Person 4");
+  await app.highlight("Person 4");
   await app.press("e");
   await app.settle();
-  expect(await labelsOf(gmail, A, s.latest("p4").id)).not.toContain("INBOX");
+  expect(await gmail.labelsOf(A, s.latest("p4").id)).not.toContain("INBOX");
 
   const discard = await gmail.hold("drafts.delete");
   await replyTo(app, "Person 3");
@@ -1130,7 +1093,7 @@ test("ACC-25 adding an account again while a send, a discard, and an undo are on
 
   const lists = (await gmail.requests("threads.list", { account: A })).length;
   await gmail.nextSignIn({ email: A });
-  await command(app, "Add account");
+  await app.command("Add account");
   await expect
     .poll(async () => (await gmail.requests("threads.list", { account: A })).length)
     .toBeGreaterThan(lists);
@@ -1147,7 +1110,7 @@ test("ACC-25 adding an account again while a send, a discard, and an undo are on
   expect(sent[0]?.raw).toContain("Sent across a sign-in");
   expect(a.drafts, "the discarded draft is gone").toEqual([]);
   expect(await gmail.requests("drafts.delete")).toHaveLength(1);
-  expect(await labelsOf(gmail, A, s.latest("p4").id)).toContain("INBOX");
+  expect(await gmail.labelsOf(A, s.latest("p4").id)).toContain("INBOX");
   const p4Modifies = (await gmail.requests("messages.batchModify")).filter((r) =>
     JSON.stringify(r.body).includes(s.latest("p4").id),
   );

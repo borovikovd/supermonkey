@@ -13,22 +13,6 @@ async function draftsIn(gmail: Control, threadId: string): Promise<Draft[]> {
 
 const bodyOf = (d: Draft | undefined) => htmlOf(parseMime(d?.message.raw ?? ""));
 
-async function openThread(app: App, subject: string): Promise<void> {
-  await app.row(subject).first().click();
-  await expect(app.conversationTitle).toContainText(subject);
-}
-
-async function highlight(app: App, text: string | RegExp, left = 40): Promise<void> {
-  if ((await app.highlighted.filter({ hasText: text }).count()) > 0) return;
-  if (left === 0) throw new Error(`no row ${String(text)} reached with j and k`);
-  const keys = await app.rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-row")));
-  const target = keys.indexOf(await app.row(text).first().getAttribute("data-row"));
-  const lit = (await app.highlighted.count()) > 0;
-  const at = lit ? keys.indexOf(await app.highlighted.getAttribute("data-row")) : -1;
-  await app.press(at < target ? "j" : "k");
-  await highlight(app, text, left - 1);
-}
-
 async function goDrafts(app: App): Promise<void> {
   await app.press("g", "d");
   await app.settle();
@@ -43,7 +27,7 @@ const creates = (gmail: Control) => gmail.requests("drafts.create", { account: A
 test("DRF-01 drafts autosave and update a single Gmail draft", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
   const thread = s.thread("p3").threadId;
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("one");
   await app.settle();
@@ -77,7 +61,7 @@ test("DRF-12 an edit saved while the draft's upsert is in flight still reaches G
 }) => {
   const s = await seeds.standard(gmail, app);
   const thread = s.thread("p3").threadId;
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("one");
   await app.settle();
@@ -102,7 +86,7 @@ test("DRF-13 a draft discarded while its first upsert is in flight stays gone", 
   const s = await seeds.standard(gmail, app);
   const thread = s.thread("p3").threadId;
   const create = await gmail.hold("drafts.create");
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("discard me");
   await expect.poll(async () => (await creates(gmail)).some((r) => r.held)).toBe(true);
@@ -133,7 +117,7 @@ test("DRF-14 a second Gmail draft carrying a local draft's id is deleted as an e
 }) => {
   const s = await seeds.standard(gmail, app);
   const thread = s.thread("p3").threadId;
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("the real one");
   await app.settle();
@@ -177,7 +161,7 @@ test("DRF-15 a draft reconcile on a stale list keeps a draft written meanwhile",
   await gmail.poll();
   await app.settle();
 
-  await openThread(app, "Person 4");
+  await app.openThread("Person 4");
   await app.reply();
   await app.type("written meanwhile");
   await app.settle();
@@ -210,7 +194,7 @@ test("DRF-16 a Gmail edit read back after the draft was reopened and edited does
   await gmail.poll();
   await app.settle();
 
-  await openThread(app, "Person 6");
+  await app.openThread("Person 6");
   await app.reply("r");
   await expect(app.editor).toContainText("Aimed at nobody.");
   await app.press("Meta+Shift+m");
@@ -235,7 +219,7 @@ test("DRF-18 a crash after drafts.create reached Gmail, before its ids were stor
   const s = await seeds.standard(gmail, app);
   const thread = s.thread("p3").threadId;
   const create = await gmail.holdAnswer("drafts.create");
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("before the crash");
   await expect.poll(async () => (await creates(gmail)).some((r) => r.held)).toBe(true);
@@ -260,7 +244,7 @@ test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app,
   await goDrafts(app);
   const count = await app.rows.count();
 
-  await highlight(app, "Idea");
+  await app.highlight("Idea");
   await app.press("Enter");
   await expect(app.page.getByRole("heading", { name: "New Message" })).toBeVisible();
   await expect(app.subject).toHaveValue("Idea");
@@ -271,7 +255,7 @@ test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app,
   await expect(app.rows).toHaveCount(count);
   await expect(app.highlighted).toContainText("Idea");
 
-  await highlight(app, "Person 4");
+  await app.highlight("Person 4");
   await app.press("Enter");
   await expect(app.conversationTitle).toContainText("Person 4");
   await expect(app.editor).toContainText("My text");
@@ -279,7 +263,7 @@ test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app,
   await app.press("Escape", "Escape");
   await goDrafts(app);
 
-  await highlight(app, "About message three.");
+  await app.highlight("About message three.");
   await app.press("Enter");
   await expect(app.conversationTitle).toContainText("Q4 plan");
   await expect(app.editor).toContainText("About message three.");
@@ -287,7 +271,7 @@ test("DRF-02 Enter in Drafts opens a draft according to its kind", async ({ app,
   await app.press("Escape", "Escape");
   await goDrafts(app);
 
-  await highlight(app, "Fwd: Contract");
+  await app.highlight("Fwd: Contract");
   await app.press("Enter");
   await expect(app.conversationTitle).toContainText("Contract");
   await expect(app.editor).toContainText("FYI");
@@ -313,7 +297,7 @@ test("DRF-03 edits made to a draft in Gmail, with the draft closed or open", asy
 
   await webEdit("dLatest", "p4", "from web");
   await app.settle();
-  await openThread(app, "Person 4");
+  await app.openThread("Person 4");
   await app.reply("r");
   await expect(app.editor).toContainText("from web");
 
@@ -331,7 +315,7 @@ test("DRF-03 edits made to a draft in Gmail, with the draft closed or open", asy
   expect(bodyOf(p4Draft)).not.toContain("from web 3");
   await app.press("Escape");
 
-  await openThread(app, "Person 2");
+  await app.openThread("Person 2");
   await app.reply("r");
   await expect(app.editor).toContainText("dTwoB");
   await webEdit("dTwoB", "p2", "from web 2");
@@ -344,7 +328,7 @@ test("DRF-03 edits made to a draft in Gmail, with the draft closed or open", asy
   await expect(app.editor).toContainText("from web 2");
   await app.press("Escape", "Escape", "Escape");
 
-  await openThread(app, "Person 6");
+  await app.openThread("Person 6");
   await app.reply("r");
   await expect(app.editor).toContainText("Aimed at nobody.");
   await webEdit("dUnknown", "p6", "from web 6");
@@ -371,7 +355,7 @@ test("DRF-04 a draft deleted or sent elsewhere", async ({ app, gmail }) => {
     await app.settle();
     await expect(app.row(text)).toHaveCount(0);
     await app.press("g", "i");
-    await openThread(app, thread);
+    await app.openThread(thread);
     await app.settle();
     await expect(stub(app, text)).toHaveCount(0);
     await app.press("Escape");
@@ -380,7 +364,7 @@ test("DRF-04 a draft deleted or sent elsewhere", async ({ app, gmail }) => {
   const open = async (key: string, thread: string, text: string, how: "delete" | "send") => {
     const gmailThread = s.thread(thread).threadId;
     await app.press("g", "i");
-    await openThread(app, s.thread(thread).subject);
+    await app.openThread(s.thread(thread).subject);
     await app.reply("r");
     await expect(app.editor).toContainText(text);
     const createsBefore = (await creates(gmail)).length;
@@ -416,7 +400,7 @@ test("DRF-05 discarding while offline is queued and replayed in order", async ({
   const s = await seeds.drafts(gmail, app);
   const p4 = s.thread("p4").threadId;
   await gmail.offline(true);
-  await openThread(app, "Person 4");
+  await app.openThread("Person 4");
   await app.reply("r");
   await expect(app.editor).toContainText("My text");
   await app.press("Meta+Shift+m");
@@ -452,7 +436,7 @@ test("DRF-06 a draft written offline reaches Gmail exactly once", async ({ app, 
   await goDrafts(app);
   await expect(app.row("Offline idea")).toHaveCount(1);
 
-  await highlight(app, "Offline idea");
+  await app.highlight("Offline idea");
   await app.press("Enter");
   await expect(app.editor).toContainText("first body");
   await app.editor.click();
@@ -475,7 +459,7 @@ test("DRF-07 sending cancels a queued upsert", async ({ app, gmail }) => {
   const s = await seeds.drafts(gmail, app);
   const p4 = s.thread("p4").threadId;
   await gmail.offline(true);
-  await openThread(app, "Person 4");
+  await app.openThread("Person 4");
   await app.reply("r");
   await expect(app.editor).toContainText("My text");
   await app.press("Meta+Shift+m");
@@ -501,7 +485,7 @@ test("DRF-07 sending cancels a queued upsert", async ({ app, gmail }) => {
 test("DRF-08 a webview reload or a crash with a composer open", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
 
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("keep after reload");
   await app.settle();
@@ -509,18 +493,18 @@ test("DRF-08 a webview reload or a crash with a composer open", async ({ app, gm
   await app.settle();
   expect(await draftsIn(gmail, s.thread("p3").threadId)).toHaveLength(1);
   await app.press("g", "i");
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await expect(stub(app, "keep after reload")).toHaveCount(1);
   await app.press("Escape");
 
   await app.press("g", "i");
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1");
   await app.press("e");
   await app.settle();
   const p1 = (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p1", 1).id);
   expect(p1?.labels).not.toContain("INBOX");
 
-  await openThread(app, "Person 5");
+  await app.openThread("Person 5");
   await app.reply();
   await app.reload();
   await app.settle();
@@ -549,7 +533,7 @@ test("DRF-09 the app's own drafts are read back after the account is re-added", 
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  await openThread(app, "Offsite venue");
+  await app.openThread("Offsite venue");
   await app.reply();
   await app.type("keep me");
   await app.settle();
@@ -589,7 +573,7 @@ const MIRROR_BODY = `Object.values(window.__sm.useMirror.getState().subs)
 
 test("DRF-10 text deleted while its save is on the way stays deleted", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("Hello");
   const release = await app.park("submit");
@@ -614,7 +598,7 @@ test("DRF-11 typing before a reply's first load keeps its filled fields", async 
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app);
-  await openThread(app, "Offsite venue");
+  await app.openThread("Offsite venue");
   const release = await app.park("submit", (body) => body.includes('"type":"composer"'));
   await app.press("r");
   await expect(app.editor).toBeFocused();
@@ -654,7 +638,7 @@ test("DRF-19 an edit still waiting to reach Gmail is not replaced by an older Gm
 }) => {
   const s = await seeds.standard(gmail, app);
   const p3 = s.thread("p3");
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("one");
   await app.settle();
@@ -709,7 +693,7 @@ test("DRF-20 j and k in a conversation opened from Drafts open the other drafts'
 }) => {
   await seeds.drafts(gmail, app);
   await goDrafts(app);
-  await highlight(app, "Person 4");
+  await app.highlight("Person 4");
   await app.press("Enter");
   await expect(app.editor).toContainText("My text");
   await app.settle();
@@ -742,7 +726,7 @@ test("DRF-21 a draft deleted on Gmail while an edit waits to reach Gmail is writ
 }) => {
   const s = await seeds.standard(gmail, app);
   const p3 = s.thread("p3");
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("one");
   await app.settle();
@@ -783,7 +767,7 @@ test("DRF-24 a reply emptied again after it reached Gmail is emptied in Gmail to
 }) => {
   const s = await seeds.standard(gmail, app);
   const p3 = s.thread("p3");
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("one");
   await app.settle();
@@ -812,7 +796,7 @@ test("DRF-23 a draft discarded after a create with no answer stays gone across a
   const thread = s.thread("p3").threadId;
   await gmail.fault("drafts.create", { kind: "noResponse" }, { times: 1 });
   await gmail.fault("drafts.list", { kind: "status", status: 503 }, { times: 1 });
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("discard me");
   await app.settle();
@@ -841,7 +825,7 @@ test("DRF-22 a draft deleted elsewhere just before its composer loads leaves the
   const s = await seeds.drafts(gmail, app);
   const heading = app.page.getByRole("heading", { name: "New Message" });
   await goDrafts(app);
-  await highlight(app, "Idea");
+  await app.highlight("Idea");
   const release = await app.park("submit", (body) => body.includes('"composer"'));
   await app.press("Enter");
   await expect(heading).toBeVisible();

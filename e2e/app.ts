@@ -317,6 +317,26 @@ export class App {
     return this.list.locator('[role="option"][aria-selected="true"]');
   }
 
+  async highlight(text: string | RegExp, opts: { settle?: boolean } = {}): Promise<void> {
+    const target = this.row(text);
+    await expect(target).toHaveCount(1);
+    await expect(target).toBeVisible();
+    await expect(this.highlighted).toHaveCount(1);
+    if (opts.settle) await this.settle();
+    const keys = await this.rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-row")));
+    const to = keys.indexOf(await target.getAttribute("data-row"));
+    const from = keys.indexOf(await this.highlighted.getAttribute("data-row"));
+    const delta = to - from;
+    await this.press(...Array.from({ length: Math.abs(delta) }, () => (delta > 0 ? "j" : "k")));
+    await expect(this.highlighted).toContainText(text);
+  }
+
+  async selectFrom(first: string, count: number): Promise<void> {
+    await this.highlight(first);
+    await this.press("x", ...Array.from({ length: count - 1 }, () => "Shift+J"));
+    await expect(this.selected).toHaveCount(count);
+  }
+
   get selected(): Locator {
     return this.list.locator("[data-row][data-selected]");
   }
@@ -393,8 +413,47 @@ export class App {
     return this.conversation.getByRole("button", { name: /older messages/ });
   }
 
+  async openThread(subject: string): Promise<void> {
+    await this.row(subject).first().click();
+    await expect(this.conversationTitle).toContainText(subject);
+  }
+
+  async openAndSettle(subject: string): Promise<void> {
+    await this.row(subject).first().click();
+    await expect(this.conversationTitle).toHaveText(subject);
+    await this.settle();
+  }
+
+  get viewTitle(): Locator {
+    return this.page.locator("div:has(> button[title='Search (/)'])");
+  }
+
   get palette(): Locator {
     return this.page.getByRole("dialog").filter({ has: this.page.getByRole("combobox") });
+  }
+
+  async command(name: string): Promise<void> {
+    await this.press("Meta+k");
+    await expect(this.palette).toBeVisible();
+    await this.type(name);
+    await expect(this.palette.locator("[cmdk-item]").first()).toContainText(name);
+    await this.press("Enter");
+  }
+
+  async pick(key: string, query = ""): Promise<void> {
+    await this.press(key);
+    await expect(this.palette).toBeVisible();
+    if (query) await this.type(query);
+    await expect(this.palette.locator("[cmdk-item]").first()).toBeVisible();
+    await this.press("Enter");
+    await expect(this.palette).toHaveCount(0);
+  }
+
+  async goLabel(name: string): Promise<void> {
+    await this.press("g", "l");
+    await expect(this.palette).toBeVisible();
+    await this.palette.getByRole("option", { name, exact: true }).click();
+    await expect(this.palette).toHaveCount(0);
   }
 
   sheet(title: string | RegExp): Locator {
@@ -441,8 +500,34 @@ export class App {
     await this.settle();
   }
 
+  async closeComposer(): Promise<void> {
+    await this.press("Escape", "Escape");
+    await expect(this.editor).toHaveCount(0);
+    await this.settle();
+  }
+
+  async send(): Promise<void> {
+    await this.settle();
+    await this.press("Meta+Enter");
+    await expect(this.editor).toHaveCount(0);
+    await this.advance(10_000);
+    await this.settle();
+  }
+
   field(label: "To" | "Cc" | "Bcc"): Locator {
     return this.page.getByRole("combobox", { name: label, exact: true });
+  }
+
+  get fromButton(): Locator {
+    return this.page
+      .locator("div")
+      .filter({ has: this.page.getByText("From", { exact: true }) })
+      .last()
+      .getByRole("button");
+  }
+
+  get draftStubs(): Locator {
+    return this.conversation.getByRole("button", { name: /^Draft/ });
   }
 
   get editor(): Locator {
@@ -455,6 +540,12 @@ export class App {
 
   chips(label: "To" | "Cc" | "Bcc"): Locator {
     return this.field(label).locator("xpath=..").locator("[data-chip]");
+  }
+
+  async chipAddresses(label: "To" | "Cc" | "Bcc"): Promise<string[]> {
+    return this.chips(label).evaluateAll((els) =>
+      els.map((el) => el.getAttribute("data-chip") ?? ""),
+    );
   }
 
   invalidChips(label: "To" | "Cc" | "Bcc"): Locator {
@@ -483,20 +574,42 @@ export class App {
     return this.account(email).locator('[data-marker="signin"]');
   }
 
-  async removeAccount(email: string): Promise<void> {
-    await this.press("Meta+,");
-    const settings = this.sheet("Settings");
-    await settings
+  async avatarCount(email: string): Promise<number> {
+    const count = this.account(email).locator("span.tabular");
+    return (await count.count()) === 0 ? 0 : Number(await count.innerText());
+  }
+
+  settingsBlock(email: string): Locator {
+    return this.sheet("Settings")
       .locator("div")
       .filter({ has: this.page.getByText(email, { exact: true }) })
       .filter({ has: this.page.getByRole("button", { name: "Remove account" }) })
-      .last()
-      .getByRole("button", { name: "Remove account" })
-      .click();
+      .last();
+  }
+
+  async removeAccount(email: string): Promise<void> {
+    await this.press("Meta+,");
+    const settings = this.sheet("Settings");
+    await this.settingsBlock(email).getByRole("button", { name: "Remove account" }).click();
     await settings.getByRole("button", { name: "Remove", exact: true }).click();
     await expect(this.account(email)).toHaveCount(0);
     await this.press("Escape");
     await expect(settings).toHaveCount(0);
+  }
+
+  async pollAndSettle(email: string): Promise<void> {
+    const polls = async () =>
+      (await this.gmail.requests("history.list", { account: email })).filter(
+        (r) => r.answer === 200,
+      ).length;
+    const before = await polls();
+    await expect
+      .poll(async () => {
+        await this.gmail.poll();
+        await this.settle();
+        return polls();
+      })
+      .toBeGreaterThan(before);
   }
 
   async eventually(

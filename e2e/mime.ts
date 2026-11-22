@@ -9,7 +9,7 @@ export type MimePart = {
   parts: MimePart[];
 };
 
-export function decodeWords(value: string): string {
+function decodeWords(value: string): string {
   return value
     .replace(/\?=\s+=\?/g, "?==?")
     .replace(

@@ -1,12 +1,10 @@
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
-import type { Control } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
+import { CONVERSATION_SUBS, inOrder } from "./helpers.ts";
 import * as seeds from "./seeds.ts";
 import { A } from "./seeds.ts";
-
-const viewHeader = (app: App): Locator => app.page.locator("div:has(> button[title='Search (/)'])");
 
 const INBOX_HEADER = "Important 16 · Other 7";
 
@@ -14,15 +12,8 @@ async function expectHeader(app: App, name: string, message?: string): Promise<v
   if (name === INBOX_HEADER) {
     await expect.poll(() => app.splitHeader(), { message: message ?? name }).toBe(name);
   } else {
-    await expect(viewHeader(app), message ?? name).toHaveText(name);
+    await expect(app.viewTitle, message ?? name).toHaveText(name);
   }
-}
-
-async function inOrder<T>(items: T[], step: (item: T, i: number) => Promise<void>): Promise<void> {
-  await items.reduce<Promise<void>>(
-    (prev, item, i) => prev.then(() => step(item, i)),
-    Promise.resolve(),
-  );
 }
 
 const senderWeight = (row: Locator, sender: string) =>
@@ -321,9 +312,6 @@ test("NAV-07 the highlight moves when a poll removes the highlighted row", async
   await expect(app.conversationTitle).toHaveText("Person 6");
 });
 
-const CONVERSATION_SUBS = `Object.fromEntries(Object.entries(window.__sm.useMirror.getState().subs)
-  .filter(([, s]) => s.type === "conversation").map(([id, s]) => [String(s.key.thread), id]))`;
-
 test("NAV-08 j keeps the prefetched neighbors it still needs", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   await expect(app.highlighted).toContainText("Person 1");
@@ -388,10 +376,6 @@ test("NAV-10 the highlight follows the mouse, so e acts on the row under it", as
   expect(await scroller.evaluate((el) => el.scrollTop)).toBe(before);
 });
 
-async function labelsOf(gmail: Control, id: string): Promise<string[]> {
-  return (await gmail.gmail(A)).messages.find((m) => m.id === id)?.labels ?? [];
-}
-
 test("NAV-11 a poll that empties the list clears the highlight, so # acts on the mail that arrives next", async ({
   app,
   gmail,
@@ -411,8 +395,8 @@ test("NAV-11 a poll that empties the list clears the highlight, so # acts on the
   await app.press("#");
   await expect(app.row("New one")).toHaveCount(0);
   await app.settle();
-  expect(await labelsOf(gmail, fresh.id)).toContain("TRASH");
-  const oldLabels = await labelsOf(gmail, old.id);
+  expect(await gmail.labelsOf(A, fresh.id)).toContain("TRASH");
+  const oldLabels = await gmail.labelsOf(A, old.id);
   expect(oldLabels).not.toContain("TRASH");
   expect(oldLabels).not.toContain("INBOX");
 });
@@ -439,8 +423,8 @@ test("NAV-12 a row removed while another account is on screen moves that account
   await app.press("#");
   await expect(app.row("Person 4")).toHaveCount(0);
   await app.settle();
-  expect(await labelsOf(gmail, s.latest("p4").id)).toContain("TRASH");
-  expect(await labelsOf(gmail, s.latest("p3").id)).not.toContain("TRASH");
+  expect(await gmail.labelsOf(A, s.latest("p4").id)).toContain("TRASH");
+  expect(await gmail.labelsOf(A, s.latest("p3").id)).not.toContain("TRASH");
 });
 
 test("NAV-13 g #, g !, and a held g jump as typed on a keyboard, and touch no mail", async ({
@@ -469,7 +453,7 @@ test("NAV-13 g #, g !, and a held g jump as typed on a keyboard, and touch no ma
   await expectHeader(app, "Done");
 
   await app.settle();
-  const labels = await labelsOf(gmail, s.latest("p1").id);
+  const labels = await gmail.labelsOf(A, s.latest("p1").id);
   expect(labels).toContain("INBOX");
   expect(labels).not.toContain("TRASH");
   expect(labels).not.toContain("SPAM");

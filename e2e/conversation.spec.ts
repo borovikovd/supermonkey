@@ -77,17 +77,6 @@ function inView(app: App, id: string): Promise<boolean> {
   }, id);
 }
 
-async function avatarCount(app: App, email: string): Promise<number> {
-  const badge = app.account(email).locator("span.tabular");
-  return (await badge.count()) === 0 ? 0 : Number(await badge.innerText());
-}
-
-async function labelsOf(app: App, email: string, id: string): Promise<string[]> {
-  const m = (await app.gmail.gmail(email)).messages.find((x) => x.id === id);
-  if (!m) throw new Error(`no Gmail message ${id}`);
-  return m.labels;
-}
-
 const ownNames = (t: string) =>
   t.includes("Here is the budget draft") ? "kim" : t.includes("Thanks, looks fine") ? "ana" : "?";
 
@@ -108,7 +97,7 @@ test.describe("conversation", () => {
   }) => {
     await app.page.setViewportSize(SHORT);
     const s = await seeds.standard(gmail, app);
-    const avatar = await avatarCount(app, A);
+    const avatar = await app.avatarCount(A);
     await app.row("Q4 plan").click();
 
     await expect.poll(() => layout(app)).toEqual(PLAN_DEFAULT);
@@ -127,7 +116,7 @@ test.describe("conversation", () => {
     const plan = new Set(s.thread("plan").messages.map((m) => m.id));
     const gm = (await gmail.gmail(A)).messages.filter((m) => plan.has(m.id));
     expect(gm.filter((m) => m.labels.includes("UNREAD"))).toEqual([]);
-    expect(await avatarCount(app, A)).toBe(avatar - 1);
+    expect(await app.avatarCount(A)).toBe(avatar - 1);
     await app.press("Escape");
     await expect(app.row("Q4 plan")).not.toHaveAttribute("data-unread");
   });
@@ -276,7 +265,7 @@ test.describe("conversation", () => {
   test("CONV-08 opening marks the thread read locally and on Gmail", async ({ app, gmail }) => {
     const s = await seeds.standard(gmail, app);
     const badge = (await gmail.platform()).badge ?? 0;
-    const avatar = await avatarCount(app, A);
+    const avatar = await app.avatarCount(A);
     await expect(app.row("Person 1")).toHaveAttribute("data-unread");
 
     await app.row("Person 1").click();
@@ -284,9 +273,9 @@ test.describe("conversation", () => {
     await app.press("Escape");
     await app.settle();
     await expect(app.row("Person 1")).not.toHaveAttribute("data-unread");
-    expect(await avatarCount(app, A)).toBe(avatar - 1);
+    expect(await app.avatarCount(A)).toBe(avatar - 1);
     expect((await gmail.platform()).badge).toBe(badge - 1);
-    expect(await labelsOf(app, A, s.message("p1", 1).id)).not.toContain("UNREAD");
+    expect(await app.gmail.labelsOf(A, s.message("p1", 1).id)).not.toContain("UNREAD");
 
     await gmail.offline(true);
     await app.row("Person 3").click();
@@ -294,10 +283,10 @@ test.describe("conversation", () => {
     await app.press("Escape");
     await expect(app.row("Person 3")).not.toHaveAttribute("data-unread");
     await app.settle();
-    expect(await labelsOf(app, A, s.message("p3", 1).id)).toContain("UNREAD");
+    expect(await app.gmail.labelsOf(A, s.message("p3", 1).id)).toContain("UNREAD");
     await gmail.offline(false);
     await app.settle();
-    expect(await labelsOf(app, A, s.message("p3", 1).id)).not.toContain("UNREAD");
+    expect(await app.gmail.labelsOf(A, s.message("p3", 1).id)).not.toContain("UNREAD");
   });
 
   test("CONV-09 a message that arrives while the conversation is open", async ({ app, gmail }) => {
@@ -322,10 +311,10 @@ test.describe("conversation", () => {
     const one = await reply("Reply one.");
     await expect.poll(() => layout(app, p2Names)).toEqual(["Eq", "Eone*"]);
     await app.settle();
-    expect(await labelsOf(app, A, one.id)).not.toContain("UNREAD");
+    expect(await app.gmail.labelsOf(A, one.id)).not.toContain("UNREAD");
     await app.press("z");
     await app.settle();
-    expect(await labelsOf(app, A, one.id)).not.toContain("UNREAD");
+    expect(await app.gmail.labelsOf(A, one.id)).not.toContain("UNREAD");
     expect(await layout(app, p2Names)).toEqual(["Eq", "Eone*"]);
     expect(await p2Notes()).toEqual([]);
 
@@ -340,7 +329,7 @@ test.describe("conversation", () => {
     const three = await reply("Reply three.");
     await expect.poll(() => layout(app, p2Names)).toEqual(["Eq", "Eone", "Etwo", "Ethree*"]);
     await app.settle();
-    expect(await labelsOf(app, A, three.id)).toContain("UNREAD");
+    expect(await app.gmail.labelsOf(A, three.id)).toContain("UNREAD");
     expect(await p2Notes()).toHaveLength(1);
   });
 
@@ -451,7 +440,7 @@ test.describe("conversation", () => {
     await app.press("e");
     await expect(app.conversationTitle).toHaveText("Person 5");
     await app.settle();
-    expect(await labelsOf(app, A, s.message("p4", 1).id)).not.toContain("INBOX");
+    expect(await app.gmail.labelsOf(A, s.message("p4", 1).id)).not.toContain("INBOX");
   });
 
   test("CONV-14 message iframes size to their content", async ({ app, gmail }) => {
@@ -498,7 +487,7 @@ test.describe("conversation", () => {
     await app.settle();
     await expect(app.highlighted).toContainText("Person 5");
     await expect(app.row("Person 5")).toHaveAttribute("data-unread");
-    expect(await labelsOf(app, A, s.message("p5", 1).id)).toContain("UNREAD");
+    expect(await app.gmail.labelsOf(A, s.message("p5", 1).id)).toContain("UNREAD");
   });
 
   test("CONV-16 the conversation that opens after an action is marked read", async ({
@@ -514,7 +503,7 @@ test.describe("conversation", () => {
     await app.press("e");
     await expect(app.conversationTitle).toHaveText(s.thread("p5").subject);
     await app.settle();
-    expect(await labelsOf(app, A, s.message("p5", 1).id)).not.toContain("UNREAD");
+    expect(await app.gmail.labelsOf(A, s.message("p5", 1).id)).not.toContain("UNREAD");
     await app.press("Escape");
     await expect(app.row("Person 5")).not.toHaveAttribute("data-unread");
   });
@@ -564,7 +553,7 @@ test.describe("conversation", () => {
     await app.conversation.getByRole("button", { name: "Mark Done (E)" }).click();
     await expect(app.conversationTitle).toHaveText("Person 2");
     await app.settle();
-    expect(await labelsOf(app, A, s.message("p1", 1).id)).not.toContain("INBOX");
+    expect(await app.gmail.labelsOf(A, s.message("p1", 1).id)).not.toContain("INBOX");
 
     await app.conversation.getByRole("button", { name: "Snooze (H)" }).click();
     await expect(app.page.getByRole("dialog", { name: /^Snooze until/ })).toBeVisible();
@@ -882,8 +871,8 @@ test("CONV-27 z while the conversation that opened after e still loads undoes th
   await app.settle();
 
   await expect(app.conversationTitle).toHaveText(s.thread("p5").subject);
-  expect(await labelsOf(app, A, s.latest("p4").id)).toContain("INBOX");
-  expect(await labelsOf(app, A, s.message("p5", 1).id)).not.toContain("UNREAD");
+  expect(await app.gmail.labelsOf(A, s.latest("p4").id)).toContain("INBOX");
+  expect(await app.gmail.labelsOf(A, s.message("p5", 1).id)).not.toContain("UNREAD");
   await app.press("Escape");
   await expect(app.row("Person 4")).toHaveCount(1);
   await expect(app.row("Person 5")).not.toHaveAttribute("data-unread");
@@ -909,9 +898,9 @@ test("CONV-28 a conversation still loading when the app quits stays unread", asy
   await app.launch();
 
   await expect(app.row("Person 5")).toHaveAttribute("data-unread");
-  expect(await labelsOf(app, A, s.message("p5", 1).id)).toContain("UNREAD");
+  expect(await app.gmail.labelsOf(A, s.message("p5", 1).id)).toContain("UNREAD");
   await app.press("j", "j", "j", "j", "Enter");
   await expect(app.conversationTitle).toHaveText(s.thread("p5").subject);
   await app.settle();
-  expect(await labelsOf(app, A, s.message("p5", 1).id)).not.toContain("UNREAD");
+  expect(await app.gmail.labelsOf(A, s.message("p5", 1).id)).not.toContain("UNREAD");
 });

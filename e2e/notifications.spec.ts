@@ -12,11 +12,6 @@ async function notes(gmail: Control) {
   return (await gmail.platform()).notifications;
 }
 
-async function avatarCount(app: App, email: string): Promise<number> {
-  const count = app.account(email).locator("span.tabular");
-  return (await count.count()) === 0 ? 0 : Number(await count.innerText());
-}
-
 function fresh(account: string, subject: string, extra: Partial<Delivery> = {}): Delivery {
   return {
     account,
@@ -33,15 +28,6 @@ function many(account: string, n: number, tag: string): Delivery[] {
   return Array.from({ length: n }, (_, i) => fresh(account, `${tag} ${i + 1}`));
 }
 
-async function command(app: App, name: string): Promise<void> {
-  await app.press("Meta+k");
-  await expect(app.palette).toBeVisible();
-  await app.type(name);
-  await expect(app.palette.locator("[cmdk-item]").first()).toContainText(name);
-  await app.press("Enter");
-  await expect(app.palette).toHaveCount(0);
-}
-
 function muteSwitch(app: App, nth: number) {
   return app.sheet("Settings").getByRole("switch", { name: "Mute notifications" }).nth(nth);
 }
@@ -54,7 +40,7 @@ test.describe("notifications", () => {
     await seeds.standard(gmail, app);
     const start = await badge(gmail);
     expect(start).toBe(9 + 2);
-    const [a0, b0] = [await avatarCount(app, A), await avatarCount(app, B)];
+    const [a0, b0] = [await app.avatarCount(A), await app.avatarCount(B)];
 
     await gmail.deliverMany([fresh(A, "News for Ana"), fresh(B, "News for Ben")]);
     await gmail.poll();
@@ -64,8 +50,8 @@ test.describe("notifications", () => {
     expect(n.map((x) => x.account).toSorted()).toEqual([A, B]);
     for (const x of n) expect(x.body).toContain(x.account);
     expect(await badge(gmail)).toBe(start + 2);
-    expect(await avatarCount(app, A)).toBe(a0 + 1);
-    expect(await avatarCount(app, B)).toBe(b0 + 1);
+    expect(await app.avatarCount(A)).toBe(a0 + 1);
+    expect(await app.avatarCount(B)).toBe(b0 + 1);
   });
 
   test("NOT-02 when a notification is not raised", async ({ app, gmail }) => {
@@ -119,7 +105,8 @@ test.describe("notifications", () => {
     await row(
       async () => {
         await gmail.nextSignIn({ email: C });
-        await command(app, "Add account");
+        await app.command("Add account");
+        await expect(app.palette).toHaveCount(0);
         await expect(app.account(C)).toBeVisible();
       },
       0,
@@ -170,19 +157,20 @@ test.describe("notifications", () => {
     await seeds.standard(gmail, app);
     const items = app.palette.locator("[cmdk-item]");
 
-    await command(app, "Mute notifications");
+    await app.command("Mute notifications");
+    await expect(app.palette).toHaveCount(0);
     await app.settle();
     await app.press("Meta+k");
     await expect(items.filter({ hasText: "Unmute notifications" })).toHaveCount(1);
     await app.press("Escape");
     await expect(app.palette).toHaveCount(0);
 
-    const a0 = await avatarCount(app, A);
+    const a0 = await app.avatarCount(A);
     await gmail.clearRecorded();
     await gmail.deliver(fresh(A, "While muted", { poll: true }));
     await app.settle();
     expect(await notes(gmail)).toEqual([]);
-    expect(await avatarCount(app, A)).toBe(a0 + 1);
+    expect(await app.avatarCount(A)).toBe(a0 + 1);
     expect(await badge(gmail)).toBe(2);
 
     await app.press("Meta+,");
@@ -191,7 +179,8 @@ test.describe("notifications", () => {
     await app.press("Escape");
     await expect(app.sheet("Settings")).toHaveCount(0);
 
-    await command(app, "Unmute notifications");
+    await app.command("Unmute notifications");
+    await expect(app.palette).toHaveCount(0);
     await app.settle();
     expect(await badge(gmail)).toBe(12);
     await gmail.clearRecorded();
@@ -210,7 +199,8 @@ test.describe("notifications", () => {
     await expect(items.filter({ hasText: "Mute notifications" })).toHaveCount(1);
     await expect(items.filter({ hasText: "Unmute notifications" })).toHaveCount(0);
     await app.press("Escape");
-    await command(app, "Mute notifications");
+    await app.command("Mute notifications");
+    await expect(app.palette).toHaveCount(0);
     await app.settle();
     await app.press("Meta+,");
     await expect(muteSwitch(app, 0)).toHaveAttribute("aria-checked", "true");

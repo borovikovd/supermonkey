@@ -1,34 +1,10 @@
 import type { App } from "./app.ts";
-import type { Control, GmailMessage } from "./control.ts";
+import type { Control } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
+import { emails, inOrder, sentByApp, sentWithSubject } from "./helpers.ts";
 import { htmlOf, parseMime } from "./mime.ts";
 import * as seeds from "./seeds.ts";
 import { A, A_ALIAS, B } from "./seeds.ts";
-
-function emails(header: string | undefined): string[] {
-  return [...(header ?? "").matchAll(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)].map((m) =>
-    m[0].toLowerCase(),
-  );
-}
-
-async function sentByApp(gmail: Control, account: string): Promise<GmailMessage[]> {
-  const { messages } = await gmail.gmail(account);
-  return messages.filter(
-    (m) => m.labels.includes("SENT") && m.headers["x-supermonkey-draft"] !== undefined,
-  );
-}
-
-async function sentWithSubject(
-  gmail: Control,
-  account: string,
-  subject: string,
-): Promise<GmailMessage> {
-  const found = (await sentByApp(gmail, account)).filter((m) => m.headers.subject === subject);
-  expect(found, `one sent message "${subject}"`).toHaveLength(1);
-  const [m] = found;
-  if (!m) throw new Error(`no sent message ${subject}`);
-  return m;
-}
 
 async function gmailDrafts(gmail: Control, account: string, subject?: string) {
   const { drafts } = await gmail.gmail(account);
@@ -42,33 +18,6 @@ const textOf = (html: string) =>
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-
-async function open(app: App, subject: string): Promise<void> {
-  await app.row(subject).first().click();
-  await expect(app.conversationTitle).toHaveText(subject);
-  await app.settle();
-}
-
-async function inOrder<T>(
-  items: readonly T[],
-  step: (item: T, i: number) => Promise<void>,
-): Promise<void> {
-  await items.reduce<Promise<void>>(
-    (prev, item, i) => prev.then(() => step(item, i)),
-    Promise.resolve(),
-  );
-}
-
-async function highlight(app: App, subject: string): Promise<void> {
-  await expect(app.row(subject)).toHaveCount(1);
-  const down = async (tries: number): Promise<void> => {
-    if ((await app.highlighted.textContent())?.includes(subject)) return;
-    if (tries === 0) throw new Error(`could not highlight ${subject}`);
-    await app.press("j");
-    await down(tries - 1);
-  };
-  await down(40);
-}
 
 async function focusBody(app: App): Promise<void> {
   await app.press("Meta+Shift+m");
@@ -92,28 +41,10 @@ async function fill(app: App, to: string, subject: string, body: string): Promis
   await app.type(body);
 }
 
-async function closeComposer(app: App): Promise<void> {
-  await app.press("Escape", "Escape");
-  await expect(app.editor).toHaveCount(0);
-  await app.settle();
-}
-
 async function sendSaved(app: App): Promise<void> {
   await app.settle();
   await app.press("Meta+Enter");
   await expect(app.editor).toHaveCount(0);
-}
-
-function fromButton(app: App) {
-  return app.page
-    .locator("div")
-    .filter({ has: app.page.getByText("From", { exact: true }) })
-    .last()
-    .getByRole("button");
-}
-
-function stubs(app: App) {
-  return app.conversation.getByRole("button", { name: /^Draft/ });
 }
 
 function rail(app: App, title: string) {
@@ -148,7 +79,7 @@ test("NEW-01 c replaces the screen, and closing it returns to where it came from
     },
     {
       name: "p1 open",
-      go: () => open(app, "Person 1"),
+      go: () => app.openAndSettle("Person 1"),
       check: async () => {
         await expect(app.conversationTitle).toHaveText("Person 1");
       },
@@ -175,7 +106,7 @@ test("NEW-01 c replaces the screen, and closing it returns to where it came from
     await expect(app.list).toHaveCount(0);
     await expect(app.conversationTitle).toHaveText("New Message");
     await fill(app, "kim@kite.test", `Kept ${i}`, "Typed content");
-    await closeComposer(app);
+    await app.closeComposer();
     await expect(newMessage(app)).toHaveCount(0);
     await start.check();
 
@@ -416,7 +347,7 @@ test("NEW-06 shortcuts never fire while typing in compose", async ({ app, gmail 
   await seeds.standard(gmail, app);
   const inbox = await app.subjects();
   const text = "Je suis #1! E? K/O x z";
-  await open(app, "Person 2");
+  await app.openAndSettle("Person 2");
   await app.reply("r");
   await app.type(text);
   await expect(app.editor).toHaveText(text);
@@ -437,7 +368,7 @@ test("NEW-06 shortcuts never fire while typing in compose", async ({ app, gmail 
   expect(await gmail.requests("messages.batchModify")).toEqual([]);
   expect(await gmail.requests("messages.trash")).toEqual([]);
   await focusBody(app);
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
   await expect(app.list).toBeVisible();
   expect(await app.subjects()).toEqual(inbox);
@@ -451,79 +382,79 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
 
   const expectLeft = async (row: string, stubCount: number | null) => {
     await app.settle();
-    if (stubCount !== null) await expect(stubs(app), `${row}: stubs`).toHaveCount(stubCount);
+    if (stubCount !== null) await expect(app.draftStubs, `${row}: stubs`).toHaveCount(stubCount);
     expect(await gmailDrafts(gmail, A), `${row}: Gmail drafts`).toHaveLength(kept);
     if (stubCount !== null) await app.press("Escape");
     expect(await draftRows(app), `${row}: Drafts rows`).toHaveLength(kept);
   };
 
-  await open(app, "Person 1");
+  await app.openAndSettle("Person 1");
   await app.reply("r");
-  await closeComposer(app);
+  await app.closeComposer();
   await expectLeft("r, untouched", 0);
 
-  await open(app, "Offsite venue");
+  await app.openAndSettle("Offsite venue");
   await app.reply("Enter");
-  await closeComposer(app);
+  await app.closeComposer();
   await expectLeft("Enter, untouched", 0);
 
-  await open(app, "Contract");
+  await app.openAndSettle("Contract");
   await app.reply("f");
   await expect(app.page.getByRole("button", { name: "Remove contract.pdf" })).toHaveCount(1);
-  await closeComposer(app);
+  await app.closeComposer();
   await expectLeft("f, untouched", 0);
 
   await app.compose();
-  await closeComposer(app);
+  await app.closeComposer();
   await expectLeft("c, untouched", null);
 
-  await open(app, "Person 5");
+  await app.openAndSettle("Person 5");
   await app.reply("r");
   await app.type("Second thoughts");
   await app.settle();
   await app.eventually(A, (g) => g.drafts.length === 1, "the typed draft reached Gmail");
   await app.press("Meta+a", "Backspace");
   await expect(app.editor).toHaveText("");
-  await closeComposer(app);
+  await app.closeComposer();
   await expectLeft("r, typed then deleted", 0);
 
-  await open(app, "Person 1");
+  await app.openAndSettle("Person 1");
   await app.reply("r");
   await app.type("Typed body");
-  await closeComposer(app);
+  await app.closeComposer();
   kept++;
   await expectLeft("r, typed", 1);
 
-  await open(app, "Person 2");
+  await app.openAndSettle("Person 2");
   await app.reply("r");
   await app.press("Meta+Shift+o");
   await app.type("kai@nowhere.test,");
   await expect(app.chips("To")).toHaveCount(2);
   await focusBody(app);
-  await closeComposer(app);
+  await app.closeComposer();
   kept++;
   await expectLeft("r, To chip added", 1);
 
-  await open(app, "Person 3");
+  await app.openAndSettle("Person 3");
   await app.reply("r");
-  await expect(fromButton(app)).toContainText(A);
+  await expect(app.fromButton).toContainText(A);
   await app.press("Meta+Shift+f");
   await app.page
     .getByRole("dialog", { name: "Send from" })
     .getByRole("option", { name: new RegExp(A_ALIAS.replace(/\./g, "\\.")) })
     .click();
-  await expect(fromButton(app)).toContainText(A_ALIAS);
+  await expect(app.fromButton).toContainText(A_ALIAS);
   await focusBody(app);
-  await closeComposer(app);
+  await app.closeComposer();
   kept++;
   await expectLeft("r, From changed", 1);
 
-  await open(app, "Contract");
+  await app.openAndSettle("Contract");
   await app.reply("f");
   await app.page.getByRole("button", { name: "Remove contract.pdf" }).click();
   await expect(app.page.getByRole("button", { name: "Remove contract.pdf" })).toHaveCount(0);
   await focusBody(app);
-  await closeComposer(app);
+  await app.closeComposer();
   kept++;
   await expectLeft("f, attachment removed", 1);
 
@@ -531,25 +462,25 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await focusSubject(app);
   await app.type("Subject only");
   await focusBody(app);
-  await closeComposer(app);
+  await app.closeComposer();
   kept++;
   await expectLeft("c, subject only", null);
 
-  await open(app, "Person 1");
+  await app.openAndSettle("Person 1");
   await app.reply("r");
   await expect(app.editor).toHaveText("Typed body");
-  await closeComposer(app);
+  await app.closeComposer();
   await expectLeft("resumed, untouched", 1);
 
-  await open(app, "Person 1");
+  await app.openAndSettle("Person 1");
   await app.reply("r");
   await expect(app.editor).toHaveText("Typed body");
   await app.press("Meta+a", "Backspace");
   await expect(app.editor).toHaveText("");
-  await closeComposer(app);
+  await app.closeComposer();
   await expectLeft("resumed, edited back to the defaults", 1);
 
-  await open(app, "Person 4");
+  await app.openAndSettle("Person 4");
   await app.reply("r");
   await app.type("Undo me");
   await sendSaved(app);
@@ -558,7 +489,7 @@ test("NEW-07 a fresh composer closed untouched leaves nothing behind", async ({ 
   await app.settle();
   await app.press("Meta+a", "Backspace");
   await expect(app.editor).toHaveText("");
-  await closeComposer(app);
+  await app.closeComposer();
   kept++;
   await expectLeft("reopened by undo send, edited back", 1);
 });
@@ -642,14 +573,14 @@ test("NEW-10 From picker and the sending account", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
 
   await app.compose();
-  await expect(fromButton(app)).toContainText(A);
-  await expect(fromButton(app)).not.toContainText(A_ALIAS);
+  await expect(app.fromButton).toContainText(A);
+  await expect(app.fromButton).not.toContainText(A_ALIAS);
   await app.press("Meta+Shift+f");
   await app.page
     .getByRole("dialog", { name: "Send from" })
     .getByRole("option", { name: new RegExp(A_ALIAS.replace(/\./g, "\\.")) })
     .click();
-  await expect(fromButton(app)).toContainText(A_ALIAS);
+  await expect(app.fromButton).toContainText(A_ALIAS);
   await fill(app, "kim@kite.test", "From the alias", "Hi");
   await sendSaved(app);
 
@@ -713,31 +644,31 @@ test("NEW-12 opening another composer, closing search, a new query, or another a
   const drafts = async () => gmailDrafts(gmail, A);
   const start = (await drafts()).length;
 
-  await open(app, "Q4 plan");
+  await app.openAndSettle("Q4 plan");
   await app.reply("r");
   await app.type("touched one");
   await app.press("Escape", "c");
   await app.settle();
   await expect(app.editor).toHaveText("touched one");
   await expect(newMessage(app)).toHaveCount(0);
-  await stubs(app).filter({ hasText: "About message three." }).click();
+  await app.draftStubs.filter({ hasText: "About message three." }).click();
   await expect(app.editor).toHaveText("About message three.");
   await app.settle();
-  await expect(stubs(app).filter({ hasText: "touched one" })).toHaveCount(1);
+  await expect(app.draftStubs.filter({ hasText: "touched one" })).toHaveCount(1);
   expect(await drafts()).toHaveLength(start + 1);
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
 
-  await open(app, "Contract");
+  await app.openAndSettle("Contract");
   await app.reply("r");
-  await stubs(app).filter({ hasText: "FYI" }).click();
+  await app.draftStubs.filter({ hasText: "FYI" }).click();
   await expect(app.editor).toHaveText("FYI");
   await app.settle();
-  await expect(stubs(app)).toHaveCount(0);
+  await expect(app.draftStubs).toHaveCount(0);
   expect(await drafts()).toHaveLength(start + 1);
   const fwdThread = s.thread("fwd").threadId;
   expect((await drafts()).filter((d) => d.message.threadId === fwdThread)).toHaveLength(1);
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
 
   await app.compose();
@@ -757,12 +688,12 @@ test("NEW-12 opening another composer, closing search, a new query, or another a
   await app.settle();
   expect(await draftRows(app)).toEqual(rowsBefore);
 
-  await open(app, "Person 1");
+  await app.openAndSettle("Person 1");
   await app.reply("r");
   await app.type("row four");
   await rail(app, "Drafts (g d)").click();
   await expect(app.editor).toHaveCount(0);
-  await highlight(app, "Idea");
+  await app.highlight("Idea");
   await app.press("Enter");
   await expect(newMessage(app)).toBeVisible();
   await expect(app.editor).toHaveText("An idea for later.");
@@ -771,7 +702,7 @@ test("NEW-12 opening another composer, closing search, a new query, or another a
   const kept = (await drafts()).filter((d) => d.message.threadId === p1);
   expect(kept).toHaveLength(1);
   expect(htmlOf(parseMime(kept[0]?.message.raw ?? ""))).toContain("row four");
-  await closeComposer(app);
+  await app.closeComposer();
   await rail(app, "Inbox").click();
   await expect(app.section("Important")).toBeVisible();
 
@@ -894,7 +825,7 @@ test("NEW-14 an Esc pressed just after a composer opens, or after a key that mov
   const [draft] = await gmailDrafts(gmail, A, "Late focus");
   expect(htmlOf(parseMime(draft?.message.raw ?? ""))).toContain("Body text");
 
-  await open(app, "Person 3");
+  await app.openAndSettle("Person 3");
   await app.page.clock.pauseAt(await app.now());
   await app.press("r");
   await expect(app.editor).toBeVisible();

@@ -1,7 +1,6 @@
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
-import type { Control } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A, B } from "./seeds.ts";
@@ -50,18 +49,6 @@ async function expectHeader(app: App, header: string) {
   await expect.poll(() => app.splitHeader()).toBe(header);
 }
 
-async function highlightRow(app: App, subject: string): Promise<void> {
-  await expect(app.row(subject)).toHaveCount(1);
-  const subjects = await app.subjects();
-  const to = subjects.indexOf(subject);
-  if (to < 0) throw new Error(`no row ${subject} in ${subjects.join(", ")}`);
-  const keys = await app.rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-row")));
-  const from = keys.indexOf(await app.highlighted.getAttribute("data-row"));
-  const key = to > from ? "j" : "k";
-  await app.press(...Array.from({ length: Math.abs(to - Math.max(from, 0)) }, () => key));
-  await expect(app.highlighted).toContainText(subject);
-}
-
 async function command(app: App, name: string): Promise<Locator> {
   await app.press("Meta+k");
   await expect(app.palette).toBeVisible();
@@ -75,19 +62,6 @@ async function pin(app: App, how: string, choice: string): Promise<void> {
   await expect(picker).toBeVisible();
   await picker.getByRole("option", { name: choice, exact: true }).click();
   await expect(picker).toHaveCount(0);
-}
-
-async function pollA(app: App, gmail: Control): Promise<void> {
-  const polls = async () =>
-    (await gmail.requests("history.list", { account: A })).filter((r) => r.answer === 200).length;
-  const before = await polls();
-  await expect
-    .poll(async () => {
-      await gmail.poll();
-      await app.settle();
-      return polls();
-    })
-    .toBeGreaterThan(before);
 }
 
 async function doneView(app: App): Promise<void> {
@@ -181,7 +155,7 @@ test("SPL-02 Tab and Shift+Tab move between visible splits", async ({ app, gmail
   const [vip, important, other] = sections.map((s) => s.subjects[0] ?? "?");
   expect(sections[0]?.subjects).toEqual(["Q4 plan", "Offsite venue"]);
 
-  await highlightRow(app, "Offsite venue");
+  await app.highlight("Offsite venue");
   await app.press("Tab");
   await expect(app.highlighted).toContainText(important ?? "?");
   await expect(app.section("Important")).toBeInViewport();
@@ -224,7 +198,7 @@ test("SPL-03 pin precedence: sender over domain over label", async ({ app, gmail
     await expectSplit(app, "X marks", x, step);
     await expectSplit(app, "Y knot", y, step);
   };
-  await highlightRow(app, "X marks");
+  await app.highlight("X marks");
 
   await pin(app, "Add to split", "Label Proj → Team");
   await where("Team", "Important", "1: label Proj → Team");
@@ -236,14 +210,14 @@ test("SPL-03 pin precedence: sender over domain over label", async ({ app, gmail
   await where("VIP", "VIP", "4: z removes the sender pin");
   await app.press("z");
   await where("Team", "Important", "5: z removes the domain pin");
-  await highlightRow(app, "X marks");
+  await app.highlight("X marks");
   await pin(app, "Add to split", "Label Ops → VIP");
   await where("VIP", "Important", "6: VIP comes first in split order");
 
   await editSplits(app, (sheet) => moveUp(sheet, "Team"));
   await where("Team", "Important", "7: Team now comes first");
 
-  await highlightRow(app, "X marks");
+  await app.highlight("X marks");
   await pin(app, "Move to Important", "Sender x@corp.test");
   await expectSplit(app, "X marks", "Important", "8: pinned to Important");
   await editSplits(app, (sheet) => toggle(sheet, "Important"));
@@ -261,7 +235,7 @@ test("SPL-04 pinning from the palette replaces an older pin; z restores it; a se
 }) => {
   test.slow();
   await seeds.standard(gmail, app);
-  await highlightRow(app, "Your receipt");
+  await app.highlight("Your receipt");
   await command(app, "Move to Important");
   const picker = app.page.getByRole("dialog", { name: "Move to Important" });
   await expect(picker.getByRole("option")).toHaveText([
@@ -278,7 +252,7 @@ test("SPL-04 pinning from the palette replaces an older pin; z restores it; a se
   await app.press("z");
   await expectSplit(app, "Your receipt", "Other", "z removes the pin");
 
-  await highlightRow(app, "Digest: week 44");
+  await app.highlight("Digest: week 44");
   await pin(app, "Move to Important", "Sender news@letters.test");
   await expectSplit(app, "Digest: week 44", "Important");
   await gmail.deliver({
@@ -291,14 +265,14 @@ test("SPL-04 pinning from the palette replaces an older pin; z restores it; a se
     labels: ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
     poll: false,
   });
-  await pollA(app, gmail);
+  await app.pollAndSettle(A);
   await app.settle();
   await expectSplit(app, "Digest: week 45", "Important", "on arrival");
-  await pollA(app, gmail);
+  await app.pollAndSettle(A);
   await app.settle();
   await expectSplit(app, "Digest: week 45", "Important", "after a poll");
   await gmail.expireHistory(A);
-  await pollA(app, gmail);
+  await app.pollAndSettle(A);
   await app.settle();
   await expectSplit(app, "Digest: week 45", "Important", "after a full resync");
   await app.restart();
@@ -311,7 +285,7 @@ test("SPL-05 your own reply does not move a thread", async ({ app, gmail }) => {
   await expectSplit(app, "Budget draft", "Important");
   await expectSplit(app, "Offsite venue", "Important");
 
-  await highlightRow(app, "Offsite venue");
+  await app.highlight("Offsite venue");
   await app.press("Enter");
   await app.reply("r");
   await app.type("Booked the venue");
@@ -335,7 +309,7 @@ test("SPL-05 your own reply does not move a thread", async ({ app, gmail }) => {
     labels: ["INBOX", "SENT", "CATEGORY_PERSONAL"],
     poll: false,
   });
-  await pollA(app, gmail);
+  await app.pollAndSettle(A);
   await app.settle();
   await expectSplit(app, "Note to self", "Mine");
 });
@@ -395,7 +369,7 @@ test("SPL-06 custom splits: add, order, rename, turn off, delete", async ({ app,
   await expectSplit(app, "Offsite venue", "Places");
   await expectSplit(app, "Ticket #42", "Places");
 
-  await highlightRow(app, "Your receipt");
+  await app.highlight("Your receipt");
   await pin(app, "Add to split", "Sender billing@shop.test → Receipts");
   await expectSplit(app, "Your receipt", "Receipts");
   const deleteReceipts = (s: Locator) =>
@@ -522,7 +496,7 @@ test("SPL-09 counts cap at 999+", async ({ app, gmail }) => {
     labels: ["INBOX", "CATEGORY_PERSONAL"],
     poll: false,
   });
-  await pollA(app, gmail);
+  await app.pollAndSettle(A);
   await app.settle();
   await expect.poll(() => app.splitHeader()).toMatch(/^Important 999\+( ·|$)/);
   expect(await app.splitHeader()).toBe("Important 999+");

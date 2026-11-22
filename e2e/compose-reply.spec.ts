@@ -2,22 +2,10 @@ import type { App } from "./app.ts";
 import type { Control, GmailMessage, Hold } from "./control.ts";
 import { attachment, files } from "./files.ts";
 import { expect, test } from "./fixtures.ts";
+import { emails, inOrder, sentByApp } from "./helpers.ts";
 import { attachments, findPart, htmlOf, parseMime } from "./mime.ts";
 import * as seeds from "./seeds.ts";
 import { A, A_ALIAS, PERSONS, dates } from "./seeds.ts";
-
-function emails(header: string | undefined): string[] {
-  return [...(header ?? "").matchAll(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)].map((m) =>
-    m[0].toLowerCase(),
-  );
-}
-
-async function sentByApp(gmail: Control, account: string): Promise<GmailMessage[]> {
-  const { messages } = await gmail.gmail(account);
-  return messages.filter(
-    (m) => m.labels.includes("SENT") && m.headers["x-supermonkey-draft"] !== undefined,
-  );
-}
 
 async function sentWith(gmail: Control, account: string, marker: string): Promise<GmailMessage> {
   const found = (await sentByApp(gmail, account)).filter((m) =>
@@ -29,70 +17,11 @@ async function sentWith(gmail: Control, account: string, marker: string): Promis
   return m;
 }
 
-async function open(app: App, subject: string): Promise<void> {
-  await app.row(subject).first().click();
-  await expect(app.conversationTitle).toHaveText(subject);
-  await app.settle();
-}
-
-async function inOrder<T>(
-  items: readonly T[],
-  step: (item: T, i: number) => Promise<void>,
-): Promise<void> {
-  await items.reduce<Promise<void>>(
-    (prev, item, i) => prev.then(() => step(item, i)),
-    Promise.resolve(),
-  );
-}
-
-async function highlight(app: App, subject: string): Promise<void> {
-  await expect(app.row(subject)).toHaveCount(1);
-  const keys = await app.rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-row")));
-  const target = keys.indexOf(await app.rowKey(subject));
-  const lit = (await app.highlighted.count()) > 0;
-  const at = lit ? keys.indexOf(await app.highlighted.getAttribute("data-row")) : -1;
-  if (at !== target)
-    await app.press(
-      ...Array.from({ length: Math.abs(target - at) }, () => (at < target ? "j" : "k")),
-    );
-  await expect(app.highlighted).toContainText(subject);
-}
-
-async function send(app: App): Promise<void> {
-  await app.settle();
-  await app.press("Meta+Enter");
-  await expect(app.editor).toHaveCount(0);
-  await app.advance(10_000);
-  await app.settle();
-}
-
-async function closeComposer(app: App): Promise<void> {
-  await app.press("Escape", "Escape");
-  await expect(app.editor).toHaveCount(0);
-  await app.settle();
-}
-
 async function quoteText(app: App): Promise<string> {
   await app.page.getByTitle("Show quoted text").click();
   const body = app.page.locator('iframe[title="quoted"]').contentFrame().locator("body");
   await expect(body).not.toBeEmpty();
   return (await body.innerText()).replace(/\s+/g, " ").trim();
-}
-
-function fromButton(app: App) {
-  return app.page
-    .locator("div")
-    .filter({ has: app.page.getByText("From", { exact: true }) })
-    .last()
-    .getByRole("button");
-}
-
-async function chipAddresses(app: App, field: "To" | "Cc" | "Bcc"): Promise<string[]> {
-  return app.chips(field).evaluateAll((els) => els.map((el) => el.getAttribute("data-chip") ?? ""));
-}
-
-function stubs(app: App) {
-  return app.conversation.getByRole("button", { name: /^Draft/ });
 }
 
 test("REP-01 r on the list opens the reply composer under the thread, in view below a long message, ready to type", async ({
@@ -110,7 +39,7 @@ test("REP-01 r on the list opens the reply composer under the thread, in view be
     inReplyTo: s.latest("plan").messageId,
   });
   await app.settle();
-  await highlight(app, "Q4 plan");
+  await app.highlight("Q4 plan");
   await app.reply("r");
   await expect(app.conversationTitle).toHaveText("Q4 plan");
   await app.type("Thanks");
@@ -129,7 +58,7 @@ test("REP-01 r on the list opens the reply composer under the thread, in view be
   expect(box.y).toBeGreaterThanOrEqual(last.y + last.height);
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
   await expect(app.selectedMessage).toHaveCount(1);
-  expect(await chipAddresses(app, "To")).toEqual(["dave@corp.test"]);
+  expect(await app.chipAddresses("To")).toEqual(["dave@corp.test"]);
   await expect(
     app.page.getByText("⌘Enter to Send", { exact: true }).locator("xpath=../.."),
   ).toHaveText(/⌘Enter to Send\s*·\s*Esc to close\s*·\s*⌘K for commands/);
@@ -146,12 +75,12 @@ test("REP-01 r on the list opens the reply composer under the thread, in view be
 test("REP-02 what r, Enter, and f do on the list and in a conversation", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
 
-  await highlight(app, "Offsite venue");
+  await app.highlight("Offsite venue");
   await app.reply("r");
   await expect(app.conversationTitle).toHaveText("Offsite venue");
-  expect(await chipAddresses(app, "To")).toEqual(["carol@corp.test"]);
+  expect(await app.chipAddresses("To")).toEqual(["carol@corp.test"]);
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
   await expect(app.highlighted).toContainText("Offsite venue");
 
@@ -166,26 +95,26 @@ test("REP-02 what r, Enter, and f do on the list and in a conversation", async (
   await expect(app.conversationTitle).toHaveText("Offsite venue");
   await expect(app.chips("To")).toHaveCount(0);
   expect(await quoteText(app)).toMatch(/^-+ Forwarded message -+ From: Carol Chen/);
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
 
-  await open(app, "Q4 plan");
+  await app.openAndSettle("Q4 plan");
   await app.press("p", "p", "p");
   await expect(app.selectedMessage).toContainText("Plan message 9");
 
   await app.reply("r");
   await expect(app.selectedMessage).toContainText("Plan message 9");
-  expect(await chipAddresses(app, "To")).toEqual(["carol@corp.test"]);
+  expect(await app.chipAddresses("To")).toEqual(["carol@corp.test"]);
   expect(await quoteText(app)).toMatch(/^On .*Carol Chen.* wrote:/);
-  await closeComposer(app);
+  await app.closeComposer();
   await expect(app.selectedMessage).toContainText("Plan message 9");
 
   await app.reply("Enter");
   await expect(app.selectedMessage).toContainText("Plan message 9");
-  expect(await chipAddresses(app, "To")).toEqual(["carol@corp.test"]);
+  expect(await app.chipAddresses("To")).toEqual(["carol@corp.test"]);
   await expect(app.chips("Cc")).toHaveCount(0);
   expect(await quoteText(app)).toMatch(/^On .*Carol Chen.* wrote:.*Plan message 9/);
-  await closeComposer(app);
+  await app.closeComposer();
 
   await app.reply("f");
   await expect(app.selectedMessage).toContainText("Plan message 9");
@@ -299,13 +228,13 @@ test("REP-03 reply and reply-all addressing", async ({ app, gmail }) => {
 
   const modes = ["r", "Enter"] as const;
   await inOrder(rows, async (row) => {
-    await open(app, row.title);
+    await app.openAndSettle(row.title);
     await inOrder(modes, async (mode) => {
       await app.reply(mode);
-      expect(await chipAddresses(app, "To"), `${row.key} ${mode} To`).toEqual(row.to);
+      expect(await app.chipAddresses("To"), `${row.key} ${mode} To`).toEqual(row.to);
       if (mode === "r") await expect(app.field("Cc")).toHaveCount(0);
-      else expect(await chipAddresses(app, "Cc"), `${row.key} reply all Cc`).toEqual(row.cc);
-      await expect(fromButton(app), `${row.key} ${mode} From`).toContainText(row.from);
+      else expect(await app.chipAddresses("Cc"), `${row.key} reply all Cc`).toEqual(row.cc);
+      await expect(app.fromButton, `${row.key} ${mode} From`).toContainText(row.from);
       await app.type(`marker-${row.key}-${mode}`);
       await app.settle();
       await app.press("Meta+Enter");
@@ -335,7 +264,7 @@ test("REP-04 a sent reply stays on the thread and carries Gmail's quote", async 
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app);
-  await open(app, "Offsite venue");
+  await app.openAndSettle("Offsite venue");
   await app.reply("r");
   await app.type("Sounds good");
 
@@ -345,7 +274,7 @@ test("REP-04 a sent reply stays on the thread and carries Gmail's quote", async 
   await expect(app.editor).toHaveText("Sounds good");
   await expect(app.editor.locator('iframe, [class*="gmail_quote"]')).toHaveCount(0);
 
-  await send(app);
+  await app.send();
   const m = await sentWith(gmail, A, "Sounds good");
   const carol = s.message("addr", 1).messageId;
   expect(m.threadId).toBe(s.thread("addr").threadId);
@@ -371,23 +300,23 @@ test("REP-04 a sent reply stays on the thread and carries Gmail's quote", async 
 
 test("REP-05 the reply follows the selected message", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
-  await open(app, "Contract");
+  await app.openAndSettle("Contract");
   await app.reply("f");
   await app.press("Meta+Shift+o");
   await app.type("kim@kite.test,");
   await expect(app.chips("To")).toHaveCount(1);
-  await send(app);
+  await app.send();
   await expect(app.messages).toHaveCount(2);
 
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
   await app.reply("r");
-  expect(await chipAddresses(app, "To")).toEqual(["kim@kite.test"]);
-  await closeComposer(app);
+  expect(await app.chipAddresses("To")).toEqual(["kim@kite.test"]);
+  await app.closeComposer();
 
   await app.press("p");
   await expect(app.selectedMessage).toContainText("Alice Adams");
   await app.reply("r");
-  expect(await chipAddresses(app, "To")).toEqual(["alice@law.test"]);
+  expect(await app.chipAddresses("To")).toEqual(["alice@law.test"]);
   expect(await quoteText(app)).toMatch(/^On .*Alice Adams.* wrote:/);
 });
 
@@ -396,12 +325,12 @@ test("REP-06 forward quotes the target, carries its attachments, and stays on th
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app);
-  await open(app, "Contract");
+  await app.openAndSettle("Contract");
   await app.reply("f");
 
   await expect(app.chips("To")).toHaveCount(0);
-  await expect(fromButton(app)).toContainText(A);
-  await expect(fromButton(app)).not.toContainText(A_ALIAS);
+  await expect(app.fromButton).toContainText(A);
+  await expect(app.fromButton).not.toContainText(A_ALIAS);
   await expect(app.page.getByRole("button", { name: "Remove contract.pdf" })).toHaveCount(1);
   expect(await quoteText(app)).toMatch(
     /^-+ Forwarded message -+ From: Alice Adams <alice@law\.test> Date: .+ Subject: Contract To: .*ana@acme\.test/,
@@ -410,7 +339,7 @@ test("REP-06 forward quotes the target, carries its attachments, and stays on th
   await app.type("Please see below");
   await app.press("Meta+Shift+o");
   await app.type("kim@kite.test,");
-  await send(app);
+  await app.send();
 
   const m = await sentWith(gmail, A, "Please see below");
   const alice = s.message("fwd", 1).messageId;
@@ -432,39 +361,39 @@ test("REP-06 forward quotes the target, carries its attachments, and stays on th
 test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   test.slow();
   const s = await seeds.standard(gmail, app);
-  await open(app, "Q4 plan");
+  await app.openAndSettle("Q4 plan");
   const m12 = app.messages.last();
   const atM12 = () => expect(m12).toHaveAttribute("aria-current", "true");
   const atM9 = () => expect(app.selectedMessage).toContainText("Plan message 9");
 
   await app.reply("r");
   await app.type("R1 marker");
-  await closeComposer(app);
-  await expect(stubs(app)).toHaveCount(1);
+  await app.closeComposer();
+  await expect(app.draftStubs).toHaveCount(1);
 
   await atM12();
   await app.reply("r");
   await atM12();
   await expect(app.editor).toHaveText("R1 marker");
-  await closeComposer(app);
+  await app.closeComposer();
 
   await app.reply("Enter");
   await atM12();
   await expect(app.editor).toHaveText("R1 marker");
-  await closeComposer(app);
+  await app.closeComposer();
 
   await app.reply("f");
   await atM12();
   await expect(app.editor).toHaveText("");
   expect(await quoteText(app)).toMatch(/^-+ Forwarded message -+/);
-  await expect(stubs(app)).toHaveCount(1);
-  await expect(stubs(app)).toContainText("R1 marker");
+  await expect(app.draftStubs).toHaveCount(1);
+  await expect(app.draftStubs).toContainText("R1 marker");
   await app.type("F1 marker");
-  await closeComposer(app);
-  await expect(stubs(app)).toHaveCount(2);
+  await app.closeComposer();
+  await expect(app.draftStubs).toHaveCount(2);
   const lastBox = await m12.boundingBox();
   if (!lastBox) throw new Error("m12 has no box");
-  const tops = await stubs(app).evaluateAll((els) =>
+  const tops = await app.draftStubs.evaluateAll((els) =>
     els.map((el) => el.getBoundingClientRect().top),
   );
   for (const top of tops) expect(top).toBeGreaterThanOrEqual(lastBox.y + lastBox.height);
@@ -479,14 +408,14 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   await app.press("Meta+Shift+Comma");
   await expect(app.editor).toHaveCount(0);
   await app.settle();
-  await expect(stubs(app)).toHaveCount(0);
+  await expect(app.draftStubs).toHaveCount(0);
 
   await app.press("p", "p", "p");
   await atM9();
   await app.reply("r");
   await atM9();
   await app.type("R2 marker");
-  await closeComposer(app);
+  await app.closeComposer();
 
   await app.press("n", "n", "n");
   await atM12();
@@ -494,19 +423,19 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   await atM12();
   await expect(app.editor).toHaveText("");
   expect(await quoteText(app)).toMatch(/^On .*Dave Diaz.* wrote:.*Plan message 12/);
-  await closeComposer(app);
-  await expect(stubs(app)).toHaveCount(1);
+  await app.closeComposer();
+  await expect(app.draftStubs).toHaveCount(1);
 
   await app.press("p", "p", "p");
   await atM9();
   await app.reply("r");
   await atM9();
   await expect(app.editor).toHaveText("R2 marker");
-  await closeComposer(app);
+  await app.closeComposer();
 
   await app.press("n", "n", "n");
   await atM12();
-  await stubs(app).filter({ hasText: "R2 marker" }).click();
+  await app.draftStubs.filter({ hasText: "R2 marker" }).click();
   await expect(app.editor).toHaveText("R2 marker");
   await atM9();
   await app.press("Meta+Shift+Comma");
@@ -517,7 +446,7 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
   await atM12();
   await app.reply("r");
   await app.type("R1 again");
-  await closeComposer(app);
+  await app.closeComposer();
   await app.advance(60_000);
   await gmail.createDraft(
     A,
@@ -531,7 +460,7 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
     { poll: true },
   );
   await app.settle();
-  await expect(stubs(app)).toHaveCount(2);
+  await expect(app.draftStubs).toHaveCount(2);
   await atM12();
   await app.reply("r");
   await atM12();
@@ -540,10 +469,10 @@ test("REP-07 which draft r, Enter, and f resume", async ({ app, gmail }) => {
 
 test("REP-08 a half-written reply survives new replies", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
-  await open(app, "Person 2");
+  await app.openAndSettle("Person 2");
   await app.reply("r");
   await app.type("half");
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
 
   await gmail.deliver({
@@ -557,7 +486,7 @@ test("REP-08 a half-written reply survives new replies", async ({ app, gmail }) 
   });
   await app.settle();
 
-  await open(app, "Person 2");
+  await app.openAndSettle("Person 2");
   await expect(app.messages).toHaveCount(2);
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
   await app.reply("r");
@@ -565,7 +494,7 @@ test("REP-08 a half-written reply survives new replies", async ({ app, gmail }) 
   await expect(app.messages.first()).toHaveAttribute("aria-current", "true");
   await expect(app.selectedMessage).toContainText("Quin Quill");
 
-  await send(app);
+  await app.send();
   const m = await sentWith(gmail, A, "half");
   expect(emails(m.headers.to)).toEqual(["quin@people.test"]);
   expect(m.headers["in-reply-to"]).toBe(s.message("p2", 1).messageId);
@@ -575,20 +504,20 @@ test("REP-09 drafts from Gmail get a kind and a target", async ({ app, gmail }) 
   test.slow();
   const s = await seeds.drafts(gmail, app);
 
-  await open(app, "Contract");
+  await app.openAndSettle("Contract");
   await app.reply("r");
   await expect(app.editor).toHaveText("");
-  await closeComposer(app);
+  await app.closeComposer();
   await app.reply("f");
   await expect(app.editor).toHaveText("FYI");
   await expect(app.messages.first()).toHaveAttribute("aria-current", "true");
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
 
-  await open(app, "Person 4");
+  await app.openAndSettle("Person 4");
   await app.reply("r");
   await expect(app.editor).toHaveText("My text");
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
 
   await app.advance(60_000);
@@ -614,12 +543,12 @@ test("REP-09 drafts from Gmail get a kind and a target", async ({ app, gmail }) 
     inReplyTo: s.latest("p5").messageId,
   });
   await app.settle();
-  await open(app, "Person 5");
+  await app.openAndSettle("Person 5");
   await expect(app.messages).toHaveCount(2);
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
   await app.reply("r");
   await expect(app.editor).toHaveText("Started on the latest");
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
 
   await gmail.deliver({
@@ -646,30 +575,30 @@ test("REP-09 drafts from Gmail get a kind and a target", async ({ app, gmail }) 
   );
   await gmail.poll();
   await app.settle();
-  await open(app, "Person 3");
+  await app.openAndSettle("Person 3");
   await expect(app.messages).toHaveCount(2);
   await expect(app.messages.last()).toHaveAttribute("aria-current", "true");
   await app.reply("r");
   await expect(app.editor).toHaveText("Written before Rae replied");
   await expect(app.messages.first()).toHaveAttribute("aria-current", "true");
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
 
-  await open(app, "Q4 plan");
+  await app.openAndSettle("Q4 plan");
   await app.reply("r");
   await expect(app.editor).toHaveText("");
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press(..."ppppppppp".split(""));
   await expect(app.selectedMessage).toContainText("Plan message 3");
   await app.reply("r");
   await expect(app.editor).toHaveText("About message three.");
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
 
-  await open(app, "Person 6");
+  await app.openAndSettle("Person 6");
   await app.reply("r");
   await expect(app.editor).toHaveText("Aimed at nobody.");
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
 
   const dFwd = s.draft("dFwd");
@@ -685,10 +614,10 @@ test("REP-09 drafts from Gmail get a kind and a target", async ({ app, gmail }) 
     { poll: true },
   );
   await app.settle();
-  await open(app, "Contract");
+  await app.openAndSettle("Contract");
   await app.reply("r");
   await expect(app.editor).toHaveText("");
-  await closeComposer(app);
+  await app.closeComposer();
   await app.reply("f");
   await expect(app.editor).toHaveText("FYI edited");
 });
@@ -698,7 +627,7 @@ test("REP-10 closing and sending the reply composer keep the conversation open",
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  await open(app, "Person 3");
+  await app.openAndSettle("Person 3");
   await app.reply("r");
   await app.type("Kept as a draft");
 
@@ -710,7 +639,7 @@ test("REP-10 closing and sending the reply composer keep the conversation open",
   await app.settle();
   await expect(app.editor).toHaveCount(0);
   await expect(app.conversationTitle).toHaveText("Person 3");
-  await expect(stubs(app)).toHaveCount(1);
+  await expect(app.draftStubs).toHaveCount(1);
   const drafts = (await gmail.gmail(A)).drafts;
   expect(drafts).toHaveLength(1);
   expect(htmlOf(parseMime(drafts[0]?.message.raw ?? ""))).toContain("Kept as a draft");
@@ -723,7 +652,7 @@ test("REP-10 closing and sending the reply composer keep the conversation open",
   const sending = app.conversation.getByText("Sending", { exact: true });
   await expect(sending).toBeVisible();
   await expect(sending.locator("xpath=..")).toContainText("Me");
-  await expect(stubs(app)).toHaveCount(0);
+  await expect(app.draftStubs).toHaveCount(0);
 
   await app.press("n");
   await expect(app.selectedMessage).toHaveCount(1);
@@ -742,12 +671,12 @@ test("REP-10 closing and sending the reply composer keep the conversation open",
 
 test("REP-11 a draft read from Gmail is split at its gmail_quote", async ({ app, gmail }) => {
   const s = await seeds.drafts(gmail, app);
-  await open(app, "Person 4");
+  await app.openAndSettle("Person 4");
   await app.reply("r");
   await expect(app.editor).toHaveText("My text");
   expect(await quoteText(app)).toMatch(/^On .*Sol Snow.* wrote:.*Hello from Sol\./);
 
-  await send(app);
+  await app.send();
   const sent = (await sentByApp(gmail, A)).filter((m) => m.threadId === s.thread("p4").threadId);
   expect(sent).toHaveLength(1);
   const html = htmlOf(parseMime(sent[0]?.raw ?? ""));
@@ -779,7 +708,7 @@ test("REP-12 a Gmail draft's attachments are downloaded before its first upsert"
   };
 
   const dLatest = s.draft("dLatest");
-  await open(app, "Person 4");
+  await app.openAndSettle("Person 4");
   await app.reply("r");
   await expect(app.editor).toHaveText("My text");
   await app.type(" more");
@@ -791,7 +720,7 @@ test("REP-12 a Gmail draft's attachments are downloaded before its first upsert"
   expect(online.html).toContain("My text more");
   expect(online.pdf?.body.equals(files.specPdf.buffer)).toBe(true);
   await order(dLatest.id, dLatest.messageId);
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("Escape");
 
   const second = await gmail.createDraft(
@@ -815,7 +744,7 @@ test("REP-12 a Gmail draft's attachments are downloaded before its first upsert"
   );
   await app.settle();
   await gmail.offline(true);
-  await open(app, "Person 5");
+  await app.openAndSettle("Person 5");
   await app.reply("r");
   await expect(app.editor).toHaveText("Second text");
   await app.type(" more");
@@ -836,20 +765,20 @@ test("REP-13 reply keys pressed before the conversation loads open one composer"
   gmail,
 }) => {
   await seeds.standard(gmail, app);
-  await highlight(app, "Offsite venue");
+  await app.highlight("Offsite venue");
   const release = await app.park("submit");
   await app.press("r", "Enter");
   await release();
   await app.settle();
   await expect(app.editor).toHaveCount(1);
-  expect(await chipAddresses(app, "Cc")).toEqual(["dave@corp.test", "erin@corp.test"]);
+  expect(await app.chipAddresses("Cc")).toEqual(["dave@corp.test", "erin@corp.test"]);
 
-  await closeComposer(app);
-  await expect(stubs(app)).toHaveCount(0);
+  await app.closeComposer();
+  await expect(app.draftStubs).toHaveCount(0);
   expect((await gmail.gmail(A)).drafts).toHaveLength(0);
 
   await app.press("Escape");
-  await highlight(app, "Person 5");
+  await app.highlight("Person 5");
   const again = await app.park("submit");
   await app.press("r", "Escape", "Enter");
   await again();
@@ -860,7 +789,7 @@ test("REP-13 reply keys pressed before the conversation loads open one composer"
 
 test("REP-14 compose keys work while focus is inside a message", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
-  await open(app, "Person 3");
+  await app.openAndSettle("Person 3");
   await app.reply("r");
   await app.type("Kept");
   await app.messageBody(0).locator("body").click();
@@ -868,12 +797,12 @@ test("REP-14 compose keys work while focus is inside a message", async ({ app, g
   await app.press("Escape", "Escape");
   await expect(app.editor).toHaveCount(0);
   await app.settle();
-  await expect(stubs(app)).toHaveCount(1);
+  await expect(app.draftStubs).toHaveCount(1);
 });
 
 test("REP-15 text typed before the reply opens goes into the reply", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
-  await highlight(app, "Person 3");
+  await app.highlight("Person 3");
   const release = await app.park("submit");
   await app.press("r");
   await app.type("thanks");
@@ -884,7 +813,7 @@ test("REP-15 text typed before the reply opens goes into the reply", async ({ ap
   await expect(app.page.getByRole("dialog")).toHaveCount(0);
   await expect(app.conversationTitle).toHaveText("Person 3");
 
-  await closeComposer(app);
+  await app.closeComposer();
   await app.press("f");
   await app.type("ok");
   await expect(app.editor).toHaveText("ok");
@@ -941,7 +870,7 @@ test("REP-16 a reply started while the message's body downloads quotes all of it
   await first.release();
   await app.settle();
   await expect(quote).toContainText("TAILONE");
-  await send(app);
+  await app.send();
   expect(htmlOf(parseMime((await sentWith(gmail, A, "My answer")).raw))).toContain("TAILONE");
 
   await app.press("Escape");
@@ -991,7 +920,7 @@ test("REP-17 a forward started while the message's body downloads carries all of
   await app.settle();
   await expect(remove).toHaveCount(1);
 
-  await send(app);
+  await app.send();
   const sent = parseMime((await sentWith(gmail, A, "Forwarding the contract")).raw);
   expect(htmlOf(sent)).toContain("TAILMARK");
   const pdf = attachments(sent).find((p) => p.filename === "contract.pdf");
@@ -1013,8 +942,8 @@ test("REP-18 a forwarded attachment that arrives with the body can be removed, a
   await app.reply("f");
   await first.release();
   await expect(remove).toHaveCount(1);
-  await closeComposer(app);
-  await expect(stubs(app)).toHaveCount(0);
+  await app.closeComposer();
+  await expect(app.draftStubs).toHaveCount(0);
   expect((await gmail.gmail(A)).drafts).toHaveLength(0);
 
   await app.press("Escape");
@@ -1033,7 +962,7 @@ test("REP-18 a forwarded attachment that arrives with the body can be removed, a
   await expect(remove).toHaveCount(0);
   await app.settle();
   await expect(remove).toHaveCount(0);
-  await send(app);
+  await app.send();
   expect(attachments(parseMime((await sentWith(gmail, A, "Just the text")).raw))).toHaveLength(0);
 });
 
@@ -1058,12 +987,12 @@ test("REP-19 a reply discarded before its target's body or its own first load ar
   await app.settle();
   await app.advance(10_000);
   await app.settle();
-  await expect(stubs(app)).toHaveCount(0);
+  await expect(app.draftStubs).toHaveCount(0);
   expect((await gmail.gmail(A)).drafts).toEqual([]);
   expect(await gmail.requests("drafts.create")).toEqual([]);
   await app.press("Escape");
 
-  await highlight(app, "Person 3");
+  await app.highlight("Person 3");
   await app.press("Enter");
   await expect(app.conversationTitle).toHaveText(s.thread("p3").subject);
   await app.settle();
@@ -1077,7 +1006,7 @@ test("REP-19 a reply discarded before its target's body or its own first load ar
   await app.settle();
   await app.advance(10_000);
   await app.settle();
-  await expect(stubs(app)).toHaveCount(0);
+  await expect(app.draftStubs).toHaveCount(0);
   expect((await gmail.gmail(A)).drafts).toEqual([]);
   expect(await gmail.requests("drafts.create")).toEqual([]);
   await app.expectNoErrorToasts();
@@ -1088,7 +1017,7 @@ test("REP-20 Cmd+Q before a reply's first load arrives keeps what was typed", as
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app);
-  await highlight(app, "Person 3");
+  await app.highlight("Person 3");
   await app.press("Enter");
   await expect(app.conversationTitle).toHaveText(s.thread("p3").subject);
   await app.settle();

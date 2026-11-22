@@ -5,15 +5,6 @@ import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A, B } from "./seeds.ts";
 
-function settingsBlock(app: App, email: string): Locator {
-  return app
-    .sheet("Settings")
-    .locator("div")
-    .filter({ has: app.page.getByText(email, { exact: true }) })
-    .filter({ has: app.page.getByRole("button", { name: "Remove account" }) })
-    .last();
-}
-
 const remoteImages = (app: App): Locator =>
   app.sheet("Settings").getByRole("switch", { name: "Load remote images" });
 
@@ -49,7 +40,7 @@ test("SET-01 what the Settings sheet holds, and how it opens", async ({ app, gma
   await expect(remoteImages(app)).toHaveAttribute("aria-checked", "true");
   await Promise.all(
     [A, B].map(async (email) => {
-      const block = settingsBlock(app, email);
+      const block = app.settingsBlock(email);
       await expect(block).toBeVisible();
       await expect(block.getByRole("switch", { name: "Mute notifications" })).toHaveAttribute(
         "aria-checked",
@@ -72,7 +63,7 @@ test("SET-01 what the Settings sheet holds, and how it opens", async ({ app, gma
   await expect(remoteImages(app)).toBeVisible();
   await expect(settings.getByRole("button", { name: "Remove account" })).toHaveCount(2);
 
-  await settingsBlock(app, B).getByRole("button", { name: "Split Inbox settings" }).click();
+  await app.settingsBlock(B).getByRole("button", { name: "Split Inbox settings" }).click();
   await expect(app.sheet(`Split Inbox · ${B}`)).toBeVisible();
   await app.press("Escape");
   await expect(app.sheet(/^Split Inbox/)).toHaveCount(0);

@@ -1,37 +1,9 @@
 import ADDRESSES from "../src-tauri/crates/sm-mime/tests/fixtures/email-addresses.json" with { type: "json" };
 import type { App } from "./app.ts";
-import type { Control, GmailMessage } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
+import { emails, sentWithSubject } from "./helpers.ts";
 import * as seeds from "./seeds.ts";
 import { A, PERSONS } from "./seeds.ts";
-
-function emails(header: string | undefined): string[] {
-  return [...(header ?? "").matchAll(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g)].map((m) =>
-    m[0].toLowerCase(),
-  );
-}
-
-async function sentWithSubject(
-  gmail: Control,
-  account: string,
-  subject: string,
-): Promise<GmailMessage> {
-  const { messages } = await gmail.gmail(account);
-  const found = messages.filter(
-    (m) =>
-      m.labels.includes("SENT") &&
-      m.headers["x-supermonkey-draft"] !== undefined &&
-      m.headers.subject === subject,
-  );
-  expect(found, `one sent message "${subject}"`).toHaveLength(1);
-  const [m] = found;
-  if (!m) throw new Error(`no sent message ${subject}`);
-  return m;
-}
-
-async function chipAddresses(app: App, label: "To" | "Cc" | "Bcc"): Promise<string[]> {
-  return app.chips(label).evaluateAll((els) => els.map((el) => el.getAttribute("data-chip") ?? ""));
-}
 
 async function suggested(app: App): Promise<string[]> {
   return app
@@ -46,14 +18,6 @@ async function subjectAndBody(app: App, subject: string, body: string): Promise<
   await app.press("Meta+Shift+m");
   await expect(app.editor).toBeFocused();
   await app.type(body);
-}
-
-async function sendSaved(app: App): Promise<void> {
-  await app.settle();
-  await app.press("Meta+Enter");
-  await expect(app.editor).toHaveCount(0);
-  await app.advance(10_000);
-  await app.settle();
 }
 
 test("RCP-01 autocomplete: at most six suggestions, keyboard choice, Esc stays in the field", async ({
@@ -85,7 +49,7 @@ test("RCP-01 autocomplete: at most six suggestions, keyboard choice, Esc stays i
   await app.press("ArrowDown", "ArrowDown", "ArrowUp");
   await expect(app.suggestions().nth(1)).toHaveAttribute("aria-selected", "true");
   await app.press("Enter");
-  expect(await chipAddresses(app, "To")).toEqual([second]);
+  expect(await app.chipAddresses("To")).toEqual([second]);
   await expect(app.suggestions()).toHaveCount(0);
   await expect(to).toBeFocused();
 
@@ -93,7 +57,7 @@ test("RCP-01 autocomplete: at most six suggestions, keyboard choice, Esc stays i
   await expect(app.suggestions().first()).toHaveAttribute("aria-selected", "true");
   const first = (await suggested(app))[0];
   await app.press("Tab");
-  expect(await chipAddresses(app, "To")).toEqual([second, first]);
+  expect(await app.chipAddresses("To")).toEqual([second, first]);
   await expect(to).toBeFocused();
 
   await app.type("mar");
@@ -171,7 +135,7 @@ test("RCP-03 ways to turn typed text into a chip", async ({ app, gmail }) => {
   await chipAfter("zed@z.test", () =>
     app.page.getByRole("heading", { name: "New Message" }).click(),
   );
-  expect(await chipAddresses(app, "To")).toEqual([
+  expect(await app.chipAddresses("To")).toEqual([
     "kai@kite.test",
     "kay@kite.test",
     "lex@kite.test",
@@ -184,18 +148,18 @@ test("RCP-04 Backspace and paste", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   await app.compose();
   await app.type("one@x.test,two@x.test,");
-  expect(await chipAddresses(app, "To")).toEqual(["one@x.test", "two@x.test"]);
+  expect(await app.chipAddresses("To")).toEqual(["one@x.test", "two@x.test"]);
 
   await app.press("Backspace");
   await expect(app.chips("To").last()).toHaveAttribute("data-selected", "true");
-  expect(await chipAddresses(app, "To")).toEqual(["one@x.test", "two@x.test"]);
+  expect(await app.chipAddresses("To")).toEqual(["one@x.test", "two@x.test"]);
   await app.press("Backspace");
-  expect(await chipAddresses(app, "To")).toEqual(["one@x.test"]);
+  expect(await app.chipAddresses("To")).toEqual(["one@x.test"]);
   await app.press("Backspace", "Backspace");
   await expect(app.chips("To")).toHaveCount(0);
 
   await app.paste("a@x.test, Bob <b@y.test>; c@z.test\nd@w.test");
-  expect(await chipAddresses(app, "To")).toEqual(["a@x.test", "b@y.test", "c@z.test", "d@w.test"]);
+  expect(await app.chipAddresses("To")).toEqual(["a@x.test", "b@y.test", "c@z.test", "d@w.test"]);
   await expect(app.chips("To").nth(1)).toHaveText(/^Bob/);
 });
 
@@ -212,7 +176,7 @@ test("RCP-06 Tab moves between fields unless the suggestion list is open", async
   await expect(app.suggestions()).toHaveCount(6);
   const first = (await suggested(app))[0];
   await app.press("Tab");
-  expect(await chipAddresses(app, "To")).toEqual([first]);
+  expect(await app.chipAddresses("To")).toEqual([first]);
   await expect(to).toBeFocused();
 
   await app.press("Tab");
@@ -260,7 +224,7 @@ test("RCP-07 Cc and Bcc stay hidden until used", async ({ app, gmail }) => {
   await app.settle();
   await app.reply("Enter");
   await expect(app.field("Cc")).toBeVisible();
-  expect(await chipAddresses(app, "Cc")).toEqual(["dave@corp.test", "erin@corp.test"]);
+  expect(await app.chipAddresses("Cc")).toEqual(["dave@corp.test", "erin@corp.test"]);
   await app.press("Escape", "Escape", "Escape");
   await expect(app.conversationTitle).toHaveCount(0);
 
@@ -269,9 +233,9 @@ test("RCP-07 Cc and Bcc stay hidden until used", async ({ app, gmail }) => {
   await app.press("Meta+Shift+b");
   await expect(app.field("Bcc")).toBeFocused();
   await app.type("bea@hidden.test,");
-  expect(await chipAddresses(app, "Bcc")).toEqual(["bea@hidden.test"]);
+  expect(await app.chipAddresses("Bcc")).toEqual(["bea@hidden.test"]);
   await subjectAndBody(app, "Blind copy", "Hello");
-  await sendSaved(app);
+  await app.send();
   const m = await sentWithSubject(gmail, A, "Blind copy");
   expect(emails(m.headers.to)).toEqual(["kim@kite.test"]);
   expect(emails(m.headers.cc)).toEqual([]);
@@ -307,9 +271,9 @@ test("RCP-08 new mail updates the suggestions", async ({ app, gmail }) => {
 
   const quinn = app.suggestions().filter({ hasText: "quinn@q.test" });
   await quinn.dispatchEvent("mousedown");
-  expect(await chipAddresses(app, "To")).toEqual(["quinn@q.test"]);
+  expect(await app.chipAddresses("To")).toEqual(["quinn@q.test"]);
   await subjectAndBody(app, "For Quinn", "Hello");
-  await sendSaved(app);
+  await app.send();
   await sentWithSubject(gmail, A, "For Quinn");
 
   await app.compose();
@@ -333,7 +297,7 @@ test("RCP-09 suggestions that answer after a chip is made stay closed", async ({
   await app.page.clock.resume();
   await app.page.clock.setFixedTime(await app.now());
   await app.settle();
-  expect(await chipAddresses(app, "To")).toEqual(["sam"]);
+  expect(await app.chipAddresses("To")).toEqual(["sam"]);
 });
 
 test("RCP-10 the autosave leaves an address being typed alone", async ({ app, gmail }) => {
@@ -344,7 +308,7 @@ test("RCP-10 the autosave leaves an address being typed alone", async ({ app, gm
   await app.type("lee@ki");
   await app.page.clock.runFor(500);
   await app.settle();
-  expect(await chipAddresses(app, "To")).toEqual(["kim@kite.test"]);
+  expect(await app.chipAddresses("To")).toEqual(["kim@kite.test"]);
   await expect(app.field("To")).toHaveValue("lee@ki");
   await expect(app.field("To")).toBeFocused();
 });
@@ -363,7 +327,7 @@ test("RCP-12 a chip removed while an address is being typed stays removed", asyn
   await app.page.getByRole("button", { name: "Remove kai@kite.test" }).click();
   await app.page.clock.runFor(200);
   await app.settle();
-  expect(await chipAddresses(app, "To")).toEqual(["kay@kite.test", "lex@kite.test"]);
+  expect(await app.chipAddresses("To")).toEqual(["kay@kite.test", "lex@kite.test"]);
   await expect(app.field("To")).toHaveValue("");
 });
 
@@ -409,7 +373,7 @@ test("RCP-11 every address the core would refuse shows in danger and blocks send
   await expect(app.chips("To")).toHaveCount(0);
   await app.type("kim@kite.test,");
   await expect(app.invalidChips("To")).toHaveCount(0);
-  await sendSaved(app);
+  await app.send();
   const m = await sentWithSubject(gmail, A, "Table");
   expect(emails(m.headers.to)).toEqual(["kim@kite.test"]);
 });

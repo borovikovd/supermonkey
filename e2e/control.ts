@@ -1,4 +1,4 @@
-export type Attachment = {
+type Attachment = {
   filename: string;
   mimeType?: string;
   content: string;
@@ -102,7 +102,7 @@ export type Outcome =
   | { kind: "statusAfterApply"; status: number; reason?: string }
   | { kind: "omitThreads"; threads: string[] };
 
-export type Match = {
+type Match = {
   api?: ApiMethod;
   method?: string;
   path?: string;
@@ -132,14 +132,14 @@ export type Hold = {
   release: (outcome?: Outcome, opts?: { min?: number }) => Promise<number>;
 };
 
-export type Notification = {
+type Notification = {
   title: string;
   body: string;
   account: string;
   thread: string | null;
 };
 
-export type Recorded = {
+type Recorded = {
   notifications: Notification[];
   badge: number | null;
   openedUrls: string[];
@@ -147,9 +147,9 @@ export type Recorded = {
   focusRequests: number;
 };
 
-export type TokenItem = { account: string; token: string };
+type TokenItem = { account: string; token: string };
 
-export type CoreIdle = { rev: number; ack: number; signIns: number; held: number };
+type CoreIdle = { rev: number; ack: number; signIns: number; held: number };
 
 export class Control {
   readonly url: string;
@@ -208,6 +208,12 @@ export class Control {
 
   gmail(email: string): Promise<GmailState> {
     return this.call("GET", this.mailbox(email));
+  }
+
+  async labelsOf(email: string, id: string): Promise<string[]> {
+    const m = (await this.gmail(email)).messages.find((x) => x.id === id);
+    if (!m) throw new Error(`no message ${id} in ${email}`);
+    return m.labels;
   }
 
   modify(

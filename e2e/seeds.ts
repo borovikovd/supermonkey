@@ -23,7 +23,7 @@ export const B = "ben@bolt.test";
 export const C = "cat@cove.test";
 export const A_ALIAS = "ana@ames.dev";
 
-export type Identity = "A" | "B" | "C";
+type Identity = "A" | "B" | "C";
 
 const IDENTITIES: Record<Identity, { email: string; name: string }> = {
   A: { email: A, name: "Ana Ames" },
@@ -31,7 +31,7 @@ const IDENTITIES: Record<Identity, { email: string; name: string }> = {
   C: { email: C, name: "Cat Cove" },
 };
 
-export type SeedOptions = {
+type SeedOptions = {
   connect?: Identity[];
   open?: boolean;
 };

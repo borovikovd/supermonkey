@@ -1,10 +1,9 @@
-import type { Route } from "@playwright/test";
-
 import type { App } from "./app.ts";
-import type { Control, GmailState } from "./control.ts";
+import type { GmailState } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
+import { has, hasEach, inOrder, threadHas } from "./helpers.ts";
 import * as seeds from "./seeds.ts";
-import { A, dates, type Seeded } from "./seeds.ts";
+import { A, dates } from "./seeds.ts";
 
 const notDraft = (labels: string[]) => !labels.includes("DRAFT");
 
@@ -12,53 +11,8 @@ function threadMessages(state: GmailState, threadId: string) {
   return state.messages.filter((m) => m.threadId === threadId && notDraft(m.labels));
 }
 
-function threadHas(state: GmailState, threadId: string, label: string): boolean {
-  const msgs = threadMessages(state, threadId);
-  if (label === "TRASH" || label === "SPAM") return msgs.some((m) => m.labels.includes(label));
-  return msgs.some(
-    (m) => !m.labels.includes("TRASH") && !m.labels.includes("SPAM") && m.labels.includes(label),
-  );
-}
-
-async function has(gmail: Control, s: Seeded, key: string, label: string): Promise<boolean> {
-  return threadHas(await gmail.gmail(A), s.thread(key).threadId, label);
-}
-
-async function hasEach(gmail: Control, s: Seeded, keys: string[], label: string) {
-  const state = await gmail.gmail(A);
-  return keys.map((k) => threadHas(state, s.thread(k).threadId, label));
-}
-
-async function each<T>(items: readonly T[], step: (item: T) => Promise<unknown>): Promise<void> {
-  await items.reduce<Promise<unknown>>(
-    (prev, item) => prev.then(() => step(item)),
-    Promise.resolve(),
-  );
-}
-
-async function highlight(app: App, text: string): Promise<void> {
-  await expect(app.row(text)).toHaveCount(1);
-  await expect(app.highlighted).toHaveCount(1);
-  const texts = await app.rows.allInnerTexts();
-  const target = texts.findIndex((t) => t.includes(text));
-  const at = await app.rows.evaluateAll((els) =>
-    els.findIndex((el) => el.getAttribute("aria-selected") === "true"),
-  );
-  const delta = target - at;
-  const key = delta >= 0 ? "j" : "k";
-  await app.press(...Array.from({ length: Math.abs(delta) }, () => key));
-  await expect(app.highlighted).toContainText(text);
-}
-
 async function go(app: App, key: string): Promise<void> {
   await app.press("g", key);
-}
-
-async function goLabel(app: App, name: string): Promise<void> {
-  await app.press("g", "l");
-  await expect(app.palette).toBeVisible();
-  await app.palette.getByRole("option", { name, exact: true }).click();
-  await expect(app.palette).toHaveCount(0);
 }
 
 async function snoozeHighlighted(app: App): Promise<void> {
@@ -68,37 +22,19 @@ async function snoozeHighlighted(app: App): Promise<void> {
   await expect(app.palette).toHaveCount(0);
 }
 
-async function parkSubmits(app: App): Promise<() => Promise<void>> {
-  const parked: Route[] = [];
-  let open = false;
-  const submit = /\/invoke\/submit$/;
-  await app.page.route(submit, (route) => (open ? route.continue() : parked.push(route)));
-  return async () => {
-    open = true;
-    await each(parked, (r) => r.continue());
-    await app.page.unroute(submit);
-  };
-}
-
 async function leavesAtOnce(
   app: App,
   row: string,
   where: string,
   action: () => Promise<void>,
 ): Promise<void> {
-  await highlight(app, row);
-  const release = await parkSubmits(app);
+  await app.highlight(row);
+  const release = await app.park("submit");
   await action();
   await expect(app.row(row), `${row} leaves ${where} at once`).toHaveCount(0);
   await release();
   await app.settle();
   await expect(app.row(row), `${row} stays out of ${where}`).toHaveCount(0);
-}
-
-async function selectFrom(app: App, first: string, count: number): Promise<void> {
-  await highlight(app, first);
-  await app.press("x", ...Array.from({ length: count - 1 }, () => "Shift+J"));
-  await expect(app.selected).toHaveCount(count);
 }
 
 test("TRI-01 e on the list removes the row before Gmail answers, moves the highlight, and archives every message", async ({
@@ -144,7 +80,7 @@ test("TRI-02 e in an open conversation opens the next one, or the previous one, 
 }) => {
   await seeds.empty(gmail, app);
   const subjects = ["Xenon", "Yarrow", "Zephyr"];
-  await each([...subjects.entries()], ([i, subject]) =>
+  await inOrder([...subjects.entries()], ([i, subject]) =>
     gmail.deliver({
       account: A,
       from: `${subject} Sender <${subject.toLowerCase()}@x.test>`,
@@ -173,7 +109,7 @@ test("TRI-02 e in an open conversation opens the next one, or the previous one, 
 
 test("TRI-03 # moves to Trash and never touches draft messages", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
-  await highlight(app, "Person 4");
+  await app.highlight("Person 4");
   await app.reply("r");
   await app.type("A reply I keep");
   await app.press("Escape", "Escape");
@@ -206,7 +142,7 @@ test("TRI-03 # moves to Trash and never touches draft messages", async ({ app, g
   expect(JSON.stringify(trashReq?.body)).not.toContain(draft?.message.id ?? "missing");
 
   await go(app, "!");
-  await highlight(app, "Old spam");
+  await app.highlight("Old spam");
   await app.press("#");
   await expect(app.row("Old spam")).toHaveCount(0);
   await app.settle();
@@ -219,7 +155,7 @@ test("TRI-03 # moves to Trash and never touches draft messages", async ({ app, g
 
 test("TRI-04 ! moves to Spam", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
-  await highlight(app, "Person 5");
+  await app.highlight("Person 5");
   await app.press("!");
   await expect(app.row("Person 5")).toHaveCount(0);
   await app.settle();
@@ -229,7 +165,7 @@ test("TRI-04 ! moves to Spam", async ({ app, gmail }) => {
   await expect(app.row("Person 5")).toHaveCount(1);
 
   await go(app, "#");
-  await highlight(app, "Old trash");
+  await app.highlight("Old trash");
   await app.press("!");
   await expect(app.row("Old trash")).toHaveCount(0);
   await app.settle();
@@ -242,7 +178,7 @@ test("TRI-05 star and read toggles", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
   const own = () => app.row("Budget draft");
 
-  await highlight(app, "Budget draft");
+  await app.highlight("Budget draft");
   const hold = await gmail.hold("messages.batchModify");
   await app.press("s");
   await expect(own()).toHaveAttribute("data-starred", "true");
@@ -253,13 +189,13 @@ test("TRI-05 star and read toggles", async ({ app, gmail }) => {
   await expect(app.row("Budget draft")).toHaveCount(1);
 
   await go(app, "i");
-  await highlight(app, "Budget draft");
+  await app.highlight("Budget draft");
   await app.press("s");
   await expect(own()).not.toHaveAttribute("data-starred");
   await app.settle();
   expect(await has(gmail, s, "own", "STARRED")).toBe(false);
 
-  await highlight(app, "Budget draft");
+  await app.highlight("Budget draft");
   await expect(own()).not.toHaveAttribute("data-unread");
   await app.press("u");
   await expect(own()).toHaveAttribute("data-unread", "true");
@@ -284,13 +220,13 @@ test("TRI-06 x and Shift+J / Shift+K select; actions apply to the whole selectio
   const before = await app.subjects();
   await app.press("j", "x", "Shift+J", "Shift+J");
   await expect(app.selected).toHaveCount(3);
-  await each([2, 3, 4], (n) =>
+  await inOrder([2, 3, 4], (n) =>
     expect(app.row(`Person ${n}`)).toHaveAttribute("data-selected", "true"),
   );
   await expect(app.row("Person 1")).not.toHaveAttribute("data-selected");
 
   await app.press("e");
-  await each([2, 3, 4], (n) => expect(app.row(`Person ${n}`)).toHaveCount(0));
+  await inOrder([2, 3, 4], (n) => expect(app.row(`Person ${n}`)).toHaveCount(0));
   await app.settle();
   expect(await hasEach(gmail, s, ["p2", "p3", "p4"], "INBOX")).toEqual([false, false, false]);
 
@@ -299,26 +235,26 @@ test("TRI-06 x and Shift+J / Shift+K select; actions apply to the whole selectio
   await app.settle();
   expect(await hasEach(gmail, s, ["p2", "p3", "p4"], "INBOX")).toEqual([true, true, true]);
 
-  await highlight(app, "Person 4");
+  await app.highlight("Person 4");
   await app.press("x", "Shift+K", "Shift+K");
   await expect(app.selected).toHaveCount(3);
-  await each([2, 3, 4], (n) =>
+  await inOrder([2, 3, 4], (n) =>
     expect(app.row(`Person ${n}`)).toHaveAttribute("data-selected", "true"),
   );
   await expect(app.highlighted).toContainText("Person 2");
   await app.press("Escape");
   await expect(app.selected).toHaveCount(0);
 
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2");
   await app.press("Shift+J");
   await expect(app.selected).toHaveCount(2);
-  await each([2, 3], (n) =>
+  await inOrder([2, 3], (n) =>
     expect(app.row(`Person ${n}`)).toHaveAttribute("data-selected", "true"),
   );
   await app.press("Escape");
   await expect(app.selected).toHaveCount(0);
 
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2");
   await app.press("x");
   await expect(app.selected).toHaveCount(1);
   await app.press("j");
@@ -343,32 +279,32 @@ test("TRI-07 s and u on a mixed selection follow the l rule", async ({ app, gmai
     return keys.map((k) => threadHas(state, s.thread(k).threadId, label));
   };
 
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2");
   await app.press("s");
   await expect(app.row("Person 2")).toHaveAttribute("data-starred", "true");
-  await selectFrom(app, "Person 1", 3);
+  await app.selectFrom("Person 1", 3);
   await app.press("s");
   await expect.poll(() => flags("data-starred")).toEqual([true, true, true]);
   await app.settle();
   expect(await inGmail("STARRED")).toEqual([true, true, true]);
 
-  await selectFrom(app, "Person 1", 3);
+  await app.selectFrom("Person 1", 3);
   await app.press("s");
   await expect.poll(() => flags("data-starred")).toEqual([false, false, false]);
   await app.settle();
   expect(await inGmail("STARRED")).toEqual([false, false, false]);
 
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1");
   await app.press("u");
   await expect(app.row("Person 1")).not.toHaveAttribute("data-unread");
-  await selectFrom(app, "Person 1", 3);
+  await app.selectFrom("Person 1", 3);
   expect(await flags("data-unread")).toEqual([false, false, true]);
   await app.press("u");
   await expect.poll(() => flags("data-unread")).toEqual([true, true, true]);
   await app.settle();
   expect(await inGmail("UNREAD")).toEqual([true, true, true]);
 
-  await selectFrom(app, "Person 1", 3);
+  await app.selectFrom("Person 1", 3);
   await app.press("u");
   await expect.poll(() => flags("data-unread")).toEqual([false, false, false]);
   await app.settle();
@@ -380,9 +316,9 @@ test("TRI-08 Shift+E returns to Inbox from any view, and the row leaves at once"
   gmail,
 }) => {
   const s = await seeds.standard(gmail, app);
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1");
   await app.press("e");
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2");
   await snoozeHighlighted(app);
   await expect(app.row("Person 2")).toHaveCount(0);
   await app.settle();
@@ -393,7 +329,7 @@ test("TRI-08 Shift+E returns to Inbox from any view, and the row leaves at once"
     ["!", "Old spam"],
     ["h", "Person 2"],
   ];
-  await each(cases, async ([view, row]) => {
+  await inOrder(cases, async ([view, row]) => {
     await go(app, view);
     await leavesAtOnce(app, row, `g ${view}`, () => app.press("Shift+E"));
   });
@@ -409,13 +345,13 @@ test("TRI-08 Shift+E returns to Inbox from any view, and the row leaves at once"
   await go(app, "h");
   await expect(app.page.getByText("Nothing here.")).toBeVisible();
   await go(app, "i");
-  await each(cases, ([, row]) => expect(app.row(row)).toHaveCount(1));
+  await inOrder(cases, ([, row]) => expect(app.row(row)).toHaveCount(1));
 });
 
 test("TRI-09 Esc closes the open overlay before it clears a selection", async ({ app, gmail }) => {
   await seeds.standard(gmail, app);
   const selectTwo = async () => {
-    await highlight(app, "Person 1");
+    await app.highlight("Person 1");
     await app.press("x", "Shift+J");
     await expect(app.selected).toHaveCount(2);
   };
@@ -448,16 +384,16 @@ test.describe("TRI-10 each action removes its row from the right lists", () => {
     await seeds.standard(gmail, app);
     await leavesAtOnce(app, "Person 1", "Inbox", () => app.press("e"));
 
-    await highlight(app, "Person 3");
+    await app.highlight("Person 3");
     await snoozeHighlighted(app);
     await go(app, "h");
     await leavesAtOnce(app, "Person 3", "Snoozed", () => app.press("e"));
 
     await go(app, "i");
-    await highlight(app, "Person 2");
+    await app.highlight("Person 2");
     await app.press("s");
     await go(app, "s");
-    await highlight(app, "Person 2");
+    await app.highlight("Person 2");
     await app.press("e");
     await app.settle();
     await expect(app.row("Person 2")).toHaveAttribute("data-starred", "true");
@@ -466,7 +402,7 @@ test.describe("TRI-10 each action removes its row from the right lists", () => {
 
   test("TRI-10 h: leaves Inbox and Done", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
-    await highlight(app, "Person 1");
+    await app.highlight("Person 1");
     await app.press("e");
     await leavesAtOnce(app, "Person 2", "Inbox", () => snoozeHighlighted(app));
 
@@ -476,7 +412,7 @@ test.describe("TRI-10 each action removes its row from the right lists", () => {
 
   test("TRI-10 #: leaves Starred, Sent, a label view, Done", async ({ app, gmail }) => {
     await seeds.standard(gmail, app);
-    await highlight(app, "Person 1");
+    await app.highlight("Person 1");
     await app.press("e");
 
     await go(app, "s");
@@ -485,7 +421,7 @@ test.describe("TRI-10 each action removes its row from the right lists", () => {
     await go(app, "t");
     await leavesAtOnce(app, "Sent 10 days ago", "Sent", () => app.press("#"));
 
-    await goLabel(app, "Projects");
+    await app.goLabel("Projects");
     await leavesAtOnce(app, "Project alpha", "Projects", () => app.press("#"));
 
     await go(app, "e");
@@ -514,7 +450,7 @@ test.describe("TRI-10 each action removes its row from the right lists", () => {
     const s = await seeds.standard(gmail, app);
     await gmail.modify(A, s.message("p1", 1).id, [s.label(A, "Travel")], [], { poll: true });
     await app.settle();
-    await goLabel(app, "Travel");
+    await app.goLabel("Travel");
     await expect(app.row("Person 1")).toHaveCount(1);
 
     await leavesAtOnce(app, "Trip ideas", "Travel", () => app.press("y"));
@@ -530,11 +466,11 @@ test.describe("TRI-10 each action removes its row from the right lists", () => {
     await expect(app.row("Fwd: Contract")).toHaveCount(1);
     const drafts = await app.rows.count();
 
-    await highlight(app, "Idea");
+    await app.highlight("Idea");
     await app.press("Enter");
     await expect(app.page.getByRole("heading", { name: "New Message" })).toBeVisible();
     await app.settle();
-    const releaseSend = await parkSubmits(app);
+    const releaseSend = await app.park("submit");
     await app.press("Meta+Enter");
     await expect(app.list).toBeVisible();
     await expect(app.rows).toHaveCount(drafts - 1);
@@ -546,7 +482,7 @@ test.describe("TRI-10 each action removes its row from the right lists", () => {
     await app.row("Fwd: Contract").click();
     await expect(app.editor).toBeVisible();
     await app.settle();
-    const releaseDiscard = await parkSubmits(app);
+    const releaseDiscard = await app.park("submit");
     await app.press("Meta+Shift+Comma");
     await expect(app.editor).toHaveCount(0);
     await app.press("Escape");
@@ -749,13 +685,13 @@ test("TRI-16 Shift+E on mail in Trash or Spam reached by search takes it out of 
     ["in:trash", "Old trash", "trashOld", "TRASH"],
     ["in:spam", "Old spam", "spamOld", "SPAM"],
   ];
-  await each(cases, async ([query, row]) => {
+  await inOrder(cases, async ([query, row]) => {
     await app.press("/");
     await app.type(query);
     await app.advance(300);
     await expect(app.row(row)).toHaveCount(1);
     await app.press("Enter");
-    await highlight(app, row);
+    await app.highlight(row);
     await app.press("Shift+E");
     await app.settle();
     await app.press("Escape");
@@ -766,7 +702,7 @@ test("TRI-16 Shift+E on mail in Trash or Spam reached by search takes it out of 
     expect(threadHas(state, s.thread(key).threadId, label), `${key} keeps ${label}`).toBe(false);
     expect(threadHas(state, s.thread(key).threadId, "INBOX"), key).toBe(true);
   }
-  await each(cases, ([, row]) => expect(app.row(row)).toHaveCount(1));
+  await inOrder(cases, ([, row]) => expect(app.row(row)).toHaveCount(1));
 });
 
 test("TRI-17 j on the last conversation and k on the first keep the selection", async ({

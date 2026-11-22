@@ -17,24 +17,8 @@ async function sentIn(gmail: Control, threadId: string): Promise<GmailMessage[]>
 
 const count = async (gmail: Control, api: ApiMethod) => (await gmail.requests(api)).length;
 
-async function openThread(app: App, subject: string): Promise<void> {
-  await app.row(subject).first().click();
-  await expect(app.conversationTitle).toContainText(subject);
-}
-
-async function highlight(app: App, text: string | RegExp, left = 40): Promise<void> {
-  if ((await app.highlighted.filter({ hasText: text }).count()) > 0) return;
-  if (left === 0) throw new Error(`no row ${String(text)} reached with j and k`);
-  const keys = await app.rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-row")));
-  const target = keys.indexOf(await app.row(text).first().getAttribute("data-row"));
-  const lit = (await app.highlighted.count()) > 0;
-  const at = lit ? keys.indexOf(await app.highlighted.getAttribute("data-row")) : -1;
-  await app.press(at < target ? "j" : "k");
-  await highlight(app, text, left - 1);
-}
-
 async function sendReply(app: App, subject: string, text: string): Promise<void> {
-  await openThread(app, subject);
+  await app.openThread(subject);
   await app.reply();
   await app.type(text);
   await app.settle();
@@ -67,7 +51,7 @@ test("SND-01 the send waits ten seconds, then goes out once", async ({ app, gmai
   const s = await seeds.standard(gmail, app);
   const p6Labels = async () =>
     (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p6", 1).id)?.labels ?? [];
-  await highlight(app, "Person 6");
+  await app.highlight("Person 6");
   await app.press("e");
   await app.settle();
   expect(await p6Labels()).not.toContain("INBOX");
@@ -133,13 +117,13 @@ test("SND-02 undo while waiting cancels the send and reopens the composer", asyn
   await expect(app.row("undo me")).toHaveCount(1);
   await expect(app.row("Undo by z")).toHaveCount(1);
 
-  await highlight(app, "undo me");
+  await app.highlight("undo me");
   await app.press("Enter");
   await expect(app.editor).toContainText("undo me");
   await app.press("Meta+Enter");
   await expect(app.editor).toHaveCount(0);
   await app.press("g", "d");
-  await highlight(app, "Undo by z");
+  await app.highlight("Undo by z");
   await app.press("Enter");
   await expect(newMessage(app)).toBeVisible();
   await app.press("Meta+Enter");
@@ -166,7 +150,7 @@ test("SND-03 z reaches a send only while it is the newest entry; the toast's Und
 
   await sendReply(app, "Person 3", "first send");
   await app.press("Escape");
-  await highlight(app, "Person 4");
+  await app.highlight("Person 4");
   await app.press("e");
   await expect(app.row("Person 4")).toHaveCount(0);
   await app.press("z");
@@ -180,7 +164,7 @@ test("SND-03 z reaches a send only while it is the newest entry; the toast's Und
 
   await sendReply(app, "Person 5", "second send");
   await app.press("Escape");
-  await highlight(app, "Person 6");
+  await app.highlight("Person 6");
   await app.press("e");
   await expect(app.row("Person 6")).toHaveCount(0);
   await undoOn(sendToast(app, "Person 5")).click();
@@ -227,7 +211,7 @@ test("SND-05 undo while sending is held until the send resolves", async ({ app, 
   const p6Labels = async () =>
     (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p6", 1).id)?.labels ?? [];
 
-  await highlight(app, "Person 6");
+  await app.highlight("Person 6");
   await app.press("e");
   await app.settle();
   expect(await p6Labels()).not.toContain("INBOX");
@@ -358,7 +342,7 @@ test("SND-07 offline at send time: Email delayed, then sent once online", async 
   await app.press("Escape", "Escape", "Escape");
 
   await gmail.offline(true);
-  await openThread(app, "Person 6");
+  await app.openThread("Person 6");
   await app.reply();
   await app.type("built after a drop");
   await app.settle();
@@ -450,7 +434,7 @@ test("SND-09 outbox rows across a quit and relaunch", async ({ app, gmail }) => 
 
   const p2Labels = async () =>
     (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p2", 1).id)?.labels ?? [];
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2");
   await app.press("e");
   await app.settle();
   expect(await p2Labels()).not.toContain("INBOX");
@@ -514,7 +498,7 @@ test("SND-11 undoing a waiting send while another composer is open", async ({ ap
 });
 
 async function replyAheadOfGmail(app: App, gmail: Control, subject: string): Promise<void> {
-  await openThread(app, subject);
+  await app.openThread(subject);
   await app.reply();
   await app.type("one");
   await app.settle();
@@ -616,7 +600,7 @@ test("SND-16 a send toast closed before the send went out takes its undo entry w
   const s = await seeds.standard(gmail, app);
   const p6Labels = async () =>
     (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p6", 1).id)?.labels ?? [];
-  await highlight(app, "Person 6");
+  await app.highlight("Person 6");
   await app.press("e");
   await app.settle();
   expect(await p6Labels()).not.toContain("INBOX");
@@ -682,7 +666,7 @@ test("SND-18 a send while the draft's first upsert is in flight goes out once an
   const s = await seeds.standard(gmail, app);
   const p3 = s.thread("p3").threadId;
   const create = await gmail.hold("drafts.create", { nth: 1 });
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("sent while saving");
   await expect
@@ -920,7 +904,7 @@ test("SND-25 an Undo while the draft's first upsert is in flight reopens the com
   const s = await seeds.standard(gmail, app);
   const p3 = s.thread("p3").threadId;
   const create = await gmail.hold("drafts.create");
-  await openThread(app, "Person 3");
+  await app.openThread("Person 3");
   await app.reply();
   await app.type("Undone mid-save");
   await expect

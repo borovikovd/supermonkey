@@ -1,12 +1,9 @@
 import type { App } from "./app.ts";
 import type { Control } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
+import { inOrder } from "./helpers.ts";
 import * as seeds from "./seeds.ts";
 import { A, dates } from "./seeds.ts";
-
-async function inOrder<T>(items: readonly T[], step: (item: T) => Promise<void>): Promise<void> {
-  await items.reduce((prev, item) => prev.then(() => step(item)), Promise.resolve());
-}
 
 function field(app: App) {
   return app.page.getByPlaceholder("Search");
@@ -17,18 +14,6 @@ async function search(app: App, query: string): Promise<void> {
   await expect(field(app)).toBeFocused();
   await field(app).fill(query);
   await app.settle();
-}
-
-async function highlightRow(app: App, subject: string): Promise<void> {
-  await expect(app.row(subject)).toHaveCount(1);
-  const subjects = await app.subjects();
-  const to = subjects.indexOf(subject);
-  if (to < 0) throw new Error(`no row ${subject} in ${subjects.join(", ")}`);
-  const keys = await app.rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-row")));
-  const from = keys.indexOf(await app.highlighted.getAttribute("data-row"));
-  const key = to > from ? "j" : "k";
-  await app.press(...Array.from({ length: Math.abs(to - Math.max(from, 0)) }, () => key));
-  await expect(app.highlighted).toContainText(subject);
 }
 
 async function mark(gmail: Control): Promise<number> {
@@ -94,7 +79,7 @@ test("SRC-01 / shows local results at once; focus moves to results; Esc restores
     .getByRole("button", { name: /^Starred/ })
     .click();
   await expect(app.row("Person 2")).toHaveCount(1);
-  await highlightRow(app, "Person 2");
+  await app.highlight("Person 2");
   const starredKey = await app.rowKey("Person 2");
   const writes = (await gmail.requests("messages.batchModify")).length;
 
@@ -287,13 +272,13 @@ test("SRC-06 actions on search results follow the removal table", async ({ app, 
   const p1 = (await gmail.gmail(A)).messages.find((m) => m.id === s.message("p1", 1).id);
   expect(p1?.labels).not.toContain("INBOX");
 
-  await highlightRow(app, "Person 2");
+  await app.highlight("Person 2");
   await app.press("#");
   await expect(app.row("Person 2")).toHaveCount(0);
   await app.settle();
   await expect(app.row("Person 2")).toHaveCount(0);
 
-  await highlightRow(app, "Person 3");
+  await app.highlight("Person 3");
   await app.press("s");
   await app.settle();
   await expect(app.row("Person 3")).toHaveCount(1);

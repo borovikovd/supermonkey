@@ -1,58 +1,14 @@
 import type { App } from "./app.ts";
-import type { GmailMessage, GmailState, LoggedRequest, Outcome } from "./control.ts";
+import type { LoggedRequest, Outcome } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
+import { inOrder, liveMessageHas, messagesOf } from "./helpers.ts";
 import * as seeds from "./seeds.ts";
 import { A } from "./seeds.ts";
-
-async function inSeries<T>(items: T[], step: (item: T, i: number) => Promise<void>): Promise<void> {
-  await items.reduce<Promise<void>>(
-    (prev, item, i) => prev.then(() => step(item, i)),
-    Promise.resolve(),
-  );
-}
-
-async function highlight(app: App, subject: string): Promise<void> {
-  await expect(app.rows.filter({ hasText: subject }).first()).toBeVisible();
-  await app.settle();
-  const { subjects, at } = await app.list.evaluate((list) => {
-    const rows = Array.from(list.querySelectorAll("[data-row]"))
-      .map((el) => ({ el, top: el.getBoundingClientRect().top }))
-      .toSorted((a, b) => a.top - b.top);
-    return {
-      subjects: rows.map(
-        (r) => r.el.querySelector(".flex-1 > .truncate")?.firstChild?.textContent ?? "",
-      ),
-      at: rows.findIndex((r) => r.el.getAttribute("aria-selected") === "true"),
-    };
-  });
-  const to = subjects.indexOf(subject);
-  if (to < 0) throw new Error(`no row "${subject}" in ${JSON.stringify(subjects)}`);
-  const from = Math.max(at, 0);
-  await app.press(...Array.from({ length: Math.abs(to - from) }, () => (to > from ? "j" : "k")));
-  await expect(app.highlighted).toContainText(subject);
-}
-
-async function pick(app: App, key: string, query = ""): Promise<void> {
-  await app.press(key);
-  await expect(app.palette).toBeVisible();
-  if (query) await app.type(query);
-  await expect(app.palette.locator("[cmdk-item]").first()).toBeVisible();
-  await app.press("Enter");
-  await expect(app.palette).toHaveCount(0);
-}
 
 async function errorToastProbe(app: App): Promise<() => Promise<string[]>> {
   const since = (await app.errorToastsShown()).length;
   return () => app.errorToastsShown(since);
 }
-
-const messagesOf = (state: GmailState, threadId: string): GmailMessage[] =>
-  state.messages.filter((m) => m.threadId === threadId);
-
-const threadHas = (state: GmailState, threadId: string, label: string): boolean =>
-  messagesOf(state, threadId).some(
-    (m) => m.labels.includes(label) && !m.labels.includes("TRASH") && !m.labels.includes("SPAM"),
-  );
 
 type ModifyBody = { ids: string[]; addLabelIds: string[]; removeLabelIds: string[] };
 
@@ -96,10 +52,10 @@ test("ERR-01 transient failures retry silently and keep the row as the user left
   const probe = await app.watchRows();
   const errors = await errorToastProbe(app);
 
-  await inSeries(outcomes, async ([name, outcome], i) => {
+  await inOrder(outcomes, async ([name, outcome], i) => {
     const key = keys[i] ?? "";
     const thread = s.thread(key);
-    await highlight(app, thread.subject);
+    await app.highlight(thread.subject, { settle: true });
     const rowKey = await app.rowKey(thread.subject);
     await gmail.fault("messages.batchModify", outcome, { times: 2 });
     await app.press("e");
@@ -110,7 +66,7 @@ test("ERR-01 transient failures retry silently and keep the row as the user left
     expect(await probe.added(), `${name}: the row came back`).not.toContain(rowKey);
     await expect(app.row(thread.subject), name).toHaveCount(0);
     const a = await gmail.gmail(A);
-    expect(threadHas(a, thread.threadId, "INBOX"), name).toBe(false);
+    expect(liveMessageHas(a, thread.threadId, "INBOX"), name).toBe(false);
     const tries = await modifiesOf(
       app,
       thread.messages.map((m) => m.id),
@@ -173,7 +129,7 @@ test("ERR-03 a quiet sync status after 30 s of retrying", async ({ app, gmail })
   await app.advance(2_000);
   await expect(app.syncMarker(A)).toBeVisible();
   await expect(app.account(A)).toHaveAttribute("title", /· Can't reach Gmail$/);
-  await highlight(app, "Ticket #42");
+  await app.highlight("Ticket #42", { settle: true });
   await app.press("Enter");
   await expect(app.conversationTitle).toHaveText("Ticket #42");
   await expect(
@@ -186,7 +142,7 @@ test("ERR-03 a quiet sync status after 30 s of retrying", async ({ app, gmail })
   await expect(app.syncMarker(A)).toHaveCount(0);
   await expect(app.account(A)).not.toHaveAttribute("title", /Can't reach Gmail/);
   const a = await gmail.gmail(A);
-  expect(threadHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
+  expect(liveMessageHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
   await app.expectNoErrorToasts();
 });
 
@@ -209,9 +165,9 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   const t = (key: string) => s.thread(key).threadId;
 
   await reject();
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("e");
-  await highlight(app, "Fold check");
+  await app.highlight("Fold check", { settle: true });
   await app.press("s");
   await app.settle();
   await expectNewErrorToast("e");
@@ -219,11 +175,11 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   expect(sections[0]?.subjects[0]).toBe("Person 1");
   await expect(app.row("Fold check")).toHaveAttribute("data-starred");
   let a = await gmail.gmail(A);
-  expect(threadHas(a, t("p1"), "INBOX")).toBe(true);
-  expect(threadHas(a, t("fold"), "STARRED")).toBe(true);
+  expect(liveMessageHas(a, t("p1"), "INBOX")).toBe(true);
+  expect(liveMessageHas(a, t("fold"), "STARRED")).toBe(true);
 
   await reject();
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2", { settle: true });
   await app.press("#");
   await app.settle();
   await expectNewErrorToast("#");
@@ -234,29 +190,29 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   await app.press("g", "i");
 
   await reject();
-  await highlight(app, "Person 3");
+  await app.highlight("Person 3", { settle: true });
   await app.press("!");
   await app.settle();
   await expectNewErrorToast("!");
   await expect(app.row("Person 3")).toHaveCount(1);
 
   await reject();
-  await highlight(app, "Person 4");
+  await app.highlight("Person 4", { settle: true });
   await app.press("s");
   await app.settle();
   await expectNewErrorToast("s");
   await expect(app.row("Person 4")).not.toHaveAttribute("data-starred");
 
   await reject();
-  await highlight(app, "Person 6");
+  await app.highlight("Person 6", { settle: true });
   await app.press("u");
   await app.settle();
   await expectNewErrorToast("u");
   await expect(app.row("Person 6")).not.toHaveAttribute("data-unread");
 
   await reject();
-  await highlight(app, "Person 5");
-  await pick(app, "l", "Travel");
+  await app.highlight("Person 5", { settle: true });
+  await app.pick("l", "Travel");
   await app.settle();
   await expectNewErrorToast("l");
   await app.press("l");
@@ -266,8 +222,8 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   await app.press("Escape");
 
   await reject();
-  await highlight(app, "Budget draft");
-  await pick(app, "h");
+  await app.highlight("Budget draft", { settle: true });
+  await app.pick("h");
   await app.settle();
   await expectNewErrorToast("h");
   await expect(app.row("Budget draft")).toHaveCount(1);
@@ -276,12 +232,12 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   await expect(app.rows).toHaveCount(0);
   await app.press("g", "i");
 
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("e");
   await app.settle();
   await app.press("g", "e");
   await reject();
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("Shift+E");
   await app.settle();
   await expectNewErrorToast("Shift+E");
@@ -289,7 +245,7 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   await app.press("g", "i");
   await expect(app.row("Person 1")).toHaveCount(0);
 
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2", { settle: true });
   await gmail.fault(
     "messages.batchModify",
     { kind: "status", status: 403, reason: "insufficientPermissions" },
@@ -301,13 +257,13 @@ test("ERR-04 a rejection rolls the action back and shows Gmail's error", async (
   await expect(app.row("Person 2")).toHaveCount(1);
 
   a = await gmail.gmail(A);
-  expect(threadHas(a, t("p2"), "INBOX")).toBe(true);
-  expect(threadHas(a, t("p2"), "TRASH")).toBe(false);
-  expect(threadHas(a, t("p3"), "SPAM")).toBe(false);
-  expect(threadHas(a, t("p4"), "STARRED")).toBe(false);
-  expect(threadHas(a, t("p6"), "UNREAD")).toBe(false);
-  expect(threadHas(a, t("p5"), s.label(A, "Travel"))).toBe(false);
-  expect(threadHas(a, t("own"), "INBOX")).toBe(true);
+  expect(liveMessageHas(a, t("p2"), "INBOX")).toBe(true);
+  expect(liveMessageHas(a, t("p2"), "TRASH")).toBe(false);
+  expect(liveMessageHas(a, t("p3"), "SPAM")).toBe(false);
+  expect(liveMessageHas(a, t("p4"), "STARRED")).toBe(false);
+  expect(liveMessageHas(a, t("p6"), "UNREAD")).toBe(false);
+  expect(liveMessageHas(a, t("p5"), s.label(A, "Travel"))).toBe(false);
+  expect(liveMessageHas(a, t("own"), "INBOX")).toBe(true);
 });
 
 test("ERR-05 an expired token is refreshed once, and the request is retried", async ({
@@ -325,7 +281,7 @@ test("ERR-05 an expired token is refreshed once, and the request is retried", as
   const tries = await modifiesOf(app, [s.message("p1", 1).id]);
   expect(tries.map((r) => r.answer)).toEqual([401, 204]);
   const a = await gmail.gmail(A);
-  expect(threadHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
+  expect(liveMessageHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
   await expect(app.toasts).toHaveCount(0);
   await app.expectNoErrorToasts();
   await expect(app.signInMarker(A)).toHaveCount(0);
@@ -348,7 +304,7 @@ test("ERR-06 a 404 on part of an action drops only the missing messages", async 
       poll: false,
     });
     const rest: (typeof first)[] = [];
-    await inSeries(
+    await inOrder(
       Array.from({ length: n - 1 }, (_, i) => i + 2),
       async (k) => {
         const prev = rest.at(-1) ?? first;
@@ -374,7 +330,7 @@ test("ERR-06 a 404 on part of an action drops only the missing messages", async 
   await gmail.poll();
   await app.settle();
   await gmail.deleteMessage(A, m2.id);
-  await highlight(app, "Three parts");
+  await app.highlight("Three parts", { settle: true });
   await app.press("e");
   await app.settle();
 
@@ -398,7 +354,7 @@ test("ERR-06 a 404 on part of an action drops only the missing messages", async 
   await gmail.poll();
   await app.settle();
   await gmail.deleteThread(A, n1.threadId);
-  await highlight(app, "Two parts");
+  await app.highlight("Two parts", { settle: true });
   await app.press("e");
   await app.settle();
   await expect(app.row("Two parts")).toHaveCount(0);
@@ -422,7 +378,7 @@ test("ERR-07 drafts.create with no clear answer never makes a duplicate draft", 
     (await gmail.gmail(A)).drafts.filter((d) => d.message.threadId === threadId);
 
   const open = async (subject: string) => {
-    await highlight(app, subject);
+    await app.highlight(subject, { settle: true });
     await app.press("Enter");
     await expect(app.conversationTitle).toHaveText(subject);
     await app.settle();
@@ -502,7 +458,7 @@ test("ERR-07 drafts.create with no clear answer never makes a duplicate draft", 
 
   await app.press("g", "d");
   await app.settle();
-  await inSeries(["Person 3", "Person 4", "Person 5", "Person 6"], async (subject) => {
+  await inOrder(["Person 3", "Person 4", "Person 5", "Person 6"], async (subject) => {
     await expect(app.row(subject), subject).toHaveCount(1);
   });
   await expect(app.rows).toHaveCount(4);
@@ -529,7 +485,7 @@ test("ERR-08 a 404 while fetching a body is dropped silently", async ({ app, gma
   const fetches = (await gmail.requests("threads.get")).filter((r) => r.path.endsWith(t.threadId));
   expect(fetches.map((r) => r.answer)).toContain(404);
   expect(await errors()).toEqual([]);
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2", { settle: true });
   await app.press("Enter");
   await expect(
     app.conversation.locator("iframe[data-frame]").last().contentFrame().locator("body"),
@@ -541,7 +497,7 @@ test("ERR-09 a rejected undo or label create", async ({ app, gmail }) => {
   const errors = await errorToastProbe(app);
 
   await gmail.fault("labels.create", { kind: "status", status: 400, reason: "badRequest" });
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2", { settle: true });
   await app.press("l");
   await app.type("Bad");
   await expect(app.palette.getByText('Create label "Bad"')).toBeVisible();
@@ -561,7 +517,7 @@ test("ERR-09 a rejected undo or label create", async ({ app, gmail }) => {
   );
 
   const before = (await errors()).length;
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("e");
   await app.settle();
   await expect(app.row("Person 1")).toHaveCount(0);
@@ -573,7 +529,7 @@ test("ERR-09 a rejected undo or label create", async ({ app, gmail }) => {
   await app.press("z");
   await app.settle();
   a = await gmail.gmail(A);
-  expect(threadHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
+  expect(liveMessageHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
   await expect.soft.poll(errors).toHaveLength(before + 1);
   await expect(app.row("Person 1")).toHaveCount(0);
 });

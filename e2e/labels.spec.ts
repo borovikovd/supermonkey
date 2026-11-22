@@ -1,62 +1,12 @@
 import type { App } from "./app.ts";
-import type { Control, GmailState } from "./control.ts";
+import type { Control } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
+import { has, hasEach, inOrder } from "./helpers.ts";
 import * as seeds from "./seeds.ts";
-import { A, type Seeded } from "./seeds.ts";
-
-function threadHas(state: GmailState, threadId: string, label: string): boolean {
-  const msgs = state.messages.filter((m) => m.threadId === threadId && !m.labels.includes("DRAFT"));
-  if (label === "TRASH" || label === "SPAM") return msgs.some((m) => m.labels.includes(label));
-  return msgs.some(
-    (m) => !m.labels.includes("TRASH") && !m.labels.includes("SPAM") && m.labels.includes(label),
-  );
-}
-
-async function has(gmail: Control, s: Seeded, key: string, label: string): Promise<boolean> {
-  return threadHas(await gmail.gmail(A), s.thread(key).threadId, label);
-}
-
-async function hasEach(gmail: Control, s: Seeded, keys: string[], label: string) {
-  const state = await gmail.gmail(A);
-  return keys.map((k) => threadHas(state, s.thread(k).threadId, label));
-}
+import { A } from "./seeds.ts";
 
 async function labelsNamed(gmail: Control, name: string) {
   return (await gmail.gmail(A)).labels.filter((l) => l.name === name);
-}
-
-async function each<T>(items: readonly T[], step: (item: T) => Promise<unknown>): Promise<void> {
-  await items.reduce<Promise<unknown>>(
-    (prev, item) => prev.then(() => step(item)),
-    Promise.resolve(),
-  );
-}
-
-async function highlight(app: App, text: string): Promise<void> {
-  await expect(app.row(text)).toHaveCount(1);
-  await expect(app.highlighted).toHaveCount(1);
-  const texts = await app.rows.allInnerTexts();
-  const target = texts.findIndex((t) => t.includes(text));
-  const at = await app.rows.evaluateAll((els) =>
-    els.findIndex((el) => el.getAttribute("aria-selected") === "true"),
-  );
-  const delta = target - at;
-  const key = delta >= 0 ? "j" : "k";
-  await app.press(...Array.from({ length: Math.abs(delta) }, () => key));
-  await expect(app.highlighted).toContainText(text);
-}
-
-async function selectFrom(app: App, first: string, count: number): Promise<void> {
-  await highlight(app, first);
-  await app.press("x", ...Array.from({ length: count - 1 }, () => "Shift+J"));
-  await expect(app.selected).toHaveCount(count);
-}
-
-async function goLabel(app: App, name: string): Promise<void> {
-  await app.press("g", "l");
-  await expect(app.palette).toBeVisible();
-  await app.palette.getByRole("option", { name, exact: true }).click();
-  await expect(app.palette).toHaveCount(0);
 }
 
 const picker = (app: App) => app.palette.getByRole("option");
@@ -97,13 +47,13 @@ test("LAB-01 l adds and removes a user label", async ({ app, gmail }) => {
   await expect(picker(app).first()).toHaveText("Travel");
   await app.press("Enter");
   await expect(app.palette).toHaveCount(0);
-  await goLabel(app, "Travel");
+  await app.goLabel("Travel");
   await expect(app.row("Person 1")).toHaveCount(1);
   await hold.release();
   await app.settle();
   expect(await has(gmail, s, "p1", travel)).toBe(true);
 
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1");
   await app.press("l");
   await expect(picker(app).filter({ hasText: "Travel" })).toHaveText("✓ Travel");
   await picker(app).filter({ hasText: "Travel" }).click();
@@ -120,10 +70,10 @@ test("LAB-02 l on a selection: remove only if every thread has the label", async
   const s = await seeds.standard(gmail, app);
   const travel = s.label(A, "Travel");
 
-  await each(["p1", "p2", "p3"], (k) => gmail.modify(A, s.message(k, 1).id, [travel], []));
+  await inOrder(["p1", "p2", "p3"], (k) => gmail.modify(A, s.message(k, 1).id, [travel], []));
   await gmail.poll();
   await app.settle();
-  await selectFrom(app, "Person 1", 3);
+  await app.selectFrom("Person 1", 3);
   await app.press("l");
   await expect(picker(app).filter({ hasText: "Travel" })).toHaveText("✓ Travel");
   await picker(app).filter({ hasText: "Travel" }).click();
@@ -132,7 +82,7 @@ test("LAB-02 l on a selection: remove only if every thread has the label", async
 
   await gmail.modify(A, s.message("p4", 1).id, [travel], [], { poll: true });
   await app.settle();
-  await selectFrom(app, "Person 4", 3);
+  await app.selectFrom("Person 4", 3);
   await app.press("l");
   await expect(picker(app).filter({ hasText: "Travel" })).toHaveText("Travel");
   await picker(app).filter({ hasText: "Travel" }).click();
@@ -146,11 +96,11 @@ test("LAB-02 l on a selection: remove only if every thread has the label", async
 
 test("LAB-03 create a label from the picker and apply it in one action", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
-  await selectFrom(app, "Person 1", 2);
+  await app.selectFrom("Person 1", 2);
   const hold = await gmail.hold("labels.create");
   await createLabel(app, "Invoices 2026");
 
-  await goLabel(app, "Invoices 2026");
+  await app.goLabel("Invoices 2026");
   await expect(app.row("Person 1")).toHaveCount(1);
   await expect(app.row("Person 2")).toHaveCount(1);
   await hold.release();
@@ -178,12 +128,12 @@ test("LAB-04 a label created offline is mapped to its Gmail id when the queue re
 }) => {
   const s = await seeds.standard(gmail, app);
   await gmail.offline(true);
-  await highlight(app, "Person 3");
+  await app.highlight("Person 3");
   await createLabel(app, "Offline L");
-  await highlight(app, "Person 4");
+  await app.highlight("Person 4");
   await pickLabel(app, "Travel");
 
-  await goLabel(app, "Offline L");
+  await app.goLabel("Offline L");
   await expect(app.row("Person 3")).toHaveCount(1);
 
   await gmail.offline(false);
@@ -215,7 +165,7 @@ test("LAB-05 if labels.create says the name exists, the existing label is used",
 }) => {
   const s = await seeds.standard(gmail, app);
   const { id } = await gmail.label(A, "Clients");
-  await highlight(app, "Person 5");
+  await app.highlight("Person 5");
   await createLabel(app, "Clients");
 
   await app.expectNoErrorToasts();
@@ -233,15 +183,15 @@ test("LAB-06 y removes the current view's label: label view, Inbox, Starred, Tra
 }) => {
   const s = await seeds.standard(gmail, app);
   const cases: [view: () => Promise<void>, row: string, key: string, label: string][] = [
-    [() => goLabel(app, "Travel"), "Trip ideas", "starredOld", s.label(A, "Travel")],
+    [() => app.goLabel("Travel"), "Trip ideas", "starredOld", s.label(A, "Travel")],
     [() => app.press("g", "i"), "Person 1", "p1", "INBOX"],
     [() => app.press("g", "s"), "Trip ideas", "starredOld", "STARRED"],
     [() => app.press("g", "#"), "Old trash", "trashOld", "TRASH"],
     [() => app.press("g", "!"), "Old spam", "spamOld", "SPAM"],
   ];
-  await each(cases, async ([open, row, key, label]) => {
+  await inOrder(cases, async ([open, row, key, label]) => {
     await open();
-    await highlight(app, row);
+    await app.highlight(row);
     await app.press("y");
     await expect(app.row(row), `${row} leaves`).toHaveCount(0);
     await app.settle();
@@ -253,12 +203,12 @@ test("LAB-06 y does nothing in Sent, Drafts, Done, Snoozed, and Search", async (
   await seeds.standard(gmail, app);
   await expect(app.highlighted).toContainText("Person 1");
   await app.press("e");
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2");
   await app.press("h");
   await expect(app.palette.getByRole("option").first()).toBeVisible();
   await app.press("Enter");
   await expect(app.row("Person 2")).toHaveCount(0);
-  await highlight(app, "Person 3");
+  await app.highlight("Person 3");
   await app.reply("r");
   await app.type("Kept as a draft");
   await app.press("Escape", "Escape", "Escape");
@@ -272,9 +222,9 @@ test("LAB-06 y does nothing in Sent, Drafts, Done, Snoozed, and Search", async (
     ["e", "Person 1"],
     ["h", "Person 2"],
   ];
-  await each(cases, async ([view, row]) => {
+  await inOrder(cases, async ([view, row]) => {
     await app.press("g", view);
-    await highlight(app, row);
+    await app.highlight(row);
     const rows = await app.rows.count();
     await app.press("y");
     await app.settle();
@@ -300,9 +250,9 @@ test("LAB-07 a label first seen in history is picked up", async ({ app, gmail })
   await gmail.modify(A, s.message("p2", 1).id, [id], [], { poll: true });
   await app.settle();
 
-  await goLabel(app, "Legal");
+  await app.goLabel("Legal");
   await expect(app.row("Person 2")).toHaveCount(1);
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2");
   await app.press("l");
   await expect(app.palette).toBeVisible();
   await expect(picker(app).filter({ hasText: "Legal" })).toHaveText("✓ Legal");
@@ -319,7 +269,7 @@ test("LAB-08 a label list read before a create landed does not delete the new la
   await expect
     .poll(async () => (await gmail.requests("labels.list")).some((r) => r.held))
     .toBe(true);
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1");
   await createLabel(app, "Fresh L");
   await app.settle();
   const id = (await labelsNamed(gmail, "Fresh L"))[0]?.id ?? "missing";
@@ -333,10 +283,10 @@ test("LAB-08 a label list read before a create landed does not delete the new la
   ).toHaveCount(1);
   await app.press("Escape");
   await expect(app.palette).toHaveCount(0);
-  await goLabel(app, "Fresh L");
+  await app.goLabel("Fresh L");
   await expect(app.row("Person 1")).toHaveCount(1);
   await app.press("g", "i");
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2");
   await pickLabel(app, "Fresh L");
   await app.settle();
   expect(await has(gmail, s, "p2", id)).toBe(true);

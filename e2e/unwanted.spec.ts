@@ -1,5 +1,5 @@
 import type { App } from "./app.ts";
-import type { Control, Delivery } from "./control.ts";
+import type { Delivery } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
 import * as seeds from "./seeds.ts";
 import { A, B } from "./seeds.ts";
@@ -19,20 +19,6 @@ async function unsubscribe(app: App, choice: string): Promise<void> {
   await expect(app.palette).toHaveCount(0);
 }
 
-async function highlight(app: App, text: string): Promise<void> {
-  const { at, to } = await app.rows.evaluateAll(
-    (rows, t) => ({
-      at: rows.findIndex((r) => r.getAttribute("aria-selected") === "true"),
-      to: rows.findIndex((r) => (r.textContent ?? "").includes(t)),
-    }),
-    text,
-  );
-  if (to < 0) throw new Error(`no row with ${text}`);
-  const delta = to - at;
-  await app.press(...Array.from({ length: Math.abs(delta) }, () => (delta > 0 ? "j" : "k")));
-  await expect(app.highlighted).toContainText(text);
-}
-
 async function choose(app: App, name: string, choice: string): Promise<void> {
   await app.press("Meta+k");
   await expect(app.palette).toBeVisible();
@@ -43,10 +29,6 @@ async function choose(app: App, name: string, choice: string): Promise<void> {
   await expect(app.palette.locator("[cmdk-item]").first()).toContainText(choice);
   await app.press("Enter");
   await expect(app.palette).toHaveCount(0);
-}
-
-async function labelsOf(gmail: Control, id: string): Promise<string[]> {
-  return (await gmail.gmail(A)).messages.find((m) => m.id === id)?.labels ?? [];
 }
 
 test("UNW-01 Cmd+U unsubscribes with one click when the list offers it", async ({ app, gmail }) => {
@@ -66,7 +48,7 @@ test("UNW-01 Cmd+U unsubscribes with one click when the list offers it", async (
   expect(posts.map((h) => [h.method, h.body])).toEqual([["POST", "List-Unsubscribe=One-Click"]]);
   expect(await gmail.requests("messages.send")).toEqual([]);
   await app.settle();
-  expect(await labelsOf(gmail, news.id)).toContain("INBOX");
+  expect(await gmail.labelsOf(A, news.id)).toContain("INBOX");
   await expect(app.row("Weekly news")).toHaveCount(1);
 });
 
@@ -84,7 +66,7 @@ test("UNW-02 an email unsubscribes, and mark done all archives the sender's Inbo
     { account: A, from: "Pat Person <pat@corp.test>", subject: "Lunch?" },
   ]);
   await app.settle();
-  await highlight(app, "News two");
+  await app.highlight("News two");
 
   await unsubscribe(app, "Unsubscribe, and mark done all");
   await expect(app.row("News one")).toHaveCount(0);
@@ -96,9 +78,9 @@ test("UNW-02 an email unsubscribes, and mark done all archives the sender's Inbo
   expect(sent).toHaveLength(1);
   expect(sent[0]?.headers.to).toContain("leave@news.test");
   expect(sent[0]?.headers.subject).toBe("unsubscribe-me");
-  expect(await labelsOf(gmail, older?.id ?? "")).not.toContain("INBOX");
-  expect(await labelsOf(gmail, newer?.id ?? "")).not.toContain("INBOX");
-  expect(await labelsOf(gmail, other?.id ?? "")).toContain("INBOX");
+  expect(await gmail.labelsOf(A, older?.id ?? "")).not.toContain("INBOX");
+  expect(await gmail.labelsOf(A, newer?.id ?? "")).not.toContain("INBOX");
+  expect(await gmail.labelsOf(A, other?.id ?? "")).toContain("INBOX");
 
   await app.press("z");
   await expect(app.row("News one")).toHaveCount(1);
@@ -122,8 +104,8 @@ test("UNW-03 a list with only a web page opens it, and trash all trashes the sen
   await expect(app.page.getByText("Opened the unsubscribe page of News Co")).toBeVisible();
   expect((await gmail.platform()).openedUrls).toEqual([page]);
   await app.settle();
-  expect(await labelsOf(gmail, one?.id ?? "")).toContain("TRASH");
-  expect(await labelsOf(gmail, two?.id ?? "")).toContain("TRASH");
+  expect(await gmail.labelsOf(A, one?.id ?? "")).toContain("TRASH");
+  expect(await gmail.labelsOf(A, two?.id ?? "")).toContain("TRASH");
   expect(await gmail.requests("messages.send")).toEqual([]);
 });
 
@@ -137,7 +119,7 @@ test("UNW-04 no unsubscribe link, or no network, says so; the archive still happ
   await unsubscribe(app, "Unsubscribe");
   await expect(app.page.getByText("No unsubscribe link in this email")).toBeVisible();
   await app.settle();
-  expect(await labelsOf(gmail, plain.id)).toContain("INBOX");
+  expect(await gmail.labelsOf(A, plain.id)).toContain("INBOX");
   expect(await gmail.requests("messages.send")).toEqual([]);
 
   await gmail.offline(true);
@@ -160,11 +142,11 @@ test("UNW-05 Block makes a Gmail filter to Trash, trashes the conversation, and 
   expect(await gmail.filters(A)).toEqual([
     { id: expect.any(String), from: "news@news.test", add: ["TRASH"], remove: ["INBOX"] },
   ]);
-  expect(await labelsOf(gmail, promo.id)).toContain("TRASH");
+  expect(await gmail.labelsOf(A, promo.id)).toContain("TRASH");
 
   const next = await gmail.deliver({ account: A, from: NEWS, subject: "Another sale" });
   await app.settle();
-  expect(await labelsOf(gmail, next.id)).toEqual(expect.arrayContaining(["TRASH"]));
+  expect(await gmail.labelsOf(A, next.id)).toEqual(expect.arrayContaining(["TRASH"]));
   await expect(app.row("Another sale")).toHaveCount(0);
 
   await gmail.deliver({ account: A, from: "Deals <deals@shop.test>", subject: "Deal" });
@@ -229,8 +211,8 @@ test("UNW-08 Mark spam, and block the domain", async ({ app, gmail }) => {
   await expect(app.row("Win")).toHaveCount(0);
   await expect(app.page.getByText("Blocked @junk.test")).toBeVisible();
   await app.settle();
-  expect(await labelsOf(gmail, junk.id)).toContain("SPAM");
-  expect(await labelsOf(gmail, junk.id)).not.toContain("TRASH");
+  expect(await gmail.labelsOf(A, junk.id)).toContain("SPAM");
+  expect(await gmail.labelsOf(A, junk.id)).not.toContain("TRASH");
   expect((await gmail.filters(A)).map((f) => f.from)).toEqual(["@junk.test"]);
 });
 
@@ -290,7 +272,7 @@ test("UNW-10 block and unsubscribe act on their own account when another one is 
     subject: "Flash deal",
   });
   await app.settle();
-  await highlight(app, "Flash deal");
+  await app.highlight("Flash deal");
 
   const filter = await gmail.hold("filters.create");
   await choose(app, "Block", "Block promo@pal.test");
@@ -299,7 +281,7 @@ test("UNW-10 block and unsubscribe act on their own account when another one is 
   await filter.release();
   await expect(app.page.getByText("Blocked promo@pal.test")).toBeVisible();
   await app.settle();
-  expect(await labelsOf(gmail, promo.id)).toContain("TRASH");
+  expect(await gmail.labelsOf(A, promo.id)).toContain("TRASH");
   expect(await trashedIn(B)).toBe(bTrash);
   await app.expectNoErrorToasts();
   await expect(app.highlighted).toContainText("Bea Blue");
@@ -311,15 +293,15 @@ test("UNW-10 block and unsubscribe act on their own account when another one is 
     newsletter("News two", header),
   ]);
   await app.settle();
-  await highlight(app, "News two");
+  await app.highlight("News two");
   const release = await app.park("sender_threads");
   await unsubscribe(app, "Unsubscribe, and mark done all");
   await app.press("Control+2");
   await expect(app.highlighted).toContainText("Bea Blue");
   await release();
   await app.settle();
-  expect(await labelsOf(gmail, one?.id ?? "")).not.toContain("INBOX");
-  expect(await labelsOf(gmail, two?.id ?? "")).not.toContain("INBOX");
+  expect(await gmail.labelsOf(A, one?.id ?? "")).not.toContain("INBOX");
+  expect(await gmail.labelsOf(A, two?.id ?? "")).not.toContain("INBOX");
   await app.expectNoErrorToasts();
   await expect(app.highlighted).toContainText("Bea Blue");
   await app.press("Control+1");

@@ -1,46 +1,9 @@
 import type { App } from "./app.ts";
-import type { GmailMessage, GmailState, LoggedRequest } from "./control.ts";
+import type { LoggedRequest } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
+import { CONVERSATION_SUBS, liveMessageHas, messagesOf } from "./helpers.ts";
 import * as seeds from "./seeds.ts";
 import { A } from "./seeds.ts";
-
-async function highlight(app: App, subject: string): Promise<void> {
-  await expect(app.rows.filter({ hasText: subject }).first()).toBeVisible();
-  await app.settle();
-  const { subjects, at } = await app.list.evaluate((list) => {
-    const rows = Array.from(list.querySelectorAll("[data-row]"))
-      .map((el) => ({ el, top: el.getBoundingClientRect().top }))
-      .toSorted((a, b) => a.top - b.top);
-    return {
-      subjects: rows.map(
-        (r) => r.el.querySelector(".flex-1 > .truncate")?.firstChild?.textContent ?? "",
-      ),
-      at: rows.findIndex((r) => r.el.getAttribute("aria-selected") === "true"),
-    };
-  });
-  const to = subjects.indexOf(subject);
-  if (to < 0) throw new Error(`no row "${subject}" in ${JSON.stringify(subjects)}`);
-  const from = Math.max(at, 0);
-  await app.press(...Array.from({ length: Math.abs(to - from) }, () => (to > from ? "j" : "k")));
-  await expect(app.highlighted).toContainText(subject);
-}
-
-async function pick(app: App, key: string, query = ""): Promise<void> {
-  await app.press(key);
-  await expect(app.palette).toBeVisible();
-  if (query) await app.type(query);
-  await expect(app.palette.locator("[cmdk-item]").first()).toBeVisible();
-  await app.press("Enter");
-  await expect(app.palette).toHaveCount(0);
-}
-
-const messagesOf = (state: GmailState, threadId: string): GmailMessage[] =>
-  state.messages.filter((m) => m.threadId === threadId);
-
-const threadHas = (state: GmailState, threadId: string, label: string): boolean =>
-  messagesOf(state, threadId).some(
-    (m) => m.labels.includes(label) && !m.labels.includes("TRASH") && !m.labels.includes("SPAM"),
-  );
 
 const MUTATING = new Set([
   "messages.batchModify",
@@ -88,7 +51,7 @@ test("OFF-01 airplane mode: read, search, autocomplete, and act; it all lands wh
   const s = await seeds.standard(gmail, app);
   await gmail.offline(true);
 
-  await highlight(app, "Q4 plan");
+  await app.highlight("Q4 plan", { settle: true });
   await app.press("Enter");
   await expect(app.conversationTitle).toHaveText("Q4 plan");
   await expect(
@@ -111,13 +74,13 @@ test("OFF-01 airplane mode: read, search, autocomplete, and act; it all lands wh
   await app.settle();
 
   const toastsBefore = await app.toasts.count();
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("e");
   await expect(app.row("Person 1")).toHaveCount(0);
   await app.expectNoErrorToasts();
   expect(await app.toasts.count()).toBeLessThanOrEqual(toastsBefore);
 
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2", { settle: true });
   await app.reply("r");
   await app.type("Written on the plane");
   await app.settle();
@@ -126,13 +89,13 @@ test("OFF-01 airplane mode: read, search, autocomplete, and act; it all lands wh
   await app.advance(10_000);
   await expect(app.toast("Email delayed")).toHaveCount(1);
   const offlineA = await gmail.gmail(A);
-  expect(threadHas(offlineA, s.thread("p1").threadId, "INBOX")).toBe(true);
+  expect(liveMessageHas(offlineA, s.thread("p1").threadId, "INBOX")).toBe(true);
 
   await gmail.offline(false);
   await app.settle();
   await expect(app.toast(/^Sent/)).toHaveCount(1);
   const a = await gmail.gmail(A);
-  expect(threadHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
+  expect(liveMessageHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
   const reply = messagesOf(a, s.thread("p2").threadId).find((m) => m.labels.includes("SENT"));
   expect(reply?.raw).toContain("Written on the plane");
 });
@@ -148,8 +111,8 @@ test("OFF-02 every kind of queued action replays, mail changes and draft writes 
   await app.advance(300);
   await expect(app.row("Archived before")).toHaveCount(1);
   await app.press("Escape");
-  await highlight(app, "Alias note");
-  await pick(app, "h");
+  await app.highlight("Alias note", { settle: true });
+  await app.pick("h");
   await expect(app.row("Alias note")).toHaveCount(0);
   const spare = await gmail.createDraft(
     A,
@@ -160,52 +123,52 @@ test("OFF-02 every kind of queued action replays, mail changes and draft writes 
   const since = await lastSeq(app);
 
   await gmail.offline(true);
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("e");
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2", { settle: true });
   await app.press("#");
-  await highlight(app, "Person 3");
+  await app.highlight("Person 3", { settle: true });
   await app.press("!");
-  await highlight(app, "Person 4");
+  await app.highlight("Person 4", { settle: true });
   await app.press("s");
-  await highlight(app, "Person 6");
+  await app.highlight("Person 6", { settle: true });
   await app.press("u");
   await expect(app.row("Person 6")).toHaveAttribute("data-unread");
   await app.press("/");
   await app.type("Archived before");
   await expect(app.row("Archived before")).toHaveCount(1);
   await app.press("Enter");
-  await highlight(app, "Archived before");
+  await app.highlight("Archived before", { settle: true });
   await app.press("Shift+E");
   await app.settle();
   await app.press("/");
   await expect(app.page.getByPlaceholder("Search")).toBeFocused();
   await app.press("Escape");
   await expect(app.row("Archived before")).toHaveCount(1);
-  await highlight(app, "Fold check");
-  await pick(app, "l", "Travel");
-  await highlight(app, "Guild meetup");
+  await app.highlight("Fold check", { settle: true });
+  await app.pick("l", "Travel");
+  await app.highlight("Guild meetup", { settle: true });
   await app.press("l");
   await app.type("NewL");
   await expect(app.palette.getByText('Create label "NewL"')).toBeVisible();
   await app.press("Enter");
   await expect(app.palette).toHaveCount(0);
-  await highlight(app, "Budget draft");
-  await pick(app, "h");
+  await app.highlight("Budget draft", { settle: true });
+  await app.pick("h");
   await expect(app.row("Budget draft")).toHaveCount(0);
   await app.press("g", "h");
-  await highlight(app, "Alias note");
+  await app.highlight("Alias note", { settle: true });
   await app.press("Shift+E");
   await expect(app.row("Alias note")).toHaveCount(0);
   await app.press("g", "i");
-  await highlight(app, "Ticket #42");
+  await app.highlight("Ticket #42", { settle: true });
   await app.reply("r");
   await app.type("Queued draft text");
   await app.settle();
   await app.press("Escape", "Escape");
   await expect(app.editor).toHaveCount(0);
   await app.press("Escape", "g", "d");
-  await highlight(app, "Spare draft");
+  await app.highlight("Spare draft", { settle: true });
   await app.press("Enter");
   await expect(app.editor).toBeVisible();
   await app.settle();
@@ -219,20 +182,20 @@ test("OFF-02 every kind of queued action replays, mail changes and draft writes 
 
   const a = await gmail.gmail(A);
   const t = (key: string) => s.thread(key).threadId;
-  expect(threadHas(a, t("p1"), "INBOX")).toBe(false);
-  expect(threadHas(a, t("p2"), "INBOX")).toBe(false);
+  expect(liveMessageHas(a, t("p1"), "INBOX")).toBe(false);
+  expect(liveMessageHas(a, t("p2"), "INBOX")).toBe(false);
   expect(messagesOf(a, t("p2")).every((m) => m.labels.includes("TRASH"))).toBe(true);
   expect(messagesOf(a, t("p3")).every((m) => m.labels.includes("SPAM"))).toBe(true);
-  expect(threadHas(a, t("p3"), "INBOX")).toBe(false);
-  expect(threadHas(a, t("p4"), "STARRED")).toBe(true);
-  expect(threadHas(a, t("p6"), "UNREAD")).toBe(true);
-  expect(threadHas(a, t("archivedOld"), "INBOX")).toBe(true);
-  expect(threadHas(a, t("fold"), s.label(A, "Travel"))).toBe(true);
+  expect(liveMessageHas(a, t("p3"), "INBOX")).toBe(false);
+  expect(liveMessageHas(a, t("p4"), "STARRED")).toBe(true);
+  expect(liveMessageHas(a, t("p6"), "UNREAD")).toBe(true);
+  expect(liveMessageHas(a, t("archivedOld"), "INBOX")).toBe(true);
+  expect(liveMessageHas(a, t("fold"), s.label(A, "Travel"))).toBe(true);
   const newL = a.labels.find((l) => l.name === "NewL");
   expect(newL).toBeDefined();
-  expect(threadHas(a, t("alias"), newL?.id ?? "missing")).toBe(true);
-  expect(threadHas(a, t("own"), "INBOX")).toBe(false);
-  expect(threadHas(a, t("ownAlias"), "INBOX")).toBe(true);
+  expect(liveMessageHas(a, t("alias"), newL?.id ?? "missing")).toBe(true);
+  expect(liveMessageHas(a, t("own"), "INBOX")).toBe(false);
+  expect(liveMessageHas(a, t("ownAlias"), "INBOX")).toBe(true);
   const replyDraft = a.drafts.find((d) => d.message.threadId === t("replyto"));
   expect(replyDraft?.message.raw).toContain("Queued draft text");
   expect(a.drafts.map((d) => d.id)).not.toContain(spare.id);
@@ -274,9 +237,9 @@ test("OFF-02 every kind of queued action replays, mail changes and draft writes 
 test("OFF-03 the queue survives a restart", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
   await gmail.offline(true);
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("e");
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2", { settle: true });
   await app.press("s");
   await expect(app.row("Person 2")).toHaveAttribute("data-starred");
   await app.settle();
@@ -286,14 +249,14 @@ test("OFF-03 the queue survives a restart", async ({ app, gmail }) => {
   await expect(app.row("Person 1")).toHaveCount(0);
   await expect(app.row("Person 2")).toHaveAttribute("data-starred");
   const offline = await gmail.gmail(A);
-  expect(threadHas(offline, s.thread("p1").threadId, "INBOX")).toBe(true);
-  expect(threadHas(offline, s.thread("p2").threadId, "STARRED")).toBe(false);
+  expect(liveMessageHas(offline, s.thread("p1").threadId, "INBOX")).toBe(true);
+  expect(liveMessageHas(offline, s.thread("p2").threadId, "STARRED")).toBe(false);
 
   await gmail.offline(false);
   await app.settle();
   const a = await gmail.gmail(A);
-  expect(threadHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
-  expect(threadHas(a, s.thread("p2").threadId, "STARRED")).toBe(true);
+  expect(liveMessageHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
+  expect(liveMessageHas(a, s.thread("p2").threadId, "STARRED")).toBe(true);
 });
 
 test("OFF-04 a queued action wins on the messages it recorded, without hiding newer mail", async ({
@@ -303,7 +266,7 @@ test("OFF-04 a queued action wins on the messages it recorded, without hiding ne
   const s = await seeds.standard(gmail, app);
   const m1 = s.message("p1", 1);
   await gmail.offline(true);
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("e");
   await expect(app.row("Person 1")).toHaveCount(0);
   await app.settle();
@@ -342,7 +305,7 @@ test("OFF-09 a poll during the replay of a queued action keeps the action applie
   const s = await seeds.standard(gmail, app);
   const m1 = s.message("p1", 1);
   await gmail.offline(true);
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("e");
   await expect(app.row("Person 1")).toHaveCount(0);
   await app.settle();
@@ -371,7 +334,7 @@ test("OFF-10 a draft write on its way to Gmail does not hold up an archive made 
 }) => {
   const s = await seeds.standard(gmail, app);
   const create = await gmail.hold("drafts.create");
-  await highlight(app, "Ticket #42");
+  await app.highlight("Ticket #42", { settle: true });
   await app.reply("r");
   await app.type("Slow draft");
   await app.settle();
@@ -382,10 +345,10 @@ test("OFF-10 a draft write on its way to Gmail does not hold up an archive made 
     .poll(async () => (await gmail.requests("drafts.create")).some((r) => r.held))
     .toBe(true);
 
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("e");
   await app.settle();
-  expect(threadHas(await gmail.gmail(A), s.thread("p1").threadId, "INBOX")).toBe(false);
+  expect(liveMessageHas(await gmail.gmail(A), s.thread("p1").threadId, "INBOX")).toBe(false);
 
   await create.release();
   await app.settle();
@@ -407,7 +370,7 @@ test("OFF-07 a Gmail answer read before an action landed does not undo it", asyn
     .poll(async () => (await gmail.requests("history.list")).some((r) => r.held))
     .toBe(true);
 
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("e");
   await app.settle();
   const before = (await gmail.gmail(A)).messages.find((m) => m.id === m1.id);
@@ -428,9 +391,9 @@ test("OFF-05 a rejection during replay rolls back that one action, and replay co
 }) => {
   const s = await seeds.standard(gmail, app);
   await gmail.offline(true);
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("e");
-  await highlight(app, "Person 2");
+  await app.highlight("Person 2", { settle: true });
   await app.press("s");
   await app.settle();
   await gmail.fault(
@@ -446,8 +409,8 @@ test("OFF-05 a rejection during replay rolls back that one action, and replay co
   await expect(app.errorToasts).toHaveCount(1);
   await expect(app.errorToasts).toContainText("Injected fault");
   const a = await gmail.gmail(A);
-  expect(threadHas(a, s.thread("p1").threadId, "INBOX")).toBe(true);
-  expect(threadHas(a, s.thread("p2").threadId, "STARRED")).toBe(true);
+  expect(liveMessageHas(a, s.thread("p1").threadId, "INBOX")).toBe(true);
+  expect(liveMessageHas(a, s.thread("p2").threadId, "STARRED")).toBe(true);
 
   await app.press("Meta+,");
   const settings = app.sheet("Settings");
@@ -463,7 +426,7 @@ test("OFF-06 losing the network during replay leaves the rest queued", async ({ 
     ["Person 1", "Person 2", "Person 3"].map((subject) => app.rowKey(subject)),
   );
   await gmail.offline(true);
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1", { settle: true });
   await app.press("e", "e", "e");
   await expect(app.row("Person 3")).toHaveCount(0);
   await expect(app.highlighted).toContainText("Person 4");
@@ -483,7 +446,7 @@ test("OFF-06 losing the network during replay leaves the rest queued", async ({ 
   await expect(app.row(/Person [123]\b/)).toHaveCount(0);
   const a = await gmail.gmail(A);
   for (const key of ["p1", "p2", "p3"]) {
-    expect(threadHas(a, s.thread(key).threadId, "INBOX"), key).toBe(false);
+    expect(liveMessageHas(a, s.thread(key).threadId, "INBOX"), key).toBe(false);
   }
   const tries = (await gmail.requests("messages.batchModify")).filter((r) => r.seq > since);
   expect(tries.filter((r) => r.answer === "dropped")).toHaveLength(1);
@@ -525,11 +488,7 @@ test("OFF-08 conversations opened offline read only the bodies still on screen w
     await app.press(key);
     await app.settle();
   }, Promise.resolve());
-  const shown = Object.keys(
-    await app.page.evaluate<Record<string, string>>(`Object.fromEntries(
-      Object.entries(window.__sm.useMirror.getState().subs)
-        .filter(([, s]) => s.type === "conversation").map(([id, s]) => [String(s.key.thread), id]))`),
-  );
+  const shown = Object.keys(await app.page.evaluate<Record<string, string>>(CONVERSATION_SUBS));
   const needed = shown.flatMap((key) => gmailIds.get(key) ?? []);
   expect(needed.length).toBeGreaterThan(0);
   const since = await lastSeq(app);

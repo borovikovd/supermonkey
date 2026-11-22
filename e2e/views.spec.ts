@@ -1,18 +1,15 @@
 import type { App } from "./app.ts";
 import type { Delivery } from "./control.ts";
 import { expect, test } from "./fixtures.ts";
+import { inOrder } from "./helpers.ts";
 import * as seeds from "./seeds.ts";
 import { A, dates } from "./seeds.ts";
 
 async function go(app: App, key: string, title: string | null): Promise<void> {
   await app.press("g", key);
   if (title === null) await expect(app.splitTitles().first()).toBeVisible();
-  else await expect(app.page.locator("div:has(> button[title='Search (/)'])")).toHaveText(title);
+  else await expect(app.viewTitle).toHaveText(title);
   await app.settle();
-}
-
-async function inOrder<T>(items: T[], step: (item: T) => Promise<void>): Promise<void> {
-  await items.reduce<Promise<void>>((prev, item) => prev.then(() => step(item)), Promise.resolve());
 }
 
 function pair(subject: string, first: string[], second: string[], at: number): Delivery[] {
@@ -26,18 +23,6 @@ function pair(subject: string, first: string[], second: string[], at: number): D
     poll: false,
   });
   return [msg(1, first), { ...msg(2, second), after: at }];
-}
-
-async function highlight(app: App, text: string): Promise<void> {
-  const keys = await app.rows.evaluateAll((rows, t) => {
-    const at = rows.findIndex((r) => r.getAttribute("aria-selected") === "true");
-    const to = rows.findIndex((r) => (r.textContent ?? "").includes(t));
-    return { at, to };
-  }, text);
-  if (keys.to < 0) throw new Error(`no row with ${text}`);
-  const delta = keys.to - keys.at;
-  await app.press(...Array.from({ length: Math.abs(delta) }, () => (delta > 0 ? "j" : "k")));
-  await expect(app.highlighted).toContainText(text);
 }
 
 test("VIEW-01 a thread's latest message sets its row", async ({ app, gmail }) => {
@@ -313,7 +298,7 @@ test("VIEW-06 All Mail lists every thread outside Trash and Spam, from Gmail too
   expect(all[0]?.params.maxResults).toBe("15");
   expect(all[0]?.params.includeSpamTrash).toBeUndefined();
 
-  await highlight(app, "Person 1");
+  await app.highlight("Person 1");
   await app.press("e");
   await app.settle();
   await expect(app.row("Person 1")).toHaveCount(1);
@@ -325,5 +310,5 @@ test("VIEW-06 All Mail lists every thread outside Trash and Spam, from Gmail too
   await app.press("Meta+k");
   await app.type("Go to All Mail");
   await app.press("Enter");
-  await expect(app.page.locator("div:has(> button[title='Search (/)'])")).toHaveText("All Mail");
+  await expect(app.viewTitle).toHaveText("All Mail");
 });
