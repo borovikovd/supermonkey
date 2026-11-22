@@ -117,7 +117,7 @@ async function flush(): Promise<void> {
     await invoke("submit", { actions });
     retryMs = 0;
   } catch (e) {
-    if (inTauri || e instanceof CommandFailed) {
+    if (e instanceof CommandFailed) {
       console.error(`submit of actions ${ns.join(", ")} refused; dropping them`, e);
       refuseUnsent(actions);
       return;
