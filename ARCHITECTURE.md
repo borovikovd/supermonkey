@@ -1,8 +1,8 @@
 # Supermonkey core: architecture
 
-The design of the Rust side, as rewritten from scratch on branch `rewrite`. It
-says how the code is split, how data and control flow, and the rules every module
-follows. SPEC.md says what the app does; this says how the Rust is built to do it.
+The design of the Rust side: how the code is split, how data and control flow,
+and the rules every module follows. SPEC.md says what the app does; this says how
+the Rust is built to do it.
 
 ## 1. Goals
 
@@ -17,15 +17,14 @@ follows. SPEC.md says what the app does; this says how the Rust is built to do i
   - Typed errors.
   - Cancellation-safe async.
   - Clear ownership.
-- **Same behavior.** The UI, the E2E suite, and the fake Gmail don't change, and
-  the rewrite is done when they pass.
 
-Non-goals: a new schema migration path (the rewrite starts from an empty database;
-accounts sign in again), Windows and Linux, and new features.
+Non-goals: schema migrations (a database of another version is moved aside and
+accounts sign in again, section 6), Windows and Linux.
 
-## 2. The frozen contract
+## 2. The contract
 
-The rewrite is judged against these, which it may not change without a decision:
+The UI and the core meet at these surfaces. Changing one is a decision, not a
+side effect:
 
 | Surface      | What is fixed                                                                                                                                                                                                                                                             | Checked by                                                                            |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
@@ -33,20 +32,20 @@ The rewrite is judged against these, which it may not change without a decision:
 | Commands     | `sm_ipc::Command`, one list of every command's name, arguments, and reply; the UI's `invoke` is typed from its bindings; the Tauri `dispatch` command and the web bridge run the same `bridge::dispatch`; error strings where the UI reads them                           | Compiler (exhaustive match, typed replies), bindings step, E2E through the web bridge |
 | Channel      | One `ChannelMessage { rev, ack, rejected, updates }` per commit, each refused action listed in or before the first message whose `ack` covers it; the update types `list`, `conversation`, `composer`, `account`, `app`; first loads as their own message (SPEC UI state) | E2E, and the writer/channel property test                                             |
 | Actions      | The 17 `Action` types (`reset` … `moreResults`) and their semantics                                                                                                                                                                                                       | E2E                                                                                   |
-| Test control | The 34 `/__test/*` endpoints `e2e/control.ts` calls, their JSON, and `settle()` meaning "idle"                                                                                                                                                                            | E2E                                                                                   |
-| Fake Gmail   | `crates/sm-fake-gmail`, unchanged                                                                                                                                                                                                                                         | E2E                                                                                   |
-| Packaging    | `tauri.conf.json`, capabilities, `build.rs` inputs (OAuth client file, quota env), binaries `supermonkey` and `e2e-server`, the `fake` feature                                                                                                                            | Release dry run                                                                       |
+| Test control | The 33 `/__test/*` endpoints `e2e/control.ts` calls, their JSON, and `settle()` meaning "idle"                                                                                                                                                                            | E2E                                                                                   |
+| Fake Gmail   | `crates/sm-fake-gmail`: the Gmail and OAuth endpoints the client calls, with faults and held replies                                                                                                                                                                      | E2E                                                                                   |
+| Packaging    | `tauri.conf.json`, capabilities, `build.rs` inputs (OAuth client file, quota env), binaries `supermonkey`, `e2e-server` and `perf-fixture`, the `fake` feature                                                                                                            | Release dry run                                                                       |
 
-Adding a command touches three places, and the build checks each: a line in the `commands!` list in `ipc/src/commands.rs` (name, arguments, reply, doc); an arm in `bridge::dispatch`, which the exhaustive match requires and whose `Replier` takes only the declared reply type; and a wrapper in `src/ipc/bridge.ts`, whose `invoke` the type check holds to the generated `Command` and `CommandReply`. Neither host lists commands, so the Tauri path the release app uses and the web bridge the E2E suite drives are one code path. App events (`AppEvent`) and settings (`Setting`) are typed the same way.
+Adding a command touches three places, and the build checks each: a line in the `commands!` list in `ipc/src/commands.rs` (name, arguments, reply); an arm in `bridge::dispatch`, which the exhaustive match requires and whose `Replier` takes only the declared reply type; and a wrapper in `src/ipc/bridge.ts`, whose `invoke` the type check holds to the generated `Command` and `CommandReply`. Neither host lists commands, so the Tauri path the release app uses and the web bridge the E2E suite drives are one code path. App events (`AppEvent`) and settings (`Setting`) are typed the same way.
 
 ## 3. Crates
 
-Crates live under `src-tauri/crates/` with an `sm-` prefix (`sm-domain`, `sm-mime`, `sm-gmail`, `sm-store`, `sm-ipc`, `sm-core`, `sm-bridge`, `sm-testkit`): a crate named `core` would shadow Rust's own. Below and in code paths they are written without the prefix.
+Crates live under `src-tauri/crates/` with an `sm-` prefix (`sm-domain`, `sm-mime`, `sm-gmail`, `sm-store`, `sm-ipc`, `sm-core`, `sm-bridge`, `sm-testkit`, `sm-fake-gmail`): a crate named `core` would shadow Rust's own. Below and in code paths they are written without the prefix.
 
 ```
                  app (src-tauri: Tauri shell, binary `supermonkey`)
                   │        │
-                  │     testkit (debug + `fake`: /__test server, e2e-server, demo, perf fixture)
+                  │     testkit (`fake` feature: /__test server, e2e-server, demo, perf fixture) ──▶ fake-gmail
                   │        │
                  bridge ───┘   command dispatch for Tauri and the debug web bridge
                   │
@@ -56,19 +55,20 @@ Crates live under `src-tauri/crates/` with an `sm-` prefix (`sm-domain`, `sm-mim
      └──────┴─────┴──────┴──▶ domain
 ```
 
-| Crate     | Job                                                                                                                                                                                                                                                                              | Depends on                                                                               | Never                                       |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------- |
-| `domain`  | Ids and units (newtypes); the small enums rules depend on (`View`, kinds, states); the mail model (thread, message, label, draft, split, pin); view membership and the latest-message rule; split routing; the search and rule query language; snooze times; addressing defaults | `serde`, `thiserror` (and, behind features, `rusqlite` and `ts-rs` for trait impls only) | I/O, async, SQL, HTTP, the system clock     |
-| `mime`    | Parse Gmail payloads, sanitize HTML, build outgoing MIME, quote blocks, `List-Unsubscribe`, address lists                                                                                                                                                                        | `ammonia`, `mail-builder`, `domain` (for `Addr`)                                         | I/O                                         |
-| `gmail`   | One HTTP client per account, OAuth (loopback + PKCE, refresh, revoke), the quota bucket and priority scheduler, the outcome taxonomy (SPEC Gmail errors), wire types                                                                                                             | `reqwest`, `oauth2`, `tokio`, `domain`                                                   | SQL, Tauri, app state                       |
-| `store`   | SQLite: schema, the writer actor, the read pool, typed repositories, `rev` stamping, change tracking, FTS                                                                                                                                                                        | `rusqlite`, `domain`                                                                     | HTTP, Tauri, async runtime types in its API |
-| `ipc`     | The contract: the command surface (`Command`, every command's name, arguments, and reply from one list) and every type exported to TypeScript (`src/bindings`), with serde and ts-rs derives                                                                                     | `domain` (`ts`), `serde`, `serde_json`, `ts-rs`                                          | Behavior                                    |
-| `core`    | The application: action handlers, queries, subscriptions and patches, the per-account workers (sync, fetch, ops, outbox, drafts, contacts), notifications, snooze timer, launch and shutdown. Takes `ipc` actions in and gives `ipc` read models and channel messages out        | `domain`, `mime`, `gmail`, `store`, `ipc`, `tokio`, `tokio-util`                         | Tauri, HTTP servers                         |
-| `bridge`  | `dispatch(name, args)`: parses an `ipc::Command` and runs it over `core`. The app's Tauri `dispatch` command and the debug web bridge (`axum`, behind a `web` feature) both call it                                                                                              | `core`, `ipc`, `axum` (optional)                                                         | Business rules                              |
-| `testkit` | The `/__test` control server, the `e2e-server` code, demo mode, the perf fixture (written through `store`), the recording `Platform`                                                                                                                                             | `core`, `bridge`, `ipc`, `store`, `sm-fake-gmail`                                        | Being linked into release builds            |
-| `app`     | Tauri setup, plugins, window, menu bar, and Dock, the Tauri `Platform`, and two Tauri commands: `connect` (the page's channel) and `dispatch` (every other command, through `bridge::dispatch`)                                                                                  | `bridge`, `core`, `ipc`, `tauri*`                                                        | Logic beyond wiring                         |
+| Crate        | Job                                                                                                                                                                                                                                                                              | Depends on                                                                               | Never                                       |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------- |
+| `domain`     | Ids and units (newtypes); the small enums rules depend on (`View`, kinds, states); the mail model (thread, message, label, draft, split, pin); view membership and the latest-message rule; split routing; the search and rule query language; snooze times; addressing defaults | `serde`, `thiserror` (and, behind features, `rusqlite` and `ts-rs` for trait impls only) | I/O, async, SQL, HTTP, the system clock     |
+| `mime`       | Parse Gmail payloads, sanitize HTML, build outgoing MIME, quote blocks, `List-Unsubscribe`, address lists                                                                                                                                                                        | `ammonia`, `mail-builder`, `encoding_rs`, `domain` (for `Addr`)                          | I/O                                         |
+| `gmail`      | One HTTP client per account, OAuth (loopback + PKCE, refresh, revoke), the quota bucket and priority scheduler, the outcome taxonomy (SPEC Gmail errors), wire types                                                                                                             | `reqwest`, `oauth2`, `tokio`, `domain`                                                   | SQL, Tauri, app state                       |
+| `store`      | SQLite: schema, the writer actor, the read pool, typed repositories, `rev` stamping, change tracking, FTS                                                                                                                                                                        | `rusqlite`, `domain`                                                                     | HTTP, Tauri, async runtime types in its API |
+| `ipc`        | The contract: the command surface (`Command`, every command's name, arguments, and reply from one list) and every type exported to TypeScript (`src/bindings`), with serde and ts-rs derives                                                                                     | `domain` (`ts`), `serde`, `serde_json`, `ts-rs`                                          | Behavior                                    |
+| `core`       | The application: action handlers, queries, subscriptions and patches, the per-account workers (sync, fetch, ops, outbox, drafts, contacts), notifications, snooze timer, launch and shutdown. Takes `ipc` actions in and gives `ipc` read models and channel messages out        | `domain`, `mime`, `gmail`, `store`, `ipc`, `tokio`, `tokio-util`, `xattr` (quarantine)   | Tauri, HTTP servers                         |
+| `bridge`     | `dispatch(name, args)`: parses an `ipc::Command` and runs it over `core`. The app's Tauri `dispatch` command and the debug web bridge (`axum`, behind a `web` feature) both call it                                                                                              | `core`, `ipc`, `axum` (optional)                                                         | Business rules                              |
+| `testkit`    | The `/__test` control server, the `e2e-server` code, demo mode, the perf fixture (written through `store`), the recording `Platform`                                                                                                                                             | `core`, `bridge`, `ipc`, `gmail`, `store`, `fake-gmail`, `axum`, `reqwest`               | Being linked into release builds            |
+| `fake-gmail` | The fake Gmail and Google OAuth server behind the E2E suite and demo mode: per-user mailboxes, faults, held replies, and a request log                                                                                                                                           | `axum`, `hyper`, `tokio`; no workspace crate                                             | Being linked into release builds            |
+| `app`        | Tauri setup, plugins, window, menu bar, and Dock, the Tauri `Platform`, and two Tauri commands: `connect` (the page's channel) and `dispatch` (every other command, through `bridge::dispatch`)                                                                                  | `bridge`, `core`, `ipc`, `gmail`, `tauri*`; `testkit` with the `fake` feature            | Logic beyond wiring                         |
 
-`rusqlite` is used only in `store` (and in `domain`'s `sqlite` impls), `reqwest` only in `gmail` (the one-click unsubscribe POST goes through `gmail`'s HTTP client too), and `tauri` only in `app`. A workspace test (`tests/layers.rs`, reading `cargo metadata`) fails on any other dependency edge, so the layering can't drift.
+`rusqlite` is used only in `store` (and in `domain`'s `sqlite` impls), `tauri` only in `app`, and `reqwest` and `axum` only in `gmail` and `bridge` respectively among the crates a release links (the one-click unsubscribe POST goes through `gmail`'s HTTP client too); `testkit` and `fake-gmail` may use them for tests. A workspace test (`tests/layers.rs`, reading `cargo metadata`) fails on any other crate edge or any other user of those four, so the layering can't drift.
 
 ## 4. Runtime
 
@@ -115,39 +115,38 @@ UI ──submit(actions)──▶ bridge::dispatch ──▶ core::Actions::subm
                         results come back as writer jobs (priority: sync) → same commit path
 ```
 
-An action handler is a plain function `fn(&mut WriteTx, &Action) -> Result<(), ActionError>`. It reads and writes through repository methods, decides with `domain` rules, and records effects on the transaction. It never sees SQL or a channel.
+An action handler is a plain function over an `ActionCtx` (the transaction and the writer state) returning `Result<(), ActionError>`. It reads and writes through repository methods, decides with `domain` rules, and records effects on the writer state. It never sees SQL or a channel.
 
 A refused action is reported to the page, not stored: the writer state collects each `Rejection` and the commit's first message carries them. If the whole batch rolls back, every action of it is refused, and the next message says so, never later than the one whose `ack` covers them. So the page settles each action by its number: refused when a message lists it, applied once `ack` covers it unlisted. The UI's `act(action, settled)` hands the caller that outcome, with the mirror as it stood when Rust applied the action; a refusal no caller waits for shows as a toast. Notices stay for what Gmail decides later: a rejected op or send, a held undo.
 
 ### 5.2 A subscription
 
-`subscribe` is an action, so it is ordered with the others. The writer computes the first load from the committed snapshot and emits it as its own message. The subscription registry lives on the writer thread, so no lock guards it. After each commit, the registry asks which subscriptions the commit's `Changes` can affect and builds patches only for those. The store's `Changes` say only what was written: thread, message, draft, and outbox ids, and which tables of which account (`Table`). Core alone maps that to read models (`subs/affects.rs`): each read model lists the tables it reads next to the code that builds it (`APP_READS` and `SUMMARY_READS` in `views/account.rs`, the list and search ones in `subs/lists.rs`), and conversations and composers go by the thread and draft ids. A new summary field or view is a change to core only. The patch builders are pure functions over read models: old ids plus new ids give moves, and changed rows are listed whether or not they are in the window.
+`subscribe` is an action, so it is ordered with the others. The writer computes the first load from the committed snapshot and emits it as its own message. The subscription registry lives on the writer thread, so no lock guards it. After each commit, the registry asks which subscriptions the commit's `Changes` can affect and builds patches only for those. The store's `Changes` say only what was written: thread and draft ids, and which tables of which account (`Table`). Core alone maps that to read models (`subs/affects.rs`): each read model lists the tables it reads next to the code that builds it (`APP_READS` and `SUMMARY_READS` in `views/account.rs`, the list and search ones in `subs/lists.rs`), and conversations and composers go by the thread and draft ids. A new summary field or view is a change to core only. The patch builders are pure functions over read models: old ids plus new ids give moves, and changed rows are listed whether or not they are in the window.
 
 ### 5.3 Sync
 
-A worker fetches from Gmail, parses and sanitizes the result off the writer thread (`mime`), and sends a `SyncWrite` job: a typed value such as `StoreThread(ParsedThread)` or `ApplyHistory(..)`. The writer applies it in a small transaction, so sync never holds the writer for long and UI actions jump the queue.
+A worker fetches from Gmail, parses and sanitizes the result off the writer thread (`mime`), and sends the writer a job at `Priority::Sync` that stores it (`ingest::store_thread`, the poller's history and listing writes). Each runs in a small transaction, so sync never holds the writer for long and UI actions jump the queue.
 
 ## 6. Store
 
 - **Schema:** one `schema.sql`, created fresh. A `user_version` pragma guards it. A file of another version, or one that is not a database, is moved aside and a new one created; there is no migration code. Any other error opening it fails the launch and leaves the file alone (SPEC Data).
-- **`Writer`:** the actor handle. `call(priority, job) -> impl Future<Output = Result<T, StoreError>>`. Jobs are closures `FnOnce(&mut WriteTx) -> Result<T>`, run in order of priority, then arrival.
-- **`WriteTx`:** wraps the transaction. It is the only way to write, and has no raw `execute`. Repositories hang off it: `tx.threads()`, `tx.messages()`, `tx.drafts()`, `tx.outbox()`, `tx.ops()`, `tx.labels()`, `tx.accounts()`, `tx.splits()`, `tx.contacts()`, `tx.settings()`.
+- **`Writer<S>`:** the actor handle, generic over the state the writer thread keeps beside the connection (core's subscription registry and pending effects). `call(priority, job)` returns a future of the job's result. Jobs are closures `FnOnce(&mut WriteTx, &mut S) -> Result<T, E>`, run in order of priority (`Ui`, `Sync`, `Background`), then arrival.
+- **`WriteTx`:** wraps the transaction. It is the only way to write, and has no raw `execute`. Repositories hang off it: `tx.meta()`, `tx.accounts()`, `tx.labels()`, `tx.threads()`, `tx.messages()`, `tx.drafts()`, `tx.outbox()`, `tx.ops()`, `tx.undo()`, `tx.notices()`, `tx.splits()`, `tx.contacts()`, `tx.settings()`.
   - Every write method stamps `rev` and records in the transaction's `Changes` the rows and the account's tables it wrote, never which read models that makes stale. Change tracking is a property of the write, not something callers remember to do.
   - Writing a message re-derives its thread's labels and stamps the thread, by the domain rule.
-  - Effects (`tx.effect(Effect::Ops(account))`) are collected on the transaction and released only after commit.
+  - Effects (`state.effect(Effect::Ops(account))`) are collected on core's writer state and released only after commit; the store knows nothing of them.
 - **Reads:** `ReadPool::with(|r: &ReadTx| ..)`. `ReadTx` exposes the same read-only repository methods as `WriteTx`, which returns domain types or read models (`ListRow`-like core types), never `rusqlite::Row`.
 - **SQL style:**
-  - `prepare_cached`;
   - named columns;
   - each statement next to the method that uses it, in that repository's module;
   - no SQL strings built at runtime except the FTS5 query, which `domain` builds and `store` binds.
 
 ## 7. Gmail
 
-- **`Gmail`:** one client per account: base URL, shared `reqwest::Client`, and `Arc<Tokens>`. One method per endpoint, returning `Result<T, GmailError>`. A 401 refreshes once inside.
+- **`Gmail`:** one client per account: the API base URL, the shared HTTP client, `Arc<Tokens>`, and the account's scheduler slot. One method per endpoint, returning `Result<T, GmailError>`. A 401 refreshes once inside.
 - **`Outcome`:** the SPEC's taxonomy, one variant per row of the Gmail errors table (offline, no response, unauthorized, invalid grant, rate limited, server error, not found, conflict, rejected with Google's reason). Callers match on it; nothing parses error strings.
-- **`Scheduler`:** the quota bucket (1,000 capacity, 4,800 per minute refill, background cap) and at most 8 requests at once per account, by priority 1 to 6. `acquire(Priority, cost)` gives the permit a request holds, and is the only way to call Gmail.
-- **`Retry`:** one policy type (back-off with jitter and `Retry-After`) used by the workers, with the per-call exceptions SPEC names (`drafts.create`, `drafts.send`).
+- **`Scheduler`:** per account, the quota bucket (`QuotaConfig`: 1,000 capacity, 4,800 per minute refill, background spending capped at 4,000 per minute and kept off the last 500) and at most 8 requests at once, by priority 1 to 6. `acquire(Priority, cost)` gives the permit a request holds, and is the only way to call Gmail.
+- **`Backoff`:** one policy (doubling to a minute, with jitter, or Gmail's `Retry-After`) used by the workers, with the per-call exceptions SPEC names (`drafts.create`, `drafts.send`).
 - **OAuth:** the loopback server, PKCE, state check, token refresh shortly before expiry, and revoke. Tokens persist in `TokenFile`, the 0600 file; tests and demo point it at a temporary folder.
 - **One-click unsubscribe:** the `POST` goes through the same `reqwest::Client`, to `https` only and following no redirect. Debug builds also allow loopback `http`, where the E2E server stands in for a list.
 
@@ -159,11 +158,11 @@ A worker fetches from Gmail, parses and sanitizes the result off the writer thre
 
 | Handle      | Does                                                                             |
 | ----------- | -------------------------------------------------------------------------------- |
-| `Actions`   | `submit`, `last_ack`; turns numbered actions into writer jobs                    |
-| `Queries`   | Window rows, bodies, autocomplete, snooze options, sender threads                |
-| `Accounts`  | Add account (sign-in), sign in again, remove; starts and stops workers           |
-| `Mail`      | Attachments, open URL, unsubscribe, block and blocked senders                    |
-| `Lifecycle` | Launch (wake snoozes, settle the outbox, untouched drafts), focus and wake, quit |
+| `Actions`   | `submit`: turns numbered actions into writer jobs                                |
+| `Queries`   | Window rows, bodies, autocomplete, snooze options, sender threads, Gmail ids     |
+| `Accounts`  | Add an account (sign-in), sign in again, poll and retry now; starts workers      |
+| `Mail`      | Open and add attachments, open URL, unsubscribe, block, blocked senders, unblock |
+| `Lifecycle` | Connect, launch (wake snoozes, settle the outbox, untouched drafts), focus, quit |
 
 `Lifecycle::launch` queues one writer job before any page can connect: due snoozes wake, the outbox settles, and untouched drafts go. Then the snooze timer and the account workers start. `Lifecycle::focus` polls every account and returns the notification a focus counts as a click on, which the shell opens.
 
@@ -171,7 +170,7 @@ Each handle holds only the `Arc`s it needs. A handle is a struct with methods, n
 
 ### 8.2 Account worker
 
-`AccountWorker::new(parts, grant)` builds a worker from its `WorkerParts` (its Gmail client on the sign-in's grant, its task group, the account's op lane), and `start(replaced)` starts the task group of section 4 once the worker it replaces has stopped. Its tasks share an `AccountCtx`: the account id, its `Gmail`, its scheduler slot, its `Kicks` (`tokio::sync::Notify` for ops, outbox, poll, and online), and the writer handle. Tasks talk to each other only through kicks and the database.
+`AccountWorker::new(parts, grant)` builds a worker from its `WorkerParts` (its Gmail client on the sign-in's grant, its task group, the account's op lane), and `start(replaced)` starts the task group of section 4 once the worker it replaces has stopped. Its tasks share an `AccountCtx`: the account id, its `Gmail`, its fetch queue, a `Kick` each for the poller, the two ops runners, and the outbox, its op lane, its health, and the shared worker dependencies (the writer, read pool, clock, network). Removing an account is an action; its commit's `AccountRemoved` effect stops the worker. Tasks talk to each other only through kicks and the database.
 
 ### 8.3 Ports
 
@@ -199,20 +198,19 @@ Every task, timer, kick, and queued job counts in one `Activity`, so the E2E ser
 
 ## 10. Testing
 
-- **E2E** (unchanged) is the main judge, through `testkit`'s `e2e-server`.
-- **Pure unit tests**, ported from the old code with the same cases (the kept unit tests in e2e/COVERAGE.md):
-  - `domain`: query language, splits, snooze;
-  - `mime`: sanitize, no-panic fuzz, unsubscribe header;
-  - `gmail`: scheduler, OAuth.
-- **Core tests** (`sm-core/src/tests`) for what E2E can't observe: a started `App` on a temporary database.
+- **E2E** is the main judge, through `testkit`'s `e2e-server` and the fake Gmail.
+- **Unit tests** only for complex logic the E2E suite can't reach; e2e/COVERAGE.md ("Kept unit and property tests") lists each file and what it covers:
+  - `domain`: the query language, the mail model and split routing, snooze times, contacts;
+  - `mime`: sanitizing, payload parsing, a no-panic fuzz, `List-Unsubscribe`, outgoing headers;
+  - `gmail`: the scheduler, OAuth, one-click unsubscribe;
+  - `store`: the writer, opening a database;
+  - `core`: the outbox and draft state machines, list diffs, and, in `sm-core/src/tests`, a started `App` on a temporary database (the writer/channel property test, the activity tracking `settle()` relies on).
 - **Perf bench:** the ignored `perf` tests in `sm-core` time local search and autocomplete per keystroke on the perf fixture (`perf-fixture`, fake feature) against SPEC Performance. The UI budgets so far were measured in Chrome through the web bridge on a development Mac, not on an M1 MacBook Air in WKWebView.
-- **Property test:** the writer/channel invariants (`store` + `core`), replacing `tests/writer_channel.rs`.
-- **Layering test** (section 3), and a test that no crate but `store` names `rusqlite`.
-- **Mutation probes** for every new guard, per AGENTS.md.
+- **Layering test** (section 3), and `tests/menu.rs`: the app's Quit replaces the predefined one.
 
 ## 11. Conventions
 
-- **Modules:** one concept per file. `mod.rs` only re-exports and documents. Items are `pub(crate)` unless another crate needs them.
+- **Modules:** one concept per file. `mod.rs` only declares and re-exports. Items are `pub(crate)` unless another crate needs them.
 - **Names:** types are nouns (`OutboxRunner`), functions are verbs (`apply_history`), no `Manager`, `Helper`, or `Util`. Booleans read as questions (`is_list`, `has_body`).
 - **Ownership:** per AGENTS.md: borrow to read, take by value to keep, `Arc<T>` written out, and `&Arc<T>` only to clone into a task.
 - **Async:**
@@ -223,28 +221,17 @@ Every task, timer, kick, and queued job counts in one `Activity`, so the E2E ser
 - **Ids and units** are newtypes (`AccountId`, `ThreadId`, `GmailThreadId`, `Millis`, `Rev`, `ActionNo`). They convert to raw values only at SQL, serde, and IPC.
 - **No comments.** Code carries no comments and no doc comments (`missing_docs` is off); names say what a thing is. Only lint directives remain, with their reason inline.
 
-## 12. Order of work
-
-The rewrite landed in slices, each green on its own E2E specs before the next started:
-
-1. **Skeleton:** `domain` ids, the `store` schema and writer, subscriptions and the channel, the `ipc` types, the `bridge` with its web bridge, a minimal `testkit`, and the `app` shell.
-2. **Accounts, sync, reading.**
-3. **Actions:** triage, undo, labels, offline.
-4. **Compose:** replies, new mail, drafts, undo send, recipients, attachments.
-5. **The rest:** search, splits, snooze, notifications, settings, palette, unsubscribe and block.
-6. **Finish:** demo mode, the perf fixture and bench, and the full gate (`vp run gate`), which is now the only gate.
-
-## 13. Decisions from review
+## 12. Decisions
 
 1. **The debug web bridge lives in `bridge`**, behind a `web` feature, so `testkit` and the debug `app` share one dispatch. Release builds leave the feature off.
-2. **Logging uses `tracing`**, with spans around Gmail calls and writer jobs.
-3. **The `e2e-server` binary stays in the root package**, as a thin `main` over `testkit`, so `e2e/global-setup.ts` builds it as before.
-4. **`ipc` sits below `core`** and holds only the contract types, so `core` takes and returns them directly instead of mirroring 47 types with conversions. `domain`'s `sqlite` and `ts` features add trait impls for its newtypes and small enums, since the orphan rule keeps those impls out of `store` and `ipc`.
-5. **Starting and launching are two steps.** `App::start` opens the database and the read pool and starts the writer; nothing talks to Gmail until `Lifecycle::launch`. The E2E server seeds accounts between the two, as the old server did before its engine ran. The Gmail endpoints, OAuth client, and request budget are part of `core::Config`.
+2. **Logging uses `tracing`**, with a span around each Gmail call.
+3. **The `e2e-server` and `perf-fixture` binaries live in the root package**, as thin `main`s over `testkit`, so `e2e/global-setup.ts` builds the server with one `cargo build`.
+4. **`ipc` sits below `core`** and holds only the contract types, so `core` takes and returns them directly instead of mirroring them with conversions. `domain`'s `sqlite` and `ts` features add trait impls for its newtypes and small enums, since the orphan rule keeps those impls out of `store` and `ipc`.
+5. **Starting and launching are two steps.** `App::start` opens the database and the read pool and starts the writer; nothing talks to Gmail until `Lifecycle::launch`. The E2E server seeds accounts between the two. The Gmail base URL, OAuth client, and quota are `core::Config`'s `GmailConfig`.
 
-## 14. Running and building
+## 13. Running and building
 
 - **Debug web bridge:** debug builds started with `SUPERMONKEY_WEB_BRIDGE=1` serve the command surface on `127.0.0.1:1430`, so the UI can run in a browser against the real core for automated checks. Release builds leave the `web` feature off and never start it.
-- **Demo mode:** `vp run demo` is a debug build with `--features fake` and `SUPERMONKEY_FAKE=1`. It runs the in-process fake Gmail with demo mail and two accounts, on a data folder in the system's temporary directory that is emptied at each launch.
+- **Demo mode:** `vp run demo` is a debug build with `--features fake`, `SUPERMONKEY_FAKE=1`, and the web bridge on. It runs the in-process fake Gmail with demo mail and two accounts, on a data folder in the system's temporary directory that is emptied at each launch.
 - **Attachments** are picked with the webview's file input and copied into the draft's folder by the `add_attachment` command, so no dialog plugin is needed.
 - **App icon:** `src-tauri/icons/app-icon.svg` is the source. `vp run tauri icon src-tauri/icons/app-icon.svg` makes every size; delete the `android` and `ios` folders it adds.
