@@ -29,8 +29,6 @@ pub enum StoreError {
     WriterStopped,
     #[error("a writer job panicked: {0}")]
     JobPanicked(String),
-    #[error("a writer job can't wait for another writer job")]
-    Reentrant,
 }
 
 impl StoreError {

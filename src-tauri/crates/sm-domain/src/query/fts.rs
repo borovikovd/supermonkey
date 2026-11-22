@@ -1,7 +1,5 @@
 use super::{Expr, Field, Query};
 
-pub const FTS_COLUMNS: [&str; 5] = ["from_text", "to_text", "cc_text", "subject", "body"];
-
 const ANY_COLUMNS: &str = "{from_text subject body}";
 
 impl Query {

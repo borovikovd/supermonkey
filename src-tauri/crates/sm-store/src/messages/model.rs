@@ -1,7 +1,7 @@
 use rusqlite::Row;
 use sm_domain::{
-    AccountId, Addr, AttachmentId, DraftId, GmailMessageId, LabelSet, MessageFacts, MessageId,
-    Millis, Rev, ThreadId,
+    AccountId, Addr, AttachmentId, DraftId, GmailAttachmentId, GmailMessageId, LabelSet,
+    MessageFacts, MessageId, Millis, Rev, ThreadId,
 };
 
 use crate::db::json_column;
@@ -41,7 +41,7 @@ pub struct NewAttachment {
     pub filename: String,
     pub mime_type: String,
     pub size: i64,
-    pub gmail_attachment_id: Option<String>,
+    pub gmail_attachment_id: Option<GmailAttachmentId>,
     pub content_id: Option<String>,
     pub is_inline: bool,
 }
@@ -112,7 +112,7 @@ pub struct AttachmentRecord {
     pub filename: String,
     pub mime_type: String,
     pub size: i64,
-    pub gmail_attachment_id: Option<String>,
+    pub gmail_attachment_id: Option<GmailAttachmentId>,
     pub content_id: Option<String>,
     pub is_inline: bool,
     pub local_path: Option<String>,

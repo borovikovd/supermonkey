@@ -1,9 +1,8 @@
-use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{Row, named_params};
 use serde::{Deserialize, Serialize};
 use sm_domain::{
-    AccountId, Addr, AttachmentId, DraftContent, DraftContentRef, DraftId, DraftKind, GmailDraftId,
-    GmailMessageId, GmailThreadId, MessageId, Millis, Rev, ThreadId,
+    AccountId, Addr, AttachmentId, DraftContent, DraftContentRef, DraftId, DraftKind, DraftWait,
+    GmailDraftId, GmailMessageId, GmailThreadId, MessageId, Millis, Rev, ThreadId,
 };
 
 use crate::StoreError;
@@ -20,37 +19,6 @@ pub struct DraftAttachment {
     pub source: Option<AttachmentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub added: Option<Rev>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DraftWait {
-    Parts,
-    TargetBody,
-}
-
-impl DraftWait {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Parts => "parts",
-            Self::TargetBody => "target_body",
-        }
-    }
-}
-
-impl ToSql for DraftWait {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::from(self.as_str()))
-    }
-}
-
-impl FromSql for DraftWait {
-    fn column_result(v: ValueRef<'_>) -> FromSqlResult<Self> {
-        let text = v.as_str()?;
-        [Self::Parts, Self::TargetBody]
-            .into_iter()
-            .find(|w| w.as_str() == text)
-            .ok_or(FromSqlError::InvalidType)
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -73,8 +73,13 @@ pub(crate) async fn ensure(
     {
         return Ok(on_disk);
     }
-    let gmail_id = record.gmail_attachment_id.map(GmailAttachmentId::from);
-    let bytes = download(ctx, &message_gmail_id, gmail_id, &record.part_id).await?;
+    let bytes = download(
+        ctx,
+        &message_gmail_id,
+        record.gmail_attachment_id,
+        &record.part_id,
+    )
+    .await?;
     if ctx.tasks.token().is_cancelled() {
         return Err(DownloadError::Stopped);
     }

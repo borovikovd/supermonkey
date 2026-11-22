@@ -17,7 +17,7 @@ impl Activity {
         Arc::default()
     }
 
-    pub fn busy(self: &Arc<Self>, label: &'static str) -> Busy {
+    pub(crate) fn busy(self: &Arc<Self>, label: &'static str) -> Busy {
         self.add(label);
         Busy {
             activity: Arc::clone(self),
@@ -25,7 +25,7 @@ impl Activity {
         }
     }
 
-    pub fn track<T>(self: &Arc<Self>, label: &'static str, value: T) -> Tracked<T> {
+    pub(crate) fn track<T>(self: &Arc<Self>, label: &'static str, value: T) -> Tracked<T> {
         Tracked {
             value,
             busy: self.busy(label),
@@ -77,17 +77,17 @@ impl Drop for Busy {
 }
 
 #[derive(Debug)]
-pub struct Tracked<T> {
+pub(crate) struct Tracked<T> {
     value: T,
     busy: Busy,
 }
 
 impl<T> Tracked<T> {
-    pub const fn get(&self) -> &T {
+    pub(crate) const fn get(&self) -> &T {
         &self.value
     }
 
-    pub fn into_parts(self) -> (T, Busy) {
+    pub(crate) fn into_parts(self) -> (T, Busy) {
         (self.value, self.busy)
     }
 }

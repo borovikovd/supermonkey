@@ -8,4 +8,5 @@ pub(crate) use kick::Kick;
 pub(crate) use signal::Signal;
 pub(crate) use tasks::parked;
 pub use tasks::{Tasks, busy_scope, waiting_on_person};
-pub use tracker::{Activity, Busy, Tracked};
+pub(crate) use tracker::Tracked;
+pub use tracker::{Activity, Busy};

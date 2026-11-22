@@ -26,8 +26,7 @@ pub use accounts::{AccountReads, AccountRecord, AccountWrites};
 pub use changes::{Changes, Commit, Table};
 pub use contacts::{ContactReads, ContactRecord, ContactWrites, Sighting};
 pub use drafts::{
-    Draft, DraftAttachment, DraftLifecycle, DraftReads, DraftRecord, DraftStage, DraftWait,
-    DraftWrites,
+    Draft, DraftAttachment, DraftLifecycle, DraftReads, DraftRecord, DraftStage, DraftWrites,
 };
 pub use error::StoreError;
 pub use labels::{GmailLabel, LabelReads, LabelRecord, LabelWrites};
@@ -38,12 +37,13 @@ pub use messages::{
 pub use meta::{MetaReads, MetaWrites};
 pub use notices::{NewNotice, NoticeReads, NoticeRecord, NoticeWrites};
 pub use open::SCHEMA_VERSION;
-pub use ops::{NewOp, OpId, OpKind, OpQueue, OpReads, OpRecord, OpWrites};
+pub use ops::{NewOp, OpReads, OpRecord, OpWrites};
 pub use outbox::{NewOutbox, Outbox, OutboxReads, OutboxRecord, OutboxWrites};
 pub use pool::ReadPool;
 pub use reply::Pending;
 pub use search::{SEARCH_LIMIT, SearchReads};
 pub use settings::{SettingReads, SettingWrites};
+pub use sm_domain::{DraftWait, OpId, OpKind, OpQueue};
 pub use splits::{SplitEdit, SplitReads, SplitRecord, SplitWrites};
 pub use threads::{
     ConversationMessage, ConversationRows, FetchedThread, ListedThread, StoredThread, ThreadReads,

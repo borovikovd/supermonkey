@@ -1,110 +1,11 @@
-use std::fmt;
-use std::str::FromStr;
-
-use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::{Row, named_params};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use sm_domain::{AccountId, ActionNo, DraftId, GmailDraftId, UnknownKind};
+use sm_domain::{AccountId, ActionNo, DraftId, GmailDraftId, OpId, OpKind, OpQueue};
 
 use crate::db::{Db, to_json};
 use crate::tx::WriteTx;
 use crate::{StoreError, Table};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OpId(pub i64);
-
-impl fmt::Display for OpId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl ToSql for OpId {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        self.0.to_sql()
-    }
-}
-
-impl FromSql for OpId {
-    fn column_result(v: ValueRef<'_>) -> FromSqlResult<Self> {
-        i64::column_result(v).map(Self)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum OpKind {
-    Modify,
-    LabelCreate,
-    DraftUpsert,
-    DraftDelete,
-    TrashMessage,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OpQueue {
-    Mail,
-    Drafts,
-}
-
-impl OpQueue {
-    pub const ALL: [Self; 2] = [Self::Mail, Self::Drafts];
-}
-
-impl OpKind {
-    #[must_use]
-    pub const fn queue(self) -> OpQueue {
-        match self {
-            Self::Modify | Self::LabelCreate | Self::TrashMessage => OpQueue::Mail,
-            Self::DraftUpsert | Self::DraftDelete => OpQueue::Drafts,
-        }
-    }
-
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Modify => "modify",
-            Self::LabelCreate => "label_create",
-            Self::DraftUpsert => "draft_upsert",
-            Self::DraftDelete => "draft_delete",
-            Self::TrashMessage => "trash_message",
-        }
-    }
-}
-
-impl FromStr for OpKind {
-    type Err = UnknownKind;
-
-    fn from_str(s: &str) -> Result<Self, UnknownKind> {
-        [
-            Self::Modify,
-            Self::LabelCreate,
-            Self::DraftUpsert,
-            Self::DraftDelete,
-            Self::TrashMessage,
-        ]
-        .into_iter()
-        .find(|k| k.as_str() == s)
-        .ok_or_else(|| UnknownKind {
-            kind: "OpKind",
-            value: s.to_owned(),
-        })
-    }
-}
-
-impl ToSql for OpKind {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::from(self.as_str()))
-    }
-}
-
-impl FromSql for OpKind {
-    fn column_result(v: ValueRef<'_>) -> FromSqlResult<Self> {
-        v.as_str()?
-            .parse()
-            .map_err(|e| FromSqlError::Other(Box::new(e)))
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewOp<'a, P> {

@@ -24,7 +24,7 @@ impl MessageFacts {
     }
 
     #[must_use]
-    pub fn is_trashed_or_spam(&self) -> bool {
+    fn is_trashed_or_spam(&self) -> bool {
         self.has(SystemLabel::Trash) || self.has(SystemLabel::Spam)
     }
 

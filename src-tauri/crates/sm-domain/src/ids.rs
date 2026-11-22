@@ -135,6 +135,7 @@ int_id!(
     AttachmentId,
     Rev,
     ActionNo,
+    OpId,
 );
 
 impl AccountId {
@@ -155,6 +156,9 @@ str_id!(
     GmailThreadId,
     GmailMessageId,
     GmailDraftId,
+    GmailAttachmentId,
+    PageToken,
+    FilterId,
 );
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]

@@ -107,3 +107,38 @@ impl SettingKey {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OpKind {
+    Modify,
+    LabelCreate,
+    DraftUpsert,
+    DraftDelete,
+    TrashMessage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpQueue {
+    Mail,
+    Drafts,
+}
+
+impl OpQueue {
+    pub const ALL: [Self; 2] = [Self::Mail, Self::Drafts];
+}
+
+impl OpKind {
+    #[must_use]
+    pub const fn queue(self) -> OpQueue {
+        match self {
+            Self::Modify | Self::LabelCreate | Self::TrashMessage => OpQueue::Mail,
+            Self::DraftUpsert | Self::DraftDelete => OpQueue::Drafts,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DraftWait {
+    Parts,
+    TargetBody,
+}

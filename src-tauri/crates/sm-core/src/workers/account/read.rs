@@ -198,7 +198,7 @@ fn new_attachment(part: &Part) -> NewAttachment {
         filename: part.filename.clone(),
         mime_type: part.mime_type.clone(),
         size: i64::try_from(part.size).unwrap_or(i64::MAX),
-        gmail_attachment_id: part.attachment_id.clone(),
+        gmail_attachment_id: part.attachment_id.clone().map(GmailAttachmentId::from),
         content_id: part.content_id.clone(),
         is_inline: part.is_inline,
     }

@@ -4,7 +4,6 @@ use std::fmt;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
 use std::sync::Arc;
-use std::thread::ThreadId;
 
 use parking_lot::{Condvar, Mutex};
 use rusqlite::{Connection, Transaction, TransactionBehavior};
@@ -79,7 +78,6 @@ impl<S> Shared<S> {
 
 struct Handle<S> {
     shared: Arc<Shared<S>>,
-    thread: ThreadId,
 }
 
 impl<S> Drop for Handle<S> {
@@ -94,9 +92,7 @@ pub struct Writer<S> {
 
 impl<S> fmt::Debug for Writer<S> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Writer")
-            .field("thread", &self.handle.thread)
-            .finish_non_exhaustive()
+        f.debug_struct("Writer").finish_non_exhaustive()
     }
 }
 
@@ -132,7 +128,7 @@ impl<S: Send + 'static> Writer<S> {
             on_rollback: Box::new(on_rollback),
         };
         let thread_shared = Arc::clone(&shared);
-        let thread = std::thread::Builder::new()
+        std::thread::Builder::new()
             .name("sm-writer".to_owned())
             .spawn(move || run(&thread_shared, runner))
             .map_err(|source| StoreError::Io {
@@ -141,10 +137,7 @@ impl<S: Send + 'static> Writer<S> {
                 source,
             })?;
         Ok(Self {
-            handle: Arc::new(Handle {
-                shared,
-                thread: thread.thread().id(),
-            }),
+            handle: Arc::new(Handle { shared }),
         })
     }
 
@@ -160,18 +153,6 @@ impl<S: Send + 'static> Writer<S> {
         }));
         drop(self.handle.shared.push(priority, entry));
         Pending::new(rx)
-    }
-
-    pub fn call_blocking<T, E, F>(&self, priority: Priority, job: F) -> Result<T, E>
-    where
-        T: Send + 'static,
-        E: From<StoreError> + Send + 'static,
-        F: FnOnce(&mut WriteTx<'_>, &mut S) -> Result<T, E> + Send + 'static,
-    {
-        if std::thread::current().id() == self.handle.thread {
-            return Err(StoreError::Reentrant.into());
-        }
-        self.call(priority, job).wait()
     }
 
     pub fn stop(&self) -> Pending<(), StoreError> {
@@ -360,36 +341,41 @@ mod tests {
     fn a_failed_commit_rolls_back_and_its_first_load_goes_with_the_next_commit() {
         let dir = tempfile::tempdir().unwrap();
         let writer = start(&dir);
-        let failed: Result<(), StoreError> = writer.call_blocking(Priority::Ui, |tx, registry| {
-            tx.accounts().create("a@example.com", "A")?;
-            registry.waiting.push("app");
-            tx.fail_commit();
-            Ok(())
-        });
+        let failed: Result<(), StoreError> = writer
+            .call(Priority::Ui, |tx, registry| {
+                tx.accounts().create("a@example.com", "A")?;
+                registry.waiting.push("app");
+                tx.fail_commit();
+                Ok(())
+            })
+            .wait();
         assert!(
             matches!(&failed, Err(StoreError::Sqlite { what, .. }) if what.contains("commit")),
             "{failed:?}"
         );
         let (accounts, rollbacks, sent) = writer
-            .call_blocking(Priority::Ui, |tx, registry| {
+            .call(Priority::Ui, |tx, registry| {
                 Ok::<_, StoreError>((
                     tx.read().accounts().all()?.len(),
                     registry.rollbacks,
                     registry.sent.clone(),
                 ))
             })
+            .wait()
             .unwrap();
         assert_eq!(accounts, 0, "the failed commit's write is gone");
         assert_eq!(rollbacks, 1);
         assert!(sent.is_empty(), "nothing went out with the failed commit");
         let sent = writer
-            .call_blocking(Priority::Ui, |_, registry| {
+            .call(Priority::Ui, |_, registry| {
                 Ok::<_, StoreError>(registry.sent.clone())
             })
+            .wait()
             .unwrap();
         assert_eq!(sent, ["app"], "sent once, after the failure");
         let rev = writer
-            .call_blocking(Priority::Ui, |tx, _| tx.read().meta().rev())
+            .call(Priority::Ui, |tx, _| tx.read().meta().rev())
+            .wait()
             .unwrap();
         assert_eq!(rev, Rev(0), "rev did not move");
     }

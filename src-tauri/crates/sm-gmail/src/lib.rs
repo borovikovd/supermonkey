@@ -4,7 +4,7 @@ mod ids;
 mod oauth;
 mod outcome;
 mod quota;
-pub mod retry;
+mod retry;
 mod token_store;
 mod unsubscribe;
 mod wire;

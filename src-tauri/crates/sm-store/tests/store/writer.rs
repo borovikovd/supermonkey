@@ -51,9 +51,10 @@ fn jobs_run_by_priority_then_in_arrival_order() {
     }
     let order = h
         .writer
-        .call_blocking(Priority::Ui, |_, s: &mut State| {
+        .call(Priority::Ui, |_, s: &mut State| {
             Ok::<_, StoreError>(s.order.clone())
         })
+        .wait()
         .unwrap();
     assert_eq!(
         order,
@@ -72,10 +73,13 @@ fn jobs_run_by_priority_then_in_arrival_order() {
 fn a_failed_job_rolls_back_and_skips_on_commit() {
     let h = Harness::start();
     let commits = h.commits.lock().len();
-    let result: Result<(), StoreError> = h.writer.call_blocking(Priority::Ui, |tx, _| {
-        tx.accounts().create("a@example.com", "A")?;
-        Err(StoreError::Invalid("refused".to_owned()))
-    });
+    let result: Result<(), StoreError> = h
+        .writer
+        .call(Priority::Ui, |tx, _| {
+            tx.accounts().create("a@example.com", "A")?;
+            Err(StoreError::Invalid("refused".to_owned()))
+        })
+        .wait();
     assert!(matches!(result, Err(StoreError::Invalid(_))), "{result:?}");
     assert_eq!(h.commits.lock().len(), commits, "no on_commit");
     assert_eq!(h.rollbacks.load(Ordering::SeqCst), 1, "on_rollback ran");
@@ -159,10 +163,13 @@ fn a_commit_lists_and_stamps_what_it_wrote() {
 #[test]
 fn a_panicking_job_rolls_back_and_the_writer_keeps_going() {
     let h = Harness::start();
-    let result: Result<(), StoreError> = h.writer.call_blocking(Priority::Ui, |tx, _| {
-        tx.accounts().create("a@example.com", "A")?;
-        panic!("boom");
-    });
+    let result: Result<(), StoreError> = h
+        .writer
+        .call(Priority::Ui, |tx, _| {
+            tx.accounts().create("a@example.com", "A")?;
+            panic!("boom");
+        })
+        .wait();
     match result {
         Err(StoreError::JobPanicked(message)) => assert_eq!(message, "boom"),
         other => panic!("expected a panic error, got {other:?}"),
@@ -188,22 +195,9 @@ fn stop_runs_earlier_ui_jobs_and_drops_queued_sync_jobs() {
     ui.wait().unwrap();
     assert!(matches!(sync.wait(), Err(StoreError::WriterStopped)));
     stopped.wait().unwrap();
-    let late: Result<(), StoreError> = h.writer.call_blocking(Priority::Ui, tag("late"));
+    let late: Result<(), StoreError> = h.writer.call(Priority::Ui, tag("late")).wait();
     assert!(matches!(late, Err(StoreError::WriterStopped)));
     h.writer.stop().wait().unwrap();
-}
-
-#[test]
-fn waiting_on_the_writer_thread_is_refused() {
-    let h = Harness::start();
-    let writer = h.writer.clone();
-    let inner = h
-        .writer
-        .call_blocking(Priority::Ui, move |_, _: &mut State| {
-            Ok::<_, StoreError>(writer.call_blocking(Priority::Ui, tag("inner")))
-        })
-        .unwrap();
-    assert!(matches!(inner, Err(StoreError::Reentrant)));
 }
 
 #[test]

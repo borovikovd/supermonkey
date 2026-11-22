@@ -50,7 +50,7 @@ pub(crate) async fn send(
     request.send().await.map_err(|e| from_transport(&e))
 }
 
-pub(crate) fn from_transport(err: &reqwest::Error) -> GmailError {
+fn from_transport(err: &reqwest::Error) -> GmailError {
     let (outcome, what) = if err.is_connect() {
         (Outcome::Offline, "connect")
     } else if err.is_builder() {
@@ -138,7 +138,7 @@ fn retry_after(response: &reqwest::Response) -> Option<Duration> {
         .map(Duration::from_secs)
 }
 
-pub(crate) fn parse_error(what: &str, err: &serde_json::Error) -> GmailError {
+fn parse_error(what: &str, err: &serde_json::Error) -> GmailError {
     GmailError::with_detail(
         Outcome::NoResponse,
         format!(

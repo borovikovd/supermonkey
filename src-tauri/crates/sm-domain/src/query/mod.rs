@@ -12,6 +12,5 @@ mod tests;
 
 pub use ast::{Expr, Field, Query, Scope, Term};
 pub use error::RuleError;
-pub use fts::FTS_COLUMNS;
 pub use gmail::gmail_query;
 pub use matching::MatchTarget;

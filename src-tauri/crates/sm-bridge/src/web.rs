@@ -26,7 +26,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::{Answer, dispatch};
 
-pub(crate) const LOCAL_ADDR: &str = "127.0.0.1:1430";
+const LOCAL_ADDR: &str = "127.0.0.1:1430";
 
 const DEV_ORIGINS: [&str; 2] = ["http://localhost:5173", "http://127.0.0.1:5173"];
 

@@ -1,6 +1,6 @@
 use crate::Millis;
 
-pub const RECENCY_HALF_LIFE_DAYS: f64 = 90.0;
+const RECENCY_HALF_LIFE_DAYS: f64 = 90.0;
 
 const MS_PER_DAY: f64 = 86_400_000.0;
 
@@ -63,7 +63,7 @@ fn prefix_len(haystack: &str, needle: &str) -> Option<usize> {
 }
 
 #[must_use]
-pub fn is_noreply(email: &str) -> bool {
+fn is_noreply(email: &str) -> bool {
     let local = email
         .rsplit_once('@')
         .map_or(email, |(local, _)| local)
@@ -114,7 +114,7 @@ impl ContactStats {
 }
 
 #[must_use]
-pub fn recency_factor(last_contact: Millis, now: Millis) -> f64 {
+fn recency_factor(last_contact: Millis, now: Millis) -> f64 {
     let age_ms = now.since(last_contact).max(0);
     let age_days =
         f64::from(u32::try_from(age_ms / 1000).unwrap_or(u32::MAX)) * 1000.0 / MS_PER_DAY;

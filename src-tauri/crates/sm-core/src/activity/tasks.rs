@@ -79,7 +79,7 @@ impl Tasks {
     }
 
     #[must_use]
-    pub fn child(&self) -> Self {
+    pub(crate) fn child(&self) -> Self {
         let outer: Vec<TaskTracker> = std::iter::once(self.tracker.clone())
             .chain(self.outer.iter().cloned())
             .collect();
@@ -98,7 +98,7 @@ impl Tasks {
     }
 
     #[must_use]
-    pub const fn token(&self) -> &CancellationToken {
+    pub(crate) const fn token(&self) -> &CancellationToken {
         &self.cancel
     }
 
@@ -129,7 +129,7 @@ impl Tasks {
         self.tracker.spawn_on(task, &self.runtime);
     }
 
-    pub fn cancel(&self) {
+    pub(crate) fn cancel(&self) {
         self.cancel.cancel();
     }
 

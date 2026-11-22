@@ -158,10 +158,12 @@ pub fn generate(path: &Path, size: Size, accounts: &[&str], now: Millis) -> Resu
         let email = (*email).to_owned();
         let seed: u64 = rng.random();
         let plan = Plan { n, size, now };
-        writer.call_blocking(Priority::Background, move |tx, ()| {
-            let mut rng = StdRng::seed_from_u64(seed);
-            write_account(tx, &mut rng, plan, email)
-        })?;
+        writer
+            .call(Priority::Background, move |tx, ()| {
+                let mut rng = StdRng::seed_from_u64(seed);
+                write_account(tx, &mut rng, plan, email)
+            })
+            .wait()?;
     }
     writer.stop().wait()
 }

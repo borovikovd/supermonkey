@@ -746,6 +746,7 @@ fn reads_body_only_for_bare_words() {
 
 #[test]
 fn fts_output_is_valid_sqlite() {
+    const FTS_COLUMNS: [&str; 5] = ["from_text", "to_text", "cc_text", "subject", "body"];
     let db = rusqlite::Connection::open_in_memory().unwrap();
     db.execute_batch(&format!(
         "CREATE VIRTUAL TABLE t USING fts5({});

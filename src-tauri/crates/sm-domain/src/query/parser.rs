@@ -14,7 +14,7 @@ const GMAIL_ONLY_OPERATORS: &[&str] = &[
     "around",
 ];
 
-pub(super) type PlaceDate<'p> = dyn Fn(&DateArg) -> Option<Millis> + 'p;
+type PlaceDate<'p> = dyn Fn(&DateArg) -> Option<Millis> + 'p;
 
 pub(super) fn parse(input: &str, place_date: &PlaceDate<'_>) -> (Query, Vec<RuleError>) {
     let mut parser = Parser {

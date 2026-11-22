@@ -62,7 +62,7 @@ impl LabelDelta {
     }
 
     #[must_use]
-    pub fn marks_unread(&self) -> bool {
+    fn marks_unread(&self) -> bool {
         self.add.has(SystemLabel::Unread)
     }
 }

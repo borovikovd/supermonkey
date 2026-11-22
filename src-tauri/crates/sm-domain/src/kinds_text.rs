@@ -2,7 +2,8 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::{
-    DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SettingKey, SplitKind, SyncStatus,
+    DraftKind, DraftWait, ModifyKind, NoticeKind, OpKind, OutboxState, PinKind, SettingKey,
+    SplitKind, SyncStatus,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -93,4 +94,12 @@ text_enum! {
         RemoveLabel => "remove_label",
     }
     SettingKey { RemoteImages => "remote_images", Muted => "muted" }
+    OpKind {
+        Modify => "modify",
+        LabelCreate => "label_create",
+        DraftUpsert => "draft_upsert",
+        DraftDelete => "draft_delete",
+        TrashMessage => "trash_message",
+    }
+    DraftWait { Parts => "parts", TargetBody => "target_body" }
 }

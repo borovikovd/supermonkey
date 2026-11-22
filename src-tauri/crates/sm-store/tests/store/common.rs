@@ -51,7 +51,8 @@ impl Harness {
         job: impl FnOnce(&mut WriteTx<'_>) -> Result<T, StoreError> + Send + 'static,
     ) -> T {
         self.writer
-            .call_blocking(Priority::Ui, |tx, _: &mut State| job(tx))
+            .call(Priority::Ui, |tx, _: &mut State| job(tx))
+            .wait()
             .unwrap()
     }
 

@@ -1,5 +1,4 @@
 use std::fmt;
-use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
@@ -97,7 +96,6 @@ impl<T> Receiver<T> {
 #[must_use = "the job runs anyway; drop the result explicitly if it is not needed"]
 pub struct Pending<T, E> {
     rx: Receiver<Result<T, E>>,
-    _error: PhantomData<fn() -> E>,
 }
 
 impl<T, E> fmt::Debug for Pending<T, E> {
@@ -107,11 +105,8 @@ impl<T, E> fmt::Debug for Pending<T, E> {
 }
 
 impl<T, E: From<StoreError>> Pending<T, E> {
-    pub(crate) fn new(rx: Receiver<Result<T, E>>) -> Self {
-        Self {
-            rx,
-            _error: PhantomData,
-        }
+    pub(crate) const fn new(rx: Receiver<Result<T, E>>) -> Self {
+        Self { rx }
     }
 
     pub fn wait(self) -> Result<T, E> {

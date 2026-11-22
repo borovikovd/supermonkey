@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 use crate::mime;
 
-pub(crate) const SYSTEM_LABELS: &[&str] = &[
+const SYSTEM_LABELS: &[&str] = &[
     "INBOX",
     "SENT",
     "DRAFT",

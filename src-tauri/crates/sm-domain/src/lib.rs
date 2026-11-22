@@ -28,12 +28,13 @@ pub use drafts::{DraftAim, DraftContent, DraftContentRef, gmail_draft_aim, gmail
 pub use hue::{AVATAR_HUES, avatar_hue};
 pub use identity::{Identity, SendAsAddress};
 pub use ids::{
-    AccountId, ActionNo, AttachmentId, DraftId, GmailDraftId, GmailMessageId, GmailThreadId,
-    HistoryId, LabelId, MessageId, NoticeId, OutboxId, Rev, SplitId, SubId, ThreadId, UndoEntryId,
+    AccountId, ActionNo, AttachmentId, DraftId, FilterId, GmailAttachmentId, GmailDraftId,
+    GmailMessageId, GmailThreadId, HistoryId, LabelId, MessageId, NoticeId, OpId, OutboxId,
+    PageToken, Rev, SplitId, SubId, ThreadId, UndoEntryId,
 };
 pub use kinds::{
-    DraftKind, ModifyKind, NoticeKind, OutboxState, PinKind, SettingKey, SplitKind, SyncStatus,
-    View,
+    DraftKind, DraftWait, ModifyKind, NoticeKind, OpKind, OpQueue, OutboxState, PinKind,
+    SettingKey, SplitKind, SyncStatus, View,
 };
 pub use kinds_text::UnknownKind;
 pub use labels::{LabelSet, SystemLabel};

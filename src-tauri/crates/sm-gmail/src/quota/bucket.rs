@@ -7,7 +7,7 @@ use super::Units;
 
 const EPSILON: f64 = 1e-6;
 
-pub(super) const WINDOW: Duration = Duration::from_secs(60);
+const WINDOW: Duration = Duration::from_secs(60);
 
 #[derive(Debug)]
 pub(super) struct Bucket {
