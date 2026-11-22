@@ -1,16 +1,3 @@
-export function searchTerms(query: string): string[] {
-  const out: string[] = [];
-  for (const m of query.matchAll(/"([^"]+)"|(\S+)/g)) {
-    const [, phrase, word] = m;
-    if (phrase) out.push(phrase);
-    else if (word && !word.includes(":") && !word.startsWith("-") && !/^(or|and)$/i.test(word)) {
-      const bare = word.replace(/[()]/g, "");
-      if (bare) out.push(bare);
-    }
-  }
-  return out;
-}
-
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function marked(text: string, terms: readonly string[]): React.ReactNode {

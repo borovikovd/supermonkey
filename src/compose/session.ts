@@ -15,12 +15,13 @@ import { dom } from "../keyboard/refs";
 import { useChrome } from "../store/chrome";
 import { conversationData } from "../store/current";
 import { useMirror } from "../store/mirror";
+import { composerDraft } from "../store/mirror-core";
 
 export type UpdateSave = Extract<DraftSave, { type: "update" }>;
 
 export type ComposeField = "to" | "cc" | "bcc" | "subject" | "body";
 
-export type ComposerHandle = {
+type ComposerHandle = {
   draft: string;
   pending: () => UpdateSave | null;
   commitTyped: () => void;
@@ -46,7 +47,7 @@ const useCompose = create<ComposeState>(() => ({ onScreen: null, blurred: false,
 
 export const useComposeState = <T>(select: (s: ComposeState) => T): T => useCompose(select);
 
-export type ComposerKind = "inline" | "screen" | null;
+type ComposerKind = "inline" | "screen" | null;
 
 export const composerKind = (s: ComposeState): ComposerKind =>
   s.onScreen === null ? null : s.onScreen.thread === null ? "screen" : "inline";
@@ -87,13 +88,10 @@ export function inOverlay(): boolean {
   );
 }
 
-export const composerKey = (draft: string): SubKey => ({ type: "composer", draft });
+const composerKey = (draft: string): SubKey => ({ type: "composer", draft });
 
 export function loadedDraft(draft: string): DraftState | null {
-  for (const sub of Object.values(useMirror.getState().subs)) {
-    if (sub.type === "composer" && sub.key.draft === draft) return sub.draft;
-  }
-  return null;
+  return composerDraft(useMirror.getState(), draft);
 }
 
 const uploads = new Map<string, Set<Promise<boolean>>>();
@@ -195,7 +193,7 @@ function whenReady(draft: string): Promise<boolean> | null {
   return Promise.all([load, files]).then(([, ok]) => ok ?? true);
 }
 
-export const draftOnScreen = (): string | null => composerOnScreen()?.draft ?? null;
+const draftOnScreen = (): string | null => composerOnScreen()?.draft ?? null;
 
 function open(draft: string) {
   const left = cancelWaiting(draft);

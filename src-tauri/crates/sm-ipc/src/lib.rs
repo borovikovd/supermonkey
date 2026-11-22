@@ -19,7 +19,8 @@ pub use commands::{
 };
 pub use compose::{DraftAttachment, DraftFields, DraftSave, DraftState};
 pub use conversation::{
-    AttachmentInfo, ConversationData, DraftSummary, MessageBody, MessageSummary, OutboxRow,
+    AttachmentInfo, ConversationData, DraftSummary, MessageAddr, MessageBody, MessageSummary,
+    OutboxRow,
 };
 pub use list::{ListEntry, ListMove, ListRow};
 pub use sm_domain::Addr;

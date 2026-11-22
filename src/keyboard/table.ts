@@ -19,6 +19,7 @@ import {
   useComposeState,
   type ComposeState,
 } from "../compose/session";
+import { targetsOf } from "../acting";
 import { notSent } from "../compose/sends";
 import { resumeDraftById, startCompose, startReply } from "../compose/start";
 import { addAccount, act, subIdFor } from "../ipc/bridge";
@@ -105,11 +106,15 @@ function contextOf(chrome: ChromeState, mirror: MirrorState, compose: ComposeSta
   const view = cur?.where.kind === "view" ? cur.where.view : null;
   const screen = cur?.screen ?? { kind: "list" as const };
   const highlight = cur?.highlight != null && shown.has(cur.highlight);
-  const selected = chrome.selection.filter((k) => shown.has(k) && !Number.isNaN(Number(k)));
   const targets =
-    screen.kind === "conversation" ||
-    selected.length > 0 ||
-    (highlight && view?.kind !== "drafts" && !Number.isNaN(Number(cur?.highlight)));
+    cur !== undefined &&
+    targetsOf(
+      screen.kind === "conversation" ? screen.thread : null,
+      chrome.selection,
+      cur.highlight,
+      shown,
+      view?.kind === "drafts",
+    ).length > 0;
   const splits = new Set(entries.map((e) => e.split).filter((s) => s !== null)).size;
   const open =
     screen.kind === "conversation"
@@ -164,9 +169,9 @@ const composing = (c: Ctx) => c.composer !== null;
 
 const isView = (c: Ctx, kind: View["kind"]) => c.view?.kind === kind;
 
-export type Scope = "global" | "sheet" | "compose" | "search" | "mail";
+type Scope = "global" | "sheet" | "compose" | "search" | "mail";
 
-export const GROUPS = ["Navigate", "Act", "Write", "Go to"] as const;
+const GROUPS = ["Navigate", "Act", "Write", "Go to"] as const;
 
 type Def = {
   label: string;
@@ -876,7 +881,7 @@ function toCommand(id: string, def: Def): Command {
   return { ...def, id, scope: def.scope ?? "mail", bindings: keys.map(parseBinding) };
 }
 
-export const COMMANDS: readonly Command[] = Object.entries(DEFS).map(([id, def]: [string, Def]) =>
+const COMMANDS: readonly Command[] = Object.entries(DEFS).map(([id, def]: [string, Def]) =>
   toCommand(id, def),
 );
 
@@ -896,7 +901,7 @@ export const keyChips = (cmd: Command) => (cmd.bindings[0] ? bindingChips(cmd.bi
 
 export const accountChips = (n: number) => bindingChips(parseBinding(`Control+${n}`));
 
-export function titleOf(cmd: Command): string {
+function titleOf(cmd: Command): string {
   const name = cmd.button ?? cmd.label;
   const keys = keyText(cmd);
   return keys ? `${name} (${keys})` : name;

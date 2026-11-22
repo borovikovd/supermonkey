@@ -4,9 +4,7 @@ import type { View } from "../ipc/types";
 
 export type Where = { kind: "view"; view: View } | { kind: "search"; query: string };
 
-export type Screen =
-  | { kind: "list" }
-  | { kind: "conversation"; thread: number; trashMode: boolean };
+type Screen = { kind: "list" } | { kind: "conversation"; thread: number; trashMode: boolean };
 
 export type PaletteMode = (
   | { kind: "commands" }
@@ -26,7 +24,7 @@ export type PaletteMode = (
 
 export type Sheet = "shortcuts" | "settings" | "splits" | null;
 
-export type AccountChrome = {
+type AccountChrome = {
   where: Where;
   highlight: string | null;
   screen: Screen;
@@ -76,15 +74,13 @@ type ChromeActions = {
   setLink: (link: [number, number] | null) => void;
 };
 
-export const defaultChrome = (): AccountChrome => ({
+const defaultChrome = (): AccountChrome => ({
   where: { kind: "view", view: { kind: "inbox" } },
   highlight: null,
   screen: { kind: "list" },
 });
 
-const INBOX: Where = { kind: "view", view: { kind: "inbox" } };
-
-function toggled<T>(xs: readonly T[], x: T): T[] {
+export function toggled<T>(xs: readonly T[], x: T): T[] {
   const set = new Set(xs);
   if (!set.delete(x)) set.add(x);
   return [...set];
@@ -182,7 +178,7 @@ export const useChrome = create<ChromeState & ChromeActions>((set, get) => {
     },
     setSearchFocus: (focus) => set((s) => (s.search ? { search: { ...s.search, focus } } : {})),
     closeSearch: () => {
-      const before = get().beforeSearch ?? { where: INBOX, highlight: null };
+      const before = get().beforeSearch ?? { where: defaultChrome().where, highlight: null };
       patchCurrent(
         { ...before, screen: { kind: "list" } },
         { search: null, beforeSearch: null, selection: [], link: null, selectedMessage: null },

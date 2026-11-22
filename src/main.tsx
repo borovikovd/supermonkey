@@ -7,7 +7,6 @@ import {
   connect,
   inTauri,
   onEvent,
-  onRefusal,
   pendingWork,
   quitNow,
   subscribe,
@@ -15,7 +14,6 @@ import {
 } from "./ipc/bridge";
 import { installKeys } from "./keyboard/dispatch";
 import { openNotification, trackFocus } from "./navigation";
-import { showRefusal } from "./ui/refusals";
 import { useChrome } from "./store/chrome";
 import { useMirror } from "./store/mirror";
 
@@ -25,7 +23,6 @@ if (import.meta.env.DEV || !inTauri)
 installKeys();
 trackFocus();
 closeGoneReplies();
-onRefusal(showRefusal);
 
 void connect().then(() => subscribe({ type: "app" }));
 

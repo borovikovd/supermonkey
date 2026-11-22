@@ -176,7 +176,20 @@ fn snooze_rule_ignores_trash_and_pending_ops() {
 }
 
 fn delta(kind: ModifyKind) -> LabelDelta {
-    LabelDelta::preset(kind).unwrap()
+    match kind {
+        ModifyKind::Done => LabelDelta::new(LabelSet::default(), set(&["INBOX", "UNREAD"])),
+        ModifyKind::Unread => LabelDelta::new(set(&["UNREAD"]), LabelSet::default()),
+        ModifyKind::ReturnToInbox
+        | ModifyKind::Snooze
+        | ModifyKind::Trash
+        | ModifyKind::Spam
+        | ModifyKind::Star
+        | ModifyKind::Unstar
+        | ModifyKind::Read
+        | ModifyKind::Label
+        | ModifyKind::RemoveLabel => panic!("no test delta for {kind:?}"),
+    }
+    .unwrap()
 }
 
 fn change(id: i64, added: &[&str], removed: &[&str]) -> MessageChange {

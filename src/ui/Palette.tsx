@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { stillShown, withFixedTargets } from "../acting";
-import { applyLabel, block, snooze, spam, targets, unsubscribe } from "../commands";
+import { allLabeled, applyLabel, block, snooze, spam, targets, unsubscribe } from "../commands";
 import { formatAddr } from "../compose/RecipientField";
 import { mountedComposer } from "../compose/session";
 import { act, blockedSenders, signInAgain, snoozeOptions, unblockSender } from "../ipc/bridge";
@@ -27,6 +27,8 @@ import { reportSignIn } from "./signIn";
 type Item = { id: string; label: string; keys?: string[]; run: () => void };
 
 const close = closePalette;
+
+const domainOf = (email: string) => email.split("@")[1] ?? "";
 
 function Chip({ keys }: { keys: string[] }) {
   return (
@@ -112,8 +114,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
     }
     case "labels": {
       const items: Item[] = userLabels.map((l) => {
-        const all =
-          opened.rows.length > 0 && opened.rows.every((row) => row?.labels.includes(l.id));
+        const all = allLabeled(opened.rows, l.id);
         return {
           id: l.id,
           label: `${all ? "✓ " : ""}${l.name}`,
@@ -197,7 +198,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
       const thread = opened.threads[0];
       if (thread === undefined) return { items: [], placeholder: "Nothing selected" };
       const email = opened.rows[0]?.senderEmail.toLowerCase() ?? "";
-      const domain = email.split("@")[1] ?? "";
+      const domain = domainOf(email);
       const asSpam = mode.kind === "spam";
       const then = asSpam ? "Mark spam, and block" : "Block";
       return {
@@ -264,7 +265,7 @@ function useCommands(mode: PaletteMode, query: string): Commands {
       const row = opened.rows[0];
       if (!row || account === null) return { items: [], placeholder: "Nothing selected" };
       const email = row.senderEmail.toLowerCase();
-      const domain = email.split("@")[1] ?? "";
+      const domain = domainOf(email);
       const rowLabels = userLabels.filter((l) => row.labels.includes(l.id));
       const choices: { kind: PinKind; value: string; label: string }[] = [
         { kind: "sender", value: email, label: `Sender ${email}` },

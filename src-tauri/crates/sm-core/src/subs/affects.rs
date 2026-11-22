@@ -15,7 +15,9 @@ pub(crate) fn affects(key: &SubKey, changes: &Changes) -> bool {
         } => touched(changes, *account, DRAFTS_READS),
         SubKey::List { account, .. } => touched(changes, *account, VIEW_READS),
         SubKey::Search { account, .. } => touched(changes, *account, SEARCH_READS),
-        SubKey::Conversation { thread, .. } => changes.threads.contains(thread),
+        SubKey::Conversation { thread, .. } => {
+            changes.threads.contains(thread) || changes.touched_any(Table::Account)
+        }
         SubKey::Composer { draft } => changes.drafts.contains(draft),
     }
 }

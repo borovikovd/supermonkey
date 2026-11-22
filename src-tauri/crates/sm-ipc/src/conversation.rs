@@ -25,10 +25,10 @@ pub struct ConversationData {
 #[ts(export)]
 pub struct MessageSummary {
     pub id: MessageId,
-    pub from: Addr,
-    pub to: Vec<Addr>,
-    pub cc: Vec<Addr>,
-    pub bcc: Vec<Addr>,
+    pub from: MessageAddr,
+    pub to: Vec<MessageAddr>,
+    pub cc: Vec<MessageAddr>,
+    pub bcc: Vec<MessageAddr>,
     pub subject: String,
     pub snippet: String,
     pub date: Millis,
@@ -37,6 +37,14 @@ pub struct MessageSummary {
     pub has_body: bool,
     pub attachments: Vec<AttachmentInfo>,
     pub rev: Rev,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct MessageAddr {
+    pub name: Option<String>,
+    pub email: String,
+    pub me: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]

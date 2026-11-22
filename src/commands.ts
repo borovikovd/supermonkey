@@ -9,9 +9,9 @@ import {
   signInAgain,
   unsubscribeFrom,
 } from "./ipc/bridge";
-import type { ModifyAction, ModifyKind } from "./ipc/types";
+import type { ListRow, ModifyAction, ModifyKind } from "./ipc/types";
 import { moveOn, openPalette } from "./navigation";
-import { fixedTargets, stillShown } from "./acting";
+import { fixedTargets, stillShown, targetsOf } from "./acting";
 import { useChrome } from "./store/chrome";
 import { currentView, rowOf, visibleIds } from "./store/current";
 import { accountSummary, undoTarget, viewLabel } from "./store/mirror-core";
@@ -24,15 +24,13 @@ export function targets(): number[] {
   const c = useChrome.getState();
   const cur = c.current();
   if (!cur) return [];
-  if (cur.screen.kind === "conversation") return [cur.screen.thread];
-  const shown = new Set(visibleIds());
-  const selection = c.selection.filter((k) => shown.has(k));
-  if (selection.length > 0) return selection.map(Number).filter((n) => !Number.isNaN(n));
-  if (cur.highlight !== null && shown.has(cur.highlight) && currentView()?.kind !== "drafts") {
-    const n = Number(cur.highlight);
-    return Number.isNaN(n) ? [] : [n];
-  }
-  return [];
+  return targetsOf(
+    cur.screen.kind === "conversation" ? cur.screen.thread : null,
+    c.selection,
+    cur.highlight,
+    new Set(visibleIds()),
+    currentView()?.kind === "drafts",
+  );
 }
 
 export function modify(
@@ -90,13 +88,7 @@ const isSnoozed = (threads: number[]) => threads.some((t) => rowOf(String(t))?.s
 
 export const markDone = () => {
   if (currentView()?.kind === "done") return;
-  withRows(({ account, threads }) =>
-    modify("done", [], ["INBOX", "UNREAD"], {
-      account,
-      threads,
-      snooze: isSnoozed(threads) ? { kind: "clear" } : null,
-    }),
-  );
+  modify("done", [], ["INBOX", "UNREAD"]);
 };
 
 export const returnToInbox = () =>
@@ -138,9 +130,15 @@ export const toggleRead = () =>
     else modify("unread", ["UNREAD"], [], acting);
   });
 
+export const allLabeled = (rows: readonly (ListRow | undefined)[], label: string) =>
+  rows.length > 0 && rows.every((row) => row?.labels.includes(label));
+
 export function applyLabel(labelId: string) {
   withRows((acting) => {
-    const all = acting.threads.every((id) => rowOf(String(id))?.labels.includes(labelId));
+    const all = allLabeled(
+      acting.threads.map((id) => rowOf(String(id))),
+      labelId,
+    );
     if (all) modify("removeLabel", [], [labelId], acting);
     else modify("label", [labelId], [], acting);
   });
@@ -168,7 +166,7 @@ export function undo() {
   act({ type: "undo", account: c.account, entry });
 }
 
-export type UnsubscribeThen = "keep" | "done" | "trash";
+type UnsubscribeThen = "keep" | "done" | "trash";
 
 export async function unsubscribe(then: UnsubscribeThen) {
   const account = useChrome.getState().account;

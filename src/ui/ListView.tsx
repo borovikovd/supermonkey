@@ -8,7 +8,7 @@ import type { ListRow } from "../ipc/types";
 import { listScroll } from "../keyboard/refs";
 import { highlight as setHighlight, openConversation } from "../navigation";
 import { useChrome } from "../store/chrome";
-import { marked, searchTerms } from "./highlight";
+import { marked } from "./highlight";
 import { useAppState, useCurrent } from "../store/hooks";
 import { useMirror } from "../store/mirror";
 import { useCurrentList, useSplitCounts } from "./current-list";
@@ -260,8 +260,7 @@ export function ListView() {
   }, []);
 
   const selected = useMemo(() => new Set(selection), [selection]);
-  const query = cur?.where.kind === "search" ? cur.where.query : "";
-  const terms = useMemo(() => searchTerms(query), [query]);
+  const terms = list.terms;
 
   if (items.length === 0) {
     const search = cur?.where.kind === "search";

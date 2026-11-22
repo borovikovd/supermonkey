@@ -26,27 +26,6 @@ impl LabelDelta {
     }
 
     #[must_use]
-    pub fn preset(kind: ModifyKind) -> Option<Self> {
-        use SystemLabel::{Inbox, Spam, Starred, Trash, Unread};
-        let (add, remove): (&[SystemLabel], &[SystemLabel]) = match kind {
-            ModifyKind::Done => (&[], &[Inbox, Unread]),
-            ModifyKind::ReturnToInbox => (&[Inbox], &[]),
-            ModifyKind::Snooze => (&[], &[Inbox]),
-            ModifyKind::Trash => (&[Trash], &[Inbox, Spam]),
-            ModifyKind::Spam => (&[Spam], &[Inbox, Trash]),
-            ModifyKind::Star => (&[Starred], &[]),
-            ModifyKind::Unstar => (&[], &[Starred]),
-            ModifyKind::Read => (&[], &[Unread]),
-            ModifyKind::Unread => (&[Unread], &[]),
-            ModifyKind::Label | ModifyKind::RemoveLabel => return None,
-        };
-        Some(Self {
-            add: add.iter().copied().collect(),
-            remove: remove.iter().copied().collect(),
-        })
-    }
-
-    #[must_use]
     pub const fn add(&self) -> &LabelSet {
         &self.add
     }

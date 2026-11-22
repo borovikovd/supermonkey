@@ -2,6 +2,7 @@ import { Channel, invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { subForKey, type MirrorState } from "../store/mirror-core";
+import { showRefusal } from "../ui/refusals";
 import { useMirror } from "../store/mirror";
 import type {
   Action,
@@ -132,13 +133,6 @@ export type Outcome = {
 };
 
 const settling = new Map<number, (outcome: Outcome) => void>();
-
-type ShowRefusal = (refusal: Rejection, action: Action | null) => void;
-let showRefusal: ShowRefusal = (r) => console.warn(`action ${r.n} refused: ${r.message}`);
-
-export function onRefusal(show: ShowRefusal): void {
-  showRefusal = show;
-}
 
 export function act(action: Action, settled?: (outcome: Outcome) => void): number {
   const n = nextN++;

@@ -42,7 +42,7 @@ export function isValidEmail(s: string): boolean {
   );
 }
 
-export function parseAddr(text: string): Addr | null {
+function parseAddr(text: string): Addr | null {
   const t = text.trim().replace(/[,;]+$/, "");
   if (!t) return null;
   const m = /^"?([^"<]*?)"?\s*<([^>]+)>$/.exec(t);
@@ -53,7 +53,7 @@ export function parseAddr(text: string): Addr | null {
 
 export const formatAddr = (a: Addr) => (a.name ? `${a.name} <${a.email}>` : a.email);
 
-export function splitAddrs(text: string): Addr[] {
+function splitAddrs(text: string): Addr[] {
   const parts = text.split(/[\n;]+|,(?=(?:[^"]*"[^"]*")*[^"]*$)/);
   return parts.map(parseAddr).filter((a): a is Addr => a !== null);
 }

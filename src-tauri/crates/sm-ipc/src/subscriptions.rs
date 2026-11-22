@@ -46,6 +46,7 @@ pub enum SubUpdate {
         searching: bool,
         needs_gmail: bool,
         looks_in_trash: bool,
+        terms: Vec<String>,
         more: bool,
         oldest_hit: Option<String>,
     },

@@ -76,18 +76,40 @@ fn delta(kind: ModifyKind) -> (LabelDelta, Option<SnoozeEdit>) {
             Some(SnoozeEdit::Clear),
         ),
         ModifyKind::Snooze => (
-            LabelDelta::preset(kind).unwrap(),
+            LabelDelta::new(labels(&[]), labels(&["INBOX"])).unwrap(),
             Some(SnoozeEdit::Set(Millis(4_000_000_000_000))),
         ),
-        ModifyKind::Done
-        | ModifyKind::Trash
-        | ModifyKind::Spam
-        | ModifyKind::Star
-        | ModifyKind::Unstar
-        | ModifyKind::Read
-        | ModifyKind::Unread
-        | ModifyKind::Label
-        | ModifyKind::RemoveLabel => (LabelDelta::preset(kind).unwrap(), None),
+        ModifyKind::Done => (
+            LabelDelta::new(labels(&[]), labels(&["INBOX", "UNREAD"])).unwrap(),
+            None,
+        ),
+        ModifyKind::Trash => (
+            LabelDelta::new(labels(&["TRASH"]), labels(&["INBOX", "SPAM"])).unwrap(),
+            None,
+        ),
+        ModifyKind::Spam => (
+            LabelDelta::new(labels(&["SPAM"]), labels(&["INBOX", "TRASH"])).unwrap(),
+            None,
+        ),
+        ModifyKind::Star => (
+            LabelDelta::new(labels(&["STARRED"]), labels(&[])).unwrap(),
+            None,
+        ),
+        ModifyKind::Unstar => (
+            LabelDelta::new(labels(&[]), labels(&["STARRED"])).unwrap(),
+            None,
+        ),
+        ModifyKind::Read => (
+            LabelDelta::new(labels(&[]), labels(&["UNREAD"])).unwrap(),
+            None,
+        ),
+        ModifyKind::Unread => (
+            LabelDelta::new(labels(&["UNREAD"]), labels(&[])).unwrap(),
+            None,
+        ),
+        ModifyKind::Label | ModifyKind::RemoveLabel => {
+            panic!("no test delta for {kind:?}")
+        }
     }
 }
 

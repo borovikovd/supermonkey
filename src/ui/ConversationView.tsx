@@ -10,7 +10,7 @@ import { useCommand, type CommandId } from "../keyboard/table";
 import type { AttachmentInfo, DraftSummary, MessageSummary, OutboxRow } from "../ipc/types";
 import { markReadOnOpen } from "../navigation";
 import { useChrome } from "../store/chrome";
-import { useAppState, useConversation, useCurrent, useSubscription } from "../store/hooks";
+import { useAppState, useConversation, useSubscription } from "../store/hooks";
 import { useMirror } from "../store/mirror";
 import { blocks } from "./folds";
 import { formatTime } from "./format";
@@ -18,25 +18,12 @@ import { LoadingBody, MessageFrame } from "./MessageFrame";
 
 type Address = MessageSummary["from"];
 
-function useOwnAddresses(): Set<string> {
-  const { account } = useCurrent();
-  const info = useAppState()?.accounts.find((a) => a.id === account);
-  const own = new Set<string>();
-  if (info) {
-    own.add(info.email.toLowerCase());
-    for (const s of info.sendAs) own.add(s.email.toLowerCase());
-  }
-  return own;
-}
+const name = (a: Address) => (a.me ? "Me" : a.name || a.email);
 
-const isOwn = (a: Address, own: Set<string>) => own.has(a.email.toLowerCase());
+const shortName = (a: Address) =>
+  a.me ? "Me" : (a.name ?? "").split(/\s+/)[0] || a.email.split("@")[0] || a.email;
 
-const name = (a: Address, own: Set<string>) => (isOwn(a, own) ? "Me" : a.name || a.email);
-
-const shortName = (a: Address, own: Set<string>) =>
-  isOwn(a, own) ? "Me" : (a.name ?? "").split(/\s+/)[0] || a.email.split("@")[0] || a.email;
-
-function recipients(m: MessageSummary, own: Set<string>): string {
+function recipients(m: MessageSummary): string {
   const all = [...m.to, ...m.cc];
   const seen = new Set<string>();
   const others: string[] = [];
@@ -45,8 +32,8 @@ function recipients(m: MessageSummary, own: Set<string>): string {
     const key = a.email.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    if (isOwn(a, own)) me = true;
-    else others.push(shortName(a, own));
+    if (a.me) me = true;
+    else others.push(shortName(a));
   }
   if (others.length === 0) return "";
   const names = me ? [...others, "Me"] : others;
@@ -79,7 +66,6 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
     s.onScreen?.thread === thread ? s.onScreen.draft : null,
   );
   const remoteImages = useAppState()?.settings.remoteImages ?? true;
-  const own = useOwnAddresses();
   const known = useRef<Set<number> | null>(null);
   const latestRef = useRef<number | null>(null);
 
@@ -160,7 +146,6 @@ export function ConversationView({ thread, trashMode }: { thread: number; trashM
               selected={selected === b.m.id}
               remoteImages={remoteImages}
               quoteOpen={expandAll}
-              own={own}
             />
           ),
         )}
@@ -268,14 +253,12 @@ function Message({
   selected,
   remoteImages,
   quoteOpen,
-  own,
 }: {
   m: MessageSummary;
   expanded: boolean;
   selected: boolean;
   remoteImages: boolean;
   quoteOpen: boolean;
-  own: Set<string>;
 }) {
   if (!expanded) {
     return (
@@ -291,7 +274,7 @@ function Message({
         <span
           className={`w-sender-narrow shrink-0 truncate ${m.unread ? "font-semibold" : "font-medium text-text-2"}`}
         >
-          {name(m.from, own)}
+          {name(m.from)}
         </span>
         <span className="flex-1 truncate text-text-2">{m.snippet}</span>
         <span className="tabular shrink-0 text-time text-text-3">{formatTime(m.date)}</span>
@@ -299,7 +282,7 @@ function Message({
     );
   }
   const files = m.attachments.filter((a) => !a.inline);
-  const to = recipients(m, own);
+  const to = recipients(m);
   return (
     // oxlint-disable-next-line jsx-a11y/no-static-element-interactions -- a pointer shortcut for n / p
     <div
@@ -316,7 +299,7 @@ function Message({
         onClick={() => toggle(m.id)}
       >
         <span className="truncate font-medium">
-          {name(m.from, own)}
+          {name(m.from)}
           {to && ` ${to}`}
         </span>
         <span title={fullDate(m.date)} className="tabular ml-auto shrink-0 text-row text-text-3">

@@ -38,10 +38,11 @@ pub(crate) fn view_ids(
         .collect())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SearchTraits {
     pub(crate) needs_gmail: bool,
     pub(crate) looks_in_trash: bool,
+    pub(crate) terms: Vec<String>,
 }
 
 pub(crate) fn search_ids(
@@ -70,6 +71,7 @@ pub(crate) fn search_ids(
         SearchTraits {
             needs_gmail: query.needs_gmail(),
             looks_in_trash: scope.trash || scope.spam,
+            terms: query.free_text(),
         },
     ))
 }

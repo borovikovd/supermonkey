@@ -35,32 +35,45 @@ export function visibleSplits(): { split: number; first: string }[] {
   return out;
 }
 
+function whenMirrorHas<T>(
+  find: () => T | undefined,
+  left: (s: ReturnType<typeof chrome>) => boolean,
+  run: (found: T) => void,
+): (() => void) | null {
+  const now = find();
+  if (now !== undefined) {
+    run(now);
+    return null;
+  }
+  const stop = () => {
+    unsubMirror();
+    unsubChrome();
+  };
+  const unsubMirror = useMirror.subscribe(() => {
+    const found = find();
+    if (found === undefined) return;
+    stop();
+    run(found);
+  });
+  const unsubChrome = useChrome.subscribe((s) => {
+    if (left(s)) stop();
+  });
+  return stop;
+}
+
 let stopSplitWait: (() => void) | null = null;
 
 export function goToSplit(kind: "important" | "other") {
   goTo({ kind: "inbox" });
   const target = splitIdOf(kind);
   chrome().forceSplit(target);
-  const highlightSplit = () => {
-    const split = visibleSplits().find((s) => s.split === target);
-    if (split) chrome().setHighlight(split.first);
-    return split !== undefined;
-  };
   stopSplitWait?.();
-  if (highlightSplit()) return;
   const { account } = chrome();
-  const stop = () => {
-    unsubMirror();
-    unsubChrome();
-    if (stopSplitWait === stop) stopSplitWait = null;
-  };
-  const unsubMirror = useMirror.subscribe(() => {
-    if (highlightSplit()) stop();
-  });
-  const unsubChrome = useChrome.subscribe((s) => {
-    if (s.account !== account || currentView()?.kind !== "inbox") stop();
-  });
-  stopSplitWait = stop;
+  stopSplitWait = whenMirrorHas(
+    () => visibleSplits().find((s) => s.split === target),
+    (s) => s.account !== account || currentView()?.kind !== "inbox",
+    (split) => chrome().setHighlight(split.first),
+  );
 }
 
 export function highlight(key: string, opts: { headerToTop?: boolean } = {}) {
@@ -89,26 +102,15 @@ function markReadWhenLoaded(thread: number) {
     Object.values(useMirror.getState().subs).some(
       (s) => s.type === "conversation" && s.key.thread === thread && s.data,
     );
-  if (loaded()) {
-    markReadOnOpen(thread);
-    return;
-  }
   const onScreen = () => {
     const screen = chrome().current()?.screen;
     return screen?.kind === "conversation" && screen.thread === thread;
   };
-  const stop = () => {
-    unsubMirror();
-    unsubChrome();
-  };
-  const unsubMirror = useMirror.subscribe(() => {
-    if (!loaded()) return;
-    stop();
-    markReadOnOpen(thread);
-  });
-  const unsubChrome = useChrome.subscribe(() => {
-    if (!onScreen()) stop();
-  });
+  whenMirrorHas(
+    () => (loaded() ? thread : undefined),
+    () => !onScreen(),
+    markReadOnOpen,
+  );
 }
 
 export function openConversation(thread: number, row?: string) {

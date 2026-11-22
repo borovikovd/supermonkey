@@ -1,6 +1,6 @@
 import { launch, perfReport } from "../ipc/bridge";
 
-export const BUDGETS: Record<string, number> = {
+const BUDGETS: Record<string, number> = {
   j: 50,
   k: 50,
   x: 50,

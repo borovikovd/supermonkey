@@ -1,18 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { keyString, subscribe, unsubscribe } from "../ipc/bridge";
+import { keyString, subIdFor, subscribe, unsubscribe } from "../ipc/bridge";
 import type { AccountSummary, AppState, ConversationData, DraftState, SubKey } from "../ipc/types";
 import { useChrome } from "./chrome";
 import { conversationData } from "./current";
-import { accountSummary, appState, viewList, type ListView, type MirrorState } from "./mirror-core";
+import {
+  accountSummary,
+  appState,
+  composerDraft,
+  viewList,
+  type ListView,
+  type MirrorState,
+} from "./mirror-core";
 import { useMirror } from "./mirror";
 
-export function useSubId(key: SubKey | null): string | undefined {
-  const k = key ? keyString(key) : null;
+function useSubId(key: SubKey | null): string | undefined {
   return useMirror((s) => {
-    if (k === null) return undefined;
-    for (const [id, sub] of Object.entries(s.subs)) if (keyString(sub.key) === k) return id;
-    return undefined;
+    const id = key ? subIdFor(key) : undefined;
+    return id !== undefined && id in s.subs ? id : undefined;
   });
 }
 
@@ -48,6 +53,7 @@ export function useListView(key: SubKey | null): ListView & {
   loaded: boolean;
   searching: boolean;
   needsGmail: boolean;
+  terms: string[];
   more: boolean;
   oldestHit: string | null;
   sub?: string;
@@ -65,6 +71,7 @@ export function useListView(key: SubKey | null): ListView & {
         loaded: false,
         searching: false,
         needsGmail: false,
+        terms: [],
         more: false,
         oldestHit: null,
       };
@@ -75,6 +82,7 @@ export function useListView(key: SubKey | null): ListView & {
       loaded: sub.loaded,
       searching: sub.searching,
       needsGmail: sub.needsGmail,
+      terms: sub.terms,
       more: sub.more,
       oldestHit: sub.oldestHit,
       sub: id,
@@ -90,13 +98,7 @@ export function useConversation(
 }
 
 export function useDraft(draft: string | null): DraftState | null {
-  return useMirror((s) => {
-    if (!draft) return null;
-    for (const sub of Object.values(s.subs)) {
-      if (sub.type === "composer" && sub.key.draft === draft) return sub.draft;
-    }
-    return null;
-  });
+  return useMirror((s) => (draft ? composerDraft(s, draft) : null));
 }
 
 export function useCurrent() {

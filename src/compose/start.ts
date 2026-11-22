@@ -16,7 +16,7 @@ import {
   openScreen,
 } from "./session";
 
-export type ReplyMode = "reply" | "replyAll" | "forward";
+type ReplyMode = "reply" | "replyAll" | "forward";
 
 export function startCompose() {
   const { account } = useChrome.getState();
@@ -39,7 +39,7 @@ export function startCompose() {
   openScreen(draft);
 }
 
-export function resumeDraft(draft: string, thread: number | null, target: number | null) {
+function resumeDraft(draft: string, thread: number | null, target: number | null) {
   closeComposerOnScreen();
   if (thread === null) {
     openScreen(draft);

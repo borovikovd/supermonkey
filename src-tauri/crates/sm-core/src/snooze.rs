@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use sm_domain::{AccountId, LabelDelta, Millis, ModifyKind, SnoozeEdit, ThreadId};
+use sm_domain::{
+    AccountId, LabelDelta, LabelSet, Millis, ModifyKind, SnoozeEdit, SystemLabel, ThreadId,
+};
 use sm_store::WriteTx;
 
 use crate::actions::{ActionError, ThreadsChange, change_threads};
@@ -14,8 +16,10 @@ pub(crate) fn wake_due(
     let due = tx.read().threads().snoozes_due(now)?;
     let count = due.len();
     for (account, threads) in by_account(due) {
-        let delta = LabelDelta::preset(ModifyKind::ReturnToInbox)
-            .ok_or(ActionError::Invalid("Couldn't return that to the inbox"))?;
+        let delta = LabelDelta::new(
+            std::iter::once(SystemLabel::Inbox).collect(),
+            LabelSet::default(),
+        )?;
         let change = ThreadsChange {
             account,
             kind: ModifyKind::ReturnToInbox,

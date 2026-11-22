@@ -1,7 +1,7 @@
 import { fetchRows } from "../ipc/bridge";
 import type { ConversationData } from "../ipc/types";
 import { focusOf, formerNeighbor, highlight, openConversation, visibleSplits } from "../navigation";
-import { useChrome } from "../store/chrome";
+import { toggled, useChrome } from "../store/chrome";
 import { currentListView, currentView, rowOf, visibleIds } from "../store/current";
 import { useMirror } from "../store/mirror";
 import { blocks } from "../ui/folds";
@@ -48,12 +48,6 @@ function openDraftThread(ids: string[], at: number, delta: number) {
       return;
     }
   }
-}
-
-function toggled<T>(xs: readonly T[], x: T): T[] {
-  const set = new Set(xs);
-  if (!set.delete(x)) set.add(x);
-  return [...set];
 }
 
 export function toggleSelect() {
@@ -111,13 +105,9 @@ export function jumpSplit(delta: number) {
   if (target) highlight(target.first);
 }
 
-export function selectable(data: ConversationData): number[] {
-  return data.messages.map((m) => m.id);
-}
-
 export function selectMessage(data: ConversationData, delta: number) {
   const c = chrome();
-  const ids = selectable(data);
+  const ids = data.messages.map((m) => m.id);
   const last = ids.length - 1;
   const at = c.selectedMessage === null ? -1 : ids.indexOf(c.selectedMessage);
   const next = ids[Math.min(last, Math.max(0, (at < 0 ? last : at) + delta))];

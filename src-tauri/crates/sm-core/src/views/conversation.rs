@@ -1,6 +1,7 @@
-use sm_domain::{Rev, SystemLabel, ThreadId};
+use sm_domain::{Addr, Identity, Rev, SystemLabel, ThreadId};
 use sm_ipc::{
-    AttachmentInfo, ConversationData, DraftSummary, MessageBody, MessageSummary, OutboxRow,
+    AttachmentInfo, ConversationData, DraftSummary, MessageAddr, MessageBody, MessageSummary,
+    OutboxRow,
 };
 use sm_store::{BodyRecord, ConversationMessage, OutboxRecord, Reads, StoreError};
 
@@ -22,7 +23,19 @@ pub(crate) fn outbox_row(record: OutboxRecord) -> OutboxRow {
     }
 }
 
-fn message_summary(entry: ConversationMessage) -> MessageSummary {
+fn message_addr(addr: Addr, me: Option<&Identity>) -> MessageAddr {
+    MessageAddr {
+        me: me.is_some_and(|me| me.is_mine(&addr.email)),
+        name: addr.name,
+        email: addr.email,
+    }
+}
+
+fn message_addrs(addrs: Vec<Addr>, me: Option<&Identity>) -> Vec<MessageAddr> {
+    addrs.into_iter().map(|a| message_addr(a, me)).collect()
+}
+
+fn message_summary(entry: ConversationMessage, me: Option<&Identity>) -> MessageSummary {
     let ConversationMessage {
         message: m,
         attachments,
@@ -31,10 +44,10 @@ fn message_summary(entry: ConversationMessage) -> MessageSummary {
         id: m.id,
         unread: m.labels.has(SystemLabel::Unread),
         starred: m.labels.has(SystemLabel::Starred),
-        from: m.from,
-        to: m.to,
-        cc: m.cc,
-        bcc: m.bcc,
+        from: message_addr(m.from, me),
+        to: message_addrs(m.to, me),
+        cc: message_addrs(m.cc, me),
+        bcc: message_addrs(m.bcc, me),
         subject: m.subject,
         snippet: m.snippet,
         date: m.date,
@@ -69,6 +82,7 @@ pub(crate) fn conversation(
             rev: Rev(0),
         });
     };
+    let me = reads.accounts().identity(rows.thread.account)?;
     let drafts = rows
         .drafts
         .into_iter()
@@ -88,7 +102,11 @@ pub(crate) fn conversation(
     Ok(ConversationData {
         thread,
         subject: rows.thread.subject,
-        messages: rows.messages.into_iter().map(message_summary).collect(),
+        messages: rows
+            .messages
+            .into_iter()
+            .map(|m| message_summary(m, me.as_ref()))
+            .collect(),
         drafts,
         outbox: rows.outbox.into_iter().map(outbox_row).collect(),
         gone: false,

@@ -111,28 +111,45 @@ pub(super) fn patch(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum ListKind {
-    View,
+    View { in_trash: bool },
     Drafts,
     Search(SearchTraits),
 }
 
 impl ListKind {
-    fn of(view: &View) -> Self {
-        if *view == View::Drafts {
-            Self::Drafts
-        } else {
-            Self::View
+    const fn of(view: &View) -> Self {
+        match view {
+            View::Drafts => Self::Drafts,
+            View::Trash | View::Spam => Self::View { in_trash: true },
+            View::Inbox
+            | View::Done
+            | View::AllMail
+            | View::Snoozed
+            | View::Starred
+            | View::Sent
+            | View::Label { .. } => Self::View { in_trash: false },
         }
     }
 
-    const fn needs_gmail(self) -> bool {
+    const fn needs_gmail(&self) -> bool {
         matches!(self, Self::Search(t) if t.needs_gmail)
     }
 
-    const fn looks_in_trash(self) -> bool {
-        matches!(self, Self::Search(t) if t.looks_in_trash)
+    const fn looks_in_trash(&self) -> bool {
+        match self {
+            Self::View { in_trash } => *in_trash,
+            Self::Search(t) => t.looks_in_trash,
+            Self::Drafts => false,
+        }
+    }
+
+    fn into_terms(self) -> Vec<String> {
+        match self {
+            Self::Search(t) => t.terms,
+            Self::View { .. } | Self::Drafts => Vec::new(),
+        }
     }
 }
 
@@ -188,6 +205,7 @@ impl<'a, 'c> ListUpdate<'a, 'c> {
             searching: sub.searching,
             needs_gmail: kind.needs_gmail(),
             looks_in_trash: kind.looks_in_trash(),
+            terms: kind.into_terms(),
             more: sub.next_page.is_some(),
             oldest_hit,
         })
@@ -230,6 +248,7 @@ impl<'a, 'c> ListUpdate<'a, 'c> {
             searching: sub.searching,
             needs_gmail: kind.needs_gmail(),
             looks_in_trash: kind.looks_in_trash(),
+            terms: kind.into_terms(),
             more: sub.next_page.is_some(),
             oldest_hit,
         }))

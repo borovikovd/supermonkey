@@ -10,7 +10,7 @@ export function listKey(account: number, where: Where): SubKey {
     : { type: "list", account, view: where.view };
 }
 
-export function currentListKey(): SubKey | null {
+function currentListKey(): SubKey | null {
   const c = useChrome.getState();
   const cur = c.current();
   return c.account === null || !cur ? null : listKey(c.account, cur.where);
@@ -39,8 +39,6 @@ export function currentListLoaded(): boolean {
 }
 
 export function listShowsTrash(): boolean {
-  const where = useChrome.getState().current()?.where;
-  if (where?.kind === "view") return where.view.kind === "trash" || where.view.kind === "spam";
   const key = currentListKey();
   const id = key ? subIdFor(key) : undefined;
   const sub = id ? useMirror.getState().subs[id] : undefined;

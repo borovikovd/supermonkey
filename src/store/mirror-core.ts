@@ -15,7 +15,7 @@ import type {
 
 type KeyOf<T extends SubKey["type"]> = Extract<SubKey, { type: T }>;
 
-export type ListSub = {
+type ListSub = {
   type: "list";
   key: KeyOf<"list" | "search">;
   loaded: boolean;
@@ -23,22 +23,23 @@ export type ListSub = {
   searching: boolean;
   needsGmail: boolean;
   looksInTrash: boolean;
+  terms: string[];
   more: boolean;
   oldestHit: string | null;
 };
-export type ConversationSub = {
+type ConversationSub = {
   type: "conversation";
   key: KeyOf<"conversation">;
   data: ConversationData | null;
 };
-export type ComposerSub = { type: "composer"; key: KeyOf<"composer">; draft: DraftState | null };
-export type AccountSub = { type: "account"; key: KeyOf<"account">; summary: AccountSummary | null };
-export type AppSub = { type: "app"; key: KeyOf<"app">; state: AppState | null };
+type ComposerSub = { type: "composer"; key: KeyOf<"composer">; draft: DraftState | null };
+type AccountSub = { type: "account"; key: KeyOf<"account">; summary: AccountSummary | null };
+type AppSub = { type: "app"; key: KeyOf<"app">; state: AppState | null };
 export type Sub = ListSub | ConversationSub | ComposerSub | AccountSub | AppSub;
 
 export type Pending = { n: number; action: Action };
 
-export type Removal = { sub: string; key: string; after: string | null };
+type Removal = { sub: string; key: string; after: string | null };
 
 export type MirrorState = {
   ack: number;
@@ -68,6 +69,7 @@ export function subForKey(key: SubKey): Sub {
         searching: false,
         needsGmail: false,
         looksInTrash: false,
+        terms: [],
         more: false,
         oldestHit: null,
       };
@@ -87,11 +89,7 @@ export function mergeRow(rows: Record<string, ListRow>, row: ListRow): void {
   if (!have || have.rev <= row.rev) rows[row.key] = row;
 }
 
-export function applyListPatch(
-  ids: ListEntry[],
-  removed: string[],
-  moved: ListMove[],
-): ListEntry[] {
+function applyListPatch(ids: ListEntry[], removed: string[], moved: ListMove[]): ListEntry[] {
   if (removed.length === 0 && moved.length === 0) return ids;
   const drop = new Set<string>(removed);
   for (const m of moved) drop.add(m.key);
@@ -160,6 +158,10 @@ export function applyChannel(
           searching: u.searching,
           needsGmail: u.needsGmail,
           looksInTrash: u.looksInTrash,
+          terms:
+            u.terms.length === sub.terms.length && u.terms.every((t, i) => t === sub.terms[i])
+              ? sub.terms
+              : u.terms,
           more: u.more,
           oldestHit: u.oldestHit,
         };
@@ -216,7 +218,7 @@ export const viewLabel = (view: View): string | null => {
   }
 };
 
-export function removesFrom(m: ModifyAction, key: SubKey): boolean {
+function removesFrom(m: ModifyAction, key: SubKey): boolean {
   if (key.type === "search") {
     return m.kind === "trash" || m.kind === "spam";
   }
@@ -280,6 +282,13 @@ function patchRow(row: ListRow, m: ModifyAction): ListRow {
     starred: flag(m, "STARRED", row.starred),
     snoozeUntil,
   };
+}
+
+export function composerDraft(s: MirrorState, draft: string): DraftState | null {
+  for (const sub of Object.values(s.subs)) {
+    if (sub.type === "composer" && sub.key.draft === draft) return sub.draft;
+  }
+  return null;
 }
 
 export function appState(s: MirrorState): AppState | null {
@@ -356,7 +365,7 @@ export function viewList(s: MirrorState, subId: string): ListView {
   return { ids, rows };
 }
 
-export function recordRemovals(s: MirrorState, p: Pending): Removal[] {
+function recordRemovals(s: MirrorState, p: Pending): Removal[] {
   const m = modifyOf(p.action);
   if (!m?.undoable) return [];
   const drop = new Set(m.threads.map(String));

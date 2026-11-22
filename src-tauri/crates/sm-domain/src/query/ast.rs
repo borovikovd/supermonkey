@@ -68,6 +68,25 @@ impl Expr {
         }
     }
 
+    fn free_text(&self, out: &mut Vec<String>) {
+        match self {
+            Self::And(xs) | Self::Or(xs) => {
+                for x in xs {
+                    x.free_text(out);
+                }
+            }
+            Self::Term(t) if t.field == Field::Any => out.push(t.value.clone()),
+            Self::Term(_)
+            | Self::IsList
+            | Self::Not(_)
+            | Self::HasAttachment
+            | Self::Snoozed
+            | Self::Anywhere
+            | Self::Date { .. }
+            | Self::Unsupported(_) => {}
+        }
+    }
+
     fn index_decides(&self) -> bool {
         match self {
             Self::And(xs) | Self::Or(xs) => xs.iter().all(Self::index_decides),
@@ -180,6 +199,13 @@ impl Query {
     pub fn reads_body(&self) -> bool {
         self.expr
             .any(&|e| matches!(e, Expr::Term(t) if t.field == Field::Any))
+    }
+
+    #[must_use]
+    pub fn free_text(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        self.expr.free_text(&mut out);
+        out
     }
 
     #[must_use]
