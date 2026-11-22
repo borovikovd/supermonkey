@@ -284,8 +284,9 @@ The only section that changes from project to project.
 
 - **Product:** Supermonkey, a keyboard-first Gmail client for macOS. Tauri 2, React
   19 with the React Compiler, TypeScript 7, Tailwind 4, Vite+, Rust with SQLite.
-- **Docs:** [SPEC.md](SPEC.md) (behavior), [ARCHITECTURE.md](ARCHITECTURE.md)
-  (design).
+- **No spec document.** Behavior is what the cases in
+  [e2e/COVERAGE.md](e2e/COVERAGE.md) and their tests check; where the rules above
+  say "the spec", read the test plan. A change in behavior starts with its case.
 - **Commands.** `vp` (Vite+) for JS tooling, never `npm`, `pnpm`, or `npx`. `cargo`
   runs from `src-tauri`.
 

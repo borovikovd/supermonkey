@@ -14,7 +14,6 @@ export default defineConfig({
     ignorePatterns: [
       "src/bindings/**",
       "src-tauri/**",
-      "SPEC.md",
       ".claude/**",
       "CHANGELOG.md",
       ".release-please-manifest.json",

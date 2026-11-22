@@ -85,7 +85,7 @@ fn workspace_crates_depend_only_on_lower_layers() {
         let allowed = ALLOWED
             .iter()
             .find(|(c, _)| c == krate)
-            .unwrap_or_else(|| panic!("{krate} is not in ARCHITECTURE.md's crate table"))
+            .unwrap_or_else(|| panic!("{krate} is not in the layering table"))
             .1;
         for (dep, dev_only) in crate_deps
             .iter()
