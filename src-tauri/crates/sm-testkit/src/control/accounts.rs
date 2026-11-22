@@ -43,7 +43,8 @@ pub(crate) async fn add_user(State(s): State<Arc<Server>>, Json(req): Json<UserR
 
 pub(crate) async fn add_account(State(s): State<Arc<Server>>, Json(req): Json<UserReq>) -> Ctl {
     let app = match &*s.core.lock().await {
-        Core::Ready { app, .. } | Core::Running(app) => Arc::clone(app),
+        Core::Ready { app, .. } => Arc::clone(app),
+        Core::Running { session, .. } => Arc::clone(session.core()),
         Core::Down => return Err(Fail("the core is down; start it first".into())),
     };
     let token = create_user(&s, &req);

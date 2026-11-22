@@ -4,7 +4,7 @@ The end-to-end cases, one line each. The test code holds each case's setup, step
 
 - **Format.** `- ID · priority · title`. Cases are grouped by spec file, and the id's prefix names the file. Each test title starts with its id, for example `test("TRI-03 # moves to Trash …")`. A new case takes the next free number in its group.
 - **Priority.** P1: a core flow, a risk of losing or duplicating data, a security property, or a core state machine. P2: another rule, or a second partition of a P1 behavior. P3: a boundary that is costly to set up, or a detail close to cosmetic.
-- **What runs.** Playwright on WebKit drives the built UI against the real Rust core through the web bridge, and the core talks to the in-process fake Gmail. The native shell is not exercised: a recording platform stands in for notifications, the Dock badge, opened URLs and files, and stored tokens.
+- **What runs.** Playwright on WebKit drives the built UI against the real Rust core through the web bridge, and the core talks to the in-process fake Gmail. The native shell is not exercised: a recording platform stands in for notifications, the Dock badge, opened URLs and files, and stored tokens, and a recording host for the window's show, the events sent to the page, and the exit.
 - **Harness.** Seed scenarios are in `e2e/seeds.ts`, the page object and app time in `e2e/app.ts`, and the fake's control API (faults, holds, the request log) in `e2e/control.ts`. `e2e/harness.spec.ts` shows each piece in use.
 - **The check.** `e2e/plan.spec.ts` checks that every case line parses, ids are unique and sit in their file's group, every case has a test in its file, every test id is a case, the lists below name only real cases and files, and every cell of the interruption grid names a case or a unit test, or says why the two can't meet.
 
@@ -403,6 +403,9 @@ The end-to-end cases, one line each. The test code holds each case's setup, step
 - UIC-06 · P1 · An action the core rejects tells the user why
 - UIC-07 · P1 · An action the core can't read is refused, and the actions after it still apply
 - UIC-08 · P1 · An action stays applied when the one before it is acked
+- UIC-09 · P1 · The window shows once the page connects, or after 5 s if it never does
+- UIC-10 · P1 · A quit the page never answers ends 10 s later, keeping what the page committed
+- UIC-11 · P2 · A quit asks the page only once it has connected, and still asks it after it left
 
 ### unwanted.spec.ts (UNW)
 
@@ -533,7 +536,7 @@ Events: close, repeat, send, discard, undo, quit, elsewhere, account, offline.
 
 ## Not covered end-to-end, and why
 
-- Window behavior (a second launch focuses the window, closing hides it, a Dock click shows it, size and position restored but not visibility, the window shown only once the page connects or after 5 s, the overlay title bar) and quitting from the menu bar or macOS: the native shell is not exercised. The suite's quit is the E2E server asking the page itself (UIC-05, ATT-09); `tests/menu.rs` checks that the menu bar's Quit is the app's own. Checked by hand on a real Mac with the release build, on a test account:
+- The native shell's own glue (a second launch focuses the window, closing hides it, a Dock click shows it, size and position restored but not visibility, the overlay title bar, and which window and macOS events reach the session): the native shell is not exercised. What the app does on those events is `sm-bridge`'s `Session`, which the E2E server runs too: the suite's quit is the session's quit request, which the menu bar's Quit calls (UIC-05, UIC-10, UIC-11, ATT-09); its crash is the session's end, which macOS's terminate (Quit in the Dock, logout) calls; the window's show is UIC-09. `tests/menu.rs` checks that the menu bar's Quit is the app's own. Checked by hand on a real Mac with the release build, on a test account:
   - type in a composer and `Cmd+Q` within 0.5 s: the text is there on relaunch, and in the Gmail draft;
   - the same with the window hidden (`Cmd+W`) and with it minimized;
   - archive, `Cmd+Q` at once: archived on relaunch, and in Gmail once online;

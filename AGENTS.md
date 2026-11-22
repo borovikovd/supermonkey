@@ -308,7 +308,8 @@ The only section that changes from project to project.
     `sm-mime`, `sm-gmail` (client, quota, OAuth, token store), `sm-store` (schema,
     writer, read pool), `sm-ipc` (types generated into `src/bindings`), `sm-core`
     (actions, subscriptions, per-account workers), `sm-bridge` (command dispatch
-    for Tauri and the debug web bridge), `sm-testkit` (E2E server, demo, perf
+    for Tauri and the debug web bridge, and the `Session` both the shell and the
+    E2E server run: connect, window show, focus, quit), `sm-testkit` (E2E server, demo, perf
     fixture), `sm-fake-gmail`.
   - `src`: the UI: `store/` (mirror and chrome state), `keyboard/`, `ui/`,
     `compose/`, `ipc/`; `src/theme.css` holds the design tokens.

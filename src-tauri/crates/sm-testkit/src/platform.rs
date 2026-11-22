@@ -3,6 +3,7 @@ use std::path::Path;
 use parking_lot::Mutex;
 use sm_core::activity::{Tasks, waiting_on_person};
 use sm_core::{Notification, Platform, PlatformError};
+use sm_ipc::AppEvent;
 use url::Url;
 
 #[derive(Debug, Default, Clone)]
@@ -11,6 +12,9 @@ pub(crate) struct Recorded {
     pub(crate) badge: Option<u32>,
     pub(crate) opened_urls: Vec<String>,
     pub(crate) opened_files: Vec<String>,
+    pub(crate) windows_shown: usize,
+    pub(crate) events: Vec<AppEvent>,
+    pub(crate) exits: usize,
 }
 
 #[derive(Debug, Default)]
@@ -47,6 +51,21 @@ impl RecordingPlatform {
         r.notifications.clear();
         r.opened_urls.clear();
         r.opened_files.clear();
+        r.windows_shown = 0;
+        r.events.clear();
+        r.exits = 0;
+    }
+
+    pub(crate) fn window_shown(&self) {
+        self.recorded.lock().windows_shown += 1;
+    }
+
+    pub(crate) fn emitted(&self, event: AppEvent) {
+        self.recorded.lock().events.push(event);
+    }
+
+    pub(crate) fn exited(&self) {
+        self.recorded.lock().exits += 1;
     }
 
     pub(crate) fn next_sign_in(&self, mode: SignInMode) {

@@ -319,3 +319,72 @@ test("UIC-07 an action the core can't read is refused, and the actions after it 
   expect(await labels("p2")).not.toContain("INBOX");
   expect(await labels("p2")).not.toContain("UNREAD");
 });
+
+test("UIC-09 the window shows once the page connects, or after 5 s if it never does", async ({
+  app,
+  gmail,
+}) => {
+  await gmail.start();
+  await gmail.advanceServerClock(4_999);
+  expect((await gmail.platform()).windowsShown).toBe(0);
+  await gmail.advanceServerClock(1);
+  expect((await gmail.platform()).windowsShown).toBe(1);
+  await gmail.stop({ graceful: true });
+
+  await gmail.clearRecorded();
+  await app.open();
+  expect((await gmail.platform()).windowsShown).toBe(1);
+  await app.advance(5_000);
+  expect((await gmail.platform()).windowsShown).toBe(1);
+});
+
+test("UIC-10 a quit the page never answers ends 10 s later, keeping what the page committed", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await app.press("j", "j", "Enter");
+  await app.reply();
+  await app.type("Written before a quit nobody answers");
+  const answers: Route[] = [];
+  await app.page.route(/\/invoke\/quit_now$/, (route) => {
+    answers.push(route);
+  });
+
+  const quitting = gmail.stop({ graceful: true });
+  await expect.poll(() => answers.length).toBe(1);
+  await gmail.idle();
+  await gmail.advanceServerClock(9_999);
+  expect((await gmail.platform()).exits).toBe(0);
+  await gmail.advanceServerClock(1);
+  expect((await gmail.platform()).exits).toBe(1);
+  await quitting;
+
+  await app.page.goto("about:blank");
+  await app.launch();
+  const drafts = (await gmail.gmail(A)).drafts;
+  expect(drafts).toHaveLength(1);
+  expect(drafts[0]?.message.raw).toContain("Written before a quit nobody answers");
+});
+
+test("UIC-11 a quit asks the page only once it has connected, and still asks it after it left", async ({
+  app,
+  gmail,
+}) => {
+  const asked = async () => (await gmail.platform()).events.map((e) => e.event);
+  await gmail.start();
+  await gmail.stop({ graceful: true });
+  expect(await asked()).toEqual([]);
+  expect((await gmail.platform()).exits).toBe(1);
+
+  await app.open();
+  await app.page.goto("about:blank");
+  const quitting = gmail.stop({ graceful: true });
+  await expect.poll(asked).toEqual(["quit-requested"]);
+  await gmail.idle();
+  await gmail.advanceServerClock(9_999);
+  expect((await gmail.platform()).exits).toBe(1);
+  await gmail.advanceServerClock(1);
+  await quitting;
+  expect((await gmail.platform()).exits).toBe(2);
+});

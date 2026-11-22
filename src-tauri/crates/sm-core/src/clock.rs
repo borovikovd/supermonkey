@@ -15,7 +15,7 @@ pub trait Clock: Send + Sync {
     fn timer(&self, duration: Duration) -> Pin<Box<dyn Future<Output = Option<Busy>> + Send + '_>>;
 }
 
-pub(crate) async fn sleep(clock: &dyn Clock, duration: Duration) {
+pub async fn sleep(clock: &dyn Clock, duration: Duration) {
     let _fired = parked(clock.timer(duration)).await;
 }
 

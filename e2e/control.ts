@@ -144,6 +144,9 @@ type Recorded = {
   badge: number | null;
   openedUrls: string[];
   openedFiles: string[];
+  windowsShown: number;
+  events: { event: string }[];
+  exits: number;
 };
 
 type TokenItem = { account: string; token: string };

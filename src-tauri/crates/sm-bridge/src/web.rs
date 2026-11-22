@@ -16,15 +16,13 @@ use axum::{Json, Router};
 use futures_core::Stream;
 use parking_lot::{Mutex, RwLock};
 use serde_json::{Value, json};
+use sm_core::MAX_ATTACHMENT_BYTES;
 use sm_core::activity::{Activity, busy_scope};
-use sm_core::{App, MAX_ATTACHMENT_BYTES};
 use sm_domain::{ActionNo, Rev};
 use sm_ipc::{AppEvent, ChannelMessage};
-use tokio::sync::Notify;
-use tokio::sync::futures::Notified;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-use crate::{Answer, dispatch};
+use crate::Session;
 
 const LOCAL_ADDR: &str = "127.0.0.1:1430";
 
@@ -42,11 +40,10 @@ impl fmt::Debug for WebBridge {
 }
 
 struct Shared {
-    app: RwLock<Option<Arc<App>>>,
+    session: RwLock<Option<Arc<Session>>>,
     activity: Arc<Activity>,
-    streams: Mutex<Vec<UnboundedSender<Push>>>,
+    pages: Pages,
     sent: Mutex<(Rev, ActionNo)>,
-    quit: Notify,
     sign_ins: AtomicUsize,
 }
 
@@ -55,47 +52,62 @@ enum Push {
     AppEvent { name: String, payload: Value },
 }
 
-impl WebBridge {
-    pub fn new(app: Option<Arc<App>>, activity: Arc<Activity>) -> Self {
-        Self(Arc::new(Shared {
-            app: RwLock::new(app),
-            activity,
-            streams: Mutex::new(Vec::new()),
-            sent: Mutex::new((Rev(0), ActionNo(0))),
-            quit: Notify::new(),
-            sign_ins: AtomicUsize::new(0),
-        }))
-    }
+#[derive(Clone, Default)]
+pub struct Pages(Arc<Mutex<Vec<UnboundedSender<Push>>>>);
 
-    #[must_use]
-    pub fn app(&self) -> Option<Arc<App>> {
-        self.0.app.read().clone()
+impl fmt::Debug for Pages {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Pages").field(&self.0.lock().len()).finish()
     }
+}
 
-    pub fn set_app(&self, app: Option<Arc<App>>) {
-        if app.is_none() {
-            self.0.streams.lock().clear();
-        }
-        *self.0.app.write() = app;
-    }
-
-    pub fn emit(&self, event: &AppEvent) -> usize {
-        let (name, payload) = match event.parts() {
-            Ok(parts) => parts,
-            Err(e) => {
-                tracing::error!(error = %e, "couldn't encode an app event");
-                return 0;
-            }
-        };
-        let mut streams = self.0.streams.lock();
-        streams.retain(|page| {
+impl Pages {
+    pub fn emit(&self, event: &AppEvent) -> Result<(), serde_json::Error> {
+        let (name, payload) = event.parts()?;
+        self.0.lock().retain(|page| {
             page.send(Push::AppEvent {
                 name: name.clone(),
                 payload: payload.clone(),
             })
             .is_ok()
         });
-        streams.len()
+        Ok(())
+    }
+
+    fn add(&self, page: UnboundedSender<Push>) {
+        self.0.lock().push(page);
+    }
+
+    fn clear(&self) {
+        self.0.lock().clear();
+    }
+}
+
+impl WebBridge {
+    pub fn new(session: Option<Arc<Session>>, activity: Arc<Activity>) -> Self {
+        Self(Arc::new(Shared {
+            session: RwLock::new(session),
+            activity,
+            pages: Pages::default(),
+            sent: Mutex::new((Rev(0), ActionNo(0))),
+            sign_ins: AtomicUsize::new(0),
+        }))
+    }
+
+    fn session(&self) -> Option<Arc<Session>> {
+        self.0.session.read().clone()
+    }
+
+    pub fn set_session(&self, session: Option<Arc<Session>>) {
+        if session.is_none() {
+            self.0.pages.clear();
+        }
+        *self.0.session.write() = session;
+    }
+
+    #[must_use]
+    pub fn pages(&self) -> Pages {
+        self.0.pages.clone()
     }
 
     #[must_use]
@@ -106,10 +118,6 @@ impl WebBridge {
     #[must_use]
     pub fn last_sent(&self) -> (Rev, ActionNo) {
         *self.0.sent.lock()
-    }
-
-    pub fn quit_called(&self) -> Notified<'_> {
-        self.0.quit.notified()
     }
 
     pub fn router(&self) -> Router {
@@ -199,7 +207,7 @@ fn down() -> Response {
 }
 
 async fn events(State(bridge): State<WebBridge>) -> Response {
-    let Some(app) = bridge.app() else {
+    let Some(session) = bridge.session() else {
         return down();
     };
     let (page, stream) = unbounded_channel();
@@ -209,11 +217,11 @@ async fn events(State(bridge): State<WebBridge>) -> Response {
         *shared.sent.lock() = (message.rev, message.ack);
         _ = to_page.send(Push::Message(message));
     });
-    if let Err(e) = app.lifecycle().connect(sink).await {
+    if let Err(e) = session.connect(sink).await {
         tracing::warn!(error = %e, "couldn't connect a page's event stream");
         return down();
     }
-    bridge.0.streams.lock().push(page);
+    bridge.0.pages.add(page);
     Sse::new(PushStream(stream)).into_response()
 }
 
@@ -251,17 +259,13 @@ async fn invoke(
     Path(cmd): Path<String>,
     Json(args): Json<Value>,
 ) -> Response {
-    let Some(app) = bridge.app() else {
+    let Some(session) = bridge.session() else {
         return down();
     };
     let _signing_in = is_sign_in(&cmd).then(|| SignIn::new(&bridge.0.sign_ins));
-    let result = busy_scope(&bridge.0.activity, "bridge", dispatch(&app, &cmd, args)).await;
+    let result = busy_scope(&bridge.0.activity, "bridge", session.dispatch(&cmd, args)).await;
     match result {
-        Ok(Answer::Reply(reply)) => Json(reply.into_json()).into_response(),
-        Ok(Answer::Quit) => {
-            bridge.0.quit.notify_waiters();
-            Json(Value::Null).into_response()
-        }
+        Ok(reply) => Json(reply).into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, Json(e)).into_response(),
     }
 }

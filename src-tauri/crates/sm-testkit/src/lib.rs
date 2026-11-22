@@ -1,6 +1,7 @@
 mod control;
 mod demo;
 pub mod fixture;
+mod host;
 mod platform;
 mod server;
 

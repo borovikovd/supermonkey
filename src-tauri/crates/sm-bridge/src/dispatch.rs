@@ -5,7 +5,7 @@ use sm_ipc::{Command, Reply};
 use crate::commands::{self, CmdResult, shown};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Answer {
+pub(crate) enum Answer {
     Reply(Reply),
     Quit,
 }
@@ -14,7 +14,7 @@ pub enum Answer {
     clippy::too_many_lines,
     reason = "one exhaustive arm per IPC command, each a single core call; splitting needs a catch-all arm"
 )]
-pub async fn dispatch(app: &App, name: &str, args: Value) -> CmdResult<Answer> {
+pub(crate) async fn dispatch(app: &App, name: &str, args: Value) -> CmdResult<Answer> {
     let command = Command::parse(name, args).map_err(|e| commands::internal(&e))?;
     let reply = match command {
         Command::Connect { reply } => reply.send(app.lifecycle().launch_info()),

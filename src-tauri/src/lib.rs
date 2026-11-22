@@ -5,16 +5,15 @@ mod platform;
 
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-use sm_core::activity::{Activity, Tasks};
+use sm_bridge::{Host, Session};
+use sm_core::activity::Activity;
 use sm_core::clock::SystemClock;
 use sm_core::{App, Config, Deps, GmailConfig};
 use sm_gmail::{OAuthConfig, QuotaConfig, TokenFile, Units};
 use sm_ipc::AppEvent;
 use tauri::{AppHandle, Emitter as _, Manager as _, RunEvent, Window, WindowEvent};
 use tauri_plugin_window_state::StateFlags;
-use tokio::sync::OnceCell;
 
 pub use crate::logging::init_logging;
 pub use crate::menu::{QUIT_MENU_ITEM, app_menu};
@@ -25,30 +24,29 @@ pub(crate) const MAIN_WINDOW: &str = "main";
 #[cfg(all(feature = "fake", not(debug_assertions)))]
 compile_error!("the `fake` feature is for debug builds only");
 
-const SHOW_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
-
-const PAGE_QUIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
-
 const DEFAULT_QUOTA_PER_MIN: u32 = 5800;
 
 pub(crate) struct Shell {
-    pub(crate) core: Arc<App>,
-    tasks: Tasks,
-    quitting: AtomicBool,
-    stopped: OnceCell<()>,
-    pub(crate) connected: AtomicBool,
+    pub(crate) session: Arc<Session>,
     #[cfg(feature = "fake")]
     _demo: Option<sm_testkit::Demo>,
 }
 
-impl Shell {
-    async fn stop(&self) {
-        self.stopped
-            .get_or_init(|| async {
-                self.tasks.stop().await;
-                self.core.lifecycle().quit().await;
-            })
-            .await;
+struct TauriHost(AppHandle);
+
+impl Host for TauriHost {
+    fn emit(&self, event: &AppEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let (name, payload) = event.parts()?;
+        self.0.emit(&name, payload)?;
+        Ok(())
+    }
+
+    fn show_window(&self) {
+        show_main(&self.0);
+    }
+
+    fn exit(&self) {
+        self.0.exit(0);
     }
 }
 
@@ -97,7 +95,6 @@ fn build() -> tauri::Result<tauri::App> {
         .setup(|app| {
             let shell = start_core(app.handle())?;
             app.manage(shell);
-            show_if_never_connected(app.handle());
             Ok(())
         })
         .on_window_event(on_window_event)
@@ -118,7 +115,11 @@ fn on_window_event(window: &Window, event: &WindowEvent) {
             api.prevent_close();
             hide(window);
         }
-        WindowEvent::Focused(focused) => on_focus(window.app_handle(), *focused),
+        WindowEvent::Focused(focused) => {
+            if let Some(shell) = window.try_state::<Shell>() {
+                shell.session.focus(*focused);
+            }
+        }
         _ => {}
     }
 }
@@ -163,15 +164,11 @@ fn start_core(app: &AppHandle) -> anyhow::Result<Shell> {
     if let Some(demo) = &setup.demo {
         tauri::async_runtime::block_on(demo.register(&core))?;
     }
-    core.lifecycle().launch();
-    let tasks = Tasks::new(runtime.clone(), activity);
-    start_web_bridge(&core, &tasks);
+    let host = Box::new(TauriHost(app.clone()));
+    let session = Session::start(core, host, Arc::new(SystemClock), &runtime, &activity);
+    start_web_bridge(&session);
     Ok(Shell {
-        core,
-        tasks,
-        quitting: AtomicBool::new(false),
-        stopped: OnceCell::new(),
-        connected: AtomicBool::new(false),
+        session,
         #[cfg(feature = "fake")]
         _demo: setup.demo,
     })
@@ -226,11 +223,12 @@ fn wants_web_bridge() -> bool {
 }
 
 #[cfg(all(debug_assertions, feature = "web"))]
-fn start_web_bridge(core: &Arc<App>, tasks: &Tasks) {
+fn start_web_bridge(session: &Arc<Session>) {
     if !wants_web_bridge() {
         return;
     }
-    let bridge = sm_bridge::WebBridge::new(Some(Arc::clone(core)), Arc::clone(tasks.activity()));
+    let tasks = session.tasks();
+    let bridge = sm_bridge::WebBridge::new(Some(Arc::clone(session)), Arc::clone(tasks.activity()));
     tasks.spawn("web bridge", async move {
         if let Err(e) = sm_bridge::serve_local(bridge).await {
             tracing::warn!(error = %e, "the web bridge stopped");
@@ -239,30 +237,11 @@ fn start_web_bridge(core: &Arc<App>, tasks: &Tasks) {
 }
 
 #[cfg(not(all(debug_assertions, feature = "web")))]
-fn start_web_bridge(_core: &Arc<App>, _tasks: &Tasks) {
+fn start_web_bridge(_session: &Arc<Session>) {
     if wants_web_bridge() {
         tracing::warn!(
             "SUPERMONKEY_WEB_BRIDGE=1 needs a debug build with the `web` feature (--features web)"
         );
-    }
-}
-
-fn show_if_never_connected(app: &AppHandle) {
-    let app = app.clone();
-    let spawned = std::thread::Builder::new()
-        .name("show deadline".into())
-        .spawn(move || {
-            std::thread::sleep(SHOW_DEADLINE);
-            let connected = app
-                .try_state::<Shell>()
-                .is_some_and(|shell| shell.connected.load(Ordering::Acquire));
-            if !connected {
-                tracing::error!("the page did not connect to the core; showing the window anyway");
-                show_main(&app);
-            }
-        });
-    if let Err(e) = spawned {
-        tracing::warn!(error = %e, "couldn't start the window's show deadline");
     }
 }
 
@@ -281,80 +260,15 @@ pub(crate) fn show_main(app: &AppHandle) {
     }
 }
 
-fn on_focus(app: &AppHandle, focused: bool) {
-    let Some(shell) = app.try_state::<Shell>() else {
-        return;
-    };
-    let Some(clicked) = shell.core.lifecycle().focus(focused) else {
-        return;
-    };
-    let event = AppEvent::NotificationOpen {
-        account: clicked.account,
-        thread: clicked.thread,
-    };
-    if let Err(e) = emit(app, &event) {
-        tracing::warn!(error = %e, "couldn't open a clicked notification");
-    }
-}
-
-fn emit(app: &AppHandle, event: &AppEvent) -> anyhow::Result<()> {
-    let (name, payload) = event.parts()?;
-    app.emit(&name, payload)?;
-    Ok(())
-}
-
 fn request_quit(app: &AppHandle) {
-    let Some(shell) = app.try_state::<Shell>() else {
-        quit(app.clone());
-        return;
-    };
-    if shell.quitting.load(Ordering::Acquire) {
-        return;
+    match app.try_state::<Shell>() {
+        Some(shell) => shell.session.request_quit(),
+        None => app.exit(0),
     }
-    if !shell.connected.load(Ordering::Acquire) {
-        quit(app.clone());
-    } else if let Err(e) = emit(app, &AppEvent::QuitRequested) {
-        tracing::warn!(error = %e, "couldn't ask the page to quit; quitting");
-        quit(app.clone());
-    } else {
-        quit_after_deadline(app);
-    }
-}
-
-fn quit_after_deadline(app: &AppHandle) {
-    let app = app.clone();
-    let spawned = std::thread::Builder::new()
-        .name("quit deadline".into())
-        .spawn(move || {
-            std::thread::sleep(PAGE_QUIT_DEADLINE);
-            let quitting = app
-                .try_state::<Shell>()
-                .is_some_and(|shell| shell.quitting.load(Ordering::Acquire));
-            if !quitting {
-                tracing::warn!("the page did not answer the quit in time; quitting");
-                quit(app);
-            }
-        });
-    if let Err(e) = spawned {
-        tracing::warn!(error = %e, "couldn't start the quit deadline");
-    }
-}
-
-pub(crate) fn quit(app: AppHandle) {
-    tauri::async_runtime::spawn(async move {
-        if let Some(shell) = app.try_state::<Shell>() {
-            if shell.quitting.swap(true, Ordering::AcqRel) {
-                return;
-            }
-            shell.stop().await;
-        }
-        app.exit(0);
-    });
 }
 
 fn finish_quit(app: &AppHandle) {
     if let Some(shell) = app.try_state::<Shell>() {
-        shell.quitting.store(true, Ordering::Release);
-        tauri::async_runtime::block_on(shell.stop());
+        tauri::async_runtime::block_on(shell.session.terminated());
     }
 }

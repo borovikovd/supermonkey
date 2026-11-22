@@ -5,8 +5,12 @@ use axum::Json;
 use axum::extract::{Query, State};
 use serde::Deserialize;
 use serde_json::json;
-use sm_ipc::AppEvent;
+use sm_bridge::Session;
+use sm_core::clock::ManualClock;
+use tokio::runtime::Handle;
+use tokio::sync::Notify;
 
+use crate::host::TestHost;
 use crate::server::{Core, Ctl, Fail, SETTLE_LIMIT, Server, done};
 
 pub(crate) async fn start(State(s): State<Arc<Server>>) -> Ctl {
@@ -20,14 +24,21 @@ pub(crate) async fn start(State(s): State<Arc<Server>>) -> Ctl {
             s.open_core(quota)?
         }
         Core::Down => s.open_core(quota)?,
-        running @ Core::Running(_) => {
+        running @ Core::Running { .. } => {
             *core = running;
             return Err(Fail("already running".into()));
         }
     };
-    app.lifecycle().launch();
-    s.bridge.set_app(Some(Arc::clone(&app)));
-    *core = Core::Running(app);
+    let exited = Arc::new(Notify::new());
+    let host = Box::new(TestHost {
+        pages: s.bridge.pages(),
+        platform: Arc::clone(&s.platform),
+        exited: Arc::clone(&exited),
+    });
+    let clock = Arc::<ManualClock>::clone(&s.clock);
+    let session = Session::start(app, host, clock, &Handle::current(), &s.activity);
+    s.bridge.set_session(Some(Arc::clone(&session)));
+    *core = Core::Running { session, exited };
     Ok(done())
 }
 
@@ -38,31 +49,36 @@ pub(crate) struct StopReq {
 
 pub(crate) async fn stop(State(s): State<Arc<Server>>, Json(req): Json<StopReq>) -> Ctl {
     let mut core = s.core.lock().await;
-    let app = match std::mem::replace(&mut *core, Core::Down) {
-        Core::Running(app) => app,
+    let (session, exited) = match std::mem::replace(&mut *core, Core::Down) {
+        Core::Running { session, exited } => (session, exited),
         other @ (Core::Ready { .. } | Core::Down) => {
             *core = other;
             return Err(Fail("the core is not running".into()));
         }
     };
-    if req.graceful {
-        ask_the_page_to_quit(&s).await;
-        s.settle().await?;
+    if !req.graceful {
+        s.bridge.set_session(None);
+        session.terminated().await;
+        return Ok(done());
     }
-    s.bridge.set_app(None);
-    app.lifecycle().quit().await;
-    Ok(done())
+    let quit = quit(&session, &exited).await;
+    s.bridge.set_session(None);
+    quit.map(|()| done())
 }
 
-async fn ask_the_page_to_quit(s: &Server) {
-    let quit = s.bridge.quit_called();
-    tokio::pin!(quit);
-    quit.as_mut().enable();
-    if s.bridge.emit(&AppEvent::QuitRequested) > 0
-        && tokio::time::timeout(SETTLE_LIMIT, quit).await.is_err()
+async fn quit(session: &Arc<Session>, exited: &Notify) -> Result<(), Fail> {
+    session.request_quit();
+    if tokio::time::timeout(SETTLE_LIMIT, exited.notified())
+        .await
+        .is_ok()
     {
-        tracing::warn!("the page did not call quit_now");
+        return Ok(());
     }
+    session.terminated().await;
+    Err(Fail(
+        "the app did not quit: the page never answered, and app time never reached the quit deadline"
+            .into(),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -128,20 +144,16 @@ pub(crate) struct FocusReq {
 }
 
 pub(crate) async fn focus(State(s): State<Arc<Server>>, Json(req): Json<FocusReq>) -> Ctl {
-    let Some(app) = s.running().await else {
+    let Some(session) = s.session().await else {
         return Err(Fail("the core is not running".into()));
     };
-    let clicked = app.lifecycle().focus(req.focused);
+    let clicked = session.focus(req.focused);
     if !req.focused {
         return Ok(done());
     }
     let Some(n) = clicked else {
         return Ok(Json(json!({ "openThread": null })));
     };
-    s.bridge.emit(&AppEvent::NotificationOpen {
-        account: n.account,
-        thread: n.thread,
-    });
     let thread = match n.thread {
         Some(t) => s.gmail_thread(t).await,
         None => None,
@@ -171,6 +183,9 @@ pub(crate) async fn platform(State(s): State<Arc<Server>>) -> Ctl {
         "badge": recorded.badge,
         "openedUrls": recorded.opened_urls,
         "openedFiles": recorded.opened_files,
+        "windowsShown": recorded.windows_shown,
+        "events": recorded.events,
+        "exits": recorded.exits,
     })))
 }
 

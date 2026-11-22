@@ -9,21 +9,28 @@ use axum::response::{IntoResponse, Response};
 use parking_lot::Mutex;
 use serde::Serialize;
 use serde_json::{Value, json};
-use sm_bridge::WebBridge;
+use sm_bridge::{Session, WebBridge};
 use sm_core::activity::{Activity, DEFERRED_KICK};
 use sm_core::clock::{Clock as _, ManualClock};
 use sm_core::{App, Config, Deps, GmailConfig};
 use sm_domain::{GmailThreadId, Millis, ThreadId};
 use sm_fake_gmail::{FakeGmail, FakeUser};
 use sm_gmail::{OAuthConfig, QuotaConfig, TokenFile};
+use tokio::sync::Notify;
 
 use crate::platform::RecordingPlatform;
 
 pub(crate) const SETTLE_LIMIT: Duration = Duration::from_secs(10);
 
 pub(crate) enum Core {
-    Ready { app: Arc<App>, quota: QuotaConfig },
-    Running(Arc<App>),
+    Ready {
+        app: Arc<App>,
+        quota: QuotaConfig,
+    },
+    Running {
+        session: Arc<Session>,
+        exited: Arc<Notify>,
+    },
     Down,
 }
 
@@ -93,16 +100,21 @@ impl Server {
         self.data_dir.join(Config::DB_FILE)
     }
 
-    pub(crate) async fn running(&self) -> Option<Arc<App>> {
+    pub(crate) async fn session(&self) -> Option<Arc<Session>> {
         match &*self.core.lock().await {
-            Core::Running(app) => Some(Arc::clone(app)),
+            Core::Running { session, .. } => Some(Arc::clone(session)),
             Core::Ready { .. } | Core::Down => None,
         }
     }
 
+    pub(crate) async fn running(&self) -> Option<Arc<App>> {
+        Some(Arc::clone(self.session().await?.core()))
+    }
+
     pub(crate) async fn open(&self) -> Option<Arc<App>> {
         match &*self.core.lock().await {
-            Core::Running(app) | Core::Ready { app, .. } => Some(Arc::clone(app)),
+            Core::Running { session, .. } => Some(Arc::clone(session.core())),
+            Core::Ready { app, .. } => Some(Arc::clone(app)),
             Core::Down => None,
         }
     }
