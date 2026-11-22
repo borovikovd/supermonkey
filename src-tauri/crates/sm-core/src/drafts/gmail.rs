@@ -13,6 +13,7 @@ use super::lifecycle::{self, DraftsWriting, GmailIds};
 use super::save::message_attachments;
 use super::text::snippet;
 use crate::effects::Effect;
+use crate::ops::queue_op;
 use crate::workers::{ReadMessage, store_draft_message};
 use crate::writer::WriterState;
 
@@ -74,16 +75,18 @@ pub(crate) fn delete_gmail_draft(
     if tx.read().ops().deletes_gmail_draft(account, gmail)? {
         return Ok(());
     }
-    tx.ops().push(&NewOp {
-        account,
-        action: None,
-        kind: OpKind::DraftDelete,
-        draft: None,
-        gmail_draft: Some(gmail),
-        payload: &(),
-    })?;
-    state.effect(Effect::Ops(account));
-    Ok(())
+    queue_op(
+        tx,
+        state,
+        &NewOp {
+            account,
+            action: None,
+            kind: OpKind::DraftDelete,
+            draft: None,
+            gmail_draft: Some(gmail),
+            payload: &(),
+        },
+    )
 }
 
 pub(crate) fn drop_gone(

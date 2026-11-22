@@ -4,7 +4,7 @@ use sm_store::{DraftAttachment, NewOp, OpKind, Reads, StoreError, WriteTx};
 
 use super::lifecycle;
 use super::text::snippet;
-use crate::effects::Effect;
+use crate::ops::queue_op;
 use crate::writer::WriterState;
 
 pub(crate) struct Edit {
@@ -90,16 +90,18 @@ pub(crate) fn queue_upsert(
     draft: &DraftId,
 ) -> Result<(), StoreError> {
     tx.ops().delete_draft_upserts(draft)?;
-    tx.ops().push(&NewOp {
-        account,
-        action: None,
-        kind: OpKind::DraftUpsert,
-        draft: Some(draft),
-        gmail_draft: None,
-        payload: &(),
-    })?;
-    state.effect(Effect::Ops(account));
-    Ok(())
+    queue_op(
+        tx,
+        state,
+        &NewOp {
+            account,
+            action: None,
+            kind: OpKind::DraftUpsert,
+            draft: Some(draft),
+            gmail_draft: None,
+            payload: &(),
+        },
+    )
 }
 
 pub(crate) fn message_attachments(

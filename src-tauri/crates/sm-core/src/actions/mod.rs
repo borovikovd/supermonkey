@@ -6,8 +6,6 @@ mod error;
 mod handle;
 mod labels;
 mod mail;
-mod notices;
-mod outbox;
 mod rejected;
 mod settings;
 mod splits;

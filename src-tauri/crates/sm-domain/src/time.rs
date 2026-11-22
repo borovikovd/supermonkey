@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -17,6 +18,11 @@ impl Millis {
     #[must_use]
     pub const fn since(self, earlier: Self) -> i64 {
         self.0.saturating_sub(earlier.0)
+    }
+
+    #[must_use]
+    pub fn duration_since(self, earlier: Self) -> Duration {
+        Duration::from_millis(u64::try_from(self.since(earlier)).unwrap_or(0))
     }
 }
 

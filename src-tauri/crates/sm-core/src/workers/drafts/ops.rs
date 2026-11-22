@@ -6,10 +6,7 @@ use super::parts::download_parts;
 use super::write::{load, write};
 use crate::drafts::WritingDraft;
 use crate::drafts::lifecycle;
-use crate::read::read;
 use crate::workers::account::AccountCtx;
-use sm_store::ReadPool;
-use std::sync::Arc;
 
 #[derive(Debug)]
 pub(crate) enum Upserted {
@@ -23,29 +20,29 @@ pub(crate) enum Upserted {
 
 pub(crate) async fn upsert(ctx: &AccountCtx, id: &DraftId) -> Result<Upserted, WriteFailure> {
     let Some(writing) = ctx.lane.writing.begin(id.clone()) else {
-        let taken = load_record(&ctx.deps.pool, id.clone())
+        let taken = load(&ctx.deps.pool, id.clone())
             .await?
-            .is_none_or(|in_outbox| in_outbox);
+            .is_none_or(|r| r.in_outbox);
         return Ok(if taken {
             Upserted::Nothing
         } else {
             Upserted::Busy
         });
     };
-    if load_record(&ctx.deps.pool, id.clone())
-        .await?
-        .is_none_or(|in_outbox| in_outbox)
-    {
+    let Some(record) = load(&ctx.deps.pool, id.clone()).await? else {
+        return Ok(Upserted::Nothing);
+    };
+    if record.in_outbox {
         return Ok(Upserted::Nothing);
     }
-    if load(&ctx.deps.pool, id.clone())
-        .await?
-        .is_some_and(|d| lifecycle::awaits_parts(&d))
-    {
+    let draft = if lifecycle::awaits_parts(&record.draft) {
         download_parts(ctx, id.clone()).await?;
-    }
-    let Some(draft) = load(&ctx.deps.pool, id.clone()).await? else {
-        return Ok(Upserted::Nothing);
+        let Some(record) = load(&ctx.deps.pool, id.clone()).await? else {
+            return Ok(Upserted::Nothing);
+        };
+        record.draft
+    } else {
+        record.draft
     };
     let Some(written) = write(ctx, draft).await? else {
         return Ok(Upserted::Nothing);
@@ -54,12 +51,6 @@ pub(crate) async fn upsert(ctx: &AccountCtx, id: &DraftId) -> Result<Upserted, W
         draft: Box::new(written),
         writing,
     })
-}
-
-async fn load_record(pool: &Arc<ReadPool>, id: DraftId) -> Result<Option<bool>, WriteFailure> {
-    Ok(read(pool, move |r| r.drafts().get(&id))
-        .await?
-        .map(|record| record.in_outbox))
 }
 
 pub(crate) async fn delete_copies(

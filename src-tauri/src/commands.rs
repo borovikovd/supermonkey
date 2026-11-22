@@ -18,7 +18,12 @@ pub(crate) async fn connect(
             tracing::debug!(error = %e, "the page's channel is gone");
         }
     });
-    let info = cmd::connect(&shell.core, sink).await?;
+    let info = shell
+        .core
+        .lifecycle()
+        .connect(sink)
+        .await
+        .map_err(|e| cmd::message(&e))?;
     shell
         .connected
         .store(true, std::sync::atomic::Ordering::Release);

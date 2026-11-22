@@ -26,10 +26,7 @@ pub(crate) async fn run(
                 }
                 LOOK_AGAIN
             }
-            Some(at) => {
-                let ms = u64::try_from(at.0.saturating_sub(now.0)).unwrap_or(0);
-                Duration::from_millis(ms).min(LOOK_AGAIN)
-            }
+            Some(at) => at.duration_since(now).min(LOOK_AGAIN),
             None => LOOK_AGAIN,
         };
         kick.wait(&*clock, wait).await;
@@ -52,7 +49,7 @@ pub(crate) async fn wake_due(writer: &CoreWriter, now: Millis) -> bool {
         })
         .await;
     match woke {
-        Ok(_) => true,
+        Ok(()) => true,
         Err(e) => {
             tracing::warn!(error = %e, "couldn't wake due snoozes");
             false

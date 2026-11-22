@@ -10,11 +10,7 @@ pub(super) fn set_setting(
     let (account, key, on) = match setting {
         Setting::RemoteImages { on } => (AccountId::NONE, SettingKey::RemoteImages, on),
         Setting::Muted { account, on } => {
-            if ctx.tx.read().accounts().get(account)?.is_none() {
-                return Err(ActionError::Invalid(
-                    "That account is no longer in Supermonkey",
-                ));
-            }
+            ctx.require_account(account)?;
             (account, SettingKey::Muted, on)
         }
     };

@@ -48,8 +48,7 @@ impl Notifier {
         }
         let away = state.away_since.take();
         let (notification, at) = state.last.take()?;
-        let clicked =
-            away.is_some_and(|away| at >= away) && now.0.saturating_sub(at.0) < CLICK_WITHIN_MS;
+        let clicked = away.is_some_and(|away| at >= away) && now.since(at) < CLICK_WITHIN_MS;
         clicked.then_some(notification)
     }
 }

@@ -140,6 +140,35 @@ impl AccountCtx {
         }
     }
 
+    pub(crate) fn gmail_wait(
+        &self,
+        err: &GmailError,
+        backoff: &mut Backoff,
+        log_backoff: bool,
+    ) -> Option<Duration> {
+        self.health.failed(err);
+        match err.outcome() {
+            Outcome::InvalidGrant => {
+                self.signed_out();
+                None
+            }
+            Outcome::Offline => Some(OFFLINE_RETRY),
+            outcome @ (Outcome::NoResponse
+            | Outcome::Unauthorized
+            | Outcome::RateLimited { .. }
+            | Outcome::ServerError { .. }
+            | Outcome::NotFound
+            | Outcome::Conflict
+            | Outcome::Rejected { .. }) => {
+                let wait = backoff.next_delay(err);
+                if log_backoff {
+                    tracing::debug!(account = self.account.0, %outcome, ?wait, "an op backs off");
+                }
+                Some(wait)
+            }
+        }
+    }
+
     pub(crate) fn signed_out(&self) {
         tracing::info!(
             account = self.account.0,

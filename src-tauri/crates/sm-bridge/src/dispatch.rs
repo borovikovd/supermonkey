@@ -2,7 +2,7 @@ use serde_json::Value;
 use sm_core::App;
 use sm_ipc::{Command, Reply};
 
-use crate::commands::{self, CmdResult};
+use crate::commands::{self, CmdResult, shown};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Answer {
@@ -86,8 +86,4 @@ pub async fn dispatch(app: &App, name: &str, args: Value) -> CmdResult<Answer> {
     reply
         .map(Answer::Reply)
         .map_err(|e| format!("couldn't encode the result: {e}"))
-}
-
-fn shown<T>(result: Result<T, sm_core::Error>) -> CmdResult<T> {
-    result.map_err(|e| commands::message(&e))
 }

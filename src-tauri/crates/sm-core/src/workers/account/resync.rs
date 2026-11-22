@@ -5,10 +5,10 @@ use sm_gmail::{Format, GmailError, HistoryId, Outcome, PageToken, Priority, Thre
 use sm_store::{Priority as WritePriority, ThreadSyncState};
 
 use super::ctx::AccountCtx;
-use super::ingest::drop_thread;
-use super::poller::{queue_starred_and_sent, store_cursor};
+use super::fetcher::drop_gone;
+use super::poller::{queue_starred_and_sent, reconcile_or_defer, store_cursor};
 use super::queue::{INBOX_BODIES, INBOX_META, LATE, Work};
-use crate::workers::drafts::{Occasion, reconcile};
+use crate::workers::drafts::Occasion;
 
 const RESYNC_PAGE: u32 = 500;
 
@@ -32,7 +32,13 @@ async fn resync(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(
     let listed = list_threads(ctx).await?;
     reconcile_cached(ctx, &listed, started).await?;
     queue_starred_and_sent(&ctx.queue);
-    resync_drafts(ctx, drafts_due).await?;
+    reconcile_or_defer(
+        ctx,
+        drafts_due,
+        |e| *e.outcome() == Outcome::InvalidGrant,
+        "the resync's draft reconcile failed; the next poll runs it",
+    )
+    .await?;
     store_cursor(ctx, profile.history_id).await;
     Ok(())
 }
@@ -76,21 +82,6 @@ async fn list_threads(
     Ok(listed)
 }
 
-async fn resync_drafts(
-    ctx: &AccountCtx,
-    drafts_due: &mut Option<Occasion>,
-) -> Result<(), GmailError> {
-    match reconcile(ctx, Occasion::Sync).await {
-        Ok(()) => {}
-        Err(e) if *e.outcome() == Outcome::InvalidGrant => return Err(e),
-        Err(e) => {
-            tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "the resync's draft reconcile failed; the next poll runs it");
-            *drafts_due = Some(Occasion::Sync);
-        }
-    }
-    Ok(())
-}
-
 async fn reconcile_cached(
     ctx: &AccountCtx,
     listed: &HashMap<GmailThreadId, Option<HistoryId>>,
@@ -107,7 +98,7 @@ async fn reconcile_cached(
     let mut owed = Vec::new();
     for thread in cached {
         match listed.get(&thread.gmail_id) {
-            None if thread.rev <= started => drop_if_gone(ctx, thread.gmail_id).await?,
+            None if thread.rev <= started => drop_if_gone(ctx, &thread.gmail_id).await?,
             Some(history) if thread.history_id != *history => {
                 owed.push(thread.id);
                 ctx.queue.push(
@@ -126,18 +117,18 @@ async fn reconcile_cached(
     Ok(())
 }
 
-async fn drop_if_gone(ctx: &AccountCtx, thread: GmailThreadId) -> Result<(), GmailError> {
+async fn drop_if_gone(ctx: &AccountCtx, thread: &GmailThreadId) -> Result<(), GmailError> {
     let check = ctx
         .retried(|| {
             ctx.gmail
-                .get_thread(Priority::P4, &thread, Format::Minimal, &[])
+                .get_thread(Priority::P4, thread, Format::Minimal, &[])
         })
         .await;
     let Err(e) = check else {
         return Ok(());
     };
     match e.outcome() {
-        Outcome::NotFound => drop_cached(ctx, thread).await,
+        Outcome::NotFound => drop_gone(ctx, thread).await,
         Outcome::InvalidGrant => return Err(e),
         outcome @ (Outcome::Offline
         | Outcome::NoResponse
@@ -150,19 +141,6 @@ async fn drop_if_gone(ctx: &AccountCtx, thread: GmailThreadId) -> Result<(), Gma
         }
     }
     Ok(())
-}
-
-async fn drop_cached(ctx: &AccountCtx, gone: GmailThreadId) {
-    let account = ctx.account;
-    let dropped = ctx
-        .writer()
-        .call(WritePriority::Sync, move |tx, _| {
-            drop_thread(tx, account, &gone)
-        })
-        .await;
-    if let Err(e) = dropped {
-        tracing::warn!(account = account.0, error = %e, "couldn't drop a thread Gmail no longer has");
-    }
 }
 
 async fn mark_owed(ctx: &AccountCtx, owed: Vec<ThreadId>) {

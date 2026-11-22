@@ -62,7 +62,7 @@ pub(crate) fn resolve(
     Ok(applied)
 }
 
-fn keep_draft(
+pub(super) fn keep_draft(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
     account: AccountId,

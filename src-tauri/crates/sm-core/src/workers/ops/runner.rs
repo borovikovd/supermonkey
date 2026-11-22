@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sm_gmail::{Backoff, GmailError, Outcome};
+use sm_gmail::Backoff;
 use sm_store::{OpQueue, OpRecord};
 use tokio::sync::{OwnedMutexGuard, oneshot};
 
@@ -104,29 +104,7 @@ fn retry_wait(ctx: &AccountCtx, failure: &Failure, backoff: &mut Backoff) -> Opt
             Some(OFFLINE_RETRY)
         }
         Failure::Busy => Some(BUSY_WAIT),
-        Failure::Gmail(err) => gmail_wait(ctx, err, backoff),
-    }
-}
-
-fn gmail_wait(ctx: &AccountCtx, err: &GmailError, backoff: &mut Backoff) -> Option<Duration> {
-    ctx.health.failed(err);
-    match err.outcome() {
-        Outcome::InvalidGrant => {
-            ctx.signed_out();
-            None
-        }
-        Outcome::Offline => Some(OFFLINE_RETRY),
-        outcome @ (Outcome::NoResponse
-        | Outcome::Unauthorized
-        | Outcome::RateLimited { .. }
-        | Outcome::ServerError { .. }
-        | Outcome::NotFound
-        | Outcome::Conflict
-        | Outcome::Rejected { .. }) => {
-            let wait = backoff.next_delay(err);
-            tracing::debug!(account = ctx.account.0, %outcome, ?wait, "an op backs off");
-            Some(wait)
-        }
+        Failure::Gmail(err) => ctx.gmail_wait(err, backoff, true),
     }
 }
 

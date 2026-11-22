@@ -3,6 +3,7 @@ use sm_store::{NewOp, OpKind, StoreError, WriteTx};
 
 use super::lifecycle::{self, GmailWrite};
 use crate::effects::Effect;
+use crate::ops::queue_op;
 use crate::writer::WriterState;
 
 pub(crate) fn close(
@@ -52,15 +53,18 @@ pub(crate) fn discard(
         GmailWrite::Create => None,
     };
     if let Some(gmail) = gmail {
-        tx.ops().push(&NewOp {
-            account: draft.account,
-            action: None,
-            kind: OpKind::DraftDelete,
-            draft: Some(id),
-            gmail_draft: gmail,
-            payload: &(),
-        })?;
-        state.effect(Effect::Ops(draft.account));
+        queue_op(
+            tx,
+            state,
+            &NewOp {
+                account: draft.account,
+                action: None,
+                kind: OpKind::DraftDelete,
+                draft: Some(id),
+                gmail_draft: gmail,
+                payload: &(),
+            },
+        )?;
     }
     let copies = tx.read().messages().draft_copies(draft.account, id)?;
     tx.messages().delete(&copies)?;

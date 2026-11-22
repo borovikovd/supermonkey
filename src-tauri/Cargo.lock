@@ -4085,6 +4085,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "futures-util",
+ "html-escape",
  "parking_lot",
  "proptest",
  "serde",

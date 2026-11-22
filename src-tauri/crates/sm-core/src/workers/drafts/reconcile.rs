@@ -41,6 +41,22 @@ pub(crate) const fn stops_the_account(e: &GmailError) -> bool {
     )
 }
 
+pub(super) fn skip_unread(
+    account: AccountId,
+    e: GmailError,
+    unread: &mut Option<GmailError>,
+    note: &str,
+) -> Result<(), GmailError> {
+    if stops_the_account(&e) {
+        return Err(e);
+    }
+    tracing::warn!(account = account.0, outcome = %e.outcome(), "{note}");
+    if e.is_transient() {
+        unread.get_or_insert(e);
+    }
+    Ok(())
+}
+
 pub(crate) async fn reconcile(ctx: &AccountCtx, occasion: Occasion) -> Result<(), GmailError> {
     let (meta, _) = occasion.priorities();
     let started = started(&ctx.deps.pool, ctx.account).await;
@@ -70,16 +86,6 @@ async fn read_changed(
     let (meta, body) = occasion.priorities();
     let account = ctx.account;
     let mut failed: Option<GmailError> = None;
-    let mut skip = |e: GmailError| -> Result<(), GmailError> {
-        if stops_the_account(&e) {
-            return Err(e);
-        }
-        tracing::warn!(account = account.0, outcome = %e.outcome(), "couldn't read a Gmail draft; skipping it");
-        if e.is_transient() {
-            failed.get_or_insert(e);
-        }
-        Ok(())
-    };
     for listed in listed {
         let read = match needs_read(ctx, &listed, &mut sorted, reconcile, meta).await {
             Ok(false) => continue,
@@ -87,7 +93,12 @@ async fn read_changed(
             Err(e) => Err(e),
         };
         if let Err(e) = read {
-            skip(e)?;
+            skip_unread(
+                account,
+                e,
+                &mut failed,
+                "couldn't read a Gmail draft; skipping it",
+            )?;
         }
     }
     failed.map_or(Ok(()), Err)
@@ -181,7 +192,7 @@ pub(crate) async fn read_skipped(ctx: &AccountCtx, id: DraftId) {
 
 async fn written_as(pool: &Arc<ReadPool>, account: AccountId, id: DraftId) -> Option<GmailDraftId> {
     match super::write::load(pool, id).await {
-        Ok(draft) => draft.and_then(|d| lifecycle::gmail_draft(&d).cloned()),
+        Ok(record) => record.and_then(|r| lifecycle::gmail_draft(&r.draft).cloned()),
         Err(e) => {
             tracing::warn!(account = account.0, error = %e, "couldn't read a draft to read back");
             None

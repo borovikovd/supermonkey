@@ -17,6 +17,7 @@ sm-ipc = { path = "../sm-ipc" }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 # `join_all`: a poll reads the threads it names at once.
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+html-escape = "0.3"
 parking_lot = "0.12"
 # Op queue payloads, stored as JSON by the store.
 serde = { version = "1", features = ["derive"] }

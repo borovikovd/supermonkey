@@ -1,3 +1,4 @@
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use sm_domain::{AccountId, ActionNo, LabelId, NoticeKind, ThreadChange, UndoEntryId};
 use sm_store::{NewNotice, NewOp, OpId, OpKind, OpRecord, StoreError, UndoAction, WriteTx};
@@ -13,6 +14,16 @@ pub(crate) struct OpOrigin {
     pub(crate) action: Option<ActionNo>,
 }
 
+pub(crate) fn queue_op<P: Serialize>(
+    tx: &mut WriteTx<'_>,
+    state: &mut WriterState,
+    op: &NewOp<'_, P>,
+) -> Result<(), StoreError> {
+    tx.ops().push(op)?;
+    state.effect(Effect::Ops(op.account));
+    Ok(())
+}
+
 pub(crate) fn queue_modify(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
@@ -20,16 +31,18 @@ pub(crate) fn queue_modify(
     op: &ModifyOp,
 ) -> Result<(), StoreError> {
     let OpOrigin { account, action } = origin;
-    tx.ops().push(&NewOp {
-        account,
-        action,
-        kind: OpKind::Modify,
-        draft: None,
-        gmail_draft: None,
-        payload: op,
-    })?;
-    state.effect(Effect::Ops(account));
-    Ok(())
+    queue_op(
+        tx,
+        state,
+        &NewOp {
+            account,
+            action,
+            kind: OpKind::Modify,
+            draft: None,
+            gmail_draft: None,
+            payload: op,
+        },
+    )
 }
 
 pub(crate) fn revert(

@@ -3,21 +3,12 @@ use std::time::Duration;
 
 use sm_domain::Millis;
 
+use super::eventually;
 use crate::activity::{Activity, Kick, Tasks, busy_scope, waiting_on_person};
 use crate::clock::{Clock, ManualClock, SystemClock, sleep};
 
 fn busy(activity: &Activity, label: &str) -> usize {
     activity.snapshot().get(label).copied().unwrap_or(0)
-}
-
-async fn until(what: &str, done: impl Fn() -> bool) {
-    for _ in 0..1000 {
-        if done() {
-            return;
-        }
-        tokio::task::yield_now().await;
-    }
-    panic!("never happened: {what}");
 }
 
 fn tasks(activity: &Arc<Activity>) -> Tasks {
@@ -35,7 +26,7 @@ async fn a_task_is_busy_until_it_parks_and_again_once_kicked() {
         k.wait(&SystemClock, Duration::from_secs(3600)).await;
         tx.send(busy(&a, "test-kick")).unwrap();
     });
-    until("the task parks", || {
+    eventually("the task parks", || {
         kick.waiters() == 1 && busy(&activity, "test-kick") == 0
     })
     .await;
@@ -72,7 +63,7 @@ async fn advance_fires_due_sleeps_once_and_jump_fires_none() {
         tokio::spawn(async move { sleep(c.as_ref(), Duration::from_millis(ms)).await })
     };
     let (short, long) = (started(500), started(2_000));
-    until("both sleeps register", || clock.sleepers() == 2).await;
+    eventually("both sleeps register", || clock.sleepers() == 2).await;
     assert_eq!(clock.next_due_within(400), None);
     assert_eq!(clock.next_due_within(500), Some(500));
     clock.jump(10_000);
@@ -96,12 +87,12 @@ async fn a_dropped_sleep_leaves_no_deadline_behind() {
     let clock = Arc::new(ManualClock::new(Arc::clone(&activity), Millis(0)));
     let c = Arc::clone(&clock);
     let sleeping = tokio::spawn(async move { sleep(c.as_ref(), Duration::from_millis(300)).await });
-    until("the sleep registers", || {
+    eventually("the sleep registers", || {
         clock.next_due_within(300) == Some(300)
     })
     .await;
     sleeping.abort();
-    until("the sleep is dropped", || sleeping.is_finished()).await;
+    eventually("the sleep is dropped", || sleeping.is_finished()).await;
     assert_eq!(clock.next_due_within(u64::MAX), None);
     assert_eq!(clock.advance(300), 0);
 }
@@ -123,7 +114,7 @@ async fn a_cancelled_group_ends_its_tasks_and_starts_no_more() {
     let activity = Activity::new();
     let group = tasks(&activity);
     group.spawn("forever", std::future::pending());
-    until("the task counts", || busy(&activity, "forever") == 1).await;
+    eventually("the task counts", || busy(&activity, "forever") == 1).await;
     group.stop().await;
     assert!(activity.is_idle());
     group.spawn("late", async {});

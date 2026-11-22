@@ -1,10 +1,8 @@
-use sm_domain::{ActionNo, Millis};
+use sm_domain::{AccountId, ActionNo, Millis};
 use sm_ipc::Action;
 use sm_store::WriteTx;
 
-use super::{
-    ActionError, accounts, compose, labels, mail, notices, outbox, settings, splits, subscriptions,
-};
+use super::{ActionError, accounts, compose, labels, mail, settings, splits, subscriptions};
 use crate::writer::WriterState;
 
 pub(crate) struct ActionCtx<'a, 'c> {
@@ -12,6 +10,17 @@ pub(crate) struct ActionCtx<'a, 'c> {
     pub(crate) state: &'a mut WriterState,
     pub(crate) n: ActionNo,
     pub(crate) now: Millis,
+}
+
+impl ActionCtx<'_, '_> {
+    pub(super) fn require_account(&self, account: AccountId) -> Result<(), ActionError> {
+        if self.tx.read().accounts().get(account)?.is_none() {
+            return Err(ActionError::Invalid(
+                "That account is no longer in Supermonkey",
+            ));
+        }
+        Ok(())
+    }
 }
 
 pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), ActionError> {
@@ -24,8 +33,8 @@ pub(super) fn apply(ctx: &mut ActionCtx<'_, '_>, action: Action) -> Result<(), A
         }
         Action::MoreResults { sub } => subscriptions::more_results(ctx, sub),
         Action::SetSetting(setting) => settings::set_setting(ctx, setting),
-        Action::AckNotice { notice } => notices::ack_notice(ctx, notice),
-        Action::CloseToast { outbox } => outbox::close_toast(ctx, outbox),
+        Action::AckNotice { notice } => Ok(ctx.tx.notices().delete(notice)?),
+        Action::CloseToast { outbox } => Ok(crate::outbox::close_toast(ctx.tx, ctx.state, outbox)?),
         Action::Modify(modify) => mail::modify(ctx, modify),
         Action::Undo { account, entry } => mail::undo(ctx, account, entry),
         Action::CreateLabel {

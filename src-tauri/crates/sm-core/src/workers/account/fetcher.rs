@@ -235,7 +235,7 @@ async fn store_read(ctx: &AccountCtx, ticket: ReadTicket, read: ReadThread) {
     }
 }
 
-async fn drop_gone(ctx: &AccountCtx, thread: &GmailThreadId) {
+pub(super) async fn drop_gone(ctx: &AccountCtx, thread: &GmailThreadId) {
     let account = ctx.account;
     let gone = thread.clone();
     let dropped = ctx

@@ -3,8 +3,7 @@ use sm_ipc::ModifyAction;
 use sm_store::{NewOp, OpKind};
 
 use super::{ActionCtx, ActionError, mail};
-use crate::effects::Effect;
-use crate::ops::LabelCreateOp;
+use crate::ops::{LabelCreateOp, queue_op};
 
 pub(super) fn create_label(
     ctx: &mut ActionCtx<'_, '_>,
@@ -17,12 +16,8 @@ pub(super) fn create_label(
     if name.is_empty() {
         return Err(ActionError::Invalid("A label needs a name"));
     }
+    ctx.require_account(account)?;
     let reads = ctx.tx.read();
-    if reads.accounts().get(account)?.is_none() {
-        return Err(ActionError::Invalid(
-            "That account is no longer in Supermonkey",
-        ));
-    }
     if reads.labels().get(account, &id)?.is_some() {
         return Err(ActionError::Invalid(
             "Couldn't create that label. Try again.",
@@ -56,18 +51,21 @@ fn queue_create(
     name: &str,
 ) -> Result<(), ActionError> {
     ctx.tx.labels().create_local(account, &id, name)?;
-    ctx.tx.ops().push(&NewOp {
-        account,
-        action: Some(ctx.n),
-        kind: OpKind::LabelCreate,
-        draft: None,
-        gmail_draft: None,
-        payload: &LabelCreateOp {
-            label: id,
-            name: name.to_owned(),
+    queue_op(
+        ctx.tx,
+        ctx.state,
+        &NewOp {
+            account,
+            action: Some(ctx.n),
+            kind: OpKind::LabelCreate,
+            draft: None,
+            gmail_draft: None,
+            payload: &LabelCreateOp {
+                label: id,
+                name: name.to_owned(),
+            },
         },
-    })?;
-    ctx.state.effect(Effect::Ops(account));
+    )?;
     Ok(())
 }
 

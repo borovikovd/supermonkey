@@ -1,7 +1,7 @@
 use base64::Engine as _;
 use sm_core::{App, MAX_ATTACHMENT_BYTES, NewAttachment, attachment_too_large};
 use sm_domain::DraftId;
-use sm_ipc::{ChannelMessage, DraftAttachment, LaunchInfo};
+use sm_ipc::DraftAttachment;
 
 pub type CmdResult<T> = Result<T, String>;
 
@@ -19,15 +19,8 @@ pub fn message(error: &(dyn std::error::Error + 'static)) -> String {
     text
 }
 
-fn err(error: &sm_core::Error) -> String {
-    message(error)
-}
-
-pub async fn connect(
-    app: &App,
-    sink: Box<dyn FnMut(ChannelMessage) + Send>,
-) -> CmdResult<LaunchInfo> {
-    app.lifecycle().connect(sink).await.map_err(|e| err(&e))
+pub(crate) fn shown<T>(result: Result<T, sm_core::Error>) -> CmdResult<T> {
+    result.map_err(|e| message(&e))
 }
 
 pub async fn add_attachment(
@@ -43,15 +36,12 @@ pub async fn add_attachment(
         mime_type,
         data,
     };
-    app.mail()
-        .add_attachment(draft, file)
-        .await
-        .map_err(|e| err(&e))
+    shown(app.mail().add_attachment(draft, file).await)
 }
 
 fn decode_file(data: &str) -> CmdResult<Vec<u8>> {
     if base64::decoded_len_estimate(data.len()) > MAX_ATTACHMENT_BYTES + 2 {
-        return Err(err(&attachment_too_large()));
+        return Err(message(&attachment_too_large()));
     }
     base64::engine::general_purpose::STANDARD
         .decode(data)

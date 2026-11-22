@@ -1,13 +1,13 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use sm_domain::{AccountId, Addr, DraftId, GmailDraftId, GmailThreadId};
+use sm_domain::{Addr, DraftId, GmailDraftId, GmailThreadId};
 use sm_gmail::{Format, GmailError, Outcome, PageToken, Priority};
 use sm_mime::{InlinePart, OutAttachment, Outgoing};
-use sm_store::{Draft, Priority as WritePriority, StoreError};
+use sm_store::{Draft, DraftRecord, Priority as WritePriority, StoreError};
 
 use super::WriteFailure;
-use super::reconcile::stops_the_account;
+use super::reconcile::skip_unread;
 use crate::Error;
 use crate::drafts::lifecycle::{self, GmailWrite};
 use crate::drafts::settle;
@@ -20,10 +20,8 @@ use std::sync::Arc;
 
 const CREATE_TRIES: usize = 3;
 
-pub(crate) async fn load(pool: &Arc<ReadPool>, id: DraftId) -> Result<Option<Draft>, Error> {
-    Ok(read(pool, move |r| r.drafts().get(&id))
-        .await?
-        .map(|record| record.draft))
+pub(crate) async fn load(pool: &Arc<ReadPool>, id: DraftId) -> Result<Option<DraftRecord>, Error> {
+    read(pool, move |r| r.drafts().get(&id)).await
 }
 
 pub(crate) async fn write(
@@ -170,7 +168,7 @@ async fn stored_copy(
 ) -> Result<Option<sm_gmail::Draft>, WriteFailure> {
     let Some(stored) = load(&ctx.deps.pool, local.clone())
         .await?
-        .and_then(|d| lifecycle::gmail_draft(&d).cloned())
+        .and_then(|r| lifecycle::gmail_draft(&r.draft).cloned())
     else {
         return Ok(None);
     };
@@ -229,18 +227,15 @@ async fn read_copy(
     match read {
         Ok(read) => Ok(Some(read)),
         Err(e) if *e.outcome() == Outcome::NotFound => Ok(None),
-        Err(e) if stops_the_account(&e) => Err(e.into()),
         Err(e) => {
-            skip_copy(ctx.account, e, unread);
+            skip_unread(
+                ctx.account,
+                e,
+                unread,
+                "couldn't read a Gmail draft while looking for copies; skipping it",
+            )?;
             Ok(None)
         }
-    }
-}
-
-fn skip_copy(account: AccountId, e: GmailError, unread: &mut Option<GmailError>) {
-    tracing::warn!(account = account.0, outcome = %e.outcome(), "couldn't read a Gmail draft while looking for copies; skipping it");
-    if e.outcome().is_transient() {
-        unread.get_or_insert(e);
     }
 }
 

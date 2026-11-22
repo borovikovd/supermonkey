@@ -4,7 +4,7 @@ use std::time::Duration;
 use sm_domain::{
     AccountId, GmailDraftId, GmailMessageId, GmailThreadId, Millis, OutboxState, SystemLabel,
 };
-use sm_gmail::{Backoff, Format, GmailError, Outcome, Priority};
+use sm_gmail::{Backoff, Format, Outcome, Priority};
 use sm_store::{Outbox, Priority as WritePriority};
 
 use super::account::{AccountCtx, OFFLINE_RETRY, fetch_thread};
@@ -46,7 +46,7 @@ fn next_wait(
             backoff.reset();
             Some(next_due.map_or(IDLE_WAIT, |due| until(ctx.clock(), due)))
         }
-        Err(Error::Gmail(e)) => gmail_wait(ctx, &e, backoff),
+        Err(Error::Gmail(e)) => ctx.gmail_wait(&e, backoff, false),
         Err(e) => {
             tracing::warn!(account = ctx.account.0, error = %e, "the outbox couldn't read or write; trying again");
             Some(OFFLINE_RETRY)
@@ -54,27 +54,8 @@ fn next_wait(
     }
 }
 
-fn gmail_wait(ctx: &AccountCtx, e: &GmailError, backoff: &mut Backoff) -> Option<Duration> {
-    ctx.health.failed(e);
-    match e.outcome() {
-        Outcome::InvalidGrant => {
-            ctx.signed_out();
-            None
-        }
-        Outcome::Offline => Some(OFFLINE_RETRY),
-        Outcome::NoResponse
-        | Outcome::Unauthorized
-        | Outcome::RateLimited { .. }
-        | Outcome::ServerError { .. }
-        | Outcome::NotFound
-        | Outcome::Conflict
-        | Outcome::Rejected { .. } => Some(backoff.next_delay(e)),
-    }
-}
-
 fn until(clock: &dyn Clock, due: Millis) -> Duration {
-    let ms = u64::try_from(due.0.saturating_sub(clock.now().0)).unwrap_or(0);
-    Duration::from_millis(ms).clamp(MIN_WAIT, IDLE_WAIT)
+    due.duration_since(clock.now()).clamp(MIN_WAIT, IDLE_WAIT)
 }
 
 async fn pass(ctx: &AccountCtx) -> Result<Option<Millis>, Error> {
@@ -145,14 +126,14 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Error> {
     let Some(_writing) = ctx.lane.writing.begin(row.draft.clone()) else {
         return Ok(());
     };
-    let late = ctx.clock().now().0 > row.send_after.0.saturating_add(LATE_AFTER);
+    let late = ctx.clock().now() > row.send_after.plus(LATE_AFTER);
     if !step(ctx, row, Event::Start { late }).await? {
         return Ok(());
     }
-    let Some(draft) = load(&ctx.deps.pool, row.draft.clone()).await? else {
+    let Some(record) = load(&ctx.deps.pool, row.draft.clone()).await? else {
         return Ok(());
     };
-    let written = match write(ctx, draft).await {
+    let written = match write(ctx, record.draft).await {
         Ok(Some(written)) => written,
         Ok(None) => return Ok(()),
         Err(failure) => return write_failed(ctx, row, failure).await,
@@ -259,7 +240,7 @@ async fn settle(ctx: &AccountCtx, row: &Outbox) -> Result<(), Error> {
             };
             let written = load(&ctx.deps.pool, row.draft.clone())
                 .await?
-                .and_then(|d| lifecycle::gmail_message(&d).cloned());
+                .and_then(|r| lifecycle::gmail_message(&r.draft).cloned());
             let message = sent_message(ctx, &thread, written.as_ref(), row.send_after).await?;
             sent(ctx, row, message, Some(thread)).await
         }

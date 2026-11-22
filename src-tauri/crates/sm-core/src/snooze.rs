@@ -10,7 +10,7 @@ pub(crate) fn wake_due(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
     now: Millis,
-) -> Result<usize, ActionError> {
+) -> Result<(), ActionError> {
     let due = tx.read().threads().snoozes_due(now)?;
     let count = due.len();
     for (account, threads) in by_account(due) {
@@ -28,7 +28,7 @@ pub(crate) fn wake_due(
     if count > 0 {
         tracing::info!(count, "woke due snoozes");
     }
-    Ok(count)
+    Ok(())
 }
 
 fn by_account(due: Vec<(AccountId, ThreadId)>) -> BTreeMap<AccountId, Vec<ThreadId>> {

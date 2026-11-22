@@ -119,8 +119,7 @@ fn poll_failed(ctx: &AccountCtx, e: &GmailError) {
 }
 
 async fn wake_if_slept(ctx: &AccountCtx, last: Millis, now: Millis) {
-    let gap = u64::try_from(now.0.saturating_sub(last.0)).unwrap_or(0);
-    if Duration::from_millis(gap) > WOKE_AFTER {
+    if now.duration_since(last) > WOKE_AFTER {
         tracing::info!(account = ctx.account.0, "woke from sleep");
         snooze::wake_due(ctx.writer(), now).await;
         ctx.outbox.kick();
@@ -158,7 +157,13 @@ async fn connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<
     store_connect_cursor(ctx, cursor).await;
     queue_inbox(&ctx.queue);
     queue_starred_and_sent(&ctx.queue);
-    reconcile_on_connect(ctx, drafts_due).await?;
+    reconcile_or_defer(
+        ctx,
+        drafts_due,
+        stops_the_account,
+        "the connect sync's draft reconcile failed; the first poll runs it",
+    )
+    .await?;
     ctx.queue.push(BACKFILL, Work::Backfill { page: None });
     mark_connected(ctx).await;
     Ok(())
@@ -171,15 +176,17 @@ async fn load_profile(ctx: &AccountCtx) -> Result<HistoryId, GmailError> {
     Ok(profile.history_id)
 }
 
-async fn reconcile_on_connect(
+pub(super) async fn reconcile_or_defer(
     ctx: &AccountCtx,
     drafts_due: &mut Option<Occasion>,
+    stops: fn(&GmailError) -> bool,
+    deferred: &str,
 ) -> Result<(), GmailError> {
     match reconcile(ctx, Occasion::Sync).await {
         Ok(()) => {}
-        Err(e) if stops_the_account(&e) => return Err(e),
+        Err(e) if stops(&e) => return Err(e),
         Err(e) => {
-            tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "the connect sync's draft reconcile failed; the first poll runs it");
+            tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "{deferred}");
             *drafts_due = Some(Occasion::Sync);
         }
     }

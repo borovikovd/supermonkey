@@ -6,7 +6,7 @@ use sm_store::{Draft, MessageRecord, Reads, StoreError, WriteTx};
 
 use super::lifecycle;
 use super::save::message_attachments;
-use super::text::{escape_text, local_offset};
+use super::text::local_offset;
 use crate::actions::ActionError;
 
 #[derive(Debug, Clone)]
@@ -166,7 +166,7 @@ fn quote(reads: Reads<'_>, draft: &mut Draft, target: &MessageRecord) -> Result<
                 .unwrap_or_else(|| sm_mime::text_to_html(body.text.as_deref().unwrap_or_default()));
             format!("{html}{}", body.quote_html.unwrap_or_default())
         }
-        None => escape_text(&target.snippet),
+        None => html_escape::encode_double_quoted_attribute(&target.snippet).into_owned(),
     };
     let source = QuoteSource {
         from: &target.from,

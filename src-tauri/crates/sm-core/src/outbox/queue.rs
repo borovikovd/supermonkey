@@ -6,9 +6,11 @@ use sm_domain::{
 };
 use sm_store::{NewOp, NewOutbox, OpKind, StoreError, UndoAction, WriteTx};
 
+use super::resolve::keep_draft;
 use crate::actions::{ActionError, Unsendable};
-use crate::drafts::{lifecycle, queue_upsert};
+use crate::drafts::lifecycle;
 use crate::effects::Effect;
+use crate::ops::queue_op;
 use crate::writer::WriterState;
 
 const SEND_DELAY: Duration = Duration::from_secs(10);
@@ -48,7 +50,7 @@ pub(crate) fn send(
         account: draft.account,
         draft: draft.id,
         thread: draft.thread,
-        send_after: Millis(now.0.saturating_add(delay)),
+        send_after: now.plus(delay),
     })?;
     tx.undo().record(
         draft.account,
@@ -75,12 +77,7 @@ pub(crate) fn undo_send(
     match row.state {
         OutboxState::Waiting => {
             tx.outbox().delete(outbox)?;
-            if let Some(draft) = tx.read().drafts().get(&row.draft)? {
-                let mut draft = draft.draft;
-                lifecycle::keep(&mut draft);
-                tx.drafts().put(&draft)?;
-                queue_upsert(tx, state, account, &draft.id)?;
-            }
+            keep_draft(tx, state, account, &row.draft)?;
         }
         OutboxState::Sending => {
             row.undo_requested = true;
@@ -113,16 +110,18 @@ pub(crate) fn trash_sent(
         labels.insert(SystemLabel::Trash.label_id());
         tx.messages().set_labels(&[(record.id, labels)])?;
     }
-    tx.ops().push(&NewOp {
-        account,
-        action: None,
-        kind: OpKind::TrashMessage,
-        draft: None,
-        gmail_draft: None,
-        payload: message,
-    })?;
-    state.effect(Effect::Ops(account));
-    Ok(())
+    queue_op(
+        tx,
+        state,
+        &NewOp {
+            account,
+            action: None,
+            kind: OpKind::TrashMessage,
+            draft: None,
+            gmail_draft: None,
+            payload: message,
+        },
+    )
 }
 
 pub(crate) fn close_toast(

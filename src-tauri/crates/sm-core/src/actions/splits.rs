@@ -61,11 +61,7 @@ pub(super) fn save_splits(
     splits: Vec<SplitInfo>,
     deleted: &[SplitId],
 ) -> Result<(), ActionError> {
-    if ctx.tx.read().accounts().get(account)?.is_none() {
-        return Err(ActionError::Invalid(
-            "That account is no longer in Supermonkey",
-        ));
-    }
+    ctx.require_account(account)?;
     let mut edits = Vec::with_capacity(splits.len());
     for split in splits {
         if split.kind == SplitKind::Custom {

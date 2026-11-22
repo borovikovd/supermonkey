@@ -9,9 +9,10 @@ use crate::drafts::lifecycle;
 use crate::workers::account::AccountCtx;
 
 pub(crate) async fn download_parts(ctx: &AccountCtx, id: DraftId) -> Result<(), WriteFailure> {
-    let Some(draft) = load(&ctx.deps.pool, id.clone()).await? else {
+    let Some(record) = load(&ctx.deps.pool, id.clone()).await? else {
         return Ok(());
     };
+    let draft = record.draft;
     let mut paths = HashMap::new();
     for a in &draft.attachments {
         if a.path.is_none()
