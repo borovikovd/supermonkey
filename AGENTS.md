@@ -312,6 +312,9 @@ The only section that changes from project to project.
     fixture), `sm-fake-gmail`.
   - `src`: the UI: `store/` (mirror and chrome state), `keyboard/`, `ui/`,
     `compose/`, `ipc/`; `src/theme.css` holds the design tokens.
+    `src/ui/UntrustedFrame.tsx` is the one path that renders mail HTML: its CSP,
+    sandbox, and link handling. Its sandbox keeps `allow-scripts` because WebKit
+    never fires the parent's listeners in a frame without it; the CSP runs nothing.
 - **Tests.** [e2e/COVERAGE.md](e2e/COVERAGE.md) is the test plan, one line per case;
   its "Kept unit and property tests" list holds the allowed unit tests.
   `e2e/plan.spec.ts` checks it and `e2e/tokens.spec.ts` checks the tokens.

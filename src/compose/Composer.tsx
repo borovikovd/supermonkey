@@ -12,9 +12,7 @@ import { command, keyText, shortHintOf, useCommand } from "../keyboard/table";
 import { openPalette } from "../navigation";
 import { useChrome } from "../store/chrome";
 import { useAppState, useDraft } from "../store/hooks";
-import { frameCsp } from "../ui/frameCsp";
-import { catchLinks } from "../ui/frameLinks";
-import { frameTokens } from "../ui/frameTokens";
+import { UntrustedFrame } from "../ui/UntrustedFrame";
 import { RecipientField, formatAddr, isValidEmail, type RecipientHandle } from "./RecipientField";
 import {
   attachFiles,
@@ -53,6 +51,8 @@ function focusEditor(editor: Editor | null, atEnd = false) {
   editor.commands.scrollIntoView();
 }
 
+const QUOTE_STYLE = "body{margin:0;font:13px/20px var(--font-sans);color:var(--color-text-2)}";
+
 function QuoteBlock({ html }: { html: string }) {
   const [open, setOpen] = useState(false);
   const remoteImages = useAppState()?.settings.remoteImages ?? true;
@@ -67,19 +67,12 @@ function QuoteBlock({ html }: { html: string }) {
         •••
       </button>
       {open && (
-        <iframe
+        <UntrustedFrame
           title="quoted"
-          // oxlint-disable-next-line react/iframe-missing-sandbox -- allow-scripts only so WebKit fires the parent's listeners; the CSP runs nothing
-          sandbox="allow-same-origin allow-scripts"
+          html={html}
+          css={QUOTE_STYLE}
+          remoteImages={remoteImages}
           className="mt-2 w-full border-0"
-          srcDoc={`<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${frameCsp(remoteImages)}"><style>${frameTokens()}body{margin:0;font:13px/20px var(--font-sans);color:var(--color-text-2)}</style></head><body>${html}</body></html>`}
-          onLoad={(e) => {
-            const el = e.currentTarget;
-            const doc = el.contentDocument;
-            if (!doc) return;
-            el.style.height = `${doc.documentElement.scrollHeight}px`;
-            catchLinks(doc);
-          }}
         />
       )}
     </div>

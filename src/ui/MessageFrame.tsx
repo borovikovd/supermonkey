@@ -1,11 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { getBodies } from "../ipc/bridge";
 import type { MessageBody } from "../ipc/types";
 import { dispatchKey } from "../keyboard/dispatch";
-import { frameCsp } from "./frameCsp";
-import { catchLinks } from "./frameLinks";
-import { frameTokens } from "./frameTokens";
+import { UntrustedFrame } from "./UntrustedFrame";
 
 const bodies = new Map<number, MessageBody>();
 const waiting = new Map<number, Promise<void>>();
@@ -51,12 +49,10 @@ blockquote{margin:0 0 0 8px;padding-left:12px;border-left:2px solid var(--color-
 a.sm-link-focus{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:2px}
 `;
 
-function srcdoc(body: MessageBody, remoteImages: boolean, quoteOpen: boolean): string {
-  const csp = frameCsp(remoteImages);
-  const quote = body.quoteHtml
-    ? `<div class="sm-toggle" data-sm-toggle>•••</div><div class="sm-quote${quoteOpen ? " sm-open" : ""}">${body.quoteHtml}</div>`
-    : "";
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><style>${frameTokens()}${BASE_STYLE}</style></head><body>${body.html}${quote}</body></html>`;
+function withQuote(body: MessageBody, quoteOpen: boolean): string {
+  return body.quoteHtml
+    ? `${body.html}<div class="sm-toggle" data-sm-toggle>•••</div><div class="sm-quote${quoteOpen ? " sm-open" : ""}">${body.quoteHtml}</div>`
+    : body.html;
 }
 
 export function LoadingBody({ snippet }: { snippet: string }) {
@@ -85,7 +81,6 @@ export function MessageFrame({
 }) {
   const [body, setBody] = useState(() => bodies.get(id));
   const [sized, setSized] = useState(false);
-  const frame = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     if (body || !hasBody) return;
@@ -96,56 +91,35 @@ export function MessageFrame({
     };
   }, [id, hasBody, body]);
 
-  useEffect(() => {
-    const el = frame.current;
-    if (!el || !body) return;
-    let ro: ResizeObserver | null = null;
-    const setup = () => {
-      const doc = el.contentDocument;
-      if (doc?.URL !== "about:srcdoc") return;
-      ro?.disconnect();
-      const fit = () => {
-        el.style.height = `${doc.documentElement.scrollHeight}px`;
-        setSized(true);
-      };
-      fit();
-      ro = new ResizeObserver(fit);
-      ro.observe(doc.documentElement);
-      for (const img of Array.from(doc.images)) img.addEventListener("load", fit);
-      doc.addEventListener("keydown", dispatchKey);
-      doc.addEventListener("mousedown", () => onSelect(id));
-      doc.addEventListener("click", (e) => {
+  const ready = (doc: Document, fit: () => void, signal: AbortSignal) => {
+    doc.addEventListener("keydown", dispatchKey, { signal });
+    doc.addEventListener("mousedown", () => onSelect(id), { signal });
+    doc.addEventListener(
+      "click",
+      (e) => {
         const t = e.target;
         const view = doc.defaultView;
-        if (!view || !(t instanceof view.Element)) return;
-        if (t.closest("[data-sm-toggle]")) {
-          doc.querySelector(".sm-quote")?.classList.toggle("sm-open");
-          requestAnimationFrame(fit);
-        }
-      });
-      catchLinks(doc);
-    };
-    el.addEventListener("load", setup);
-    if (el.contentDocument?.readyState === "complete") setup();
-    return () => {
-      el.removeEventListener("load", setup);
-      ro?.disconnect();
-    };
-  }, [body, onSelect, id]);
+        if (!view || !(t instanceof view.Element) || !t.closest("[data-sm-toggle]")) return;
+        doc.querySelector(".sm-quote")?.classList.toggle("sm-open");
+        requestAnimationFrame(fit);
+      },
+      { signal },
+    );
+  };
 
   return (
     <div className="relative">
       {!sized && <LoadingBody snippet={snippet} />}
       {body && (
-        <iframe
-          ref={frame}
-          data-frame={id}
+        <UntrustedFrame
+          frameId={id}
           title={`message ${id}`}
-          // oxlint-disable-next-line react/iframe-missing-sandbox -- allow-scripts only so WebKit fires the parent's listeners; the CSP runs nothing
-          sandbox="allow-same-origin allow-scripts"
-          srcDoc={srcdoc(body, remoteImages, quoteOpen)}
+          html={withQuote(body, quoteOpen)}
+          css={BASE_STYLE}
+          remoteImages={remoteImages}
           className={`block w-full border-0 ${sized ? "" : "invisible absolute inset-x-0 top-0"}`}
-          style={{ height: 0, colorScheme: "light" }}
+          onFit={() => setSized(true)}
+          onReady={ready}
         />
       )}
     </div>

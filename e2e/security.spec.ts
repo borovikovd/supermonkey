@@ -1,4 +1,4 @@
-import type { Dialog } from "@playwright/test";
+import type { Dialog, Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
 import { expect, test } from "./fixtures.ts";
@@ -31,16 +31,72 @@ const WEBVIEW_STATE = `(async () => {
   return [dump(localStorage), dump(sessionStorage), ...idb, ...stores, document.documentElement.outerHTML].join("\\n");
 })()`;
 
+function dialogsOf(app: App): Dialog[] {
+  const dialogs: Dialog[] = [];
+  app.page.on("dialog", (d) => {
+    dialogs.push(d);
+    void d.dismiss();
+  });
+  return dialogs;
+}
+
+async function injectScript(frame: Locator): Promise<void> {
+  await frame.evaluate((f) => {
+    const doc = f instanceof HTMLIFrameElement ? f.contentDocument : null;
+    if (!doc) throw new Error("no frame document");
+    const script = doc.createElement("script");
+    script.textContent = "top.__pwned = 8";
+    doc.body.append(script);
+    const img = doc.createElement("img");
+    img.setAttribute("onerror", "top.__pwned = 9");
+    img.src = "data:image/png;base64,AA";
+    doc.body.append(img);
+    doc.body.insertAdjacentHTML("beforeend", '<svg onload="top.__pwned = 10"></svg>');
+  });
+}
+
+async function expectLockedDown(frame: Locator): Promise<void> {
+  await expect(frame).toHaveAttribute("sandbox", "allow-same-origin allow-scripts");
+  const dom = await frame.evaluate((f) => {
+    const doc = f instanceof HTMLIFrameElement ? f.contentDocument : null;
+    if (!doc) return null;
+    const head = Array.from(doc.head.children);
+    const first = head.find((el) => !el.matches("meta[charset]"));
+    const all = Array.from(doc.querySelectorAll("*"));
+    return {
+      charset: head[0]?.outerHTML ?? "",
+      firstInHead: first?.outerHTML ?? "",
+      csp: first?.getAttribute("content") ?? "",
+      scripts: doc.querySelectorAll("script").length,
+      handlers: all.flatMap((el) =>
+        el.getAttributeNames().filter((n) => n.toLowerCase().startsWith("on")),
+      ),
+      jsUrls: all.flatMap((el) =>
+        el.getAttributeNames().filter((n) => /javascript:/i.test(el.getAttribute(n) ?? "")),
+      ),
+      forbidden: Array.from(doc.querySelectorAll("form, iframe, base")).map((el) => el.tagName),
+      refresh: all.filter(
+        (el) => el.tagName === "META" && el.getAttribute("http-equiv")?.toLowerCase() === "refresh",
+      ).length,
+    };
+  });
+  expect(dom).not.toBeNull();
+  expect(dom?.charset).toBe('<meta charset="utf-8">');
+  expect(dom?.firstInHead).toMatch(/^<meta http-equiv="Content-Security-Policy"/i);
+  expect(dom?.csp).toContain("script-src 'none'");
+  expect(dom?.scripts).toBe(0);
+  expect(dom?.handlers).toEqual([]);
+  expect(dom?.jsUrls).toEqual([]);
+  expect(dom?.forbidden).toEqual([]);
+  expect(dom?.refresh).toBe(0);
+}
+
 const HOSTILE_SUBJECT = "<img src=x onerror=top.__pwned=1>";
 const HOSTILE_NAME = "<b>Boss</b>";
 
 test.describe("security", () => {
   test("SEC-01 hostile HTML cannot run script or navigate", async ({ app, gmail }) => {
-    const dialogs: Dialog[] = [];
-    app.page.on("dialog", (d) => {
-      dialogs.push(d);
-      void d.dismiss();
-    });
+    const dialogs = dialogsOf(app);
     await seeds.security(gmail, app);
     const url = app.page.url();
     await app.row("Hostile").click();
@@ -53,6 +109,9 @@ test.describe("security", () => {
     await body.getByText("Submit").click();
     const links = await body.locator("a[href]").count();
     await app.press(...Array.from({ length: links }, () => ["Tab", "Enter"]).flat());
+    const frame = app.conversation.locator("iframe[data-frame]");
+    await expectLockedDown(frame);
+    await injectScript(frame);
     await app.advance(1_000);
     await app.settle();
 
@@ -64,40 +123,38 @@ test.describe("security", () => {
     expect(openedUrls.filter((u) => /^javascript:|evil\.test/i.test(u))).toEqual([]);
     expect(app.popups.filter((u) => /^javascript:|evil\.test/i.test(u))).toEqual([]);
     expect((await gmail.hits()).filter((h) => h.path.startsWith("/sink/evil.test"))).toEqual([]);
+  });
 
-    const frame = app.conversation.locator("iframe[data-frame]");
-    await expect(frame).toHaveAttribute("sandbox", "allow-same-origin allow-scripts");
-    const dom = await frame.evaluate((f) => {
-      const doc = f instanceof HTMLIFrameElement ? f.contentDocument : null;
-      if (!doc) return null;
-      const head = Array.from(doc.head.children);
-      const first = head.find((el) => !el.matches("meta[charset]"));
-      const all = Array.from(doc.querySelectorAll("*"));
-      return {
-        firstInHead: first?.outerHTML ?? "",
-        csp: first?.getAttribute("content") ?? "",
-        scripts: doc.querySelectorAll("script").length,
-        handlers: all.flatMap((el) =>
-          el.getAttributeNames().filter((n) => n.toLowerCase().startsWith("on")),
-        ),
-        jsUrls: all.flatMap((el) =>
-          el.getAttributeNames().filter((n) => /javascript:/i.test(el.getAttribute(n) ?? "")),
-        ),
-        forbidden: Array.from(doc.querySelectorAll("form, iframe, base")).map((el) => el.tagName),
-        refresh: all.filter(
-          (el) =>
-            el.tagName === "META" && el.getAttribute("http-equiv")?.toLowerCase() === "refresh",
-        ).length,
-      };
-    });
-    expect(dom).not.toBeNull();
-    expect(dom?.firstInHead).toMatch(/^<meta http-equiv="Content-Security-Policy"/i);
-    expect(dom?.csp).toContain("script-src 'none'");
-    expect(dom?.scripts).toBe(0);
-    expect(dom?.handlers).toEqual([]);
-    expect(dom?.jsUrls).toEqual([]);
-    expect(dom?.forbidden).toEqual([]);
-    expect(dom?.refresh).toBe(0);
+  test("SEC-08 hostile HTML in a reply's quoted text cannot run script or navigate", async ({
+    app,
+    gmail,
+  }) => {
+    const dialogs = dialogsOf(app);
+    await seeds.security(gmail, app);
+    const url = app.page.url();
+    await app.row("Hostile").click();
+    await expect(app.messageBody(0).getByText("Hostile content.")).toBeVisible();
+    await app.reply("r");
+    await app.page.getByTitle("Show quoted text").click();
+    const frame = app.page.locator('iframe[title="quoted"]');
+    const quote = frame.contentFrame();
+    await expect(quote.getByText("Hostile content.")).toBeVisible();
+
+    await quote.getByText("Run me").click();
+    await quote.getByText("Submit").click();
+    await expectLockedDown(frame);
+    await injectScript(frame);
+    await app.advance(1_000);
+    await app.settle();
+
+    expect(await pwned(app)).toEqual(["undefined", "undefined", "undefined"]);
+    expect(dialogs).toEqual([]);
+    expect(app.page.url()).toBe(url);
+    await expect(app.editor).toBeVisible();
+    const { openedUrls } = await gmail.platform();
+    expect(openedUrls.filter((u) => /^javascript:|evil\.test/i.test(u))).toEqual([]);
+    expect(app.popups.filter((u) => /^javascript:|evil\.test/i.test(u))).toEqual([]);
+    expect((await gmail.hits()).filter((h) => h.path.startsWith("/sink/evil.test"))).toEqual([]);
   });
 
   test("SEC-02 mail text never becomes markup outside the frame", async ({ app, gmail }) => {

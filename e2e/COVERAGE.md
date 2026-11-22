@@ -390,6 +390,7 @@ The end-to-end cases, one line each. The test code holds each case's setup, step
 - SEC-04 · P2 · The webview holds no Gmail credentials
 - SEC-06 · P1 · The UI runs under the release app's content security policy
 - SEC-07 · P1 · Links in a reply's quoted text open in the browser, never in the composer
+- SEC-08 · P1 · Hostile HTML in a reply's quoted text cannot run script or navigate
 
 ### ui-consistency.spec.ts (UIC)
 
