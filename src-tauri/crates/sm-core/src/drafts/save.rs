@@ -37,7 +37,29 @@ pub(crate) fn update(
         attachments,
     } = fields;
     let old = std::mem::take(&mut draft.attachments);
-    let mut attachments: Vec<DraftAttachment> = attachments
+    draft.from = from;
+    draft.to = to;
+    draft.cc = cc;
+    draft.bcc = bcc;
+    draft.subject = subject;
+    draft.snippet = snippet(&body_html);
+    draft.body_html = body_html;
+    draft.attachments = merge_attachments(old, attachments, seen);
+    draft.updated_at = now;
+    lifecycle::edited(&mut draft);
+    tx.drafts().put(&draft)?;
+    if !lifecycle::discards_on_close(&draft) {
+        queue_upsert(tx, state, draft.account, id, now)?;
+    }
+    Ok(())
+}
+
+fn merge_attachments(
+    old: Vec<DraftAttachment>,
+    edited: Vec<sm_ipc::DraftAttachment>,
+    seen: Rev,
+) -> Vec<DraftAttachment> {
+    let mut attachments: Vec<DraftAttachment> = edited
         .into_iter()
         .map(|a| {
             let stored = old.iter().find(|s| s.id == a.id);
@@ -58,21 +80,7 @@ pub(crate) fn update(
         .filter(|s| attachments.iter().all(|a| a.id != s.id))
         .collect();
     attachments.extend(unseen);
-    draft.from = from;
-    draft.to = to;
-    draft.cc = cc;
-    draft.bcc = bcc;
-    draft.subject = subject;
-    draft.snippet = snippet(&body_html);
-    draft.body_html = body_html;
-    draft.attachments = attachments;
-    draft.updated_at = now;
-    lifecycle::edited(&mut draft);
-    tx.drafts().put(&draft)?;
-    if !lifecycle::discards_on_close(&draft) {
-        queue_upsert(tx, state, draft.account, id, now)?;
-    }
-    Ok(())
+    attachments
 }
 
 pub(crate) fn queue_upsert(

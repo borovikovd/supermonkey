@@ -248,11 +248,15 @@ impl AccountWorkers {
                 Ok(())
             }
             Err(e) => {
-                tracing::warn!(account = account.0, error = %e, "couldn't read the refresh token; the account needs a sign-in");
-                self.mark_signed_out(account, grant);
+                self.token_unreadable(account, grant, &e);
                 Ok(())
             }
         }
+    }
+
+    fn token_unreadable(&self, account: AccountId, grant: Grant, e: &Error) {
+        tracing::warn!(account = account.0, error = %e, "couldn't read the refresh token; the account needs a sign-in");
+        self.mark_signed_out(account, grant);
     }
 
     async fn load_token(&self, email: &str) -> Result<Option<RefreshToken>, Error> {
@@ -359,15 +363,8 @@ impl AccountWorkers {
             let dir = attachments_dir(&workers.deps.data_dir, account);
             let gone = email.clone();
             let cleaned = tokio::task::spawn_blocking(move || {
-                if let Err(e) = tokens.delete(&gone) {
-                    tracing::warn!(account = account.0, error = %e, "couldn't delete a removed account's token");
-                }
-                match std::fs::remove_dir_all(&dir) {
-                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                        tracing::warn!(account = account.0, error = %e, "couldn't delete a removed account's files");
-                    }
-                    _ => {}
-                }
+                delete_removed_token(&tokens, &gone, account);
+                delete_removed_files(&dir, account);
             })
             .await;
             if let Err(e) = cleaned {
@@ -384,6 +381,21 @@ impl AccountWorkers {
     }
 }
 
+fn delete_removed_token(tokens: &TokenFile, email: &str, account: AccountId) {
+    if let Err(e) = tokens.delete(email) {
+        tracing::warn!(account = account.0, error = %e, "couldn't delete a removed account's token");
+    }
+}
+
+fn delete_removed_files(dir: &Path, account: AccountId) {
+    match std::fs::remove_dir_all(dir) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            tracing::warn!(account = account.0, error = %e, "couldn't delete a removed account's files");
+        }
+        _ => {}
+    }
+}
+
 fn sweep_tokens(tokens: &TokenFile, emails: &HashSet<String>) {
     match tokens.entries() {
         Ok(entries) => {
@@ -396,11 +408,10 @@ fn sweep_tokens(tokens: &TokenFile, emails: &HashSet<String>) {
 }
 
 fn delete_swept_token(tokens: &TokenFile, email: &str) {
-    if let Err(e) = tokens.delete(email) {
-        tracing::warn!(error = %e, "couldn't delete a removed account's token");
-    } else {
-        tracing::info!("deleted the token of an account removed before a quit");
-    }
+    tokens.delete(email).map_or_else(
+        |e| tracing::warn!(error = %e, "couldn't delete a removed account's token"),
+        |()| tracing::info!("deleted the token of an account removed before a quit"),
+    );
 }
 
 fn folders(dir: &Path) -> Vec<String> {

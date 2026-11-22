@@ -46,7 +46,11 @@ fn hostile_html_is_defused() {
     ] {
         assert!(!lower.contains(gone), "{gone:?} survived:\n{clean}");
     }
+}
 
+#[test]
+fn hostile_html_keeps_layout_styles_and_safe_links() {
+    let clean = sanitize_html(HOSTILE, &CidImages::new());
     for kept in [
         "<style",
         ".KEEP_STYLE_BLOCK { color: #333;",

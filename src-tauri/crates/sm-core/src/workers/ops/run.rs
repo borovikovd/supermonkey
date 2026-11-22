@@ -46,7 +46,19 @@ enum Landing {
 }
 
 pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure> {
-    let mut writing: Option<WritingDraft> = None;
+    let id = op.id;
+    let (answer, writing) = answer(ctx, op).await?;
+    ctx.health.succeeded();
+    let written = write(ctx, id, answer).await.map_err(Failure::Store);
+    if let Some(writing) = writing {
+        let draft = writing.draft().clone();
+        drop(writing);
+        wake_outbox_if_sending(ctx, draft);
+    }
+    written
+}
+
+async fn answer(ctx: &AccountCtx, op: OpRecord) -> Result<(Answer, Option<WritingDraft>), Failure> {
     let answer = match op.kind {
         OpKind::Modify => match parsed::<ModifyOp>(&op) {
             Some(payload) => modify(ctx, payload).await?,
@@ -56,25 +68,14 @@ pub(super) async fn run_op(ctx: &AccountCtx, op: OpRecord) -> Result<(), Failure
             Some(payload) => create_label(ctx, payload).await?,
             None => Answer::Unreadable,
         },
-        OpKind::DraftUpsert => {
-            let (answer, guard) = draft_upsert(ctx, op.id, op.draft).await?;
-            writing = guard;
-            answer
-        }
+        OpKind::DraftUpsert => return draft_upsert(ctx, op.id, op.draft).await,
         OpKind::DraftDelete => draft_delete(ctx, &op).await?,
         OpKind::TrashMessage => match parsed::<GmailMessageId>(&op) {
             Some(message) => trash_message(ctx, message).await?,
             None => Answer::Unreadable,
         },
     };
-    ctx.health.succeeded();
-    let written = write(ctx, op.id, answer).await.map_err(Failure::Store);
-    if let Some(writing) = writing {
-        let draft = writing.draft().clone();
-        drop(writing);
-        wake_outbox_if_sending(ctx, draft);
-    }
-    written
+    Ok((answer, None))
 }
 
 fn parsed<P: DeserializeOwned>(op: &OpRecord) -> Option<P> {
@@ -188,6 +189,13 @@ async fn draft_upsert(
     if !matches!(upserted, Ok(Upserted::Written { .. })) {
         wake_outbox_if_sending(ctx, draft.clone());
     }
+    upsert_answer(draft, upserted)
+}
+
+fn upsert_answer(
+    draft: DraftId,
+    upserted: Result<Upserted, WriteFailure>,
+) -> Result<(Answer, Option<WritingDraft>), Failure> {
     match upserted {
         Ok(Upserted::Written {
             draft: written,
@@ -227,10 +235,13 @@ async fn draft_delete(ctx: &AccountCtx, op: &OpRecord) -> Result<Answer, Failure
         tracing::error!(op = %op.id, "a draft delete names no draft; dropping it");
         return Ok(Answer::Unreadable);
     };
+    delete_local(ctx, op.id, local).await
+}
+
+async fn delete_local(ctx: &AccountCtx, id: OpId, local: &DraftId) -> Result<Answer, Failure> {
     match delete_copies(ctx, local).await {
         Ok(None) => Ok(Answer::Done(Landing::Plain)),
         Ok(Some(unread)) => {
-            let id = op.id;
             ctx.writer()
                 .call(WritePriority::Sync, move |tx, _| tx.ops().requeue(id))
                 .await

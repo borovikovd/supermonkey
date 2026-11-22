@@ -12,7 +12,7 @@ use sm_core::clock::SystemClock;
 use sm_core::{App, Config, Deps, GmailConfig};
 use sm_gmail::{OAuthConfig, QuotaConfig, TokenFile, Units};
 use sm_ipc::AppEvent;
-use tauri::{AppHandle, Emitter as _, Manager as _, RunEvent, WindowEvent};
+use tauri::{AppHandle, Emitter as _, Manager as _, RunEvent, Window, WindowEvent};
 use tauri_plugin_window_state::StateFlags;
 use tokio::sync::OnceCell;
 
@@ -62,7 +62,22 @@ struct Setup {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     init_logging();
-    let built = tauri::Builder::default()
+    #[expect(
+        clippy::exit,
+        reason = "the app was never built: there is no core to quit and no run loop to leave, and whoever launched it needs the failure status"
+    )]
+    let app = match build() {
+        Ok(app) => app,
+        Err(e) => {
+            tracing::error!(error = %e, "couldn't start Supermonkey");
+            std::process::exit(1);
+        }
+    };
+    app.run(on_run_event);
+}
+
+fn build() -> tauri::Result<tauri::App> {
+    tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main(app);
         }))
@@ -85,55 +100,51 @@ pub fn run() {
             show_if_never_connected(app.handle());
             Ok(())
         })
-        .on_window_event(|window, event| {
-            #[expect(
-                clippy::wildcard_enum_match_arm,
-                reason = "Tauri's enum is non-exhaustive, and the app acts on these two events only"
-            )]
-            match event {
-                WindowEvent::CloseRequested { api, .. } if window.label() == MAIN_WINDOW => {
-                    api.prevent_close();
-                    if let Err(e) = window.hide() {
-                        tracing::warn!(error = %e, "couldn't hide the main window");
-                    }
-                }
-                WindowEvent::Focused(focused) => on_focus(window.app_handle(), *focused),
-                _ => {}
-            }
-        })
+        .on_window_event(on_window_event)
         .invoke_handler(tauri::generate_handler![
             commands::connect,
             commands::dispatch
         ])
-        .build(tauri::generate_context!());
+        .build(tauri::generate_context!())
+}
+
+fn on_window_event(window: &Window, event: &WindowEvent) {
     #[expect(
-        clippy::exit,
-        reason = "the app was never built: there is no core to quit and no run loop to leave, and whoever launched it needs the failure status"
+        clippy::wildcard_enum_match_arm,
+        reason = "Tauri's enum is non-exhaustive, and the app acts on these two events only"
     )]
-    let app = match built {
-        Ok(app) => app,
-        Err(e) => {
-            tracing::error!(error = %e, "couldn't start Supermonkey");
-            std::process::exit(1);
+    match event {
+        WindowEvent::CloseRequested { api, .. } if window.label() == MAIN_WINDOW => {
+            api.prevent_close();
+            hide(window);
         }
-    };
-    app.run(|app, event| {
-        #[expect(
-            clippy::wildcard_enum_match_arm,
-            reason = "Tauri's enum is non-exhaustive, and the app acts on these three events only"
-        )]
-        match event {
-            RunEvent::Reopen { .. } => show_main(app),
-            RunEvent::ExitRequested {
-                code: None, api, ..
-            } => {
-                api.prevent_exit();
-                request_quit(app);
-            }
-            RunEvent::Exit => finish_quit(app),
-            _ => {}
+        WindowEvent::Focused(focused) => on_focus(window.app_handle(), *focused),
+        _ => {}
+    }
+}
+
+fn hide(window: &Window) {
+    if let Err(e) = window.hide() {
+        tracing::warn!(error = %e, "couldn't hide the main window");
+    }
+}
+
+fn on_run_event(app: &AppHandle, event: RunEvent) {
+    #[expect(
+        clippy::wildcard_enum_match_arm,
+        reason = "Tauri's enum is non-exhaustive, and the app acts on these three events only"
+    )]
+    match event {
+        RunEvent::Reopen { .. } => show_main(app),
+        RunEvent::ExitRequested {
+            code: None, api, ..
+        } => {
+            api.prevent_exit();
+            request_quit(app);
         }
-    });
+        RunEvent::Exit => finish_quit(app),
+        _ => {}
+    }
 }
 
 fn start_core(app: &AppHandle) -> anyhow::Result<Shell> {

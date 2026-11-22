@@ -76,6 +76,10 @@ pub async fn revoke(
         tracing::debug!("grant revoked");
         return Ok(());
     }
+    revoke_failure(response).await
+}
+
+async fn revoke_failure(response: reqwest::Response) -> Result<(), GmailError> {
     let response = ReadResponse::read(response).await?;
     match serde_json::from_slice::<OAuthErrorBody>(&response.body) {
         Ok(err) if err.error == "invalid_token" => Ok(()),

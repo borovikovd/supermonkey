@@ -60,8 +60,16 @@ fn decode_file(data: &str) -> CmdResult<Vec<u8>> {
 
 pub fn perf_report(action: &str, ms: f64, budget: f64) {
     if ms > budget {
-        tracing::warn!(action, ms, budget, "over the performance budget");
+        over_budget(action, ms, budget);
     } else {
-        tracing::debug!(action, ms, "within the performance budget");
+        within_budget(action, ms);
     }
+}
+
+fn over_budget(action: &str, ms: f64, budget: f64) {
+    tracing::warn!(action, ms, budget, "over the performance budget");
+}
+
+fn within_budget(action: &str, ms: f64) {
+    tracing::debug!(action, ms, "within the performance budget");
 }

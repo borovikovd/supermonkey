@@ -986,7 +986,7 @@ async fn handle(
     kill: &Notify,
     req: hyper::Request<Incoming>,
 ) -> Result<Response, Infallible> {
-    let Backend { shared, router } = backend;
+    let shared = &backend.shared;
     let (parts, body) = req.into_parts();
     let body = axum::body::to_bytes(Body::new(body), usize::MAX)
         .await
@@ -994,19 +994,31 @@ async fn handle(
     let info = RequestInfo::new(&shared.world(), &parts, &body);
     let seq = shared.log_request(info.clone(), &parts.headers, &body);
     let _in_flight = InFlight::new(&shared.in_flight);
-    let mut hold_answer = None;
-    let fault = match shared.fault_for(seq, &info) {
-        None => None,
-        Some(Plan::Fault(fault)) => Some(fault),
-        Some(Plan::Hold(ticket)) => ticket.park().await,
-        Some(Plan::HoldAnswer(ticket)) => {
-            hold_answer = Some(ticket);
-            None
-        }
+    let (fault, hold_answer) = match shared.fault_for(seq, &info) {
+        None => (None, None),
+        Some(Plan::Fault(fault)) => (Some(fault), None),
+        Some(Plan::Hold(ticket)) => (ticket.park().await, None),
+        Some(Plan::HoldAnswer(ticket)) => (None, Some(ticket)),
     };
     let req = hyper::Request::from_parts(parts, Body::from(body));
+    let response = respond(backend, kill, seq, req, fault).await;
+    if let Some(ticket) = hold_answer {
+        let _ = ticket.park().await;
+    }
+    shared.answered(seq, Answer::Status(response.status().as_u16()));
+    Ok(response)
+}
+
+async fn respond(
+    backend: &Backend,
+    kill: &Notify,
+    seq: usize,
+    req: hyper::Request<Body>,
+    fault: Option<Fault>,
+) -> Response {
+    let Backend { shared, router } = backend;
     let route = |req: hyper::Request<Body>| router.clone().oneshot(req);
-    let response = match fault {
+    match fault {
         None | Some(Fault::Hold | Fault::HoldAnswer) => {
             route(req).await.unwrap_or_else(|e| match e {})
         }
@@ -1026,20 +1038,15 @@ async fn handle(
         Some(Fault::Drop) => {
             shared.answered(seq, Answer::Dropped);
             kill.notify_one();
-            return std::future::pending().await;
+            std::future::pending().await
         }
         Some(Fault::NoResponse) => {
             let _ = route(req).await;
             shared.answered(seq, Answer::NoResponse);
             kill.notify_one();
-            return std::future::pending().await;
+            std::future::pending().await
         }
-    };
-    if let Some(ticket) = hold_answer {
-        let _ = ticket.park().await;
     }
-    shared.answered(seq, Answer::Status(response.status().as_u16()));
-    Ok(response)
 }
 
 async fn omit_threads(response: Response, ids: &[String]) -> Response {

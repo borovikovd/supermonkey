@@ -1,3 +1,4 @@
+use serde::de::DeserializeOwned;
 use sm_domain::{AccountId, GmailMessageId, LabelSet};
 use sm_store::{OpKind, Reads, StoreError};
 
@@ -13,22 +14,12 @@ impl LocalChanges {
         landed: Vec<ModifyOp>,
     ) -> Result<Self, StoreError> {
         let mut ops = landed;
-        for op in reads.ops().of_kind(account, OpKind::Modify)? {
-            match op.payload::<ModifyOp>() {
-                Ok(payload) => ops.push(payload),
-                Err(e) => {
-                    tracing::warn!(op = %op.id, error = %e, "skipping a queued op that does not parse");
-                }
-            }
-        }
-        for op in reads.ops().of_kind(account, OpKind::TrashMessage)? {
-            match op.payload::<GmailMessageId>() {
-                Ok(message) => ops.push(ModifyOp::trash(message)),
-                Err(e) => {
-                    tracing::warn!(op = %op.id, error = %e, "skipping a queued op that does not parse");
-                }
-            }
-        }
+        ops.extend(queued::<ModifyOp>(reads, account, OpKind::Modify)?);
+        ops.extend(
+            queued::<GmailMessageId>(reads, account, OpKind::TrashMessage)?
+                .into_iter()
+                .map(ModifyOp::trash),
+        );
         Ok(Self(ops))
     }
 
@@ -41,4 +32,23 @@ impl LocalChanges {
     pub(crate) fn touches(&self, message: &GmailMessageId) -> bool {
         self.0.iter().any(|op| op.names(message))
     }
+}
+
+fn queued<P: DeserializeOwned>(
+    reads: Reads<'_>,
+    account: AccountId,
+    kind: OpKind,
+) -> Result<Vec<P>, StoreError> {
+    Ok(reads
+        .ops()
+        .of_kind(account, kind)?
+        .into_iter()
+        .filter_map(|op| {
+            op.payload::<P>()
+                .inspect_err(|e| {
+                    tracing::warn!(op = %op.id, error = %e, "skipping a queued op that does not parse");
+                })
+                .ok()
+        })
+        .collect())
 }

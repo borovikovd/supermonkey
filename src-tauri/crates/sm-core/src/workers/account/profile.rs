@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use sm_domain::{LabelId, SendAsAddress};
 use sm_gmail::{GmailError, LabelType, Priority};
-use sm_store::{GmailLabel, Priority as WritePriority, StoreError};
+use sm_store::{GmailLabel, LabelRecord, Priority as WritePriority, StoreError};
 
 use super::ctx::AccountCtx;
 
@@ -73,32 +73,40 @@ pub(crate) async fn refresh_labels(ctx: &AccountCtx) -> Result<(), GmailError> {
             }
             let all = tx.read().labels().all(account)?;
             if lane.labels_mapped() != mapped {
-                for label in &all {
-                    if let Some(gmail_id) = &label.gmail_id
-                        && *gmail_id != label.id
-                        && !labels.iter().any(|l| l.gmail_id == *gmail_id)
-                    {
-                        labels.push(GmailLabel {
-                            gmail_id: gmail_id.clone(),
-                            name: label.name.clone(),
-                            system: label.system,
-                        });
-                    }
-                }
+                keep_mapped(&all, &mut labels);
             }
-            let stored: BTreeMap<&LabelId, (&str, bool)> = all
-                .iter()
-                .filter_map(|l| Some((l.gmail_id.as_ref()?, (l.name.as_str(), l.system))))
-                .collect();
-            let listed: BTreeMap<&LabelId, (&str, bool)> = labels
-                .iter()
-                .map(|l| (&l.gmail_id, (l.name.as_str(), l.system)))
-                .collect();
-            if stored != listed {
+            if !matches_stored(&all, &labels) {
                 tx.labels().sync_from_gmail(account, &labels)?;
             }
             Ok::<_, StoreError>(())
         },
     );
     Ok(())
+}
+
+fn keep_mapped(all: &[LabelRecord], labels: &mut Vec<GmailLabel>) {
+    for label in all {
+        if let Some(gmail_id) = &label.gmail_id
+            && *gmail_id != label.id
+            && !labels.iter().any(|l| l.gmail_id == *gmail_id)
+        {
+            labels.push(GmailLabel {
+                gmail_id: gmail_id.clone(),
+                name: label.name.clone(),
+                system: label.system,
+            });
+        }
+    }
+}
+
+fn matches_stored(all: &[LabelRecord], labels: &[GmailLabel]) -> bool {
+    let stored: BTreeMap<&LabelId, (&str, bool)> = all
+        .iter()
+        .filter_map(|l| Some((l.gmail_id.as_ref()?, (l.name.as_str(), l.system))))
+        .collect();
+    let listed: BTreeMap<&LabelId, (&str, bool)> = labels
+        .iter()
+        .map(|l| (&l.gmail_id, (l.name.as_str(), l.system)))
+        .collect();
+    stored == listed
 }

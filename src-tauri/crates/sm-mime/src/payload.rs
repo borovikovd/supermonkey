@@ -252,63 +252,78 @@ impl Walk {
             && filename.is_empty()
             && !disposition_kind.eq_ignore_ascii_case("attachment");
         if is_body {
-            let is_html = mime_type == "text/html";
-            if message != THIS_MESSAGE && !is_html {
-                return;
-            }
-            if let Some(bytes) = data {
-                let charset = header_param(content_type, "charset");
-                let decoded = decode_text_part(bytes, charset.as_deref());
-                if is_html && let Some(referenced) = self.messages.get_mut(message) {
-                    referenced.extend(cid_references(&decoded));
-                }
-                if message != THIS_MESSAGE {
-                    return;
-                }
-                let body = if is_html {
-                    &mut self.html
-                } else {
-                    &mut self.text
-                };
-                match body {
-                    Some(joined) => {
-                        joined.push('\n');
-                        joined.push_str(&decoded);
-                    }
-                    None => *body = Some(decoded),
-                }
-            }
+            self.body_text(data, content_type, mime_type == "text/html", message);
             return;
         }
-
-        let attachment_id = part.body.attachment_id.map(str::to_owned);
-        if data.is_none() && attachment_id.is_none() {
-            return;
+        if let Some(found) = attachment(part, mime_type, filename, data) {
+            self.found.push((message, found));
         }
-        let content_id = part
-            .header("Content-ID")
-            .map(bare_id)
-            .filter(|id| !id.is_empty())
-            .map(str::to_owned);
-        let filename = if filename.is_empty() {
-            default_filename(&mime_type).to_owned()
-        } else {
-            filename
-        };
-        self.found.push((
-            message,
-            Part {
-                id: part.part_id.to_owned(),
-                filename,
-                mime_type,
-                size: part.body.size,
-                attachment_id,
-                content_id,
-                is_inline: false,
-                data,
-            },
-        ));
     }
+
+    fn body_text(
+        &mut self,
+        data: Option<Vec<u8>>,
+        content_type: &str,
+        is_html: bool,
+        message: usize,
+    ) {
+        if message != THIS_MESSAGE && !is_html {
+            return;
+        }
+        let Some(bytes) = data else { return };
+        let charset = header_param(content_type, "charset");
+        let decoded = decode_text_part(bytes, charset.as_deref());
+        if is_html && let Some(referenced) = self.messages.get_mut(message) {
+            referenced.extend(cid_references(&decoded));
+        }
+        if message != THIS_MESSAGE {
+            return;
+        }
+        let body = if is_html {
+            &mut self.html
+        } else {
+            &mut self.text
+        };
+        match body {
+            Some(joined) => {
+                joined.push('\n');
+                joined.push_str(&decoded);
+            }
+            None => *body = Some(decoded),
+        }
+    }
+}
+
+fn attachment(
+    part: &WirePart<'_>,
+    mime_type: String,
+    filename: String,
+    data: Option<Vec<u8>>,
+) -> Option<Part> {
+    let attachment_id = part.body.attachment_id.map(str::to_owned);
+    if data.is_none() && attachment_id.is_none() {
+        return None;
+    }
+    let content_id = part
+        .header("Content-ID")
+        .map(bare_id)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned);
+    let filename = if filename.is_empty() {
+        default_filename(&mime_type).to_owned()
+    } else {
+        filename
+    };
+    Some(Part {
+        id: part.part_id.to_owned(),
+        filename,
+        mime_type,
+        size: part.body.size,
+        attachment_id,
+        content_id,
+        is_inline: false,
+        data,
+    })
 }
 
 fn default_filename(mime_type: &str) -> &'static str {

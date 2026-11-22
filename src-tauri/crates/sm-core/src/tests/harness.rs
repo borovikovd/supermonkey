@@ -167,29 +167,7 @@ pub(crate) fn seed(tx: &mut WriteTx<'_>) -> Result<(AccountId, Vec<ThreadId>), S
             let date = base - (count - 1 - m) * 3_600_000;
             let id = format!("m{t}_{m}");
             let from_me = m % 2 == 1;
-            let mut labels: Vec<&str> = Vec::new();
-            if from_me {
-                labels.push("SENT");
-            } else {
-                if t < 25 {
-                    labels.push("INBOX");
-                }
-                if t % 5 == 4 {
-                    labels.push("CATEGORY_PROMOTIONS");
-                }
-                if m + 1 == count && t % 3 == 0 {
-                    labels.push("UNREAD");
-                }
-            }
-            if m + 1 == count && t % 7 == 2 {
-                labels.push("STARRED");
-            }
-            if (30..32).contains(&t) {
-                labels.push("TRASH");
-            }
-            if (32..34).contains(&t) {
-                labels.push("SPAM");
-            }
+            let labels = seed_labels(t, from_me, m + 1 == count);
             let from = if from_me {
                 ACCOUNT_EMAIL.to_owned()
             } else {
@@ -207,4 +185,31 @@ pub(crate) fn seed(tx: &mut WriteTx<'_>) -> Result<(AccountId, Vec<ThreadId>), S
         threads.push(stored.thread.unwrap());
     }
     Ok((account, threads))
+}
+
+fn seed_labels(t: i64, from_me: bool, last: bool) -> Vec<&'static str> {
+    let mut labels: Vec<&str> = Vec::new();
+    if from_me {
+        labels.push("SENT");
+    } else {
+        if t < 25 {
+            labels.push("INBOX");
+        }
+        if t % 5 == 4 {
+            labels.push("CATEGORY_PROMOTIONS");
+        }
+        if last && t % 3 == 0 {
+            labels.push("UNREAD");
+        }
+    }
+    if last && t % 7 == 2 {
+        labels.push("STARRED");
+    }
+    if (30..32).contains(&t) {
+        labels.push("TRASH");
+    }
+    if (32..34).contains(&t) {
+        labels.push("SPAM");
+    }
+    labels
 }

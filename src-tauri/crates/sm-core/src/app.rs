@@ -11,7 +11,7 @@ use crate::accounts::Accounts;
 use crate::actions::{Actions, Received};
 use crate::activity::{Activity, Kick, Tasks};
 use crate::clock::Clock;
-use crate::effects::Router;
+use crate::effects::{EffectReceiver, Router};
 use crate::lifecycle::{Lifecycle, LifecycleDeps};
 use crate::mail::Mail;
 use crate::queries::Queries;
@@ -133,43 +133,45 @@ impl App {
             tasks.clone(),
         );
         let badge = Arc::new(Kick::new(Arc::clone(&activity)));
-        let router = Router {
-            workers: Arc::clone(&workers),
-            searches: Searches::default(),
-            notifier: Arc::clone(&notifier),
-            snoozes: Arc::clone(&snoozes),
-            badge: Arc::clone(&badge),
+        let deps = LifecycleDeps {
+            writer,
+            pool,
+            received,
+            clock,
+            tasks,
+            workers,
+            notifier,
+            snoozes,
         };
-        tasks.spawn("effects", router.run(from_writers));
-        show_badge(&tasks, badge, &pool, &platform, &clock);
+        start_effects(&deps, from_writers, badge, &platform);
+        Ok(Self::assemble(deps, platform, config.debug))
+    }
+
+    fn assemble(deps: LifecycleDeps, platform: Arc<dyn Platform>, debug: bool) -> Self {
+        let actions = Actions::new(
+            deps.writer.clone(),
+            Arc::clone(&deps.received),
+            Arc::clone(&deps.clock),
+            deps.tasks.clone(),
+        );
+        let queries = Queries::new(Arc::clone(&deps.pool), Arc::clone(&deps.clock));
+        let accounts = Accounts::new(
+            deps.writer.clone(),
+            Arc::clone(&deps.workers),
+            Arc::clone(&platform),
+        );
+        let mail = Mail::new(platform, Arc::clone(&deps.workers), Arc::clone(&deps.pool));
         #[cfg(test)]
-        let tests_writer = writer.clone();
-        Ok(Self {
-            actions: Actions::new(
-                writer.clone(),
-                Arc::clone(&received),
-                Arc::clone(&clock),
-                tasks.clone(),
-            ),
-            queries: Queries::new(Arc::clone(&pool), Arc::clone(&clock)),
-            lifecycle: Lifecycle::new(
-                LifecycleDeps {
-                    writer: writer.clone(),
-                    pool: Arc::clone(&pool),
-                    received,
-                    clock,
-                    tasks,
-                    workers: Arc::clone(&workers),
-                    notifier,
-                    snoozes,
-                },
-                config.debug,
-            ),
-            accounts: Accounts::new(writer, Arc::clone(&workers), Arc::clone(&platform)),
-            mail: Mail::new(platform, workers, pool),
+        let writer = deps.writer.clone();
+        Self {
+            actions,
+            queries,
+            lifecycle: Lifecycle::new(deps, debug),
+            accounts,
+            mail,
             #[cfg(test)]
-            writer: tests_writer,
-        })
+            writer,
+        }
     }
 
     pub const fn actions(&self) -> &Actions {
@@ -207,6 +209,23 @@ fn resume_numbering(pool: &ReadPool, writer: &CoreWriter) -> Result<Arc<Received
         Ok::<_, StoreError>(())
     }));
     Ok(received)
+}
+
+fn start_effects(
+    deps: &LifecycleDeps,
+    effects: EffectReceiver,
+    badge: Arc<Kick>,
+    platform: &Arc<dyn Platform>,
+) {
+    let router = Router {
+        workers: Arc::clone(&deps.workers),
+        searches: Searches::default(),
+        notifier: Arc::clone(&deps.notifier),
+        snoozes: Arc::clone(&deps.snoozes),
+        badge: Arc::clone(&badge),
+    };
+    deps.tasks.spawn("effects", router.run(effects));
+    show_badge(&deps.tasks, badge, &deps.pool, platform, &deps.clock);
 }
 
 fn show_badge(

@@ -1,4 +1,4 @@
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -47,15 +47,7 @@ impl Loopback {
         let mut reading = JoinSet::new();
         loop {
             tokio::select! {
-                accepted = self.listener.accept() => match accepted {
-                    Ok((stream, _)) => {
-                        reading.spawn(read_target(stream));
-                    }
-                    Err(err) => {
-                        tracing::warn!(error = %err, "sign-in loopback accept failed");
-                        tokio::time::sleep(ACCEPT_RETRY).await;
-                    }
-                },
+                accepted = self.listener.accept() => take_connection(accepted, &mut reading).await,
                 Some(read) = reading.join_next(), if !reading.is_empty() => {
                     let Ok(Some((stream, target))) = read else {
                         continue;
@@ -69,25 +61,47 @@ impl Loopback {
     }
 }
 
+async fn take_connection(
+    accepted: std::io::Result<(TcpStream, SocketAddr)>,
+    reading: &mut JoinSet<Option<(TcpStream, String)>>,
+) {
+    match accepted {
+        Ok((stream, _)) => {
+            reading.spawn(read_target(stream));
+        }
+        Err(err) => {
+            tracing::warn!(error = %err, "sign-in loopback accept failed");
+            tokio::time::sleep(ACCEPT_RETRY).await;
+        }
+    }
+}
+
 async fn answer(mut stream: TcpStream, target: &str, expected_state: &str) -> Option<Redirect> {
-    let redirect = match parse(target, expected_state) {
-        Request::Redirect(redirect) => redirect,
+    match parse(target, expected_state) {
+        Request::Redirect(redirect) => Some(confirm(&mut stream, redirect).await),
         Request::ForeignState => {
-            tracing::warn!("a sign-in redirect with another state; ignoring it");
-            respond(&mut stream, "400 Bad Request", FAILED_PAGE).await;
-            return None;
+            refuse_foreign_state(&mut stream).await;
+            None
         }
         Request::Other => {
             respond(&mut stream, "404 Not Found", "").await;
-            return None;
+            None
         }
-    };
+    }
+}
+
+async fn confirm(stream: &mut TcpStream, redirect: Redirect) -> Redirect {
     let page = match &redirect {
         Redirect::Code(_) => DONE_PAGE,
         Redirect::Error(_) => FAILED_PAGE,
     };
-    respond(&mut stream, "200 OK", page).await;
-    Some(redirect)
+    respond(stream, "200 OK", page).await;
+    redirect
+}
+
+async fn refuse_foreign_state(stream: &mut TcpStream) {
+    tracing::warn!("a sign-in redirect with another state; ignoring it");
+    respond(stream, "400 Bad Request", FAILED_PAGE).await;
 }
 
 async fn read_target(mut stream: TcpStream) -> Option<(TcpStream, String)> {

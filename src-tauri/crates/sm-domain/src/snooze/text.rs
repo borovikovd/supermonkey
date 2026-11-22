@@ -1,5 +1,6 @@
 use chrono::{
-    DateTime, Datelike, Days, NaiveDate, NaiveTime, TimeDelta, TimeZone, Timelike, Weekday,
+    DateTime, Datelike, Days, NaiveDate, NaiveDateTime, NaiveTime, TimeDelta, TimeZone, Timelike,
+    Weekday,
 };
 
 use super::options::{LATER_TODAY, MORNING, at_hour, resolve_local};
@@ -34,15 +35,58 @@ impl Parsed {
     }
 }
 
+#[derive(Debug)]
+struct Reading {
+    parsed: Parsed,
+    roll: Roll,
+    default_time: NaiveTime,
+}
+
+impl Reading {
+    fn take_date(&mut self, date: NaiveDate, roll: Option<Roll>) -> Option<()> {
+        self.parsed.set_date(date)?;
+        if let Some(roll) = roll {
+            self.roll = roll;
+        }
+        Some(())
+    }
+
+    fn take_days(&mut self, days: u64, local: NaiveDateTime) -> Option<()> {
+        self.parsed
+            .set_date(local.date().checked_add_days(Days::new(days))?)?;
+        self.default_time = NaiveTime::from_hms_opt(local.hour(), local.minute(), 0)?;
+        Some(())
+    }
+
+    fn take_word(&mut self, toks: &[&str], today: NaiveDate) -> Option<usize> {
+        let t = *toks.first()?;
+        if let Some((date, roll)) = day_word(t, today) {
+            self.take_date(date, roll)?;
+            return Some(0);
+        }
+        if let Some(named) = named_time(t) {
+            self.parsed.set_time(named)?;
+            return Some(0);
+        }
+        if let Some((date, used, rolls)) = parse_month_day(toks, today) {
+            self.take_date(date, rolls.then_some(Roll::Year))?;
+            return Some(used - 1);
+        }
+        let meridiem = toks.get(1).copied().filter(|next| is_meridiem(next));
+        self.parsed.set_time(parse_time(t, meridiem)?)?;
+        Some(usize::from(meridiem.is_some()))
+    }
+}
+
 pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: &DateTime<Tz>) -> Option<DateTime<Tz>> {
     let lower = text.to_lowercase().replace(',', " ");
     let toks: Vec<&str> = lower.split_whitespace().collect();
     let local = now.naive_local();
-    let today = local.date();
-
-    let mut parsed = Parsed::default();
-    let mut roll = Roll::Never;
-    let mut default_time = MORNING;
+    let mut reading = Reading {
+        parsed: Parsed::default(),
+        roll: Roll::Never,
+        default_time: MORNING,
+    };
 
     let mut i = 0;
     while let Some(&t) = toks.get(i) {
@@ -50,59 +94,34 @@ pub fn parse_snooze_text<Tz: TimeZone>(text: &str, now: &DateTime<Tz>) -> Option
         if matches!(t, "at" | "on" | "next" | "this") {
             continue;
         }
-        if t == "in" {
-            let (span, used) = parse_span(toks.get(i..)?)?;
-            i += used;
-            match span {
-                Span::Minutes(minutes) => {
-                    let rest = toks.get(i..).unwrap_or_default();
-                    return after_minutes(now, minutes, parsed, rest);
-                }
-                Span::Days(days) => {
-                    parsed.set_date(today.checked_add_days(Days::new(days))?)?;
-                    default_time = NaiveTime::from_hms_opt(local.hour(), local.minute(), 0)?;
-                }
+        if t != "in" {
+            i += reading.take_word(toks.get(i - 1..)?, local.date())?;
+            continue;
+        }
+        let (span, used) = parse_span(toks.get(i..)?)?;
+        i += used;
+        match span {
+            Span::Minutes(minutes) => {
+                let rest = toks.get(i..).unwrap_or_default();
+                return after_minutes(now, minutes, reading.parsed, rest);
             }
-            continue;
+            Span::Days(days) => reading.take_days(days, local)?,
         }
-        if let Some(days) = relative_day(t) {
-            parsed.set_date(today.checked_add_days(Days::new(days))?)?;
-            continue;
-        }
-        if let Some(weekday) = weekday(t) {
-            let ahead =
-                (7 + weekday.num_days_from_monday() - today.weekday().num_days_from_monday()) % 7;
-            parsed.set_date(today.checked_add_days(Days::new(u64::from(ahead)))?)?;
-            roll = Roll::Week;
-            continue;
-        }
-        if let Some(d) = iso_date(t) {
-            parsed.set_date(d)?;
-            continue;
-        }
-        if let Some(named) = named_time(t) {
-            parsed.set_time(named)?;
-            continue;
-        }
-        if let Some((d, used, rolls)) = parse_month_day(toks.get(i - 1..)?, today) {
-            i += used - 1;
-            if rolls {
-                roll = Roll::Year;
-            }
-            parsed.set_date(d)?;
-            continue;
-        }
-        let meridiem = toks.get(i).copied().filter(|next| is_meridiem(next));
-        if let Some(time) = parse_time(t, meridiem) {
-            if meridiem.is_some() {
-                i += 1;
-            }
-            parsed.set_time(time)?;
-            continue;
-        }
-        return None;
     }
-    resolve(now, parsed, default_time, roll)
+    resolve(now, reading.parsed, reading.default_time, reading.roll)
+}
+
+fn day_word(t: &str, today: NaiveDate) -> Option<(NaiveDate, Option<Roll>)> {
+    if let Some(days) = relative_day(t) {
+        return Some((today.checked_add_days(Days::new(days))?, None));
+    }
+    if let Some(weekday) = weekday(t) {
+        let ahead =
+            (7 + weekday.num_days_from_monday() - today.weekday().num_days_from_monday()) % 7;
+        let date = today.checked_add_days(Days::new(u64::from(ahead)))?;
+        return Some((date, Some(Roll::Week)));
+    }
+    iso_date(t).map(|d| (d, None))
 }
 
 fn after_minutes<Tz: TimeZone>(
@@ -339,10 +358,24 @@ mod tests {
         assert_eq!(parse_at("2026-12-01 14:00"), Some(ny(2026, 12, 1, 14, 0)));
     }
 
+    fn assert_cases(cases: &[(&str, Option<DateTime<Tz>>)]) {
+        for (text, want) in cases {
+            assert_eq!(&parse_at(text), want, "{text:?}");
+        }
+    }
+
     #[test]
     fn text_times() {
-        assert_eq!(parse_at("3pm"), Some(ny(2026, 11, 2, 15, 0)));
-        assert_eq!(parse_at("3 PM"), Some(ny(2026, 11, 2, 15, 0)));
+        assert_cases(&[
+            ("3pm", Some(ny(2026, 11, 2, 15, 0))),
+            ("3 PM", Some(ny(2026, 11, 2, 15, 0))),
+            ("10:01", Some(ny(2026, 11, 2, 10, 1))),
+            ("12pm", Some(ny(2026, 11, 2, 12, 0))),
+            ("12am", Some(ny(2026, 11, 3, 0, 0))),
+            ("noon", Some(ny(2026, 11, 2, 12, 0))),
+            ("evening", Some(ny(2026, 11, 2, 18, 0))),
+            ("at 17", Some(ny(2026, 11, 2, 17, 0))),
+        ]);
         assert_eq!(
             parse_at("9:30am"),
             Some(ny(2026, 11, 3, 9, 30)),
@@ -353,33 +386,34 @@ mod tests {
             Some(ny(2026, 11, 3, 10, 0)),
             "now is not the future"
         );
-        assert_eq!(parse_at("10:01"), Some(ny(2026, 11, 2, 10, 1)));
-        assert_eq!(parse_at("12pm"), Some(ny(2026, 11, 2, 12, 0)));
-        assert_eq!(parse_at("12am"), Some(ny(2026, 11, 3, 0, 0)));
-        assert_eq!(parse_at("noon"), Some(ny(2026, 11, 2, 12, 0)));
-        assert_eq!(parse_at("evening"), Some(ny(2026, 11, 2, 18, 0)));
-        assert_eq!(parse_at("at 17"), Some(ny(2026, 11, 2, 17, 0)));
     }
 
     #[test]
     fn text_days_and_weekdays() {
-        assert_eq!(parse_at("today 5pm"), Some(ny(2026, 11, 2, 17, 0)));
+        assert_cases(&[
+            ("today 5pm", Some(ny(2026, 11, 2, 17, 0))),
+            ("Tomorrow", Some(ny(2026, 11, 3, 8, 0))),
+            ("tmrw at 7:15 pm", Some(ny(2026, 11, 3, 19, 15))),
+            ("friday", Some(ny(2026, 11, 6, 8, 0))),
+            ("next Fri, 9am", Some(ny(2026, 11, 6, 9, 0))),
+            ("sun", Some(ny(2026, 11, 8, 8, 0))),
+            ("mon 5pm", Some(ny(2026, 11, 2, 17, 0))),
+            ("mon", Some(ny(2026, 11, 9, 8, 0))),
+            ("9am fri", Some(ny(2026, 11, 6, 9, 0))),
+        ]);
         assert_eq!(parse_at("today 9am"), None, "explicit past time");
-        assert_eq!(parse_at("Tomorrow"), Some(ny(2026, 11, 3, 8, 0)));
-        assert_eq!(parse_at("tmrw at 7:15 pm"), Some(ny(2026, 11, 3, 19, 15)));
-        assert_eq!(parse_at("friday"), Some(ny(2026, 11, 6, 8, 0)));
-        assert_eq!(parse_at("next Fri, 9am"), Some(ny(2026, 11, 6, 9, 0)));
-        assert_eq!(parse_at("sun"), Some(ny(2026, 11, 8, 8, 0)));
-        assert_eq!(parse_at("mon 5pm"), Some(ny(2026, 11, 2, 17, 0)));
-        assert_eq!(parse_at("mon"), Some(ny(2026, 11, 9, 8, 0)));
-        assert_eq!(parse_at("9am fri"), Some(ny(2026, 11, 6, 9, 0)));
     }
 
     #[test]
     fn text_dates() {
-        assert_eq!(parse_at("24 dec"), Some(ny(2026, 12, 24, 8, 0)));
-        assert_eq!(parse_at("December 24th 6pm"), Some(ny(2026, 12, 24, 18, 0)));
-        assert_eq!(parse_at("dec 24 2027"), Some(ny(2027, 12, 24, 8, 0)));
+        assert_cases(&[
+            ("24 dec", Some(ny(2026, 12, 24, 8, 0))),
+            ("December 24th 6pm", Some(ny(2026, 12, 24, 18, 0))),
+            ("dec 24 2027", Some(ny(2027, 12, 24, 8, 0))),
+            ("nov 2 3pm", Some(ny(2026, 11, 2, 15, 0))),
+            ("2026-12-01", Some(ny(2026, 12, 1, 8, 0))),
+            ("2026-12-01 2pm", Some(ny(2026, 12, 1, 14, 0))),
+        ]);
         assert_eq!(
             parse_at("jan 5"),
             Some(ny(2027, 1, 5, 8, 0)),
@@ -390,27 +424,26 @@ mod tests {
             Some(ny(2027, 11, 2, 8, 0)),
             "08:00 today passed"
         );
-        assert_eq!(parse_at("nov 2 3pm"), Some(ny(2026, 11, 2, 15, 0)));
         assert_eq!(parse_at("dec 9 am"), None, "day 9 or 9 am is ambiguous");
-        assert_eq!(parse_at("2026-12-01"), Some(ny(2026, 12, 1, 8, 0)));
         assert_eq!(parse_at("2026-01-01"), None, "explicit past date");
-        assert_eq!(parse_at("2026-12-01 2pm"), Some(ny(2026, 12, 1, 14, 0)));
     }
 
     #[test]
     fn text_durations() {
-        assert_eq!(parse_at("in 30 min"), Some(ny(2026, 11, 2, 10, 30)));
-        assert_eq!(parse_at("in 2h"), Some(ny(2026, 11, 2, 12, 0)));
-        assert_eq!(parse_at("in an hour"), Some(ny(2026, 11, 2, 11, 0)));
-        assert_eq!(parse_at("in 3 days"), Some(ny(2026, 11, 5, 10, 0)));
-        assert_eq!(parse_at("in 3 days 9am"), Some(ny(2026, 11, 5, 9, 0)));
-        assert_eq!(parse_at("in a week"), Some(ny(2026, 11, 9, 10, 0)));
-        assert_eq!(parse_at("in 2 weeks"), Some(ny(2026, 11, 16, 10, 0)));
-        assert_eq!(parse_at("in 0 hours"), None);
-        assert_eq!(parse_at("in 2 hours tomorrow"), None);
-        assert_eq!(parse_at("tomorrow in 2 hours"), None);
-        assert_eq!(parse_at("in"), None);
-        assert_eq!(parse_at("in 2 fortnights"), None);
+        assert_cases(&[
+            ("in 30 min", Some(ny(2026, 11, 2, 10, 30))),
+            ("in 2h", Some(ny(2026, 11, 2, 12, 0))),
+            ("in an hour", Some(ny(2026, 11, 2, 11, 0))),
+            ("in 3 days", Some(ny(2026, 11, 5, 10, 0))),
+            ("in 3 days 9am", Some(ny(2026, 11, 5, 9, 0))),
+            ("in a week", Some(ny(2026, 11, 9, 10, 0))),
+            ("in 2 weeks", Some(ny(2026, 11, 16, 10, 0))),
+            ("in 0 hours", None),
+            ("in 2 hours tomorrow", None),
+            ("tomorrow in 2 hours", None),
+            ("in", None),
+            ("in 2 fortnights", None),
+        ]);
     }
 
     #[test]

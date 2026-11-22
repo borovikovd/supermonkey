@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::mailbox::{Filter, Mailbox, Missing};
-use crate::{AuthCode, Shared, TOKEN_LIFETIME};
+use crate::{AuthCode, Shared, TOKEN_LIFETIME, World};
 
 const BASE64URL_LENIENT: GeneralPurpose = GeneralPurpose::new(
     &base64::alphabet::URL_SAFE,
@@ -638,40 +638,15 @@ async fn auth(
 async fn token(State(s): State<Arc<Shared>>, body: Bytes) -> Response {
     let form = Params::parse(&body);
     let mut world = s.world();
-    let (email, refresh) = match form.get("grant_type") {
-        Some("refresh_token") => {
-            let Some(email) = form
-                .get("refresh_token")
-                .and_then(|t| world.refresh_tokens.get(t))
-                .cloned()
-            else {
-                return invalid_grant();
-            };
-            if world.invalid_grant.contains(&email) {
-                return invalid_grant();
-            }
-            (email, None)
-        }
+    let granted = match form.get("grant_type") {
+        Some("refresh_token") => refresh_grant(&world, &form).map(|email| (email, None)),
         Some("authorization_code") => {
-            let Some(code) = form.get("code").and_then(|c| world.auth_codes.remove(c)) else {
-                return invalid_grant();
-            };
-            let verifier = form.get("code_verifier").unwrap_or_default();
-            let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-            if challenge != code.code_challenge
-                || form.get("redirect_uri") != Some(&code.redirect_uri)
-            {
-                return invalid_grant();
-            }
-            let refresh = world.issue_refresh_token(&code.email);
-            if code.scope.split_whitespace().any(|s| s == SETTINGS_SCOPE) {
-                world.no_settings_scope.remove(&code.email);
-            } else {
-                world.no_settings_scope.insert(code.email.clone());
-            }
-            (code.email, Some(refresh))
+            code_grant(&mut world, &form).map(|(email, refresh)| (email, Some(refresh)))
         }
         _ => return oauth_error("unsupported_grant_type", "Invalid grant_type"),
+    };
+    let Some((email, refresh)) = granted else {
+        return invalid_grant();
     };
     let access = world.issue_access_token(&email);
     let scope = if world.no_settings_scope.contains(&email) {
@@ -689,6 +664,30 @@ async fn token(State(s): State<Arc<Shared>>, body: Bytes) -> Response {
         out["refresh_token"] = json!(refresh);
     }
     Json(out).into_response()
+}
+
+fn refresh_grant(world: &World, form: &Params) -> Option<String> {
+    let email = form
+        .get("refresh_token")
+        .and_then(|t| world.refresh_tokens.get(t))
+        .cloned()?;
+    (!world.invalid_grant.contains(&email)).then_some(email)
+}
+
+fn code_grant(world: &mut World, form: &Params) -> Option<(String, String)> {
+    let code = form.get("code").and_then(|c| world.auth_codes.remove(c))?;
+    let verifier = form.get("code_verifier").unwrap_or_default();
+    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
+    if challenge != code.code_challenge || form.get("redirect_uri") != Some(&code.redirect_uri) {
+        return None;
+    }
+    let refresh = world.issue_refresh_token(&code.email);
+    if code.scope.split_whitespace().any(|s| s == SETTINGS_SCOPE) {
+        world.no_settings_scope.remove(&code.email);
+    } else {
+        world.no_settings_scope.insert(code.email.clone());
+    }
+    Some((code.email, refresh))
 }
 
 async fn revoke(State(s): State<Arc<Shared>>, mut params: Params, body: Bytes) -> Response {

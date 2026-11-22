@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::thread::ThreadId;
 
 use parking_lot::{Condvar, Mutex};
-use rusqlite::{Connection, TransactionBehavior};
+use rusqlite::{Connection, Transaction, TransactionBehavior};
 use sm_domain::Rev;
 
 use crate::meta;
 use crate::reply::{self, Pending};
-use crate::tx::WriteTx;
+use crate::tx::{Finished, WriteTx};
 use crate::{Commit, Snapshot, StoreError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -212,38 +212,17 @@ impl<S> Runner<S> {
         };
         let next = Rev(rev.0.saturating_add(1));
         let mut write = WriteTx::new(&tx, next);
-        let outcome = catch_unwind(AssertUnwindSafe(|| job(&mut write, &mut *state)));
-        let value = match outcome {
-            Ok(Ok(value)) => value,
-            Ok(Err(e)) => {
+        let value = match run_job(&mut write, state, job) {
+            Ok(value) => value,
+            Err(e) => {
                 drop(write);
                 drop(tx);
                 rolled_back(on_rollback, state);
                 return Err(e);
             }
-            Err(panic) => {
-                let message = panic_message(panic.as_ref());
-                tracing::error!(target: "sm_store", %message, "writer job panicked; rolled back");
-                drop(write);
-                drop(tx);
-                rolled_back(on_rollback, state);
-                return Err(StoreError::JobPanicked(message).into());
-            }
         };
         let finished = write.finish();
-        let committed = (|| {
-            if finished.wrote {
-                meta::store_rev(&tx, next)?;
-            }
-            #[cfg(any(test, feature = "test-hooks"))]
-            if finished.fail_commit {
-                meta::break_commit(&tx)?;
-            }
-            tx.commit()
-                .map_err(StoreError::sql("commit a write transaction"))
-        })();
-        if let Err(e) = committed {
-            tracing::warn!(target: "sm_store", error = %e, "write transaction failed to commit");
+        if let Err(e) = commit_tx(tx, next, &finished) {
             rolled_back(on_rollback, state);
             return Err(e.into());
         }
@@ -254,14 +233,56 @@ impl<S> Runner<S> {
             rev: *rev,
             changes: finished.changes,
         };
-        let snapshot = Snapshot::new(conn);
-        if let Err(panic) = catch_unwind(AssertUnwindSafe(|| {
-            on_commit(&mut *state, &snapshot, &commit);
-        })) {
-            let message = panic_message(panic.as_ref());
-            tracing::error!(target: "sm_store", %message, rev = commit.rev.0, "on_commit panicked after a commit");
-        }
+        committed(on_commit, state, conn, &commit);
         Ok(value)
+    }
+}
+
+fn run_job<S, T, E: From<StoreError>>(
+    write: &mut WriteTx<'_>,
+    state: &mut S,
+    job: impl FnOnce(&mut WriteTx<'_>, &mut S) -> Result<T, E>,
+) -> Result<T, E> {
+    match catch_unwind(AssertUnwindSafe(|| job(write, state))) {
+        Ok(result) => result,
+        Err(panic) => {
+            let message = panic_message(panic.as_ref());
+            tracing::error!(target: "sm_store", %message, "writer job panicked; rolled back");
+            Err(StoreError::JobPanicked(message).into())
+        }
+    }
+}
+
+fn commit_tx(tx: Transaction<'_>, next: Rev, finished: &Finished) -> Result<(), StoreError> {
+    let committed = (|| {
+        if finished.wrote {
+            meta::store_rev(&tx, next)?;
+        }
+        #[cfg(any(test, feature = "test-hooks"))]
+        if finished.fail_commit {
+            meta::break_commit(&tx)?;
+        }
+        tx.commit()
+            .map_err(StoreError::sql("commit a write transaction"))
+    })();
+    if let Err(e) = &committed {
+        tracing::warn!(target: "sm_store", error = %e, "write transaction failed to commit");
+    }
+    committed
+}
+
+fn committed<S>(
+    on_commit: &mut dyn FnMut(&mut S, &Snapshot<'_>, &Commit),
+    state: &mut S,
+    conn: &Connection,
+    commit: &Commit,
+) {
+    let snapshot = Snapshot::new(conn);
+    if let Err(panic) = catch_unwind(AssertUnwindSafe(|| {
+        on_commit(state, &snapshot, commit);
+    })) {
+        let message = panic_message(panic.as_ref());
+        tracing::error!(target: "sm_store", %message, rev = commit.rev.0, "on_commit panicked after a commit");
     }
 }
 

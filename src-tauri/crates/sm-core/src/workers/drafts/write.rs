@@ -1,12 +1,13 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use sm_domain::{Addr, DraftId, GmailDraftId, GmailThreadId};
+use sm_domain::{AccountId, Addr, DraftId, GmailDraftId, GmailThreadId};
 use sm_gmail::{Format, GmailError, Outcome, PageToken, Priority};
 use sm_mime::{InlinePart, OutAttachment, Outgoing};
 use sm_store::{Draft, Priority as WritePriority, StoreError};
 
 use super::WriteFailure;
+use super::reconcile::stops_the_account;
 use crate::Error;
 use crate::drafts::lifecycle::{self, GmailWrite};
 use crate::drafts::settle;
@@ -149,28 +150,39 @@ async fn recover_create(
     ctx: &AccountCtx,
     local: &DraftId,
 ) -> Result<Option<sm_gmail::Draft>, WriteFailure> {
-    if let Some(stored) = load(&ctx.deps.pool, local.clone())
-        .await?
-        .and_then(|d| lifecycle::gmail_draft(&d).cloned())
-    {
-        match ctx
-            .gmail
-            .get_draft(Priority::P1, &stored, Format::Metadata)
-            .await
-        {
-            Ok(found) => return Ok(Some(found)),
-            Err(e) if *e.outcome() == Outcome::NotFound => {}
-            Err(e) => return Err(e.into()),
-        }
+    if let Some(found) = stored_copy(ctx, local).await? {
+        return Ok(Some(found));
     }
     let mut found = copies_of(ctx, local).await?.ours.into_iter();
     let keep = found.next();
     for extra in found {
-        if let Err(e) = ctx.gmail.delete_draft(Priority::P1, &extra.id).await {
+        let deleted = ctx.gmail.delete_draft(Priority::P1, &extra.id).await;
+        deleted.unwrap_or_else(|e| {
             tracing::warn!(account = ctx.account.0, outcome = %e.outcome(), "couldn't delete an extra copy of a draft");
-        }
+        });
     }
     Ok(keep)
+}
+
+async fn stored_copy(
+    ctx: &AccountCtx,
+    local: &DraftId,
+) -> Result<Option<sm_gmail::Draft>, WriteFailure> {
+    let Some(stored) = load(&ctx.deps.pool, local.clone())
+        .await?
+        .and_then(|d| lifecycle::gmail_draft(&d).cloned())
+    else {
+        return Ok(None);
+    };
+    match ctx
+        .gmail
+        .get_draft(Priority::P1, &stored, Format::Metadata)
+        .await
+    {
+        Ok(found) => Ok(Some(found)),
+        Err(e) if *e.outcome() == Outcome::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub(super) struct Copies {
@@ -195,37 +207,41 @@ pub(super) async fn copies_of(ctx: &AccountCtx, local: &DraftId) -> Result<Copie
         .into_iter()
         .filter(|id| !known.contains(id))
     {
-        let read = ctx
-            .gmail
-            .get_draft(Priority::P1, &id, Format::Metadata)
-            .await;
-        let read = match read {
-            Ok(read) => read,
-            Err(e) if *e.outcome() == Outcome::NotFound => continue,
-            Err(e)
-                if matches!(
-                    e.outcome(),
-                    Outcome::Offline
-                        | Outcome::InvalidGrant
-                        | Outcome::Unauthorized
-                        | Outcome::RateLimited { .. }
-                ) =>
-            {
-                return Err(e.into());
-            }
-            Err(e) => {
-                tracing::warn!(account = account.0, outcome = %e.outcome(), "couldn't read a Gmail draft while looking for copies; skipping it");
-                if e.outcome().is_transient() {
-                    copies.unread = copies.unread.or(Some(e));
-                }
-                continue;
-            }
+        let Some(read) = read_copy(ctx, &id, &mut copies.unread).await? else {
+            continue;
         };
         if parse(&read.message).headers.draft_id.as_ref() == Some(local) {
             copies.ours.push(read);
         }
     }
     Ok(copies)
+}
+
+async fn read_copy(
+    ctx: &AccountCtx,
+    id: &GmailDraftId,
+    unread: &mut Option<GmailError>,
+) -> Result<Option<sm_gmail::Draft>, WriteFailure> {
+    let read = ctx
+        .gmail
+        .get_draft(Priority::P1, id, Format::Metadata)
+        .await;
+    match read {
+        Ok(read) => Ok(Some(read)),
+        Err(e) if *e.outcome() == Outcome::NotFound => Ok(None),
+        Err(e) if stops_the_account(&e) => Err(e.into()),
+        Err(e) => {
+            skip_copy(ctx.account, e, unread);
+            Ok(None)
+        }
+    }
+}
+
+fn skip_copy(account: AccountId, e: GmailError, unread: &mut Option<GmailError>) {
+    tracing::warn!(account = account.0, outcome = %e.outcome(), "couldn't read a Gmail draft while looking for copies; skipping it");
+    if e.outcome().is_transient() {
+        unread.get_or_insert(e);
+    }
 }
 
 pub(super) async fn list_all(ctx: &AccountCtx) -> Result<Vec<GmailDraftId>, GmailError> {

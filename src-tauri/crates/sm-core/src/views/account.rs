@@ -81,30 +81,8 @@ pub(crate) fn account_summary(
     let Some(record) = reads.accounts().get(account)? else {
         return Ok(None);
     };
-    let labels = reads
-        .labels()
-        .all(account)?
-        .into_iter()
-        .map(|l| LabelInfo {
-            id: l.id,
-            name: l.name,
-            system: l.system,
-        })
-        .collect();
-    let splits = reads
-        .splits()
-        .all(account)?
-        .into_iter()
-        .map(|s| SplitInfo {
-            id: s.id,
-            name: s.name,
-            kind: s.kind,
-            query: s.query,
-            enabled: s.enabled,
-            hide_when_empty: s.hide_when_empty,
-            position: s.position,
-        })
-        .collect();
+    let labels = labels(reads, account)?;
+    let splits = splits(reads, account)?;
     let pins = reads
         .splits()
         .pins(account)?
@@ -132,6 +110,36 @@ pub(crate) fn account_summary(
         notices,
         queued_ops: reads.ops().count(account)?,
     }))
+}
+
+fn labels(reads: Reads<'_>, account: AccountId) -> Result<Vec<LabelInfo>, StoreError> {
+    Ok(reads
+        .labels()
+        .all(account)?
+        .into_iter()
+        .map(|l| LabelInfo {
+            id: l.id,
+            name: l.name,
+            system: l.system,
+        })
+        .collect())
+}
+
+fn splits(reads: Reads<'_>, account: AccountId) -> Result<Vec<SplitInfo>, StoreError> {
+    Ok(reads
+        .splits()
+        .all(account)?
+        .into_iter()
+        .map(|s| SplitInfo {
+            id: s.id,
+            name: s.name,
+            kind: s.kind,
+            query: s.query,
+            enabled: s.enabled,
+            hide_when_empty: s.hide_when_empty,
+            position: s.position,
+        })
+        .collect())
 }
 
 fn undo_entries(reads: Reads<'_>, account: AccountId) -> Result<Vec<UndoEntryInfo>, StoreError> {

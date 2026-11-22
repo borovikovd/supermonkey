@@ -341,6 +341,30 @@ pub struct StoredThread {
     pub removed: Vec<MessageId>,
 }
 
+fn place_thread(db: Db<'_>, fetched: &FetchedThread, rev: Rev) -> Result<ThreadId, StoreError> {
+    let account = fetched.account;
+    db.execute(
+        "add a thread",
+        "INSERT INTO threads (account_id, gmail_id, rev) VALUES (?1, ?2, ?3)
+         ON CONFLICT (account_id, gmail_id) DO NOTHING",
+        (account, &fetched.gmail_id, rev),
+    )?;
+    let thread: ThreadId = db.one(
+        "find a thread by Gmail id",
+        "SELECT id FROM threads WHERE account_id = ?1 AND gmail_id = ?2",
+        (account, &fetched.gmail_id),
+        |r| r.get("id"),
+    )?;
+    if let Some(history) = fetched.history_id {
+        db.execute(
+            "store a thread's history id",
+            "UPDATE threads SET history_id = ?2 WHERE id = ?1",
+            (thread, history),
+        )?;
+    }
+    Ok(thread)
+}
+
 #[derive(Debug)]
 pub struct ThreadWrites<'t, 'c> {
     tx: &'t mut WriteTx<'c>,
@@ -355,25 +379,7 @@ impl<'t, 'c> ThreadWrites<'t, 'c> {
         let account = fetched.account;
         let rev = self.tx.stamp();
         let db = self.tx.db();
-        db.execute(
-            "add a thread",
-            "INSERT INTO threads (account_id, gmail_id, rev) VALUES (?1, ?2, ?3)
-             ON CONFLICT (account_id, gmail_id) DO NOTHING",
-            (account, &fetched.gmail_id, rev),
-        )?;
-        let thread: ThreadId = db.one(
-            "find a thread by Gmail id",
-            "SELECT id FROM threads WHERE account_id = ?1 AND gmail_id = ?2",
-            (account, &fetched.gmail_id),
-            |r| r.get("id"),
-        )?;
-        if let Some(history) = fetched.history_id {
-            db.execute(
-                "store a thread's history id",
-                "UPDATE threads SET history_id = ?2 WHERE id = ?1",
-                (thread, history),
-            )?;
-        }
+        let thread = place_thread(db, fetched, rev)?;
         let before: Vec<MessageId> = db.all(
             "read a thread's message ids",
             "SELECT id FROM messages WHERE thread_id = ?1",

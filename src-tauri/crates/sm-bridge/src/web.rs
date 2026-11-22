@@ -155,24 +155,31 @@ async fn local_only(request: Request, next: Next) -> Response {
         header(headers, SEC_FETCH_SITE),
     );
     if !allowed {
-        tracing::warn!("the web bridge refused a request from another page or host");
-        return StatusCode::FORBIDDEN.into_response();
+        return refused();
     }
     let mut response = next.run(request).await;
     if let Some(origin) = origin {
-        let headers = response.headers_mut();
-        headers.insert("access-control-allow-origin", origin);
-        headers.insert("vary", HeaderValue::from_static("origin"));
-        headers.insert(
-            "access-control-allow-headers",
-            HeaderValue::from_static("content-type"),
-        );
-        headers.insert(
-            "access-control-allow-methods",
-            HeaderValue::from_static("POST, GET, OPTIONS"),
-        );
+        allow_origin(response.headers_mut(), origin);
     }
     response
+}
+
+fn refused() -> Response {
+    tracing::warn!("the web bridge refused a request from another page or host");
+    StatusCode::FORBIDDEN.into_response()
+}
+
+fn allow_origin(headers: &mut HeaderMap, origin: HeaderValue) {
+    headers.insert("access-control-allow-origin", origin);
+    headers.insert("vary", HeaderValue::from_static("origin"));
+    headers.insert(
+        "access-control-allow-headers",
+        HeaderValue::from_static("content-type"),
+    );
+    headers.insert(
+        "access-control-allow-methods",
+        HeaderValue::from_static("POST, GET, OPTIONS"),
+    );
 }
 
 fn header(headers: &HeaderMap, name: HeaderName) -> Option<&str> {
@@ -280,51 +287,39 @@ mod tests {
 
     #[test]
     fn only_loopback_hosts_and_known_origins_reach_the_bridge() {
-        assert!(is_allowed(
-            Some("127.0.0.1:1430"),
-            Some("http://localhost:5173"),
-            None
-        ));
-        assert!(is_allowed(
-            Some("127.0.0.1:1430"),
-            Some("http://127.0.0.1:5173"),
-            None
-        ));
-        assert!(is_allowed(
-            Some("127.0.0.1:41234"),
-            Some("http://127.0.0.1:41234"),
-            None
-        ));
-        assert!(is_allowed(Some("localhost:1430"), None, None));
-        assert!(!is_allowed(
-            Some("127.0.0.1:1430"),
-            Some("https://evil.test"),
-            None
-        ));
-        assert!(!is_allowed(
-            Some("127.0.0.1:1430"),
-            Some("http://127.0.0.1:9999"),
-            None
-        ));
-        assert!(!is_allowed(Some("127.0.0.1:1430"), Some("null"), None));
-        assert!(!is_allowed(Some("evil.test:1430"), None, None));
-        assert!(!is_allowed(
-            Some("evil.test:1430"),
-            Some("http://evil.test:1430"),
-            None
-        ));
-        assert!(!is_allowed(None, None, None));
-        assert!(is_allowed(
-            Some("127.0.0.1:41234"),
-            None,
-            Some("same-origin")
-        ));
-        assert!(is_allowed(Some("127.0.0.1:1430"), None, Some("none")));
-        assert!(!is_allowed(
-            Some("127.0.0.1:1430"),
-            None,
-            Some("cross-site")
-        ));
-        assert!(!is_allowed(Some("localhost:1430"), None, Some("same-site")));
+        for (host, origin, allowed) in [
+            ("127.0.0.1:1430", "http://localhost:5173", true),
+            ("127.0.0.1:1430", "http://127.0.0.1:5173", true),
+            ("127.0.0.1:41234", "http://127.0.0.1:41234", true),
+            ("127.0.0.1:1430", "https://evil.test", false),
+            ("127.0.0.1:1430", "http://127.0.0.1:9999", false),
+            ("127.0.0.1:1430", "null", false),
+            ("evil.test:1430", "http://evil.test:1430", false),
+        ] {
+            assert_eq!(
+                is_allowed(Some(host), Some(origin), None),
+                allowed,
+                "{host} {origin}"
+            );
+        }
+    }
+
+    #[test]
+    fn without_an_origin_only_loopback_hosts_and_same_origin_fetches_reach_the_bridge() {
+        for (host, fetch_site, allowed) in [
+            (Some("localhost:1430"), None, true),
+            (Some("evil.test:1430"), None, false),
+            (None, None, false),
+            (Some("127.0.0.1:41234"), Some("same-origin"), true),
+            (Some("127.0.0.1:1430"), Some("none"), true),
+            (Some("127.0.0.1:1430"), Some("cross-site"), false),
+            (Some("localhost:1430"), Some("same-site"), false),
+        ] {
+            assert_eq!(
+                is_allowed(host, None, fetch_site),
+                allowed,
+                "{host:?} {fetch_site:?}"
+            );
+        }
     }
 }

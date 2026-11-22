@@ -1,8 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sm_domain::{GmailDraftId, GmailMessageId, GmailThreadId, Millis, OutboxState, SystemLabel};
-use sm_gmail::{Backoff, Format, Outcome, Priority};
+use sm_domain::{
+    AccountId, GmailDraftId, GmailMessageId, GmailThreadId, Millis, OutboxState, SystemLabel,
+};
+use sm_gmail::{Backoff, Format, GmailError, Outcome, Priority};
 use sm_store::{Outbox, Priority as WritePriority};
 
 use super::account::{AccountCtx, OFFLINE_RETRY, fetch_thread};
@@ -23,38 +25,50 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
     let mut backoff = Backoff::new();
     loop {
         let pass = pass(&ctx).await;
-        let wait = match pass {
-            Ok(next_due) => {
-                backoff.reset();
-                next_due.map_or(IDLE_WAIT, |due| until(ctx.clock(), due))
-            }
-            Err(Error::Gmail(e)) => {
-                ctx.health.failed(&e);
-                match e.outcome() {
-                    Outcome::InvalidGrant => {
-                        ctx.signed_out();
-                        return;
-                    }
-                    Outcome::Offline => OFFLINE_RETRY,
-                    Outcome::NoResponse
-                    | Outcome::Unauthorized
-                    | Outcome::RateLimited { .. }
-                    | Outcome::ServerError { .. }
-                    | Outcome::NotFound
-                    | Outcome::Conflict
-                    | Outcome::Rejected { .. } => backoff.next_delay(&e),
-                }
-            }
-            Err(e) => {
-                tracing::warn!(account = ctx.account.0, error = %e, "the outbox couldn't read or write; trying again");
-                OFFLINE_RETRY
-            }
+        let Some(wait) = next_wait(&ctx, pass, &mut backoff) else {
+            return;
         };
         let network = &ctx.deps.network;
         tokio::select! {
             () = ctx.outbox.wait(ctx.clock(), wait) => {}
             () = network.wait(ctx.clock(), wait) => {}
         }
+    }
+}
+
+fn next_wait(
+    ctx: &AccountCtx,
+    pass: Result<Option<Millis>, Error>,
+    backoff: &mut Backoff,
+) -> Option<Duration> {
+    match pass {
+        Ok(next_due) => {
+            backoff.reset();
+            Some(next_due.map_or(IDLE_WAIT, |due| until(ctx.clock(), due)))
+        }
+        Err(Error::Gmail(e)) => gmail_wait(ctx, &e, backoff),
+        Err(e) => {
+            tracing::warn!(account = ctx.account.0, error = %e, "the outbox couldn't read or write; trying again");
+            Some(OFFLINE_RETRY)
+        }
+    }
+}
+
+fn gmail_wait(ctx: &AccountCtx, e: &GmailError, backoff: &mut Backoff) -> Option<Duration> {
+    ctx.health.failed(e);
+    match e.outcome() {
+        Outcome::InvalidGrant => {
+            ctx.signed_out();
+            None
+        }
+        Outcome::Offline => Some(OFFLINE_RETRY),
+        Outcome::NoResponse
+        | Outcome::Unauthorized
+        | Outcome::RateLimited { .. }
+        | Outcome::ServerError { .. }
+        | Outcome::NotFound
+        | Outcome::Conflict
+        | Outcome::Rejected { .. } => Some(backoff.next_delay(e)),
     }
 }
 
@@ -71,26 +85,43 @@ async fn pass(ctx: &AccountCtx) -> Result<Option<Millis>, Error> {
     let mut failed: Option<Error> = None;
     for record in rows {
         let row = record.outbox;
-        let done = if row.state == OutboxState::Sending {
-            settle(ctx, &row).await
-        } else if row.send_after <= now {
-            send(ctx, &row).await
-        } else {
-            next_due = Some(next_due.map_or(row.send_after, |d| d.min(row.send_after)));
-            Ok(())
-        };
-        match done {
-            Err(Error::Gmail(e)) if *e.outcome() == Outcome::InvalidGrant => {
-                return Err(Error::Gmail(e));
-            }
-            Err(e) => {
-                tracing::info!(account = account.0, outbox = %row.id, error = ?e, "a send couldn't go on; trying the next");
-                failed.get_or_insert(e);
-            }
-            Ok(()) => {}
-        }
+        let done = advance(ctx, &row, now, &mut next_due).await;
+        go_on(account, &row, done, &mut failed)?;
     }
     failed.map_or(Ok(next_due), Err)
+}
+
+async fn advance(
+    ctx: &AccountCtx,
+    row: &Outbox,
+    now: Millis,
+    next_due: &mut Option<Millis>,
+) -> Result<(), Error> {
+    if row.state == OutboxState::Sending {
+        settle(ctx, row).await
+    } else if row.send_after <= now {
+        send(ctx, row).await
+    } else {
+        *next_due = Some(next_due.map_or(row.send_after, |d| d.min(row.send_after)));
+        Ok(())
+    }
+}
+
+fn go_on(
+    account: AccountId,
+    row: &Outbox,
+    done: Result<(), Error>,
+    failed: &mut Option<Error>,
+) -> Result<(), Error> {
+    match done {
+        Err(Error::Gmail(e)) if *e.outcome() == Outcome::InvalidGrant => Err(Error::Gmail(e)),
+        Err(e) => {
+            tracing::info!(account = account.0, outbox = %row.id, error = ?e, "a send couldn't go on; trying the next");
+            failed.get_or_insert(e);
+            Ok(())
+        }
+        Ok(()) => Ok(()),
+    }
 }
 
 async fn step(ctx: &AccountCtx, row: &Outbox, event: Event) -> Result<bool, Error> {
@@ -124,33 +155,7 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Error> {
     let written = match write(ctx, draft).await {
         Ok(Some(written)) => written,
         Ok(None) => return Ok(()),
-        Err(failure) => {
-            let retry = match failure {
-                WriteFailure::Gmail(e) => match e.outcome() {
-                    Outcome::Rejected { message, .. } => Err(message.clone()),
-                    Outcome::Offline
-                    | Outcome::NoResponse
-                    | Outcome::Unauthorized
-                    | Outcome::InvalidGrant
-                    | Outcome::RateLimited { .. }
-                    | Outcome::ServerError { .. }
-                    | Outcome::NotFound
-                    | Outcome::Conflict => Ok(Error::Gmail(e)),
-                },
-                WriteFailure::Local(message) => Err(message),
-                WriteFailure::Store(e) => Ok(e),
-            };
-            return match retry {
-                Err(message) => {
-                    step(ctx, row, Event::Rejected(message)).await?;
-                    Ok(())
-                }
-                Ok(failure) => {
-                    step(ctx, row, Event::Unreached).await?;
-                    Err(failure)
-                }
-            };
-        }
+        Err(failure) => return write_failed(ctx, row, failure).await,
     };
     let (id, now, local) = (row.id, ctx.clock().now(), row.draft.clone());
     let ids = GmailIds::of(written);
@@ -166,6 +171,37 @@ async fn send(ctx: &AccountCtx, row: &Outbox) -> Result<(), Error> {
         return Ok(());
     }
     send_draft(ctx, row, &to_send).await
+}
+
+async fn write_failed(ctx: &AccountCtx, row: &Outbox, failure: WriteFailure) -> Result<(), Error> {
+    match retryable(failure) {
+        Err(message) => {
+            step(ctx, row, Event::Rejected(message)).await?;
+            Ok(())
+        }
+        Ok(failure) => {
+            step(ctx, row, Event::Unreached).await?;
+            Err(failure)
+        }
+    }
+}
+
+fn retryable(failure: WriteFailure) -> Result<Error, String> {
+    match failure {
+        WriteFailure::Gmail(e) => match e.outcome() {
+            Outcome::Rejected { message, .. } => Err(message.clone()),
+            Outcome::Offline
+            | Outcome::NoResponse
+            | Outcome::Unauthorized
+            | Outcome::InvalidGrant
+            | Outcome::RateLimited { .. }
+            | Outcome::ServerError { .. }
+            | Outcome::NotFound
+            | Outcome::Conflict => Ok(Error::Gmail(e)),
+        },
+        WriteFailure::Local(message) => Err(message),
+        WriteFailure::Store(e) => Ok(e),
+    }
 }
 
 async fn send_draft(ctx: &AccountCtx, row: &Outbox, gmail: &GmailDraftId) -> Result<(), Error> {
@@ -274,8 +310,7 @@ async fn sent(
     let Some(thread) = thread else {
         return Ok(());
     };
-    if let Err(e) = fetch_thread(ctx, &thread, Format::Full, Priority::P1).await {
-        tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "couldn't fetch a sent message yet");
+    if !fetched(ctx, &thread).await {
         return Ok(());
     }
     let account = ctx.account;
@@ -286,4 +321,12 @@ async fn sent(
         step(ctx, row, Event::Stored(stored)).await?;
     }
     Ok(())
+}
+
+async fn fetched(ctx: &AccountCtx, thread: &GmailThreadId) -> bool {
+    let Err(e) = fetch_thread(ctx, thread, Format::Full, Priority::P1).await else {
+        return true;
+    };
+    tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "couldn't fetch a sent message yet");
+    false
 }

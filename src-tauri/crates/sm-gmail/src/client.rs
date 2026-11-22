@@ -536,23 +536,41 @@ impl Gmail {
     async fn send_call(&self, call: &Call<'_>) -> Result<ReadResponse, GmailError> {
         let _permit = self.scheduler.acquire(call.priority, call.cost).await;
         let url = format!("{}/{}", self.api, call.path);
-        let token = self.tokens.access_token().await.map_err(not_sent)?;
-        let mut response = self.attempt(call, &url, &token).await?;
-        if response.status() == StatusCode::UNAUTHORIZED {
-            tracing::debug!("401; refreshing the access token");
-            let token = self
-                .tokens
-                .refresh_after_401(&token)
-                .await
-                .map_err(not_sent)?;
-            response = self.attempt(call, &url, &token).await?;
-        }
+        let response = self.authorized(call, &url).await?;
         let read = ReadResponse::read(response).await?;
         if read.status.is_success() {
             Ok(read)
         } else {
             Err(read.to_error())
         }
+    }
+
+    async fn authorized(
+        &self,
+        call: &Call<'_>,
+        url: &str,
+    ) -> Result<reqwest::Response, GmailError> {
+        let token = self.tokens.access_token().await.map_err(not_sent)?;
+        let response = self.attempt(call, url, &token).await?;
+        if response.status() != StatusCode::UNAUTHORIZED {
+            return Ok(response);
+        }
+        self.retry_after_401(call, url, &token).await
+    }
+
+    async fn retry_after_401(
+        &self,
+        call: &Call<'_>,
+        url: &str,
+        stale: &AccessToken,
+    ) -> Result<reqwest::Response, GmailError> {
+        tracing::debug!("401; refreshing the access token");
+        let token = self
+            .tokens
+            .refresh_after_401(stale)
+            .await
+            .map_err(not_sent)?;
+        self.attempt(call, url, &token).await
     }
 
     async fn attempt(

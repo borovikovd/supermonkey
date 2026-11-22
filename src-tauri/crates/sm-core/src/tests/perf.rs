@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use sm_domain::{AccountId, SubId};
-use sm_ipc::{Action, SubKey, SubUpdate};
+use sm_ipc::{Action, ChannelMessage, SubKey, SubUpdate};
 
 use super::Harness;
 use crate::Config;
@@ -20,33 +20,49 @@ async fn on_fixture() -> Harness {
     Harness::start_in(dir).await
 }
 
+const SEARCHES: [&str; 18] = [
+    "i",
+    "i",
+    "a",
+    "in",
+    "invoice",
+    "from:ada",
+    "q3 planning",
+    "budget OR travel",
+    "label:Receipts",
+    "is:list",
+    "subject:lunch",
+    "in:sent",
+    "is:unread",
+    "has:attachment",
+    "-in:inbox",
+    "after:2020/01/01",
+    "-newsletter",
+    "invoice -newsletter",
+];
+
+fn first_load_len(messages: &[ChannelMessage], sub: &SubId) -> usize {
+    messages
+        .iter()
+        .flat_map(|m| &m.updates)
+        .find_map(|u| match u {
+            SubUpdate::List { sub: s, ids, .. } if s == sub => ids.as_ref().map(Vec::len),
+            SubUpdate::List { .. }
+            | SubUpdate::Conversation { .. }
+            | SubUpdate::Composer { .. }
+            | SubUpdate::Account { .. }
+            | SubUpdate::App { .. } => None,
+        })
+        .expect("the search's first load")
+}
+
 #[tokio::test]
 #[ignore = "needs SUPERMONKEY_PERF_DB pointing at a perf fixture"]
 async fn perf_local_search_per_keystroke() {
     let mut h = on_fixture().await;
     h.take();
-    let queries = [
-        "i",
-        "i",
-        "a",
-        "in",
-        "invoice",
-        "from:ada",
-        "q3 planning",
-        "budget OR travel",
-        "label:Receipts",
-        "is:list",
-        "subject:lunch",
-        "in:sent",
-        "is:unread",
-        "has:attachment",
-        "-in:inbox",
-        "after:2020/01/01",
-        "-newsletter",
-        "invoice -newsletter",
-    ];
     let mut slowest = Duration::ZERO;
-    for (n, query) in queries.into_iter().enumerate() {
+    for (n, query) in SEARCHES.into_iter().enumerate() {
         let sub = SubId(format!("search-{n}"));
         let started = Instant::now();
         h.act(vec![Action::Subscribe {
@@ -58,19 +74,7 @@ async fn perf_local_search_per_keystroke() {
         }])
         .await;
         let took = started.elapsed();
-        let hits = h
-            .take()
-            .iter()
-            .flat_map(|m| &m.updates)
-            .find_map(|u| match u {
-                SubUpdate::List { sub: s, ids, .. } if *s == sub => ids.as_ref().map(Vec::len),
-                SubUpdate::List { .. }
-                | SubUpdate::Conversation { .. }
-                | SubUpdate::Composer { .. }
-                | SubUpdate::Account { .. }
-                | SubUpdate::App { .. } => None,
-            })
-            .expect("the search's first load");
+        let hits = first_load_len(&h.take(), &sub);
         println!(
             "{query:>18}: {hits:>4} hits in {:>6.1} ms",
             took.as_secs_f64() * 1000.0

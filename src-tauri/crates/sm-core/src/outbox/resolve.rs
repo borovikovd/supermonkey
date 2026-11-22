@@ -1,4 +1,4 @@
-use sm_domain::{Millis, OutboxId};
+use sm_domain::{AccountId, DraftId, Millis, OutboxId, ThreadId};
 use sm_store::{NewNotice, StoreError, WriteTx};
 
 use super::machine::{Event, Step, step};
@@ -47,16 +47,7 @@ pub(crate) fn resolve(
         } => {
             tx.undo().delete_for_outbox(outbox)?;
             tx.outbox().delete(outbox)?;
-            let thread = match tx.read().drafts().get(&draft)? {
-                Some(record) => {
-                    let mut kept = record.draft;
-                    lifecycle::keep(&mut kept);
-                    tx.drafts().put(&kept)?;
-                    queue_upsert(tx, state, account, &kept.id, now)?;
-                    kept.thread
-                }
-                None => None,
-            };
+            let thread = keep_draft(tx, state, account, &draft, now)?;
             tx.notices().add(&NewNotice {
                 account,
                 kind,
@@ -71,4 +62,21 @@ pub(crate) fn resolve(
         finish(tx, state, account)?;
     }
     Ok(applied)
+}
+
+fn keep_draft(
+    tx: &mut WriteTx<'_>,
+    state: &mut WriterState,
+    account: AccountId,
+    draft: &DraftId,
+    now: Millis,
+) -> Result<Option<ThreadId>, StoreError> {
+    let Some(record) = tx.read().drafts().get(draft)? else {
+        return Ok(None);
+    };
+    let mut kept = record.draft;
+    lifecycle::keep(&mut kept);
+    tx.drafts().put(&kept)?;
+    queue_upsert(tx, state, account, &kept.id, now)?;
+    Ok(kept.thread)
 }

@@ -18,8 +18,8 @@ use super::queue::{
 };
 use super::read::{ReadThread, read_thread};
 use super::resync::full_resync;
-use crate::Error;
 use crate::notify::Arrivals;
+use crate::ops::ReadTicket;
 use crate::read::read;
 use crate::workers::drafts::{Occasion, reconcile, stops_the_account};
 use crate::workers::snooze;
@@ -56,19 +56,20 @@ pub(crate) async fn run(ctx: Arc<AccountCtx>) {
 
 async fn resume_or_connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> ControlFlow<()> {
     match is_connected(&ctx.deps.pool, ctx.account).await {
-        Ok(true) => {
-            queue_inbox(&ctx.queue);
-            queue_starred_and_sent(&ctx.queue);
-            queue_owed(ctx).await;
-            *drafts_due = Some(Occasion::Poll);
+        Some(true) => {
+            resume(ctx, drafts_due).await;
             ControlFlow::Continue(())
         }
-        Ok(false) => connect_until_done(ctx, drafts_due).await,
-        Err(e) => {
-            tracing::error!(account = ctx.account.0, error = %e, "couldn't read the account; not syncing it");
-            ControlFlow::Break(())
-        }
+        Some(false) => connect_until_done(ctx, drafts_due).await,
+        None => ControlFlow::Break(()),
     }
+}
+
+async fn resume(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) {
+    queue_inbox(&ctx.queue);
+    queue_starred_and_sent(&ctx.queue);
+    queue_owed(ctx).await;
+    *drafts_due = Some(Occasion::Poll);
 }
 
 async fn connect_until_done(
@@ -79,33 +80,42 @@ async fn connect_until_done(
         match connect(ctx, drafts_due).await {
             Ok(()) => return ControlFlow::Continue(()),
             Err(e) if *e.outcome() == Outcome::InvalidGrant => {
-                ctx.health.failed(&e);
-                ctx.signed_out();
+                grant_refused(ctx, &e);
                 return ControlFlow::Break(());
             }
             Err(e) => {
-                tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "the connect sync failed; trying again");
-                ctx.health.failed(&e);
+                connect_failed(ctx, &e);
                 ctx.poll.wait(ctx.clock(), OFFLINE_RETRY).await;
             }
         }
     }
 }
 
+fn grant_refused(ctx: &AccountCtx, e: &GmailError) {
+    ctx.health.failed(e);
+    ctx.signed_out();
+}
+
+fn connect_failed(ctx: &AccountCtx, e: &GmailError) {
+    tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "the connect sync failed; trying again");
+    ctx.health.failed(e);
+}
+
 async fn poll_once(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> ControlFlow<()> {
     match poll(ctx, drafts_due).await {
         Ok(()) => ctx.health.succeeded(),
         Err(e) if *e.outcome() == Outcome::InvalidGrant => {
-            ctx.health.failed(&e);
-            ctx.signed_out();
+            grant_refused(ctx, &e);
             return ControlFlow::Break(());
         }
-        Err(e) => {
-            tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "a poll failed");
-            ctx.health.failed(&e);
-        }
+        Err(e) => poll_failed(ctx, &e),
     }
     ControlFlow::Continue(())
+}
+
+fn poll_failed(ctx: &AccountCtx, e: &GmailError) {
+    tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "a poll failed");
+    ctx.health.failed(e);
 }
 
 async fn wake_if_slept(ctx: &AccountCtx, last: Millis, now: Millis) {
@@ -131,21 +141,40 @@ async fn wait_to_poll(ctx: &AccountCtx) {
     ctx.poll.wait(ctx.clock(), OFFLINE_RETRY).await;
 }
 
-async fn is_connected(pool: &Arc<ReadPool>, account: AccountId) -> Result<bool, Error> {
+async fn is_connected(pool: &Arc<ReadPool>, account: AccountId) -> Option<bool> {
     read(pool, move |r| {
         Ok(r.accounts().get(account)?.is_some_and(|a| a.connected))
     })
     .await
+    .inspect_err(|e| {
+        tracing::error!(account = account.0, error = %e, "couldn't read the account; not syncing it");
+    })
+    .ok()
 }
 
 async fn connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(), GmailError> {
     ctx.health.syncing();
+    let cursor = load_profile(ctx).await?;
+    store_connect_cursor(ctx, cursor).await;
+    queue_inbox(&ctx.queue);
+    queue_starred_and_sent(&ctx.queue);
+    reconcile_on_connect(ctx, drafts_due).await?;
+    ctx.queue.push(BACKFILL, Work::Backfill { page: None });
+    mark_connected(ctx).await;
+    Ok(())
+}
+
+async fn load_profile(ctx: &AccountCtx) -> Result<HistoryId, GmailError> {
     let profile = ctx.gmail.get_profile(Priority::P3).await?;
     refresh_send_as(ctx).await?;
     refresh_labels(ctx).await?;
-    store_connect_cursor(ctx, profile.history_id).await;
-    queue_inbox(&ctx.queue);
-    queue_starred_and_sent(&ctx.queue);
+    Ok(profile.history_id)
+}
+
+async fn reconcile_on_connect(
+    ctx: &AccountCtx,
+    drafts_due: &mut Option<Occasion>,
+) -> Result<(), GmailError> {
     match reconcile(ctx, Occasion::Sync).await {
         Ok(()) => {}
         Err(e) if stops_the_account(&e) => return Err(e),
@@ -154,8 +183,6 @@ async fn connect(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<
             *drafts_due = Some(Occasion::Sync);
         }
     }
-    ctx.queue.push(BACKFILL, Work::Backfill { page: None });
-    mark_connected(ctx).await;
     Ok(())
 }
 
@@ -193,23 +220,22 @@ async fn mark_connected(ctx: &AccountCtx) {
 
 async fn queue_owed(ctx: &AccountCtx) {
     let account = ctx.account;
-    let owed = ctx.read(move |r| r.threads().owed_reads(account)).await;
-    match owed {
-        Ok(owed) => {
-            for thread in owed {
-                ctx.queue.push(
-                    LATE,
-                    Work::Meta {
-                        thread,
-                        history: None,
-                        body: None,
-                    },
-                );
-            }
-        }
-        Err(e) => {
+    let owed = ctx
+        .read(move |r| r.threads().owed_reads(account))
+        .await
+        .unwrap_or_else(|e| {
             tracing::warn!(account = account.0, error = %e, "couldn't read the threads owed a read");
-        }
+            Vec::new()
+        });
+    for thread in owed {
+        ctx.queue.push(
+            LATE,
+            Work::Meta {
+                thread,
+                history: None,
+                body: None,
+            },
+        );
     }
 }
 
@@ -247,15 +273,7 @@ pub(crate) fn queue_starred_and_sent(queue: &FetchQueue) {
 }
 
 async fn poll(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(), GmailError> {
-    let account = ctx.account;
-    let start = ctx
-        .read(move |r| Ok(r.accounts().get(account)?.and_then(|a| a.history_id)))
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(account = account.0, error = %e, "couldn't read the history cursor");
-            None
-        });
-    let Some(start) = start else {
+    let Some(start) = history_cursor(ctx).await else {
         return Ok(());
     };
     let ticket = ctx.lane.landed.read();
@@ -263,18 +281,52 @@ async fn poll(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(),
         return full_resync(ctx, drafts_due).await;
     };
     if records.is_empty() {
-        if latest != start {
-            store_cursor(ctx, latest).await;
-        }
-        return reconcile_drafts(ctx, drafts_due, false).await;
+        return caught_up(ctx, drafts_due, start, latest).await;
     }
     let batch = HistoryBatch::new(records);
     let drafts_changed = batch.drafts_changed;
     let known = known_messages(ctx, batch.labels.keys().cloned().collect()).await;
     let to_read = batch.threads_to_read(|id| known.contains(id));
-    let (read, deferred) = read_threads(ctx, &to_read).await?;
+    let reads = read_threads(ctx, &to_read).await?;
+    if let Some(deferred) = apply_poll(ctx, batch, reads, latest, ticket).await {
+        queue_after_poll(&ctx.queue, to_read, deferred);
+    }
+    reconcile_drafts(ctx, drafts_due, drafts_changed).await
+}
+
+async fn history_cursor(ctx: &AccountCtx) -> Option<HistoryId> {
+    let account = ctx.account;
+    ctx.read(move |r| Ok(r.accounts().get(account)?.and_then(|a| a.history_id)))
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(account = account.0, error = %e, "couldn't read the history cursor");
+            None
+        })
+}
+
+async fn caught_up(
+    ctx: &AccountCtx,
+    drafts_due: &mut Option<Occasion>,
+    start: HistoryId,
+    latest: HistoryId,
+) -> Result<(), GmailError> {
+    if latest != start {
+        store_cursor(ctx, latest).await;
+    }
+    reconcile_drafts(ctx, drafts_due, false).await
+}
+
+async fn apply_poll(
+    ctx: &AccountCtx,
+    batch: HistoryBatch,
+    reads: PollReads,
+    cursor: HistoryId,
+    ticket: ReadTicket,
+) -> Option<Vec<GmailThreadId>> {
+    let account = ctx.account;
     let now = ctx.clock().now();
     let notifier = Arc::clone(&ctx.deps.notifier);
+    let PollReads { read, deferred } = reads;
     let applied = ctx
         .writer()
         .call(WritePriority::Sync, move |tx, state| {
@@ -283,7 +335,7 @@ async fn poll(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(),
                 batch: &batch,
                 read,
                 deferred: &deferred,
-                cursor: latest,
+                cursor,
                 now,
                 ticket: &ticket,
             };
@@ -297,13 +349,11 @@ async fn poll(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(),
             Ok::<_, sm_store::StoreError>(deferred)
         })
         .await;
-    match applied {
-        Ok(deferred) => queue_after_poll(&ctx.queue, to_read, deferred),
-        Err(e) => {
+    applied
+        .inspect_err(|e| {
             tracing::warn!(account = account.0, error = %e, "couldn't apply a poll's history");
-        }
-    }
-    reconcile_drafts(ctx, drafts_due, drafts_changed).await
+        })
+        .ok()
 }
 
 async fn known_messages(ctx: &AccountCtx, named: Vec<GmailMessageId>) -> BTreeSet<GmailMessageId> {
@@ -324,10 +374,35 @@ async fn known_messages(ctx: &AccountCtx, named: Vec<GmailMessageId>) -> BTreeSe
     })
 }
 
+struct PollReads {
+    read: Vec<(GmailThreadId, Option<ReadThread>)>,
+    deferred: Vec<GmailThreadId>,
+}
+
+impl PollReads {
+    fn add(
+        &mut self,
+        account: AccountId,
+        thread: &GmailThreadId,
+        answer: Result<ReadThread, GmailError>,
+    ) -> Result<(), GmailError> {
+        match answer {
+            Ok(answer) => self.read.push((thread.clone(), Some(answer))),
+            Err(e) if *e.outcome() == Outcome::NotFound => self.read.push((thread.clone(), None)),
+            Err(e) if *e.outcome() == Outcome::InvalidGrant => return Err(e),
+            Err(e) => {
+                tracing::info!(account = account.0, outcome = %e.outcome(), "a poll's thread read failed; queueing it");
+                self.deferred.push(thread.clone());
+            }
+        }
+        Ok(())
+    }
+}
+
 async fn read_threads(
     ctx: &AccountCtx,
     to_read: &BTreeSet<GmailThreadId>,
-) -> Result<(Vec<(GmailThreadId, Option<ReadThread>)>, Vec<GmailThreadId>), GmailError> {
+) -> Result<PollReads, GmailError> {
     let none = HashSet::new();
     let answers = join_all(
         to_read
@@ -335,20 +410,14 @@ async fn read_threads(
             .map(|t| read_thread(ctx, t, Format::Metadata, Priority::P3, &none)),
     )
     .await;
-    let mut read = Vec::with_capacity(answers.len());
-    let mut deferred = Vec::new();
+    let mut reads = PollReads {
+        read: Vec::with_capacity(answers.len()),
+        deferred: Vec::new(),
+    };
     for (thread, answer) in to_read.iter().zip(answers) {
-        match answer {
-            Ok(answer) => read.push((thread.clone(), Some(answer))),
-            Err(e) if *e.outcome() == Outcome::NotFound => read.push((thread.clone(), None)),
-            Err(e) if *e.outcome() == Outcome::InvalidGrant => return Err(e),
-            Err(e) => {
-                tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "a poll's thread read failed; queueing it");
-                deferred.push(thread.clone());
-            }
-        }
+        reads.add(ctx.account, thread, answer)?;
     }
-    Ok((read, deferred))
+    Ok(reads)
 }
 
 fn queue_after_poll(

@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use sm_domain::{
     AccountId, GmailMessageId, GmailThreadId, LabelId, LabelSet, MessageId, Millis, SystemLabel,
@@ -45,18 +45,7 @@ pub(crate) fn store_thread(
     }
     let labels = Labels::load(reads, account)?;
     let mut unknown = false;
-    let mut rest = Vec::with_capacity(read.messages.len());
-    let messages = read
-        .messages
-        .into_iter()
-        .map(|m| {
-            let ReadMessage { mut message, body } = m;
-            rest.push((body, message.labels.has(SystemLabel::Spam)));
-            message.labels = labels.local(&message.labels, &mut unknown);
-            local.apply(&message.gmail_id, &mut message.labels);
-            message
-        })
-        .collect();
+    let (messages, rest) = localize(read.messages, &labels, local, &mut unknown);
     let fetched = FetchedThread {
         account,
         gmail_id: read.gmail_id,
@@ -80,6 +69,24 @@ pub(crate) fn store_thread(
         thread: stored.thread,
         added: stored.added,
     })
+}
+
+fn localize(
+    messages: Vec<ReadMessage>,
+    labels: &Labels,
+    local: &LocalChanges,
+    unknown: &mut bool,
+) -> (Vec<NewMessage>, Vec<(Option<NewBody>, bool)>) {
+    messages
+        .into_iter()
+        .map(|m| {
+            let ReadMessage { mut message, body } = m;
+            let in_spam = message.labels.has(SystemLabel::Spam);
+            message.labels = labels.local(&message.labels, unknown);
+            local.apply(&message.gmail_id, &mut message.labels);
+            (message, (body, in_spam))
+        })
+        .unzip()
 }
 
 pub(crate) fn store_draft_message(
@@ -143,14 +150,7 @@ pub(crate) fn apply_history(
         ticket,
     } = polled;
     let local = LocalChanges::load(tx.read(), account, ticket.landed())?;
-    let mut touched = BTreeSet::new();
-    let mut gone = Vec::new();
-    for message in &batch.deleted {
-        if let Some(record) = tx.read().messages().by_gmail_id(account, message)? {
-            touched.insert(record.thread);
-            gone.push(record.id);
-        }
-    }
+    let (mut touched, gone) = find_deleted(tx.read(), account, &batch.deleted)?;
     tx.messages().delete(&gone)?;
     let mut added = Vec::new();
     let mut refetched = BTreeSet::new();
@@ -165,10 +165,55 @@ pub(crate) fn apply_history(
         }
         refetched.insert(thread);
     }
-    let reads = tx.read();
+    let relabeled = relabel(tx.read(), account, batch, &refetched, &local)?;
+    touched.extend(relabeled.touched);
+    tx.messages().set_labels(&relabeled.changed)?;
+    advance_histories(tx, account, &batch.newest, deferred)?;
+    for &thread in &touched {
+        wake_if_back_in_inbox(tx, thread, &local)?;
+    }
+    tx.accounts().set_history(account, cursor, now)?;
+    if relabeled.unknown {
+        state.effect(Effect::RefreshLabels(account));
+    }
+    Ok(added)
+}
+
+fn find_deleted(
+    reads: Reads<'_>,
+    account: AccountId,
+    deleted: &BTreeSet<GmailMessageId>,
+) -> Result<(BTreeSet<ThreadId>, Vec<MessageId>), StoreError> {
+    let mut touched = BTreeSet::new();
+    let mut gone = Vec::new();
+    for message in deleted {
+        if let Some(record) = reads.messages().by_gmail_id(account, message)? {
+            touched.insert(record.thread);
+            gone.push(record.id);
+        }
+    }
+    Ok((touched, gone))
+}
+
+struct Relabeled {
+    changed: Vec<(MessageId, LabelSet)>,
+    touched: Vec<ThreadId>,
+    unknown: bool,
+}
+
+fn relabel(
+    reads: Reads<'_>,
+    account: AccountId,
+    batch: &HistoryBatch,
+    refetched: &BTreeSet<GmailThreadId>,
+    local: &LocalChanges,
+) -> Result<Relabeled, StoreError> {
     let labels = Labels::load(reads, account)?;
-    let mut unknown = false;
-    let mut changed = Vec::new();
+    let mut relabeled = Relabeled {
+        changed: Vec::new(),
+        touched: Vec::new(),
+        unknown: false,
+    };
     for (message, (thread, gmail_labels)) in &batch.labels {
         if refetched.contains(thread) || batch.deleted.contains(message) {
             continue;
@@ -181,15 +226,23 @@ pub(crate) fn apply_history(
         {
             continue;
         }
-        let mut set = labels.local(gmail_labels, &mut unknown);
+        let mut set = labels.local(gmail_labels, &mut relabeled.unknown);
         local.apply(message, &mut set);
         if set != record.labels {
-            touched.insert(record.thread);
-            changed.push((record.id, set));
+            relabeled.touched.push(record.thread);
+            relabeled.changed.push((record.id, set));
         }
     }
-    tx.messages().set_labels(&changed)?;
-    for (thread, newest) in batch.newest.iter().filter(|(t, _)| !deferred.contains(t)) {
+    Ok(relabeled)
+}
+
+fn advance_histories(
+    tx: &mut WriteTx<'_>,
+    account: AccountId,
+    newest: &BTreeMap<GmailThreadId, HistoryId>,
+    deferred: &[GmailThreadId],
+) -> Result<(), StoreError> {
+    for (thread, newest) in newest.iter().filter(|(t, _)| !deferred.contains(t)) {
         let Some(id) = tx.read().threads().by_gmail_id(account, thread)? else {
             continue;
         };
@@ -197,14 +250,7 @@ pub(crate) fn apply_history(
             tx.threads().set_history_id(id, *newest)?;
         }
     }
-    for &thread in &touched {
-        wake_if_back_in_inbox(tx, thread, &local)?;
-    }
-    tx.accounts().set_history(account, cursor, now)?;
-    if unknown {
-        state.effect(Effect::RefreshLabels(account));
-    }
-    Ok(added)
+    Ok(())
 }
 
 fn stored_history(reads: Reads<'_>, thread: ThreadId) -> Result<Option<HistoryId>, StoreError> {

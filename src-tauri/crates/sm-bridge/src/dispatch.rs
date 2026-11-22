@@ -10,6 +10,10 @@ pub enum Answer {
     Quit,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "one exhaustive arm per IPC command, each a single core call; splitting needs a catch-all arm"
+)]
 pub async fn dispatch(app: &App, name: &str, args: Value) -> CmdResult<Answer> {
     let reply = match Command::parse(name, args)? {
         Command::Connect { reply } => reply.send(app.lifecycle().launch_info()),

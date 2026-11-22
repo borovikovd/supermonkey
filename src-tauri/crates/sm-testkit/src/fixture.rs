@@ -185,7 +185,18 @@ fn write_account(
     plan: Plan,
     email: String,
 ) -> Result<(), StoreError> {
-    let Plan { n, size, now } = plan;
+    let owner = create_owner(tx, plan.now, email)?;
+    write_threads(tx, rng, plan, &owner)?;
+    write_contacts(tx, rng, plan, owner.account)?;
+    tracing::info!(
+        account = owner.account.0,
+        threads = plan.size.threads,
+        "wrote a fixture account"
+    );
+    Ok(())
+}
+
+fn create_owner(tx: &mut WriteTx<'_>, now: Millis, email: String) -> Result<Owner, StoreError> {
     let name = email.split('@').next().unwrap_or(&email).to_owned();
     let account = tx.accounts().create(&email, &name)?;
     tx.accounts().set_profile(
@@ -202,6 +213,15 @@ fn write_account(
     tx.accounts()
         .set_history(account, sm_domain::HistoryId(1), now)?;
     tx.accounts().set_connected(account)?;
+    let labels = sync_labels(tx, account)?;
+    Ok(Owner {
+        account,
+        me,
+        labels,
+    })
+}
+
+fn sync_labels(tx: &mut WriteTx<'_>, account: AccountId) -> Result<Vec<LabelId>, StoreError> {
     let gmail_labels: Vec<GmailLabel> = LABELS
         .iter()
         .map(|(id, name)| GmailLabel {
@@ -221,18 +241,32 @@ fn write_account(
             user_labels.push(label);
         }
     }
-    let owner = Owner {
-        account,
-        me,
-        labels: user_labels,
-    };
-    for t in 0..size.threads {
-        let (fetched, bodies) = thread(rng, plan, &owner, t);
+    Ok(user_labels)
+}
+
+fn write_threads(
+    tx: &mut WriteTx<'_>,
+    rng: &mut StdRng,
+    plan: Plan,
+    owner: &Owner,
+) -> Result<(), StoreError> {
+    for t in 0..plan.size.threads {
+        let (fetched, bodies) = thread(rng, plan, owner, t);
         let stored = tx.threads().store(&fetched)?;
         for (id, body) in stored.added.into_iter().zip(bodies) {
             tx.messages().store_body(id, &body)?;
         }
     }
+    Ok(())
+}
+
+fn write_contacts(
+    tx: &mut WriteTx<'_>,
+    rng: &mut StdRng,
+    plan: Plan,
+    account: AccountId,
+) -> Result<(), StoreError> {
+    let Plan { n, size, now } = plan;
     for c in 0..size.contacts {
         let who = person(rng);
         let email = format!("{c}{}", who.email);
@@ -247,11 +281,6 @@ fn write_account(
         let source = GmailMessageId::from(format!("c{n}_{c:05}"));
         tx.contacts().count(account, &source, &[sighting])?;
     }
-    tracing::info!(
-        account = account.0,
-        threads = size.threads,
-        "wrote a fixture account"
-    );
     Ok(())
 }
 
@@ -314,17 +343,10 @@ fn thread(rng: &mut StdRng, plan: Plan, owner: &Owner, t: usize) -> (FetchedThre
     let Plan { n, size, now } = plan;
     let me = &owner.me;
     let in_inbox = t < size.inbox;
-    let count = if t == LONG_THREAD {
-        size.long_thread
-    } else {
-        rng.random_range(1..5)
-    };
+    let count = message_count(rng, size, t);
     let subject = pick(rng, &SUBJECTS);
     let sender = person(rng);
-    let age = i64::try_from(t)
-        .unwrap_or(i64::MAX)
-        .saturating_mul(MINUTES_APART * 60_000);
-    let latest = now.plus(-age.saturating_add(rng.random_range(0..600_000)));
+    let latest = latest_time(rng, now, t);
     let traits = Traits::draw(rng, in_inbox, &owner.labels);
     let mut messages = Vec::with_capacity(count);
     let mut bodies = Vec::with_capacity(count);
@@ -338,22 +360,15 @@ fn thread(rng: &mut StdRng, plan: Plan, owner: &Owner, t: usize) -> (FetchedThre
         };
         let labels = traits.labels(rng, from_me, newest);
         let (html, text) = body(rng);
-        let back = i64::try_from(count - 1 - m)
-            .unwrap_or(0)
-            .saturating_mul(3_600_000);
         messages.push(NewMessage {
             gmail_id: GmailMessageId::from(format!("m{n}_{t:06}_{m:02}")),
-            date: latest.plus(-back),
+            date: received_at(latest, count, m),
             from,
             to: vec![to],
             cc: Vec::new(),
             bcc: Vec::new(),
             reply_to: Vec::new(),
-            subject: if m == 0 {
-                subject.to_owned()
-            } else {
-                format!("Re: {subject}")
-            },
+            subject: reply_subject(subject, m),
             snippet: text.chars().take(140).collect(),
             message_id_header: Some(format!("<m{n}.{t}.{m}@fixture>")),
             in_reply_to: None,
@@ -364,13 +379,7 @@ fn thread(rng: &mut StdRng, plan: Plan, owner: &Owner, t: usize) -> (FetchedThre
             labels,
             has_attachments: false,
         });
-        bodies.push(NewBody {
-            html: Some(html),
-            quote_html: None,
-            text: Some(text),
-            is_plain: false,
-            attachments: Vec::new(),
-        });
+        bodies.push(html_body(html, text));
     }
     let fetched = FetchedThread {
         account: owner.account,
@@ -380,4 +389,44 @@ fn thread(rng: &mut StdRng, plan: Plan, owner: &Owner, t: usize) -> (FetchedThre
         complete: true,
     };
     (fetched, bodies)
+}
+
+fn message_count(rng: &mut StdRng, size: Size, t: usize) -> usize {
+    if t == LONG_THREAD {
+        size.long_thread
+    } else {
+        rng.random_range(1..5)
+    }
+}
+
+fn latest_time(rng: &mut StdRng, now: Millis, t: usize) -> Millis {
+    let age = i64::try_from(t)
+        .unwrap_or(i64::MAX)
+        .saturating_mul(MINUTES_APART * 60_000);
+    now.plus(-age.saturating_add(rng.random_range(0..600_000)))
+}
+
+fn received_at(latest: Millis, count: usize, m: usize) -> Millis {
+    let back = i64::try_from(count - 1 - m)
+        .unwrap_or(0)
+        .saturating_mul(3_600_000);
+    latest.plus(-back)
+}
+
+fn reply_subject(subject: &str, m: usize) -> String {
+    if m == 0 {
+        subject.to_owned()
+    } else {
+        format!("Re: {subject}")
+    }
+}
+
+const fn html_body(html: String, text: String) -> NewBody {
+    NewBody {
+        html: Some(html),
+        quote_html: None,
+        text: Some(text),
+        is_plain: false,
+        attachments: Vec::new(),
+    }
 }

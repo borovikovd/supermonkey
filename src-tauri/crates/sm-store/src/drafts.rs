@@ -370,13 +370,8 @@ impl<'t, 'c> DraftWrites<'t, 'c> {
 
     pub fn put(&mut self, draft: &Draft) -> Result<(), StoreError> {
         let before = self.placed(&draft.id)?;
-        if let Some((account, _)) = before
-            && account != draft.account
-        {
-            return Err(StoreError::Invalid(format!(
-                "draft {} belongs to account {}, not {}",
-                draft.id, account, draft.account
-            )));
+        if let Some((account, _)) = before {
+            ensure_same_account(&draft.id, account, draft.account)?;
         }
         let rev = self.tx.stamp();
         let life = &draft.lifecycle;
@@ -455,6 +450,19 @@ impl<'t, 'c> DraftWrites<'t, 'c> {
         }
         Ok(())
     }
+}
+
+fn ensure_same_account(
+    id: &DraftId,
+    stored: AccountId,
+    given: AccountId,
+) -> Result<(), StoreError> {
+    if stored == given {
+        return Ok(());
+    }
+    Err(StoreError::Invalid(format!(
+        "draft {id} belongs to account {stored}, not {given}"
+    )))
 }
 
 pub(crate) fn stamp_thread(tx: &mut WriteTx<'_>, thread: ThreadId) -> Result<(), StoreError> {

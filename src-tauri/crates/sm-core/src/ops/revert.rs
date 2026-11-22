@@ -1,5 +1,6 @@
+use serde::de::DeserializeOwned;
 use sm_domain::{AccountId, ActionNo, LabelId, Millis, NoticeKind, ThreadChange, UndoEntryId};
-use sm_store::{NewNotice, NewOp, OpId, OpKind, StoreError, UndoAction, WriteTx};
+use sm_store::{NewNotice, NewOp, OpId, OpKind, OpRecord, StoreError, UndoAction, WriteTx};
 
 use super::payload::relabel_changes;
 use super::{LabelCreateOp, ModifyOp};
@@ -134,18 +135,16 @@ pub(crate) fn reject(
         return Ok(());
     };
     match op.kind {
-        OpKind::Modify => match op.payload::<ModifyOp>() {
-            Ok(payload) => drop(revert(tx, &payload.threads)?),
-            Err(e) => {
-                tracing::warn!(op = %id, error = %e, "a rejected op does not parse; nothing to roll back");
+        OpKind::Modify => {
+            if let Some(payload) = rejected_payload::<ModifyOp>(&op) {
+                drop(revert(tx, &payload.threads)?);
             }
-        },
-        OpKind::LabelCreate => match op.payload::<LabelCreateOp>() {
-            Ok(payload) => drop_label(tx, op.account, &payload.label)?,
-            Err(e) => {
-                tracing::warn!(op = %id, error = %e, "a rejected op does not parse; nothing to roll back");
+        }
+        OpKind::LabelCreate => {
+            if let Some(payload) = rejected_payload::<LabelCreateOp>(&op) {
+                drop_label(tx, op.account, &payload.label)?;
             }
-        },
+        }
         OpKind::DraftUpsert | OpKind::DraftDelete | OpKind::TrashMessage => {}
     }
     if let Some(action) = op.action {
@@ -161,6 +160,14 @@ pub(crate) fn reject(
         created_at: now,
     })?;
     Ok(())
+}
+
+fn rejected_payload<P: DeserializeOwned>(op: &OpRecord) -> Option<P> {
+    op.payload::<P>()
+        .inspect_err(|e| {
+            tracing::warn!(op = %op.id, error = %e, "a rejected op does not parse; nothing to roll back");
+        })
+        .ok()
 }
 
 pub(crate) fn drop_label(

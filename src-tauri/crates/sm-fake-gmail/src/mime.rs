@@ -69,39 +69,53 @@ fn parse_part(bytes: &[u8], part_id: &str, ctx: &mut Ctx<'_>) -> (Value, Vec<(St
         mime_type.starts_with("multipart/"),
         param(&params, "boundary"),
     ) {
-        let parts: Vec<Value> = split_multipart(body, boundary)
-            .into_iter()
-            .enumerate()
-            .map(|(i, part)| {
-                let id = if part_id.is_empty() {
-                    i.to_string()
-                } else {
-                    format!("{part_id}.{i}")
-                };
-                parse_part(part, &id, ctx).0
-            })
-            .collect();
         node["body"] = json!({ "size": 0 });
-        node["parts"] = Value::Array(parts);
+        node["parts"] = Value::Array(parse_children(body, boundary, part_id, ctx));
     } else {
-        let encoding = header(&headers, "Content-Transfer-Encoding").unwrap_or("7bit");
-        let data = decode_transfer(body, encoding);
-        if filename.is_empty() {
-            if mime_type == "text/plain" && ctx.plain.is_none() {
-                ctx.plain = Some(String::from_utf8_lossy(&data).into_owned());
-            } else if mime_type == "text/html" && ctx.html.is_none() {
-                ctx.html = Some(String::from_utf8_lossy(&data).into_owned());
-            }
-            node["body"] = json!({ "size": data.len(), "data": URL_SAFE.encode(&data) });
-        } else if header(&headers, SERVED_INLINE).is_some() {
-            node["body"] = json!({ "size": data.len(), "data": URL_SAFE.encode(&data) });
-        } else {
-            let id = (ctx.new_id)();
-            node["body"] = json!({ "attachmentId": id, "size": data.len() });
-            ctx.attachments.push((id, data.into_owned()));
-        }
+        node["body"] = leaf_body(body, &headers, &mime_type, filename, ctx);
     }
     (node, headers)
+}
+
+fn parse_children(body: &[u8], boundary: &str, part_id: &str, ctx: &mut Ctx<'_>) -> Vec<Value> {
+    split_multipart(body, boundary)
+        .into_iter()
+        .enumerate()
+        .map(|(i, part)| {
+            let id = if part_id.is_empty() {
+                i.to_string()
+            } else {
+                format!("{part_id}.{i}")
+            };
+            parse_part(part, &id, ctx).0
+        })
+        .collect()
+}
+
+fn leaf_body(
+    body: &[u8],
+    headers: &[(String, String)],
+    mime_type: &str,
+    filename: &str,
+    ctx: &mut Ctx<'_>,
+) -> Value {
+    let encoding = header(headers, "Content-Transfer-Encoding").unwrap_or("7bit");
+    let data = decode_transfer(body, encoding);
+    if filename.is_empty() {
+        if mime_type == "text/plain" && ctx.plain.is_none() {
+            ctx.plain = Some(String::from_utf8_lossy(&data).into_owned());
+        } else if mime_type == "text/html" && ctx.html.is_none() {
+            ctx.html = Some(String::from_utf8_lossy(&data).into_owned());
+        }
+        return json!({ "size": data.len(), "data": URL_SAFE.encode(&data) });
+    }
+    if header(headers, SERVED_INLINE).is_some() {
+        return json!({ "size": data.len(), "data": URL_SAFE.encode(&data) });
+    }
+    let id = (ctx.new_id)();
+    let value = json!({ "attachmentId": id, "size": data.len() });
+    ctx.attachments.push((id, data.into_owned()));
+    value
 }
 
 fn split_head(bytes: &[u8]) -> (&[u8], &[u8]) {
@@ -340,7 +354,11 @@ pub(crate) fn build(msg: &NewMessage, date_ms: u64, message_id: &str) -> Vec<u8>
         push(name, value);
     }
     push("MIME-Version", "1.0");
+    out.push_str(&mime_body(msg));
+    out.into_bytes()
+}
 
+fn mime_body(msg: &NewMessage) -> String {
     let mut counter = 0;
     let mut boundary = || {
         counter += 1;
@@ -370,8 +388,7 @@ pub(crate) fn build(msg: &NewMessage, date_ms: u64, message_id: &str) -> Vec<u8>
         parts.extend(attached.iter().map(|a| attachment(a)));
         body = multipart("mixed", &boundary(), &parts);
     }
-    out.push_str(&body);
-    out.into_bytes()
+    body
 }
 
 fn attachment(a: &NewAttachment) -> String {

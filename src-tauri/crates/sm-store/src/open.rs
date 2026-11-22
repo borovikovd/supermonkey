@@ -14,36 +14,53 @@ const STATEMENT_CACHE: usize = 256;
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) fn open_writer(path: &Path) -> Result<Connection, StoreError> {
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir).map_err(|source| StoreError::Io {
-            action: "create the folder",
-            path: dir.to_path_buf(),
-            source,
-        })?;
-    }
-    if path.exists() {
-        match stored_version(path) {
-            Ok(SCHEMA_VERSION) => return open_existing(path),
-            Ok(found) => {
-                let aside = move_aside(path)?;
-                tracing::warn!(
-                    target: "sm_store",
-                    found, expected = SCHEMA_VERSION, moved_to = %aside.display(),
-                    "database has another schema version; starting a fresh one",
-                );
-            }
-            Err(e) if is_not_a_database(&e) => {
-                let aside = move_aside(path)?;
-                tracing::warn!(
-                    target: "sm_store",
-                    error = %e, moved_to = %aside.display(),
-                    "database file is not a database or is corrupt; starting a fresh one",
-                );
-            }
-            Err(e) => return Err(StoreError::sql("read the database's schema version")(e)),
-        }
+    create_folder(path)?;
+    if path.exists()
+        && let Some(conn) = open_if_current(path)?
+    {
+        return Ok(conn);
     }
     create(path)
+}
+
+fn create_folder(path: &Path) -> Result<(), StoreError> {
+    let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) else {
+        return Ok(());
+    };
+    std::fs::create_dir_all(dir).map_err(|source| StoreError::Io {
+        action: "create the folder",
+        path: dir.to_path_buf(),
+        source,
+    })
+}
+
+fn open_if_current(path: &Path) -> Result<Option<Connection>, StoreError> {
+    match stored_version(path) {
+        Ok(SCHEMA_VERSION) => open_existing(path).map(Some),
+        Ok(found) => set_aside_other_version(path, found).map(|()| None),
+        Err(e) if is_not_a_database(&e) => set_aside_not_a_database(path, &e).map(|()| None),
+        Err(e) => Err(StoreError::sql("read the database's schema version")(e)),
+    }
+}
+
+fn set_aside_other_version(path: &Path, found: i32) -> Result<(), StoreError> {
+    let aside = move_aside(path)?;
+    tracing::warn!(
+        target: "sm_store",
+        found, expected = SCHEMA_VERSION, moved_to = %aside.display(),
+        "database has another schema version; starting a fresh one",
+    );
+    Ok(())
+}
+
+fn set_aside_not_a_database(path: &Path, e: &rusqlite::Error) -> Result<(), StoreError> {
+    let aside = move_aside(path)?;
+    tracing::warn!(
+        target: "sm_store",
+        error = %e, moved_to = %aside.display(),
+        "database file is not a database or is corrupt; starting a fresh one",
+    );
+    Ok(())
 }
 
 pub(crate) fn open_reader(path: &Path) -> Result<Connection, StoreError> {

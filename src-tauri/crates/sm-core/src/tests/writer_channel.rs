@@ -6,15 +6,18 @@ use parking_lot::Mutex;
 use proptest::prelude::*;
 use sm_domain::{
     AccountId, ActionNo, LabelDelta, LabelId, LabelSet, Millis, ModifyKind, SnoozeEdit, SubId,
-    UndoEntryId, View,
+    ThreadId, UndoEntryId, View,
 };
 use sm_ipc::{
-    Action, ListEntry, ListMove, ModifyAction, NumberedAction, SnoozeChange, SubKey, SubUpdate,
+    Action, ChannelMessage, ListEntry, ListMove, ModifyAction, NumberedAction, SnoozeChange,
+    SubKey, SubUpdate,
 };
 use sm_store::{NewMessage, Pending, Priority, ReadPool, StoreError};
 
 use super::{Harness, NEWEST, eventually, seed};
+use crate::App;
 use crate::workers::Freshness;
+use crate::writer::CoreWriter;
 
 #[derive(Debug, Clone)]
 enum Op {
@@ -167,15 +170,174 @@ fn redated(m: &sm_store::MessageRecord, date: i64) -> NewMessage {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "the property harness: set up, replay ops, check"
-)]
+type Views = Mutex<HashMap<SubId, View>>;
+
+fn mirror(
+    rebuilt: Arc<Mutex<Rebuilt>>,
+    views: Arc<Views>,
+    pool: Arc<ReadPool>,
+    account: AccountId,
+) -> Box<dyn FnMut(ChannelMessage) + Send> {
+    Box::new(move |msg| {
+        let mut st = rebuilt.lock();
+        for u in &msg.updates {
+            if let SubUpdate::List {
+                sub,
+                first,
+                ids,
+                removed,
+                moved,
+                ..
+            } = u
+                && views.lock().contains_key(sub)
+            {
+                let next = if *first {
+                    ids.clone().unwrap_or_default()
+                } else {
+                    let cur = st.lists.get(sub).cloned().unwrap_or_default();
+                    apply(&cur, removed, moved)
+                };
+                st.lists.insert(sub.clone(), next);
+            }
+        }
+        let stale = stale_lists(&pool, account, &st.lists, &views.lock());
+        for s in stale {
+            st.failures.push(format!("rev {}: {s} differs", msg.rev));
+        }
+    })
+}
+
+fn relabel_latest(
+    writer: &CoreWriter,
+    thread: ThreadId,
+    label: &'static str,
+    add: bool,
+) -> Pending<(), StoreError> {
+    writer.call(Priority::Sync, move |tx, _| {
+        let messages = tx.read().messages().for_thread(thread)?;
+        if let Some(m) = messages.iter().rev().find(|m| !m.is_draft) {
+            let mut labels = m.labels.clone();
+            labels.remove(label);
+            if add {
+                labels.insert(LabelId::from(label));
+            }
+            tx.messages().set_labels(&[(m.id, labels)])?;
+        }
+        Ok(())
+    })
+}
+
+fn redate_latest(writer: &CoreWriter, thread: ThreadId, date: i64) -> Pending<(), StoreError> {
+    writer.call(Priority::Sync, move |tx, _| {
+        let messages = tx.read().messages().for_thread(thread)?;
+        if let Some(m) = messages.iter().rev().find(|m| !m.is_draft) {
+            tx.messages().upsert(thread, &redated(m, date))?;
+        }
+        Ok(())
+    })
+}
+
+fn modify_action(account: AccountId, kind: ModifyKind, threads: Vec<ThreadId>) -> Action {
+    let (delta, edit) = delta(kind);
+    Action::Modify(ModifyAction {
+        account,
+        kind,
+        threads,
+        add: delta.add().iter().cloned().collect(),
+        remove: delta.remove().iter().cloned().collect(),
+        snooze: edit.map(|e| match e {
+            SnoozeEdit::Set(at) => SnoozeChange::Set(at),
+            SnoozeEdit::Clear => SnoozeChange::Clear,
+        }),
+        undoable: true,
+    })
+}
+
+struct Replay<'a> {
+    app: &'a App,
+    account: AccountId,
+    threads: &'a [ThreadId],
+    views: &'a Views,
+    rebuilt: &'a Mutex<Rebuilt>,
+    undo: Vec<UndoEntryId>,
+    jobs: Vec<Pending<(), StoreError>>,
+    n: i64,
+    slots: HashMap<usize, SubId>,
+    seq: u32,
+    newest: i64,
+}
+
+impl Replay<'_> {
+    fn submit(&mut self, action: Action) -> i64 {
+        self.n += 1;
+        self.app.actions().submit(vec![NumberedAction {
+            n: ActionNo(self.n),
+            action,
+        }]);
+        self.n
+    }
+
+    fn pick(&self, i: usize) -> ThreadId {
+        self.threads[i % self.threads.len()]
+    }
+
+    fn play(&mut self, op: Op) {
+        match op {
+            Op::Subscribe(slot, view) => self.subscribe(slot, view),
+            Op::Unsubscribe(slot) => self.unsubscribe(slot),
+            Op::Modify(kind, picked) => {
+                let threads = picked.into_iter().map(|i| self.pick(i)).collect();
+                let n = self.submit(modify_action(self.account, kind, threads));
+                self.undo.push(UndoEntryId(n));
+            }
+            Op::Undo => {
+                if let Some(entry) = self.undo.pop() {
+                    let account = self.account;
+                    self.submit(Action::Undo { account, entry });
+                }
+            }
+            Op::Remote(i, label, add) => {
+                let job = relabel_latest(self.app.writer(), self.pick(i), label, add);
+                self.jobs.push(job);
+            }
+            Op::Bump(i) => {
+                let thread = self.pick(i);
+                self.newest += 1;
+                let job = redate_latest(self.app.writer(), thread, self.newest);
+                self.jobs.push(job);
+            }
+        }
+    }
+
+    fn subscribe(&mut self, slot: usize, view: View) {
+        if self.slots.contains_key(&slot) {
+            return;
+        }
+        self.seq += 1;
+        let sub = SubId(format!("s{}", self.seq));
+        self.slots.insert(slot, sub.clone());
+        self.views.lock().insert(sub.clone(), view.clone());
+        let account = self.account;
+        self.submit(Action::Subscribe {
+            sub,
+            key: SubKey::List { account, view },
+        });
+    }
+
+    fn unsubscribe(&mut self, slot: usize) {
+        if let Some(sub) = self.slots.remove(&slot) {
+            self.views.lock().remove(&sub);
+            self.rebuilt.lock().lists.remove(&sub);
+            self.submit(Action::Unsubscribe { sub });
+        }
+    }
+}
+
 async fn run(ops: Vec<Op>) -> Result<HashMap<SubId, Vec<ListEntry>>, TestCaseError> {
     let h = Harness::start().await;
     let (account, threads) = h.write(seed).await;
     let rebuilt: Arc<Mutex<Rebuilt>> = Arc::default();
-    let views: Arc<Mutex<HashMap<SubId, View>>> = Arc::default();
+    let views: Arc<Views> = Arc::default();
     let pool = Arc::new(
         ReadPool::open(
             &h.dir.path().join(crate::Config::DB_FILE),
@@ -183,128 +345,30 @@ async fn run(ops: Vec<Op>) -> Result<HashMap<SubId, Vec<ListEntry>>, TestCaseErr
         )
         .unwrap(),
     );
-    {
-        let (rebuilt, views, pool) = (Arc::clone(&rebuilt), Arc::clone(&views), Arc::clone(&pool));
-        h.app
-            .lifecycle()
-            .connect(Box::new(move |msg| {
-                let mut st = rebuilt.lock();
-                for u in &msg.updates {
-                    if let SubUpdate::List {
-                        sub,
-                        first,
-                        ids,
-                        removed,
-                        moved,
-                        ..
-                    } = u
-                        && views.lock().contains_key(sub)
-                    {
-                        let next = if *first {
-                            ids.clone().unwrap_or_default()
-                        } else {
-                            let cur = st.lists.get(sub).cloned().unwrap_or_default();
-                            apply(&cur, removed, moved)
-                        };
-                        st.lists.insert(sub.clone(), next);
-                    }
-                }
-                let stale = stale_lists(&pool, account, &st.lists, &views.lock());
-                for s in stale {
-                    st.failures.push(format!("rev {}: {s} differs", msg.rev));
-                }
-            }))
-            .await
-            .unwrap();
-    }
-    let writer = h.app.writer();
-    let mut undo: Vec<UndoEntryId> = Vec::new();
-    let mut jobs: Vec<Pending<(), StoreError>> = Vec::new();
-    let mut n = h.app.actions().last_received().0;
-    let mut slots: HashMap<usize, SubId> = HashMap::new();
-    let mut seq = 0;
-    let mut newest = NEWEST;
-    let mut submit = |action: Action| {
-        n += 1;
-        h.app.actions().submit(vec![NumberedAction {
-            n: ActionNo(n),
-            action,
-        }]);
-        n
+    let sink = mirror(
+        Arc::clone(&rebuilt),
+        Arc::clone(&views),
+        Arc::clone(&pool),
+        account,
+    );
+    h.app.lifecycle().connect(sink).await.unwrap();
+    let mut replay = Replay {
+        app: &h.app,
+        account,
+        threads: &threads,
+        views: &views,
+        rebuilt: &rebuilt,
+        undo: Vec::new(),
+        jobs: Vec::new(),
+        n: h.app.actions().last_received().0,
+        slots: HashMap::new(),
+        seq: 0,
+        newest: NEWEST,
     };
-    let pick = |i: usize| threads[i % threads.len()];
     for op in ops {
-        match op {
-            Op::Subscribe(slot, view) => {
-                if slots.contains_key(&slot) {
-                    continue;
-                }
-                seq += 1;
-                let sub = SubId(format!("s{seq}"));
-                slots.insert(slot, sub.clone());
-                views.lock().insert(sub.clone(), view.clone());
-                submit(Action::Subscribe {
-                    sub,
-                    key: SubKey::List { account, view },
-                });
-            }
-            Op::Unsubscribe(slot) => {
-                if let Some(sub) = slots.remove(&slot) {
-                    views.lock().remove(&sub);
-                    rebuilt.lock().lists.remove(&sub);
-                    submit(Action::Unsubscribe { sub });
-                }
-            }
-            Op::Modify(kind, picked) => {
-                let (delta, edit) = delta(kind);
-                let n = submit(Action::Modify(ModifyAction {
-                    account,
-                    kind,
-                    threads: picked.into_iter().map(pick).collect(),
-                    add: delta.add().iter().cloned().collect(),
-                    remove: delta.remove().iter().cloned().collect(),
-                    snooze: edit.map(|e| match e {
-                        SnoozeEdit::Set(at) => SnoozeChange::Set(at),
-                        SnoozeEdit::Clear => SnoozeChange::Clear,
-                    }),
-                    undoable: true,
-                }));
-                undo.push(UndoEntryId(n));
-            }
-            Op::Undo => {
-                if let Some(entry) = undo.pop() {
-                    submit(Action::Undo { account, entry });
-                }
-            }
-            Op::Remote(i, label, add) => {
-                let thread = pick(i);
-                jobs.push(writer.call(Priority::Sync, move |tx, _| {
-                    let messages = tx.read().messages().for_thread(thread)?;
-                    if let Some(m) = messages.iter().rev().find(|m| !m.is_draft) {
-                        let mut labels = m.labels.clone();
-                        labels.remove(label);
-                        if add {
-                            labels.insert(LabelId::from(label));
-                        }
-                        tx.messages().set_labels(&[(m.id, labels)])?;
-                    }
-                    Ok(())
-                }));
-            }
-            Op::Bump(i) => {
-                let thread = pick(i);
-                newest += 1;
-                let date = newest;
-                jobs.push(writer.call(Priority::Sync, move |tx, _| {
-                    let messages = tx.read().messages().for_thread(thread)?;
-                    if let Some(m) = messages.iter().rev().find(|m| !m.is_draft) {
-                        tx.messages().upsert(thread, &redated(m, date))?;
-                    }
-                    Ok(())
-                }));
-            }
-        }
+        replay.play(op);
     }
+    let jobs = replay.jobs;
     h.app.actions().drained().await.unwrap();
     for job in jobs {
         job.await.unwrap();

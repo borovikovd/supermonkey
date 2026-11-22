@@ -63,22 +63,18 @@ static HREF: LazyLock<Regex> =
     LazyLock::new(|| crate::regex(r#"(?i)\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))"#));
 
 fn render(html: &str, style: Style) -> String {
-    let mut html = COMMENT.replace_all(html, "");
-    for hidden in HIDDEN.iter() {
-        if let Cow::Owned(replaced) = hidden.replace_all(&html, " ") {
-            html = Cow::Owned(replaced);
-        }
-    }
-
-    let mut w = TextWriter::new(style);
-    let mut pre_depth = 0u32;
-    let mut link: Option<(Cow<'_, str>, usize)> = None;
+    let html = strip_hidden(html);
+    let mut r = Render {
+        w: TextWriter::new(style),
+        pre_depth: 0,
+        link: None,
+    };
     let mut last = 0;
     for tag in TAG.captures_iter(&html) {
         let Some(whole) = tag.get(0) else { continue };
-        w.text(
+        r.w.text(
             html.get(last..whole.start()).unwrap_or_default(),
-            pre_depth > 0,
+            r.pre_depth > 0,
         );
         last = whole.end();
 
@@ -86,14 +82,40 @@ fn render(html: &str, style: Style) -> String {
         let mut name = [0; MAX_TAG_NAME];
         let name = lowercase_tag_name(tag.get(2).map_or("", |m| m.as_str()), &mut name);
         let attributes = tag.get(3).map_or("", |m| m.as_str());
+        r.tag(name, is_end, attributes);
+    }
+    r.w.text(html.get(last..).unwrap_or_default(), r.pre_depth > 0);
+    r.w.out
+}
+
+fn strip_hidden(html: &str) -> Cow<'_, str> {
+    let mut html = COMMENT.replace_all(html, "");
+    for hidden in HIDDEN.iter() {
+        if let Cow::Owned(replaced) = hidden.replace_all(&html, " ") {
+            html = Cow::Owned(replaced);
+        }
+    }
+    html
+}
+
+struct Render<'h> {
+    w: TextWriter,
+    pre_depth: u32,
+    link: Option<(Cow<'h, str>, usize)>,
+}
+
+impl<'h> Render<'h> {
+    fn tag(&mut self, name: &str, is_end: bool, attributes: &'h str) {
+        let w = &mut self.w;
+        let plain = w.style == Style::Plain;
         match (name, is_end) {
             ("br", _) => w.newline(),
             ("pre", false) => {
-                pre_depth += 1;
+                self.pre_depth += 1;
                 w.block();
             }
             ("pre", true) => {
-                pre_depth = pre_depth.saturating_sub(1);
+                self.pre_depth = self.pre_depth.saturating_sub(1);
                 w.block();
             }
             ("blockquote", false) => {
@@ -109,7 +131,7 @@ fn render(html: &str, style: Style) -> String {
             }
             ("li", false) => {
                 w.block();
-                if style == Style::Plain {
+                if plain {
                     w.text("- ", true);
                 }
             }
@@ -119,23 +141,24 @@ fn render(html: &str, style: Style) -> String {
                 _,
             ) => w.block(),
             ("td" | "th", true) => w.text(" ", true),
-            ("a", false) if style == Style::Plain => {
-                link = href(attributes).map(|href| (href, w.out.len()));
+            ("a", false) if plain => {
+                self.link = href(attributes).map(|href| (href, w.out.len()));
             }
-            ("a", true) if style == Style::Plain => {
-                if let Some((href, start)) = link.take() {
-                    let shown = w.out.get(start..).unwrap_or_default().trim();
-                    let is_web = href.starts_with("http://") || href.starts_with("https://");
-                    if is_web && !shown.is_empty() && shown != href {
-                        w.text(&format!(" <{href}>"), true);
-                    }
-                }
-            }
+            ("a", true) if plain => self.close_link(),
             _ => {}
         }
     }
-    w.text(html.get(last..).unwrap_or_default(), pre_depth > 0);
-    w.out
+
+    fn close_link(&mut self) {
+        let Some((href, start)) = self.link.take() else {
+            return;
+        };
+        let shown = self.w.out.get(start..).unwrap_or_default().trim();
+        let is_web = href.starts_with("http://") || href.starts_with("https://");
+        if is_web && !shown.is_empty() && shown != href {
+            self.w.text(&format!(" <{href}>"), true);
+        }
+    }
 }
 
 const MAX_TAG_NAME: usize = 10;

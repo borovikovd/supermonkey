@@ -1,7 +1,7 @@
 use sm_domain::{Addr, MessageFacts, ThreadId, email_domain};
 use sm_gmail::{Filter, FilterId, GmailError, HttpClient, Priority};
 use sm_ipc::{BlockResult, BlockedSender, BlockedSenders, Unsubscribed};
-use sm_mime::{PlainMessage, build_plain, list_unsubscribe};
+use sm_mime::{Mailto, PlainMessage, build_plain, list_unsubscribe};
 
 use super::account::AccountCtx;
 use crate::read::read;
@@ -38,25 +38,12 @@ pub(crate) async fn unsubscribe(
     let how = list_unsubscribe(header, headers.header(HEADERS[1]));
     if how.is_one_click
         && let Some(url) = &how.web
+        && one_click(ctx, http, url).await
     {
-        match sm_gmail::one_click_unsubscribe(http, url).await {
-            Ok(()) => return Ok(Unsubscribed::OneClick { sender }),
-            Err(e) => {
-                tracing::warn!(account = ctx.account.0, outcome = %e.outcome(), "the one-click unsubscribe failed");
-            }
-        }
+        return Ok(Unsubscribed::OneClick { sender });
     }
     if let Some(mailto) = how.mailto {
-        let raw = build_plain(&PlainMessage {
-            from: &Addr::new(account_email(&ctx.deps.pool, ctx.account).await?),
-            to: &mailto.to,
-            subject: mailto.subject.as_deref().unwrap_or(UNSUBSCRIBE),
-            text: mailto.body.as_deref().unwrap_or(UNSUBSCRIBE),
-            date: ctx.clock().now(),
-        });
-        let sent = ctx.gmail.send_message(Priority::P1, &raw).await;
-        ctx.note(&sent);
-        sent?;
+        email_unsubscribe(ctx, &mailto).await?;
         return Ok(Unsubscribed::Emailed { sender });
     }
     if let Some(url) = how.web {
@@ -64,6 +51,29 @@ pub(crate) async fn unsubscribe(
         return Ok(Unsubscribed::OpenedPage { sender });
     }
     Ok(Unsubscribed::NoLink { sender })
+}
+
+async fn one_click(ctx: &AccountCtx, http: &HttpClient, url: &str) -> bool {
+    sm_gmail::one_click_unsubscribe(http, url)
+        .await
+        .inspect_err(|e| {
+            tracing::warn!(account = ctx.account.0, outcome = %e.outcome(), "the one-click unsubscribe failed");
+        })
+        .is_ok()
+}
+
+async fn email_unsubscribe(ctx: &AccountCtx, mailto: &Mailto) -> Result<(), Error> {
+    let raw = build_plain(&PlainMessage {
+        from: &Addr::new(account_email(&ctx.deps.pool, ctx.account).await?),
+        to: &mailto.to,
+        subject: mailto.subject.as_deref().unwrap_or(UNSUBSCRIBE),
+        text: mailto.body.as_deref().unwrap_or(UNSUBSCRIBE),
+        date: ctx.clock().now(),
+    });
+    let sent = ctx.gmail.send_message(Priority::P1, &raw).await;
+    ctx.note(&sent);
+    sent?;
+    Ok(())
 }
 
 fn unsubscribe_source(messages: &[MessageFacts]) -> Option<&MessageFacts> {
@@ -77,6 +87,29 @@ pub(crate) async fn block(
     domain: bool,
 ) -> Result<BlockResult, Error> {
     let messages = thread_messages(&ctx.deps.pool, ctx.account, thread).await?;
+    let from = block_target(&messages, domain)?;
+    let made = ctx.gmail.create_trash_filter(Priority::P1, &from).await;
+    ctx.note(&made);
+    filter_made(ctx.account, domain, from, made)
+}
+
+fn filter_made(
+    account: AccountId,
+    domain: bool,
+    from: String,
+    made: Result<Filter, GmailError>,
+) -> Result<BlockResult, Error> {
+    match made {
+        Ok(_) => {
+            tracing::info!(account = account.0, domain, "blocked a sender");
+            Ok(BlockResult::Blocked { from })
+        }
+        Err(e) if e.outcome().is_missing_scope() => Ok(BlockResult::NeedsPermission),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn block_target(messages: &[MessageFacts], domain: bool) -> Result<String, Error> {
     let Some(email) = messages
         .iter()
         .rev()
@@ -87,24 +120,13 @@ pub(crate) async fn block(
             "The conversation has no sender to block".to_owned(),
         ));
     };
-    let from = if domain {
-        let Some(at) = email_domain(&email) else {
-            return Err(Error::Invalid("The sender has no domain".to_owned()));
-        };
-        format!("@{at}")
-    } else {
-        email
-    };
-    let made = ctx.gmail.create_trash_filter(Priority::P1, &from).await;
-    ctx.note(&made);
-    match made {
-        Ok(_) => {
-            tracing::info!(account = ctx.account.0, domain, "blocked a sender");
-            Ok(BlockResult::Blocked { from })
-        }
-        Err(e) if e.outcome().is_missing_scope() => Ok(BlockResult::NeedsPermission),
-        Err(e) => Err(e.into()),
+    if !domain {
+        return Ok(email);
     }
+    let Some(at) = email_domain(&email) else {
+        return Err(Error::Invalid("The sender has no domain".to_owned()));
+    };
+    Ok(format!("@{at}"))
 }
 
 pub(crate) async fn blocked_senders(ctx: &AccountCtx) -> Result<BlockedSenders, Error> {

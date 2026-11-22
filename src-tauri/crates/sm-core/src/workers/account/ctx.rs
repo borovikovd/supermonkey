@@ -50,6 +50,16 @@ pub(crate) struct AccountCtx {
     sign_out: SignOutSender,
 }
 
+fn retry_wait(err: &GmailError, backoff: &mut Backoff) -> Option<Duration> {
+    if *err.outcome() == Outcome::Offline {
+        Some(OFFLINE_RETRY)
+    } else if err.is_transient() {
+        Some(backoff.next_delay(err))
+    } else {
+        None
+    }
+}
+
 impl AccountCtx {
     pub(crate) fn new(parts: WorkerParts, health: Health, queue: FetchQueue) -> Self {
         let WorkerParts {
@@ -121,11 +131,7 @@ impl AccountCtx {
                 }
                 Err(err) => err,
             };
-            let wait = if *err.outcome() == Outcome::Offline {
-                OFFLINE_RETRY
-            } else if err.is_transient() {
-                backoff.next_delay(&err)
-            } else {
+            let Some(wait) = retry_wait(&err, &mut backoff) else {
                 return Err(err);
             };
             self.health.failed(&err);

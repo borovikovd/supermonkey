@@ -32,20 +32,7 @@ pub(super) fn create_label(
     let rename = if let Some(existing) = existing {
         Some((id, existing.id))
     } else {
-        ctx.tx.labels().create_local(account, &id, name)?;
-        ctx.tx.ops().push(&NewOp {
-            account,
-            action: Some(ctx.n),
-            kind: OpKind::LabelCreate,
-            draft: None,
-            gmail_draft: None,
-            payload: &LabelCreateOp {
-                label: id,
-                name: name.to_owned(),
-            },
-            created_at: ctx.now,
-        })?;
-        ctx.state.effect(Effect::Ops(account));
+        queue_create(ctx, account, id, name)?;
         None
     };
     let Some(mut apply) = apply else {
@@ -57,11 +44,38 @@ pub(super) fn create_label(
         ));
     }
     if let Some((requested, existing)) = &rename {
-        for ids in [&mut apply.add, &mut apply.remove] {
-            for l in ids.iter_mut().filter(|l| *l == requested) {
-                l.clone_from(existing);
-            }
-        }
+        retarget(&mut apply, requested, existing);
     }
     mail::modify(ctx, apply)
+}
+
+fn queue_create(
+    ctx: &mut ActionCtx<'_, '_>,
+    account: AccountId,
+    id: LabelId,
+    name: &str,
+) -> Result<(), ActionError> {
+    ctx.tx.labels().create_local(account, &id, name)?;
+    ctx.tx.ops().push(&NewOp {
+        account,
+        action: Some(ctx.n),
+        kind: OpKind::LabelCreate,
+        draft: None,
+        gmail_draft: None,
+        payload: &LabelCreateOp {
+            label: id,
+            name: name.to_owned(),
+        },
+        created_at: ctx.now,
+    })?;
+    ctx.state.effect(Effect::Ops(account));
+    Ok(())
+}
+
+fn retarget(apply: &mut ModifyAction, requested: &LabelId, existing: &LabelId) {
+    for ids in [&mut apply.add, &mut apply.remove] {
+        for l in ids.iter_mut().filter(|l| *l == requested) {
+            l.clone_from(existing);
+        }
+    }
 }

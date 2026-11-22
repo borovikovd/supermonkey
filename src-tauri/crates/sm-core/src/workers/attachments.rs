@@ -73,17 +73,8 @@ pub(crate) async fn ensure(
     {
         return Ok(on_disk);
     }
-    let bytes = match record.gmail_attachment_id.map(GmailAttachmentId::from) {
-        Some(gmail_id) => {
-            let bytes = ctx
-                .gmail
-                .get_attachment(Priority::P2, &message_gmail_id, &gmail_id)
-                .await;
-            ctx.note(&bytes);
-            bytes?
-        }
-        None => in_message(ctx, &message_gmail_id, &record.part_id).await?,
-    };
+    let gmail_id = record.gmail_attachment_id.map(GmailAttachmentId::from);
+    let bytes = download(ctx, &message_gmail_id, gmail_id, &record.part_id).await?;
     if ctx.tasks.token().is_cancelled() {
         return Err(DownloadError::Stopped);
     }
@@ -103,6 +94,25 @@ pub(crate) async fn ensure(
         .await
         .map_err(|e: StoreError| Error::Store(e))?;
     Ok(path)
+}
+
+async fn download(
+    ctx: &AccountCtx,
+    message: &GmailMessageId,
+    gmail_id: Option<GmailAttachmentId>,
+    part_id: &str,
+) -> Result<Vec<u8>, DownloadError> {
+    match gmail_id {
+        Some(gmail_id) => {
+            let bytes = ctx
+                .gmail
+                .get_attachment(Priority::P2, message, &gmail_id)
+                .await;
+            ctx.note(&bytes);
+            Ok(bytes?)
+        }
+        None => in_message(ctx, message, part_id).await,
+    }
 }
 
 async fn in_message(

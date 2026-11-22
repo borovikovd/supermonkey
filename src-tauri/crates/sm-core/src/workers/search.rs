@@ -124,31 +124,41 @@ async fn list_page(
         sleep(ctx.clock(), TYPING_PAUSE).await;
     }
     let request = thread_query(query, page);
-    let (threads, next) = match list_when_reachable(ctx, progress, &request).await {
+    let (threads, next) = list_or_nothing(ctx, progress, &request).await;
+    read_uncached(ctx, &threads).await;
+    let hits: Vec<GmailThreadId> = threads.into_iter().map(|t| t.id).collect();
+    queue_bodies(ctx, &hits).await;
+    (local_ids(ctx, hits).await, next)
+}
+
+async fn list_or_nothing(
+    ctx: &AccountCtx,
+    progress: &Progress,
+    request: &ThreadQuery<'_>,
+) -> (Vec<Thread>, Option<PageToken>) {
+    match list_when_reachable(ctx, progress, request).await {
         Ok(listed) => (listed.threads, listed.next_page_token),
         Err(e) => {
             tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "a Gmail listing failed");
             (Vec::new(), None)
         }
-    };
-    read_uncached(ctx, &threads).await;
-    let hits: Vec<GmailThreadId> = threads.into_iter().map(|t| t.id).collect();
-    queue_bodies(ctx, &hits).await;
+    }
+}
+
+async fn local_ids(ctx: &AccountCtx, hits: Vec<GmailThreadId>) -> Vec<ThreadId> {
     let account = ctx.account;
-    let ids = ctx
-        .read(move |r| {
-            let mut ids = Vec::with_capacity(hits.len());
-            for hit in &hits {
-                ids.extend(r.threads().by_gmail_id(account, hit)?);
-            }
-            Ok(ids)
-        })
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "couldn't read a listing's hits");
-            Vec::new()
-        });
-    (ids, next)
+    ctx.read(move |r| {
+        let mut ids = Vec::with_capacity(hits.len());
+        for hit in &hits {
+            ids.extend(r.threads().by_gmail_id(account, hit)?);
+        }
+        Ok(ids)
+    })
+    .await
+    .unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "couldn't read a listing's hits");
+        Vec::new()
+    })
 }
 
 async fn list_when_reachable(
@@ -156,27 +166,34 @@ async fn list_when_reachable(
     progress: &Progress,
     request: &ThreadQuery<'_>,
 ) -> Result<ThreadPage, GmailError> {
-    let network = &ctx.deps.network;
     loop {
-        if !network.is_online() {
-            progress.searching(false);
-            network.until_online(ctx.clock(), OFFLINE_RETRY).await;
-            progress.searching(true);
-        }
+        until_online(ctx, progress).await;
         let listed = ctx.gmail.list_threads(Priority::P2, request).await;
         ctx.note(&listed);
         match listed {
-            Err(e) if *e.outcome() == Outcome::Offline => {
-                tracing::info!(
-                    account = ctx.account.0,
-                    "a Gmail listing can't reach Gmail; it runs when it can"
-                );
-                if network.is_online() {
-                    network.wait(ctx.clock(), OFFLINE_RETRY).await;
-                }
-            }
+            Err(e) if *e.outcome() == Outcome::Offline => wait_for_gmail(ctx).await,
             answer => return answer,
         }
+    }
+}
+
+async fn until_online(ctx: &AccountCtx, progress: &Progress) {
+    let network = &ctx.deps.network;
+    if !network.is_online() {
+        progress.searching(false);
+        network.until_online(ctx.clock(), OFFLINE_RETRY).await;
+        progress.searching(true);
+    }
+}
+
+async fn wait_for_gmail(ctx: &AccountCtx) {
+    tracing::info!(
+        account = ctx.account.0,
+        "a Gmail listing can't reach Gmail; it runs when it can"
+    );
+    let network = &ctx.deps.network;
+    if network.is_online() {
+        network.wait(ctx.clock(), OFFLINE_RETRY).await;
     }
 }
 

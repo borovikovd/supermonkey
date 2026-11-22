@@ -21,12 +21,10 @@ array-size-threshold = 8192
 
 # Simpler functions.
 too-many-arguments-threshold = 5
-too-many-lines-threshold = 75
-# vulcan's file says 15, but vulcan allows the lint, so there it checks nothing.
-# Here the lint is on, at clippy's own 25. At 15 it flags 34 functions (tried
-# 2026-11-10); clippy counts every match arm, so some of those are flat matches.
-# Lower it once the functions between 16 and 25 have been looked at.
-cognitive-complexity-threshold = 25
+too-many-lines-threshold = 60
+# vulcan's 15; clippy's own is 25. Each `tracing` macro scores about 7, so 10
+# forced log lines into helpers; 15 leaves room for one plus ordinary branching.
+cognitive-complexity-threshold = 15
 # type-complexity-threshold stays at clippy's 250, not vulcan's 100: 74 hits, 10
 # sampled, all ordinary signatures (`Result<Vec<(ThreadId, Option<SplitId>)>, E>`,
 # `Box<dyn FnMut(ChannelMessage) + Send>`). Aliases for them would hide a `Box` or

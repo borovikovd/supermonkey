@@ -120,11 +120,11 @@ impl Lifecycle {
     }
 
     async fn stop_writer(&self, deadline: tokio::time::Instant) {
-        match tokio::time::timeout_at(deadline, self.deps.writer.stop()).await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::warn!(error = %e, "the writer stopped with an error"),
-            Err(_) => tracing::warn!("queued UI actions did not commit before the quit deadline"),
-        }
+        let Ok(stopped) = tokio::time::timeout_at(deadline, self.deps.writer.stop()).await else {
+            tracing::warn!("queued UI actions did not commit before the quit deadline");
+            return;
+        };
+        stopped.unwrap_or_else(|e| tracing::warn!(error = %e, "the writer stopped with an error"));
     }
 
     async fn stop_tasks(&self, deadline: tokio::time::Instant) {

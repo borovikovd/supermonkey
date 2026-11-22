@@ -2,15 +2,15 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use sm_domain::{GmailMessageId, GmailThreadId, ThreadId};
-use sm_gmail::{Format, GmailError, HistoryId, Outcome, Priority, ThreadQuery};
+use sm_gmail::{Format, GmailError, HistoryId, Outcome, PageToken, Priority, ThreadQuery};
 use sm_store::Priority as WritePriority;
 
 use super::contacts::backfill_page;
 use super::ctx::AccountCtx;
 use super::ingest::{drop_thread, store_thread};
 use super::queue::{Listing, Slot, Work};
-use super::read::read_thread;
-use crate::ops::LocalChanges;
+use super::read::{ReadThread, read_thread};
+use crate::ops::{LocalChanges, ReadTicket};
 use crate::read::read;
 use sm_domain::AccountId;
 use sm_store::ReadPool;
@@ -93,30 +93,9 @@ async fn run_one(ctx: &AccountCtx, slot: Slot, work: &Work) -> Result<(), GmailE
             meta,
             body,
         } => {
-            let query = ThreadQuery {
-                q: match listing {
-                    Listing::Query(q) => Some(*q),
-                    Listing::Label(_) => None,
-                },
-                label_ids: match listing {
-                    Listing::Label(label) => std::slice::from_ref(label),
-                    Listing::Query(_) => &[],
-                },
-                page_token: page.as_ref(),
-                max_results: Some(LIST_PAGE),
-                include_spam_trash: false,
-            };
+            let query = thread_query(listing, page.as_ref());
             let listed = ctx.gmail.list_threads(slot.priority, &query).await?;
-            for thread in listed.threads {
-                ctx.queue.push(
-                    *meta,
-                    Work::Meta {
-                        thread: thread.id,
-                        history: thread.history_id,
-                        body: *body,
-                    },
-                );
-            }
+            queue_listed(ctx, listed.threads, *meta, *body);
             if let Some(next) = listed.next_page_token {
                 ctx.queue.push(
                     slot,
@@ -134,28 +113,71 @@ async fn run_one(ctx: &AccountCtx, slot: Slot, work: &Work) -> Result<(), GmailE
             thread,
             history,
             body,
-        } => {
-            if !is_current(&ctx.deps.pool, ctx.account, thread, *history).await {
-                fetch_thread(ctx, thread, Format::Metadata, slot.priority).await?;
-            }
-            if let Some(body) = body {
-                ctx.queue.push(
-                    *body,
-                    Work::Body {
-                        thread: thread.clone(),
-                    },
-                );
-            }
-            Ok(())
-        }
-        Work::Body { thread } => {
-            if needs_bodies(&ctx.deps.pool, ctx.account, thread.clone()).await {
-                fetch_thread(ctx, thread, Format::Full, slot.priority).await?;
-            }
-            Ok(())
-        }
+        } => fetch_meta(ctx, slot, thread, *history, *body).await,
+        Work::Body { thread } => fetch_body(ctx, slot, thread).await,
         Work::Backfill { page } => backfill_page(ctx, page.as_ref()).await,
     }
+}
+
+const fn thread_query<'a>(listing: &'a Listing, page: Option<&'a PageToken>) -> ThreadQuery<'a> {
+    ThreadQuery {
+        q: match listing {
+            Listing::Query(q) => Some(*q),
+            Listing::Label(_) => None,
+        },
+        label_ids: match listing {
+            Listing::Label(label) => std::slice::from_ref(label),
+            Listing::Query(_) => &[],
+        },
+        page_token: page,
+        max_results: Some(LIST_PAGE),
+        include_spam_trash: false,
+    }
+}
+
+fn queue_listed(ctx: &AccountCtx, threads: Vec<sm_gmail::Thread>, meta: Slot, body: Option<Slot>) {
+    for thread in threads {
+        ctx.queue.push(
+            meta,
+            Work::Meta {
+                thread: thread.id,
+                history: thread.history_id,
+                body,
+            },
+        );
+    }
+}
+
+async fn fetch_meta(
+    ctx: &AccountCtx,
+    slot: Slot,
+    thread: &GmailThreadId,
+    history: Option<HistoryId>,
+    body: Option<Slot>,
+) -> Result<(), GmailError> {
+    if !is_current(&ctx.deps.pool, ctx.account, thread, history).await {
+        fetch_thread(ctx, thread, Format::Metadata, slot.priority).await?;
+    }
+    if let Some(body) = body {
+        ctx.queue.push(
+            body,
+            Work::Body {
+                thread: thread.clone(),
+            },
+        );
+    }
+    Ok(())
+}
+
+async fn fetch_body(
+    ctx: &AccountCtx,
+    slot: Slot,
+    thread: &GmailThreadId,
+) -> Result<(), GmailError> {
+    if needs_bodies(&ctx.deps.pool, ctx.account, thread.clone()).await {
+        fetch_thread(ctx, thread, Format::Full, slot.priority).await?;
+    }
+    Ok(())
 }
 
 pub(crate) async fn fetch_thread(
@@ -164,6 +186,26 @@ pub(crate) async fn fetch_thread(
     format: Format,
     priority: Priority,
 ) -> Result<(), GmailError> {
+    let stored = stored_bodies(ctx, thread, format).await;
+    let ticket = ctx.lane.landed.read();
+    match read_thread(ctx, thread, format, priority, &stored).await {
+        Ok(read) => {
+            store_read(ctx, ticket, read).await;
+            Ok(())
+        }
+        Err(e) if *e.outcome() == Outcome::NotFound => {
+            drop_gone(ctx, thread).await;
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+async fn stored_bodies(
+    ctx: &AccountCtx,
+    thread: &GmailThreadId,
+    format: Format,
+) -> HashSet<GmailMessageId> {
     let account = ctx.account;
     let stored = if format == Format::Full {
         let id = thread.clone();
@@ -176,36 +218,34 @@ pub(crate) async fn fetch_thread(
     } else {
         Vec::new()
     };
-    let stored: HashSet<GmailMessageId> = stored.into_iter().collect();
-    let ticket = ctx.lane.landed.read();
-    match read_thread(ctx, thread, format, priority, &stored).await {
-        Ok(read) => {
-            let stored = ctx
-                .writer()
-                .call(WritePriority::Sync, move |tx, state| {
-                    let local = LocalChanges::load(tx.read(), account, ticket.landed())?;
-                    store_thread(tx, state, account, read, &local)
-                })
-                .await;
-            if let Err(e) = stored {
-                tracing::warn!(account = account.0, error = %e, "couldn't store a thread");
-            }
-            Ok(())
-        }
-        Err(e) if *e.outcome() == Outcome::NotFound => {
-            let gone = thread.clone();
-            let dropped = ctx
-                .writer()
-                .call(WritePriority::Sync, move |tx, _| {
-                    drop_thread(tx, account, &gone)
-                })
-                .await;
-            if let Err(e) = dropped {
-                tracing::warn!(account = account.0, error = %e, "couldn't drop a thread Gmail no longer has");
-            }
-            Ok(())
-        }
-        Err(e) => Err(e),
+    stored.into_iter().collect()
+}
+
+async fn store_read(ctx: &AccountCtx, ticket: ReadTicket, read: ReadThread) {
+    let account = ctx.account;
+    let stored = ctx
+        .writer()
+        .call(WritePriority::Sync, move |tx, state| {
+            let local = LocalChanges::load(tx.read(), account, ticket.landed())?;
+            store_thread(tx, state, account, read, &local)
+        })
+        .await;
+    if let Err(e) = stored {
+        tracing::warn!(account = account.0, error = %e, "couldn't store a thread");
+    }
+}
+
+async fn drop_gone(ctx: &AccountCtx, thread: &GmailThreadId) {
+    let account = ctx.account;
+    let gone = thread.clone();
+    let dropped = ctx
+        .writer()
+        .call(WritePriority::Sync, move |tx, _| {
+            drop_thread(tx, account, &gone)
+        })
+        .await;
+    if let Err(e) = dropped {
+        tracing::warn!(account = account.0, error = %e, "couldn't drop a thread Gmail no longer has");
     }
 }
 

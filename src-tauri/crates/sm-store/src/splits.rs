@@ -41,6 +41,48 @@ fn split_row(r: &Row<'_>) -> rusqlite::Result<SplitRecord> {
     })
 }
 
+fn write_split(
+    db: Db<'_>,
+    account: AccountId,
+    edit: &SplitEdit,
+    position: i32,
+) -> Result<SplitId, StoreError> {
+    let name = edit.name.trim();
+    let enabled = edit.enabled || edit.kind == SplitKind::Other;
+    if edit.id.is_saved() {
+        db.execute(
+            "update a split",
+            "UPDATE splits SET name = :name, position = :position, query = :query,
+                 enabled = :enabled, hide_when_empty = :hide
+             WHERE id = :id AND account_id = :account AND kind = :kind",
+            named_params! {
+                ":id": edit.id, ":account": account, ":name": name, ":kind": edit.kind,
+                ":position": position, ":query": edit.query, ":enabled": enabled,
+                ":hide": edit.hide_when_empty,
+            },
+        )?;
+        return Ok(edit.id);
+    }
+    if edit.kind != SplitKind::Custom {
+        return Err(StoreError::Invalid(format!(
+            "a new split must be custom, not {}",
+            edit.kind
+        )));
+    }
+    let id = db.insert(
+        "add a split",
+        "INSERT INTO splits (account_id, name, kind, position, query, enabled,
+             hide_when_empty)
+         VALUES (:account, :name, :kind, :position, :query, :enabled, :hide)",
+        named_params! {
+            ":account": account, ":name": name, ":kind": edit.kind,
+            ":position": position, ":query": edit.query, ":enabled": enabled,
+            ":hide": edit.hide_when_empty,
+        },
+    )?;
+    Ok(SplitId(id))
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct SplitReads<'c> {
     db: Db<'c>,
@@ -141,40 +183,7 @@ impl<'t, 'c> SplitWrites<'t, 'c> {
             if edit.kind == SplitKind::Custom {
                 custom_rank = custom_rank.saturating_add(1);
             }
-            let name = edit.name.trim();
-            let enabled = edit.enabled || edit.kind == SplitKind::Other;
-            if edit.id.is_saved() {
-                db.execute(
-                    "update a split",
-                    "UPDATE splits SET name = :name, position = :position, query = :query,
-                         enabled = :enabled, hide_when_empty = :hide
-                     WHERE id = :id AND account_id = :account AND kind = :kind",
-                    named_params! {
-                        ":id": edit.id, ":account": account, ":name": name, ":kind": edit.kind,
-                        ":position": position, ":query": edit.query, ":enabled": enabled,
-                        ":hide": edit.hide_when_empty,
-                    },
-                )?;
-                ids.push(edit.id);
-            } else if edit.kind == SplitKind::Custom {
-                let id = db.insert(
-                    "add a split",
-                    "INSERT INTO splits (account_id, name, kind, position, query, enabled,
-                         hide_when_empty)
-                     VALUES (:account, :name, :kind, :position, :query, :enabled, :hide)",
-                    named_params! {
-                        ":account": account, ":name": name, ":kind": edit.kind,
-                        ":position": position, ":query": edit.query, ":enabled": enabled,
-                        ":hide": edit.hide_when_empty,
-                    },
-                )?;
-                ids.push(SplitId(id));
-            } else {
-                return Err(StoreError::Invalid(format!(
-                    "a new split must be custom, not {}",
-                    edit.kind
-                )));
-            }
+            ids.push(write_split(db, account, edit, position)?);
         }
         self.tx.touch(account, Table::Splits);
         routing::reroute_inbox(self.tx, account)?;

@@ -67,20 +67,7 @@ impl<'c> SearchReads<'c> {
         if let Some(fts) = &fts
             && !query.needs_post_filter()
         {
-            return self.db.all(
-                "search the index",
-                "SELECT t.id, t.sort_time FROM threads t
-                 WHERE t.account_id = ?2 AND t.has_live = 1 AND t.id IN (
-                   SELECT m.thread_id FROM messages_fts f JOIN messages m ON m.id = f.rowid
-                   WHERE messages_fts MATCH ?1 AND m.account_id = ?2 AND m.is_live = 1)
-                 ORDER BY t.sort_time DESC, t.id DESC LIMIT ?3",
-                (
-                    fts,
-                    account,
-                    i64::try_from(SEARCH_LIMIT).unwrap_or(i64::MAX),
-                ),
-                |r| Ok((r.get("sort_time")?, r.get("id")?)),
-            );
+            return self.indexed(account, fts);
         }
         let scope = query.scope();
         let past_live = !scope.live_only();
@@ -121,6 +108,23 @@ impl<'c> SearchReads<'c> {
             }
         }
         Ok(matched)
+    }
+
+    fn indexed(self, account: AccountId, fts: &str) -> Result<Vec<(Millis, ThreadId)>, StoreError> {
+        self.db.all(
+            "search the index",
+            "SELECT t.id, t.sort_time FROM threads t
+             WHERE t.account_id = ?2 AND t.has_live = 1 AND t.id IN (
+               SELECT m.thread_id FROM messages_fts f JOIN messages m ON m.id = f.rowid
+               WHERE messages_fts MATCH ?1 AND m.account_id = ?2 AND m.is_live = 1)
+             ORDER BY t.sort_time DESC, t.id DESC LIMIT ?3",
+            (
+                fts,
+                account,
+                i64::try_from(SEARCH_LIMIT).unwrap_or(i64::MAX),
+            ),
+            |r| Ok((r.get("sort_time")?, r.get("id")?)),
+        )
     }
 
     fn candidates(

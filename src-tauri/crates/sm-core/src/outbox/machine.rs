@@ -53,19 +53,7 @@ pub(crate) fn step(row: Outbox, event: Event) -> Step {
             delayed: true,
             ..row
         }),
-        Event::Accepted(message) if sending => {
-            let trash = message.clone().filter(|_| row.undo_requested);
-            Step::Sent {
-                drop_entry: trash.is_some() || row.toast_closed,
-                row: Outbox {
-                    state: OutboxState::Sent,
-                    sent_message_id: message,
-                    toast_closed: row.toast_closed || trash.is_some(),
-                    ..row
-                },
-                trash,
-            }
-        }
+        Event::Accepted(message) if sending => accepted(row, message),
         Event::Rejected(message) if sending => Step::Return {
             draft: row.draft,
             kind: NoticeKind::SendFailed,
@@ -82,6 +70,20 @@ pub(crate) fn step(row: Outbox, event: Event) -> Step {
         | Event::Accepted(_)
         | Event::Rejected(_)
         | Event::Stored(_) => Step::Ignore,
+    }
+}
+
+fn accepted(row: Outbox, message: Option<GmailMessageId>) -> Step {
+    let trash = message.clone().filter(|_| row.undo_requested);
+    Step::Sent {
+        drop_entry: trash.is_some() || row.toast_closed,
+        row: Outbox {
+            state: OutboxState::Sent,
+            sent_message_id: message,
+            toast_closed: row.toast_closed || trash.is_some(),
+            ..row
+        },
+        trash,
     }
 }
 

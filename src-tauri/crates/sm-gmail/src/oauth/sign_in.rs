@@ -81,9 +81,13 @@ impl SignIn {
             Redirect::Error(error) => return Err(SignInError::Denied(error)),
         };
         ready.await;
+        self.exchange(http, &code).await
+    }
+
+    async fn exchange(&self, http: &HttpClient, code: &str) -> Result<Grant, SignInError> {
         let form = [
             ("grant_type", "authorization_code"),
-            ("code", code.as_str()),
+            ("code", code),
             ("redirect_uri", self.redirect_uri.as_str()),
             ("client_id", self.config.client_id.as_str()),
             ("client_secret", self.config.client_secret.as_str()),

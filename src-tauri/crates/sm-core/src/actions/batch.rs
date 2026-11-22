@@ -16,12 +16,7 @@ pub(crate) fn apply_batch(
 ) -> Result<(), StoreError> {
     let mut last = tx.read().meta().last_action()?;
     for Submitted { n, action } in actions {
-        if n <= last {
-            tracing::warn!(
-                n = n.0,
-                last = last.0,
-                "dropping an action at or below the last one applied"
-            );
+        if !is_new(n, last) {
             continue;
         }
         match action {
@@ -36,6 +31,18 @@ pub(crate) fn apply_batch(
         tx.fail_commit();
     }
     Ok(())
+}
+
+fn is_new(n: ActionNo, last: ActionNo) -> bool {
+    if n > last {
+        return true;
+    }
+    tracing::warn!(
+        n = n.0,
+        last = last.0,
+        "dropping an action at or below the last one applied"
+    );
+    false
 }
 
 fn apply_one(

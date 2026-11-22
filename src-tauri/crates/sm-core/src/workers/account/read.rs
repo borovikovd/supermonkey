@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use sm_domain::{Addr, GmailMessageId, GmailThreadId, LabelSet, Millis, SystemLabel};
 use sm_gmail::{Format, GmailAttachmentId, GmailError, HistoryId, Message, Outcome, Priority};
-use sm_mime::{CidImages, DraftBody, MessageHeaders, ParsedMessage, Part};
+use sm_mime::{CidImages, DraftBody, MessageHeaders, ParsedMessage, Part, RawBody};
 use sm_store::{NewAttachment, NewBody, NewMessage};
 
 use super::ctx::AccountCtx;
@@ -115,25 +115,52 @@ async fn body(
     parsed: ParsedMessage,
     priority: Priority,
 ) -> Result<NewBody, GmailError> {
+    let images = inline_images(ctx, message, &parsed, priority).await?;
+    let attachments = parsed.parts.iter().map(new_attachment).collect();
+    let rendered = render(parsed.body, images).await;
+    Ok(NewBody {
+        html: Some(rendered.html),
+        quote_html: rendered.quote,
+        text: Some(rendered.text),
+        is_plain: rendered.is_plain,
+        attachments,
+    })
+}
+
+async fn inline_images(
+    ctx: &AccountCtx,
+    message: &GmailMessageId,
+    parsed: &ParsedMessage,
+    priority: Priority,
+) -> Result<CidImages, GmailError> {
     let mut images = parsed.cid_images();
     for fetch in parsed.inline_images_to_fetch() {
         let attachment = GmailAttachmentId::from(fetch.attachment_id);
-        match ctx
+        let read = ctx
             .gmail
             .get_attachment(priority, message, &attachment)
-            .await
-        {
-            Ok(bytes) => images.insert(fetch.content_id, fetch.mime_type, &bytes),
-            Err(e) if *e.outcome() == Outcome::NotFound => {
-                tracing::debug!("an inline image is gone; leaving it out");
-            }
-            Err(e) => return Err(e),
+            .await;
+        if let Some(bytes) = unless_gone(read)? {
+            images.insert(fetch.content_id, fetch.mime_type, &bytes);
         }
     }
-    let attachments = parsed.parts.iter().map(new_attachment).collect();
-    let raw = parsed.body;
+    Ok(images)
+}
+
+fn unless_gone(read: Result<Vec<u8>, GmailError>) -> Result<Option<Vec<u8>>, GmailError> {
+    match read {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(e) if *e.outcome() == Outcome::NotFound => {
+            tracing::debug!("an inline image is gone; leaving it out");
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}
+
+async fn render(raw: RawBody, images: CidImages) -> sm_mime::Body {
     let rendered = tokio::task::spawn_blocking(move || raw.render(&images)).await;
-    let rendered = match rendered {
+    match rendered {
         Ok(body) => body,
         Err(e) => {
             tracing::error!(error = %e, "rendering a body failed; storing it empty");
@@ -144,14 +171,7 @@ async fn body(
                 is_plain: true,
             }
         }
-    };
-    Ok(NewBody {
-        html: Some(rendered.html),
-        quote_html: rendered.quote,
-        text: Some(rendered.text),
-        is_plain: rendered.is_plain,
-        attachments,
-    })
+    }
 }
 
 pub(crate) fn draft_message(m: Message) -> (ReadMessage, DraftBody) {

@@ -61,59 +61,64 @@ fn forwarded_as_attachment(eml_body: &Value) -> Value {
                     header("Content-Disposition", "attachment; filename=\"Quarterly.eml\""),
                 ],
                 "body": eml_body,
-                "parts": [{
-                    "partId": "1.0",
-                    "mimeType": "multipart/mixed",
-                    "headers": [header("Subject", "Quarterly numbers")],
-                    "parts": [
-                        {
-                            "partId": "1.0.0",
-                            "mimeType": "multipart/alternative",
-                            "parts": [
-                                {
-                                    "partId": "1.0.0.0",
-                                    "mimeType": "text/plain",
-                                    "body": data("Numbers attached."),
-                                },
-                                {
-                                    "partId": "1.0.0.1",
-                                    "mimeType": "text/html",
-                                    "body": data("<p>Numbers attached.<img src=\"cid:logo\"></p>"),
-                                },
-                            ],
-                        },
-                        {
-                            "partId": "1.0.1",
-                            "mimeType": "image/png",
-                            "filename": "logo.png",
-                            "headers": [
-                                header("Content-Disposition", "inline; filename=\"logo.png\""),
-                                header("Content-ID", "<logo>"),
-                            ],
-                            "body": { "size": 120, "attachmentId": "ATT-LOGO" },
-                        },
-                        {
-                            "partId": "1.0.2",
-                            "mimeType": "application/pdf",
-                            "filename": "q3.pdf",
-                            "headers": [
-                                header("Content-Disposition", "attachment; filename=\"q3.pdf\""),
-                            ],
-                            "body": { "size": 2048, "attachmentId": "ATT-PDF" },
-                        },
-                        {
-                            "partId": "1.0.3",
-                            "mimeType": "text/csv",
-                            "filename": "q3.csv",
-                            "headers": [
-                                header("Content-Disposition", "attachment; filename=\"q3.csv\""),
-                            ],
-                            "body": data("a,b\n1,2\n"),
-                        },
-                    ],
-                }],
+                "parts": [quarterly_message()],
             },
         ],
+    })
+}
+
+fn quarterly_message() -> Value {
+    json!({
+        "partId": "1.0",
+        "mimeType": "multipart/mixed",
+        "headers": [header("Subject", "Quarterly numbers")],
+        "parts": [
+            {
+                "partId": "1.0.0",
+                "mimeType": "multipart/alternative",
+                "parts": [
+                    {
+                        "partId": "1.0.0.0",
+                        "mimeType": "text/plain",
+                        "body": data("Numbers attached."),
+                    },
+                    {
+                        "partId": "1.0.0.1",
+                        "mimeType": "text/html",
+                        "body": data("<p>Numbers attached.<img src=\"cid:logo\"></p>"),
+                    },
+                ],
+            },
+            {
+                "partId": "1.0.1",
+                "mimeType": "image/png",
+                "filename": "logo.png",
+                "headers": [
+                    header("Content-Disposition", "inline; filename=\"logo.png\""),
+                    header("Content-ID", "<logo>"),
+                ],
+                "body": { "size": 120, "attachmentId": "ATT-LOGO" },
+            },
+            quarterly_attachment(
+                "1.0.2",
+                "application/pdf",
+                "q3.pdf",
+                &json!({ "size": 2048, "attachmentId": "ATT-PDF" }),
+            ),
+            quarterly_attachment("1.0.3", "text/csv", "q3.csv", &data("a,b\n1,2\n")),
+        ],
+    })
+}
+
+fn quarterly_attachment(id: &str, mime_type: &str, filename: &str, body: &Value) -> Value {
+    json!({
+        "partId": id,
+        "mimeType": mime_type,
+        "filename": filename,
+        "headers": [
+            header("Content-Disposition", &format!("attachment; filename=\"{filename}\"")),
+        ],
+        "body": body,
     })
 }
 
@@ -155,31 +160,33 @@ fn an_attached_message_with_an_attachment_id_is_listed_before_its_attachments() 
     assert_eq!(parsed.parts[0].mime_type, "message/rfc822");
 }
 
+fn inline_pdf(id: &str, name: &str) -> Value {
+    json!({
+        "partId": id,
+        "mimeType": "application/pdf",
+        "filename": name,
+        "headers": [
+            header("Content-Type", &format!("application/pdf; name=\"{name}\"")),
+            header("Content-Disposition", &format!("inline; filename=\"{name}\"")),
+        ],
+        "body": { "size": 4096, "attachmentId": format!("ATT-{id}") },
+    })
+}
+
+fn inline_photo(id: &str) -> Value {
+    json!({
+        "partId": id,
+        "mimeType": "image/jpeg",
+        "filename": "photo.jpg",
+        "headers": [
+            header("Content-Disposition", "inline; filename=\"photo.jpg\""),
+            header("Content-ID", &format!("<photo-{id}>")),
+        ],
+        "body": { "size": 2048, "attachmentId": format!("ATT-{id}") },
+    })
+}
+
 fn apple_mail() -> Value {
-    let pdf = |id: &str, name: &str| {
-        json!({
-            "partId": id,
-            "mimeType": "application/pdf",
-            "filename": name,
-            "headers": [
-                header("Content-Type", &format!("application/pdf; name=\"{name}\"")),
-                header("Content-Disposition", &format!("inline; filename=\"{name}\"")),
-            ],
-            "body": { "size": 4096, "attachmentId": format!("ATT-{id}") },
-        })
-    };
-    let photo = |id: &str| {
-        json!({
-            "partId": id,
-            "mimeType": "image/jpeg",
-            "filename": "photo.jpg",
-            "headers": [
-                header("Content-Disposition", "inline; filename=\"photo.jpg\""),
-                header("Content-ID", &format!("<photo-{id}>")),
-            ],
-            "body": { "size": 2048, "attachmentId": format!("ATT-{id}") },
-        })
-    };
     json!({
         "partId": "",
         "mimeType": "multipart/mixed",
@@ -189,8 +196,8 @@ fn apple_mail() -> Value {
                 "mimeType": "text/html",
                 "body": data("<p>Scans attached.<img src=\"cid:photo-2\"></p>"),
             },
-            pdf("1", "scan.pdf"),
-            photo("2"),
+            inline_pdf("1", "scan.pdf"),
+            inline_photo("2"),
             {
                 "partId": "3",
                 "mimeType": "message/rfc822",
@@ -202,8 +209,8 @@ fn apple_mail() -> Value {
                     "mimeType": "multipart/mixed",
                     "parts": [
                         { "partId": "3.0.0", "mimeType": "text/plain", "body": data("Inside.") },
-                        pdf("3.0.1", "inner.pdf"),
-                        photo("3.0.2"),
+                        inline_pdf("3.0.1", "inner.pdf"),
+                        inline_photo("3.0.2"),
                     ],
                 }],
             },

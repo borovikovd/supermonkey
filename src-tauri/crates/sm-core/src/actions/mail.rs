@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
 use sm_domain::{
-    AccountId, ActionNo, LabelDelta, Millis, ModifyKind, SnoozeEdit, Thread, ThreadChange,
-    ThreadId, ThreadModify, UndoEntryId, plan_modify, snooze_after,
+    AccountId, ActionNo, GmailMessageId, LabelDelta, Millis, ModifyKind, SnoozeEdit, Thread,
+    ThreadChange, ThreadId, ThreadModify, UndoEntryId, plan_modify, snooze_after,
 };
 use sm_ipc::{ModifyAction, SnoozeChange};
-use sm_store::{UndoAction, WriteTx};
+use sm_store::{StoreError, UndoAction, WriteTx};
 
 use super::{ActionCtx, ActionError, splits};
 use crate::effects::Effect;
@@ -94,10 +94,7 @@ pub(crate) fn change_threads(
         tx.messages().apply(&changes)?;
         let after = snooze_after(snooze, kind, row.snooze_until);
         if after != row.snooze_until {
-            tx.threads().set_snooze(thread, after)?;
-            if after.is_some() {
-                state.effect(Effect::Snoozes);
-            }
+            set_snooze(tx, state, thread, after)?;
         }
         entry.push(ThreadChange {
             thread,
@@ -108,13 +105,7 @@ pub(crate) fn change_threads(
     }
     let relabels = entry.iter().any(|t| !t.changes.is_empty());
     if relabels && !messages.is_empty() {
-        let (add, remove) = delta.into_parts();
-        let op = ModifyOp {
-            messages,
-            add,
-            remove,
-            threads: entry,
-        };
+        let op = relabel_op(delta, messages, entry);
         let origin = OpOrigin {
             account,
             action,
@@ -124,6 +115,33 @@ pub(crate) fn change_threads(
         return Ok(op.threads);
     }
     Ok(entry)
+}
+
+fn relabel_op(
+    delta: LabelDelta,
+    messages: Vec<GmailMessageId>,
+    threads: Vec<ThreadChange>,
+) -> ModifyOp {
+    let (add, remove) = delta.into_parts();
+    ModifyOp {
+        messages,
+        add,
+        remove,
+        threads,
+    }
+}
+
+fn set_snooze(
+    tx: &mut WriteTx<'_>,
+    state: &mut WriterState,
+    thread: ThreadId,
+    until: Option<Millis>,
+) -> Result<(), StoreError> {
+    tx.threads().set_snooze(thread, until)?;
+    if until.is_some() {
+        state.effect(Effect::Snoozes);
+    }
+    Ok(())
 }
 
 pub(super) fn undo(

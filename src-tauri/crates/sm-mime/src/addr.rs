@@ -66,6 +66,24 @@ impl Lexer {
         }
     }
 
+    const fn open_comment(&mut self, in_comment: bool) -> Token {
+        self.comment_depth += 1;
+        if in_comment {
+            Token::NestedParen('(')
+        } else {
+            Token::Syntax
+        }
+    }
+
+    const fn close_comment(&mut self) -> Token {
+        self.comment_depth -= 1;
+        if self.comment_depth > 0 {
+            Token::NestedParen(')')
+        } else {
+            Token::CommentEnd
+        }
+    }
+
     const fn next(&mut self, c: char) -> Token {
         if self.escaped {
             self.escaped = false;
@@ -81,22 +99,8 @@ impl Lexer {
                 self.in_quote = !self.in_quote;
                 Token::Syntax
             }
-            '(' if !self.in_quote => {
-                self.comment_depth += 1;
-                if in_comment {
-                    Token::NestedParen(c)
-                } else {
-                    Token::Syntax
-                }
-            }
-            ')' if !self.in_quote && in_comment => {
-                self.comment_depth -= 1;
-                if self.comment_depth > 0 {
-                    Token::NestedParen(c)
-                } else {
-                    Token::CommentEnd
-                }
-            }
+            '(' if !self.in_quote => self.open_comment(in_comment),
+            ')' if !self.in_quote && in_comment => self.close_comment(),
             '<' if !self.in_quote && !in_comment => {
                 self.in_angle = true;
                 Token::AngleStart

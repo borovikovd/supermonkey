@@ -86,9 +86,14 @@ fn a_failed_job_rolls_back_and_skips_on_commit() {
     assert_eq!(h.read(|r| r.meta().rev()), Rev(0), "rev did not move");
 }
 
+fn store_last_actions(h: &Harness) {
+    h.write(|tx| tx.meta().set_last_action(ActionNo(5)));
+    h.write(|tx| tx.meta().set_last_action(ActionNo(3)));
+}
+
 #[test]
-fn rev_moves_once_per_writing_commit_and_survives_a_restart() {
-    let mut h = Harness::start();
+fn rev_moves_once_per_writing_commit() {
+    let h = Harness::start();
     assert_eq!(h.read(|r| r.meta().rev()), Rev(0));
     let account = h.account("a@example.com");
     let first = h.last_commit();
@@ -101,9 +106,15 @@ fn rev_moves_once_per_writing_commit_and_survives_a_restart() {
     assert_eq!(h.last_commit().rev, Rev(1));
     assert!(h.last_commit().changes.is_empty());
 
-    h.write(|tx| tx.meta().set_last_action(ActionNo(5)));
-    h.write(|tx| tx.meta().set_last_action(ActionNo(3)));
+    store_last_actions(&h);
     assert_eq!(h.last_commit().rev, Rev(1));
+}
+
+#[test]
+fn rev_and_the_last_action_survive_a_restart() {
+    let mut h = Harness::start();
+    h.account("a@example.com");
+    store_last_actions(&h);
 
     h.restart();
     assert_eq!(h.read(|r| r.meta().rev()), Rev(1));

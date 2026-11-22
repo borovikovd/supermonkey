@@ -20,6 +20,10 @@ pub(crate) async fn full_resync(
         account = ctx.account.0,
         "history expired; running a full resync"
     );
+    resync(ctx, drafts_due).await
+}
+
+async fn resync(ctx: &AccountCtx, drafts_due: &mut Option<Occasion>) -> Result<(), GmailError> {
     let profile = ctx.retried(|| ctx.gmail.get_profile(Priority::P3)).await?;
     let started = ctx.read(|r| r.meta().rev()).await.unwrap_or_else(|e| {
         tracing::warn!(error = %e, "couldn't read the rev; keeping every cached thread");
@@ -129,12 +133,20 @@ async fn drop_if_gone(ctx: &AccountCtx, thread: GmailThreadId) -> Result<(), Gma
                 .get_thread(Priority::P4, &thread, Format::Minimal, &[])
         })
         .await;
-    match check {
-        Ok(_) => {}
-        Err(e) if *e.outcome() == Outcome::NotFound => drop_cached(ctx, thread).await,
-        Err(e) if *e.outcome() == Outcome::InvalidGrant => return Err(e),
-        Err(e) => {
-            tracing::info!(account = ctx.account.0, outcome = %e.outcome(), "couldn't check a cached thread in the resync; keeping it");
+    let Err(e) = check else {
+        return Ok(());
+    };
+    match e.outcome() {
+        Outcome::NotFound => drop_cached(ctx, thread).await,
+        Outcome::InvalidGrant => return Err(e),
+        outcome @ (Outcome::Offline
+        | Outcome::NoResponse
+        | Outcome::Unauthorized
+        | Outcome::RateLimited { .. }
+        | Outcome::ServerError { .. }
+        | Outcome::Conflict
+        | Outcome::Rejected { .. }) => {
+            tracing::info!(account = ctx.account.0, %outcome, "couldn't check a cached thread in the resync; keeping it");
         }
     }
     Ok(())

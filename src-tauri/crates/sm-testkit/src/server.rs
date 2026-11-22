@@ -122,13 +122,10 @@ impl Server {
 
     pub(crate) async fn gmail_thread(&self, thread: ThreadId) -> Option<GmailThreadId> {
         let app = self.open().await?;
-        match app.queries().gmail_thread(thread).await {
-            Ok(id) => id,
-            Err(e) => {
-                tracing::warn!(error = %e, "couldn't read a thread's Gmail id");
-                None
-            }
-        }
+        app.queries()
+            .gmail_thread(thread)
+            .await
+            .unwrap_or_else(|e| unread_gmail_id(&e))
     }
 
     pub(crate) fn user(&self, email: &str) -> Result<FakeUser, Fail> {
@@ -179,6 +176,11 @@ impl Server {
             }
         }
     }
+}
+
+fn unread_gmail_id(e: &sm_core::Error) -> Option<GmailThreadId> {
+    tracing::warn!(error = %e, "couldn't read a thread's Gmail id");
+    None
 }
 
 #[derive(Debug)]

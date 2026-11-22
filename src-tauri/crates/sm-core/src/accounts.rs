@@ -48,15 +48,20 @@ impl Accounts {
 
     pub async fn add(&self) -> Result<AccountId, Error> {
         let SignedIn { email, tokens } = self.sign_in().await?;
-        self.keep_token(&email, tokens.refresh_token()).await?;
-        let (id, grant) = self.signed_in_row(&email).await?;
-        self.workers.signed_in(id, &email, tokens, grant)?;
+        let id = self.start_account(&email, tokens).await?;
         self.platform.focus_window();
         tracing::info!(account = id.0, "account added");
         Ok(id)
     }
 
     pub async fn sign_in_again(&self, account: AccountId) -> Result<(), Error> {
+        let SignedIn { email, tokens } = self.sign_in_as(account).await?;
+        let id = self.start_account(&email, tokens).await?;
+        tracing::info!(account = id.0, "signed in again");
+        Ok(())
+    }
+
+    async fn sign_in_as(&self, account: AccountId) -> Result<SignedIn, Error> {
         let expected = self
             .writer
             .call(WritePriority::Ui, move |tx, _| {
@@ -70,11 +75,17 @@ impl Accounts {
                 "You signed in as {email}. Sign in as {expected} to reconnect this account."
             )));
         }
-        self.keep_token(&expected, tokens.refresh_token()).await?;
-        let (id, grant) = self.signed_in_row(&expected).await?;
-        self.workers.signed_in(id, &expected, tokens, grant)?;
-        tracing::info!(account = id.0, "signed in again");
-        Ok(())
+        Ok(SignedIn {
+            email: expected,
+            tokens,
+        })
+    }
+
+    async fn start_account(&self, email: &str, tokens: Arc<Tokens>) -> Result<AccountId, Error> {
+        self.keep_token(email, tokens.refresh_token()).await?;
+        let (id, grant) = self.signed_in_row(email).await?;
+        self.workers.signed_in(id, email, tokens, grant)?;
+        Ok(id)
     }
 
     pub async fn register(&self, email: &str) -> Result<AccountId, Error> {

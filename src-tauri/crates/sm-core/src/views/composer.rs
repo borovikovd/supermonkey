@@ -6,25 +6,7 @@ use crate::drafts::lifecycle;
 
 pub(crate) fn draft_state(reads: Reads<'_>, id: &DraftId) -> Result<DraftState, StoreError> {
     let Some(record) = reads.drafts().get(id)? else {
-        return Ok(DraftState {
-            id: id.clone(),
-            account: AccountId::NONE,
-            kind: DraftKind::New,
-            reply_all: false,
-            thread: None,
-            target: None,
-            from: None,
-            to: Vec::new(),
-            cc: Vec::new(),
-            bcc: Vec::new(),
-            subject: String::new(),
-            body_html: String::new(),
-            quote_html: None,
-            attachments: Vec::new(),
-            resumed: false,
-            gone: true,
-            rev: Rev(0),
-        });
+        return Ok(gone(id.clone()));
     };
     let d = record.draft;
     let resumed = !lifecycle::is_fresh(&d);
@@ -58,4 +40,26 @@ pub(crate) fn draft_state(reads: Reads<'_>, id: &DraftId) -> Result<DraftState, 
         gone: false,
         rev: record.rev,
     })
+}
+
+const fn gone(id: DraftId) -> DraftState {
+    DraftState {
+        id,
+        account: AccountId::NONE,
+        kind: DraftKind::New,
+        reply_all: false,
+        thread: None,
+        target: None,
+        from: None,
+        to: Vec::new(),
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        subject: String::new(),
+        body_html: String::new(),
+        quote_html: None,
+        attachments: Vec::new(),
+        resumed: false,
+        gone: true,
+        rev: Rev(0),
+    }
 }

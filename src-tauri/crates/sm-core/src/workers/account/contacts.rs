@@ -1,5 +1,5 @@
 use sm_domain::{Addr, Identity, SystemLabel};
-use sm_gmail::{Format, GmailError, Outcome, PageToken, Priority, ThreadQuery};
+use sm_gmail::{Format, GmailError, Message, Outcome, PageToken, Priority, ThreadQuery};
 use sm_store::{NewMessage, Priority as WritePriority, Sighting};
 
 use super::ctx::AccountCtx;
@@ -42,6 +42,35 @@ pub(crate) fn sightings<'m>(m: &'m NewMessage, me: &Identity) -> Vec<Sighting<'m
     }
 }
 
+fn sent_messages(messages: Vec<Message>) -> Vec<NewMessage> {
+    messages
+        .into_iter()
+        .filter(|m| {
+            let has = |l: SystemLabel| m.label_ids.iter().any(|id| id.as_str() == l.id());
+            has(SystemLabel::Sent) && !has(SystemLabel::Draft)
+        })
+        .map(|m| {
+            let parsed = parse(&m);
+            new_message(m, parsed.headers, &parsed.parts)
+        })
+        .collect()
+}
+
+fn count_sent(ctx: &AccountCtx, sent: Vec<NewMessage>) {
+    let account = ctx.account;
+    ctx.writer()
+        .queue(WritePriority::Background, "count contacts", move |tx, _| {
+            let Some(me) = tx.read().accounts().identity(account)? else {
+                return Ok(());
+            };
+            for m in &sent {
+                tx.contacts()
+                    .count(account, &m.gmail_id, &sightings(m, &me))?;
+            }
+            Ok(())
+        });
+}
+
 pub(crate) async fn backfill_page(
     ctx: &AccountCtx,
     page: Option<&PageToken>,
@@ -63,33 +92,11 @@ pub(crate) async fn backfill_page(
             Err(e) if *e.outcome() == Outcome::NotFound => continue,
             Err(e) => return Err(e),
         };
-        let sent: Vec<NewMessage> = read
-            .messages
-            .into_iter()
-            .filter(|m| {
-                let has = |l: SystemLabel| m.label_ids.iter().any(|id| id.as_str() == l.id());
-                has(SystemLabel::Sent) && !has(SystemLabel::Draft)
-            })
-            .map(|m| {
-                let parsed = parse(&m);
-                new_message(m, parsed.headers, &parsed.parts)
-            })
-            .collect();
+        let sent = sent_messages(read.messages);
         if sent.is_empty() {
             continue;
         }
-        let account = ctx.account;
-        ctx.writer()
-            .queue(WritePriority::Background, "count contacts", move |tx, _| {
-                let Some(me) = tx.read().accounts().identity(account)? else {
-                    return Ok(());
-                };
-                for m in &sent {
-                    tx.contacts()
-                        .count(account, &m.gmail_id, &sightings(m, &me))?;
-                }
-                Ok(())
-            });
+        count_sent(ctx, sent);
     }
     if let Some(next) = listed.next_page_token {
         ctx.queue

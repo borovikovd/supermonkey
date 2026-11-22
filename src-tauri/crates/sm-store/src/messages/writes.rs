@@ -5,11 +5,40 @@ use sm_domain::{
     AccountId, AttachmentId, DraftId, LabelSet, MessageChange, MessageId, SystemLabel, ThreadId,
 };
 
-use super::model::{NewBody, NewMessage};
+use super::model::{NewAttachment, NewBody, NewMessage};
 use crate::StoreError;
 use crate::db::{Db, id_list, json_column, to_json};
 use crate::routing;
 use crate::tx::{WriteTx, require};
+
+const STORE_BODY: &str = "UPDATE messages SET has_body = 1, body_html = :html, quote_html = :quote,
+         body_text = :text, is_plain = :plain, rev = :rev
+     WHERE id = :id";
+
+const PUT_ATTACHMENT: &str = "INSERT INTO attachments (message_id, part_id, filename, mime_type,
+         size, gmail_att_id, content_id, is_inline)
+     VALUES (:message, :part, :filename, :mime, :size, :gmail, :cid, :inline)
+     ON CONFLICT (message_id, part_id) DO UPDATE SET
+         filename = excluded.filename, mime_type = excluded.mime_type,
+         size = excluded.size, gmail_att_id = excluded.gmail_att_id,
+         content_id = excluded.content_id, is_inline = excluded.is_inline";
+
+const UPDATE_MESSAGE: &str = "UPDATE messages SET thread_id = :thread, internal_date = :date,
+         from_name = :from_name, from_email = :from_email, to_addrs = :to,
+         cc_addrs = :cc, bcc_addrs = :bcc, reply_to = :reply_to, subject = :subject,
+         snippet = :snippet, message_id_hdr = :msgid, in_reply_to = :in_reply_to,
+         references_hdr = :references, is_list = :is_list, is_draft = :is_draft,
+         is_live = :is_live, sm_draft_id = :sm_draft, label_ids = :labels,
+         has_attachments = :attachments, rev = :rev
+     WHERE account_id = :account AND gmail_id = :gmail";
+
+const INSERT_MESSAGE: &str = "INSERT INTO messages (account_id, thread_id, gmail_id,
+         internal_date, from_name, from_email, to_addrs, cc_addrs, bcc_addrs, reply_to,
+         subject, snippet, message_id_hdr, in_reply_to, references_hdr, is_list, is_draft,
+         is_live, sm_draft_id, label_ids, has_attachments, rev)
+     VALUES (:account, :thread, :gmail, :date, :from_name, :from_email, :to, :cc,
+         :bcc, :reply_to, :subject, :snippet, :msgid, :in_reply_to, :references,
+         :is_list, :is_draft, :is_live, :sm_draft, :labels, :attachments, :rev)";
 
 #[derive(Debug)]
 pub struct MessageWrites<'t, 'c> {
@@ -81,43 +110,13 @@ impl<'t, 'c> MessageWrites<'t, 'c> {
         )?;
         db.execute(
             "store a message's body",
-            "UPDATE messages SET has_body = 1, body_html = :html, quote_html = :quote,
-                 body_text = :text, is_plain = :plain, rev = :rev
-             WHERE id = :id",
+            STORE_BODY,
             named_params! {
                 ":id": id, ":html": body.html, ":quote": body.quote_html,
                 ":text": body.text, ":plain": body.is_plain, ":rev": rev,
             },
         )?;
-        for part in &body.attachments {
-            db.execute(
-                "store an attachment",
-                "INSERT INTO attachments (message_id, part_id, filename, mime_type, size,
-                     gmail_att_id, content_id, is_inline)
-                 VALUES (:message, :part, :filename, :mime, :size, :gmail, :cid, :inline)
-                 ON CONFLICT (message_id, part_id) DO UPDATE SET
-                     filename = excluded.filename, mime_type = excluded.mime_type,
-                     size = excluded.size, gmail_att_id = excluded.gmail_att_id,
-                     content_id = excluded.content_id, is_inline = excluded.is_inline",
-                named_params! {
-                    ":message": id, ":part": part.part_id, ":filename": part.filename,
-                    ":mime": part.mime_type, ":size": part.size,
-                    ":gmail": part.gmail_attachment_id, ":cid": part.content_id,
-                    ":inline": part.is_inline,
-                },
-            )?;
-        }
-        let parts: Vec<&str> = body
-            .attachments
-            .iter()
-            .map(|a| a.part_id.as_str())
-            .collect();
-        db.execute(
-            "drop attachments a body no longer has",
-            "DELETE FROM attachments WHERE message_id = ?1
-               AND part_id NOT IN (SELECT value FROM json_each(?2))",
-            (id, id_list(&parts)?),
-        )?;
+        replace_attachments(db, id, &body.attachments)?;
         reindex(db, id)?;
         derive_all(self.tx, BTreeSet::from([thread]))
     }
@@ -192,37 +191,43 @@ pub(crate) fn upsert_row(
         ":attachments": m.has_attachments, ":rev": rev,
     };
     let (id, is_new) = if let Some((id, old_thread)) = existing {
-        db.execute(
-            "update a stored message",
-            "UPDATE messages SET thread_id = :thread, internal_date = :date,
-                 from_name = :from_name, from_email = :from_email, to_addrs = :to,
-                 cc_addrs = :cc, bcc_addrs = :bcc, reply_to = :reply_to, subject = :subject,
-                 snippet = :snippet, message_id_hdr = :msgid, in_reply_to = :in_reply_to,
-                 references_hdr = :references, is_list = :is_list, is_draft = :is_draft,
-                 is_live = :is_live, sm_draft_id = :sm_draft, label_ids = :labels,
-                 has_attachments = :attachments, rev = :rev
-             WHERE account_id = :account AND gmail_id = :gmail",
-            params,
-        )?;
+        db.execute("update a stored message", UPDATE_MESSAGE, params)?;
         touched.insert(old_thread);
         (id, false)
     } else {
-        let id = db.insert(
-            "add a message",
-            "INSERT INTO messages (account_id, thread_id, gmail_id, internal_date, from_name,
-                 from_email, to_addrs, cc_addrs, bcc_addrs, reply_to, subject, snippet,
-                 message_id_hdr, in_reply_to, references_hdr, is_list, is_draft, is_live,
-                 sm_draft_id, label_ids, has_attachments, rev)
-             VALUES (:account, :thread, :gmail, :date, :from_name, :from_email, :to, :cc,
-                 :bcc, :reply_to, :subject, :snippet, :msgid, :in_reply_to, :references,
-                 :is_list, :is_draft, :is_live, :sm_draft, :labels, :attachments, :rev)",
-            params,
-        )?;
+        let id = db.insert("add a message", INSERT_MESSAGE, params)?;
         (MessageId(id), true)
     };
     reindex(db, id)?;
     touched.insert(thread);
     Ok((id, is_new))
+}
+
+fn replace_attachments(
+    db: Db<'_>,
+    id: MessageId,
+    attachments: &[NewAttachment],
+) -> Result<(), StoreError> {
+    for part in attachments {
+        db.execute(
+            "store an attachment",
+            PUT_ATTACHMENT,
+            named_params! {
+                ":message": id, ":part": part.part_id, ":filename": part.filename,
+                ":mime": part.mime_type, ":size": part.size,
+                ":gmail": part.gmail_attachment_id, ":cid": part.content_id,
+                ":inline": part.is_inline,
+            },
+        )?;
+    }
+    let parts: Vec<&str> = attachments.iter().map(|a| a.part_id.as_str()).collect();
+    db.execute(
+        "drop attachments a body no longer has",
+        "DELETE FROM attachments WHERE message_id = ?1
+           AND part_id NOT IN (SELECT value FROM json_each(?2))",
+        (id, id_list(&parts)?),
+    )?;
+    Ok(())
 }
 
 fn write_labels(

@@ -46,19 +46,23 @@ pub(crate) async fn stop(State(s): State<Arc<Server>>, Json(req): Json<StopReq>)
         }
     };
     if req.graceful {
-        let quit = s.bridge.quit_called();
-        tokio::pin!(quit);
-        quit.as_mut().enable();
-        if s.bridge.emit(&AppEvent::QuitRequested) > 0
-            && tokio::time::timeout(SETTLE_LIMIT, quit).await.is_err()
-        {
-            tracing::warn!("the page did not call quit_now");
-        }
+        ask_the_page_to_quit(&s).await;
         s.settle().await?;
     }
     s.bridge.set_app(None);
     app.lifecycle().quit().await;
     Ok(done())
+}
+
+async fn ask_the_page_to_quit(s: &Server) {
+    let quit = s.bridge.quit_called();
+    tokio::pin!(quit);
+    quit.as_mut().enable();
+    if s.bridge.emit(&AppEvent::QuitRequested) > 0
+        && tokio::time::timeout(SETTLE_LIMIT, quit).await.is_err()
+    {
+        tracing::warn!("the page did not call quit_now");
+    }
 }
 
 #[derive(Deserialize)]

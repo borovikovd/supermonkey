@@ -153,27 +153,42 @@ impl Registry {
         for (id, sub) in subs {
             let forced = std::mem::take(&mut sub.forced) || (app_forced && sub.key == SubKey::App);
             if sub.first_sent {
-                match build::patch(source, id, sub, changes, forced) {
-                    Ok(Some(update)) => out.patches.push(update),
-                    Ok(None) => {}
-                    Err(e) => {
-                        tracing::warn!(sub = %id, error = %e, "couldn't build a patch; sending a first load next");
-                        sub.first_sent = false;
-                    }
-                }
+                out.patches.extend(patch(source, id, sub, changes, forced));
             } else {
-                match build::first_load(source, id, sub) {
-                    Ok(update) => {
-                        sub.first_sent = true;
-                        out.first_loads.push(update);
-                    }
-                    Err(e) => {
-                        tracing::warn!(sub = %id, error = %e, "couldn't build a first load; trying again next commit");
-                    }
-                }
+                out.first_loads.extend(first_load(source, id, sub));
             }
         }
         out
+    }
+}
+
+fn patch(
+    source: Source<'_>,
+    id: &SubId,
+    sub: &mut Sub,
+    changes: &Changes,
+    forced: bool,
+) -> Option<SubUpdate> {
+    match build::patch(source, id, sub, changes, forced) {
+        Ok(update) => update,
+        Err(e) => {
+            tracing::warn!(sub = %id, error = %e, "couldn't build a patch; sending a first load next");
+            sub.first_sent = false;
+            None
+        }
+    }
+}
+
+fn first_load(source: Source<'_>, id: &SubId, sub: &mut Sub) -> Option<SubUpdate> {
+    match build::first_load(source, id, sub) {
+        Ok(update) => {
+            sub.first_sent = true;
+            Some(update)
+        }
+        Err(e) => {
+            tracing::warn!(sub = %id, error = %e, "couldn't build a first load; trying again next commit");
+            None
+        }
     }
 }
 

@@ -5,7 +5,9 @@ use sm_domain::{
     AccountId, DraftId, DraftKind, GmailDraftId, GmailThreadId, Millis, NoticeKind, Rev, Thread,
     ThreadId, gmail_draft_aim, gmail_draft_kind,
 };
-use sm_store::{Draft, DraftAttachment, NewNotice, NewOp, OpKind, Reads, StoreError, WriteTx};
+use sm_store::{
+    Draft, DraftAttachment, DraftRecord, NewNotice, NewOp, OpKind, Reads, StoreError, WriteTx,
+};
 
 use super::lifecycle::{self, DraftsWriting, GmailIds};
 use super::save::message_attachments;
@@ -188,6 +190,16 @@ pub(crate) fn apply_gmail_draft(
         }
         None => None,
     };
+    save_gmail_draft(tx, state, account, gmail, existing)
+}
+
+fn save_gmail_draft(
+    tx: &mut WriteTx<'_>,
+    state: &mut WriterState,
+    account: AccountId,
+    gmail: GmailDraft,
+    existing: Option<DraftRecord>,
+) -> Result<(), StoreError> {
     let Some(thread) = store_draft_message(tx, state, account, &gmail.thread, &gmail.message)?
     else {
         return Ok(());
@@ -264,7 +276,7 @@ fn local_for(
     account: AccountId,
     gmail: &GmailDraftId,
     header: Option<&DraftId>,
-) -> Result<Option<sm_store::DraftRecord>, StoreError> {
+) -> Result<Option<DraftRecord>, StoreError> {
     if let Some(id) = reads.drafts().by_gmail_draft(account, gmail)? {
         return reads.drafts().get(&id);
     }

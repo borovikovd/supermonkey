@@ -8,13 +8,10 @@ use crate::subs::affects_badge;
 pub(crate) fn on_commit(state: &mut WriterState, snapshot: &Snapshot<'_>, commit: &Commit) {
     let releasing = Releasing(state);
     let state = &mut *releasing.0;
-    let ack = match snapshot.meta().last_action() {
-        Ok(ack) => ack,
-        Err(e) => {
-            tracing::error!(error = %e, "couldn't read the last action number after a commit");
-            state.sent_ack
-        }
-    };
+    let ack = snapshot.meta().last_action().unwrap_or_else(|e| {
+        tracing::error!(error = %e, "couldn't read the last action number after a commit");
+        state.sent_ack
+    });
     let online = state.online();
     let now = state.now();
     let updates = state.subs.updates(**snapshot, &commit.changes, online, now);

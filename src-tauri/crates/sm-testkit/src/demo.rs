@@ -155,46 +155,50 @@ fn seed_people(user: &FakeUser, me: &str) {
             .get((i + 1) % PEOPLE.len())
             .map(|(_, e)| (*e).to_owned());
         _ = user.add_message(NewMessage {
-            from,
-            to: vec![me.to_owned()],
-            cc: cc.into_iter().collect(),
             subject: reply_subject,
-            html: Some(
-                "<p>Good catch, fixed. See the chart below.</p>\
-                 <img src=\"cid:chart@demo\" width=\"120\">\
-                 <div class=\"gmail_quote\"><blockquote class=\"gmail_quote\">\
-                 Looks good to me.</blockquote></div>"
-                    .into(),
-            ),
-            labels: labels(&["INBOX", "CATEGORY_PERSONAL"]),
             thread_id: Some(first.thread_id),
             in_reply_to: Some(mine.rfc822_message_id),
-            attachments: vec![
-                NewAttachment {
-                    filename: "chart.png".into(),
-                    mime_type: "image/png".into(),
-                    data: PNG.to_vec(),
-                    content_id: Some("chart@demo".into()),
-                    inline: false,
-                    served_inline: false,
-                },
-                NewAttachment {
-                    filename: "numbers.csv".into(),
-                    mime_type: "text/csv".into(),
-                    data: b"quarter,revenue\nQ3,42\n".to_vec(),
-                    content_id: None,
-                    inline: false,
-                    served_inline: false,
-                },
-            ],
-            ..Default::default()
+            ..chart_answer(from, me, cc)
         });
     }
 }
 
-fn seed_the_rest(user: &FakeUser, me: &str) -> anyhow::Result<()> {
-    let receipts = demo_label(user, "Receipts")?;
-    let travel = demo_label(user, "Travel")?;
+fn chart_answer(from: String, me: &str, cc: Option<String>) -> NewMessage {
+    NewMessage {
+        from,
+        to: vec![me.to_owned()],
+        cc: cc.into_iter().collect(),
+        html: Some(
+            "<p>Good catch, fixed. See the chart below.</p>\
+             <img src=\"cid:chart@demo\" width=\"120\">\
+             <div class=\"gmail_quote\"><blockquote class=\"gmail_quote\">\
+             Looks good to me.</blockquote></div>"
+                .into(),
+        ),
+        labels: labels(&["INBOX", "CATEGORY_PERSONAL"]),
+        attachments: vec![
+            NewAttachment {
+                filename: "chart.png".into(),
+                mime_type: "image/png".into(),
+                data: PNG.to_vec(),
+                content_id: Some("chart@demo".into()),
+                inline: false,
+                served_inline: false,
+            },
+            NewAttachment {
+                filename: "numbers.csv".into(),
+                mime_type: "text/csv".into(),
+                data: b"quarter,revenue\nQ3,42\n".to_vec(),
+                content_id: None,
+                inline: false,
+                served_inline: false,
+            },
+        ],
+        ..Default::default()
+    }
+}
+
+fn seed_digests(user: &FakeUser, me: &str) {
     for issue in 100..106 {
         _ = user.add_message(NewMessage {
             from: "Weekly Digest <digest@news.example>".into(),
@@ -212,6 +216,12 @@ fn seed_the_rest(user: &FakeUser, me: &str) -> anyhow::Result<()> {
             ..Default::default()
         });
     }
+}
+
+fn seed_the_rest(user: &FakeUser, me: &str) -> anyhow::Result<()> {
+    let receipts = demo_label(user, "Receipts")?;
+    let travel = demo_label(user, "Travel")?;
+    seed_digests(user, me);
     _ = user.add_message(NewMessage {
         from: "Acme Store <orders@acme.shop>".into(),
         to: vec![me.to_owned()],

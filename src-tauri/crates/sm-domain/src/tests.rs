@@ -87,7 +87,10 @@ fn digest_counts_and_flags() {
     assert!(d.unread);
     assert!(d.has_attachments);
     assert!(d.in_inbox() && d.in_trash() && !d.in_spam() && d.has_live);
+}
 
+#[test]
+fn digest_of_threads_with_trashed_or_draft_messages() {
     let gone = Thread::new(vec![
         message(1, alice(), &["TRASH", "UNREAD"]),
         message(2, alice(), &["TRASH"]),

@@ -38,17 +38,7 @@ pub(crate) fn create(tx: &mut WriteTx<'_>, new: NewDraft, now: Millis) -> Result
         ));
     }
     let target = match new.target {
-        Some(id) => {
-            let Some(message) = reads.messages().get(id)? else {
-                return Err(ActionError::Invalid("That message no longer exists"));
-            };
-            if message.account != new.account {
-                return Err(ActionError::Invalid(
-                    "That message is no longer in this account",
-                ));
-            }
-            Some(message)
-        }
+        Some(id) => Some(target_message(reads, id, new.account)?),
         None => None,
     };
     let filled = addressing(
@@ -71,23 +61,44 @@ pub(crate) fn create(tx: &mut WriteTx<'_>, new: NewDraft, now: Millis) -> Result
     draft.to = filled.to;
     draft.cc = filled.cc;
     if let Some(t) = &target {
-        draft.in_reply_to.clone_from(&t.message_id_header);
-        draft.references = references(t);
-        match new.kind {
-            DraftKind::Reply => draft.subject = sm_mime::reply_subject(&t.subject),
-            DraftKind::Forward => draft.subject = sm_mime::forward_subject(&t.subject),
-            DraftKind::New => {}
-        }
-        if new.kind != DraftKind::New {
-            if quote(reads, &mut draft, t)? {
-                draft.attachments = forwarded(reads, &draft, t)?;
-            } else {
-                lifecycle::await_target_body(&mut draft);
-            }
-        }
+        answer(reads, &mut draft, t)?;
     }
     lifecycle::start_fresh(&mut draft);
     tx.drafts().put(&draft)?;
+    Ok(())
+}
+
+fn target_message(
+    reads: Reads<'_>,
+    id: MessageId,
+    account: AccountId,
+) -> Result<MessageRecord, ActionError> {
+    let Some(message) = reads.messages().get(id)? else {
+        return Err(ActionError::Invalid("That message no longer exists"));
+    };
+    if message.account != account {
+        return Err(ActionError::Invalid(
+            "That message is no longer in this account",
+        ));
+    }
+    Ok(message)
+}
+
+fn answer(reads: Reads<'_>, draft: &mut Draft, target: &MessageRecord) -> Result<(), StoreError> {
+    draft.in_reply_to.clone_from(&target.message_id_header);
+    draft.references = references(target);
+    match draft.kind {
+        DraftKind::Reply => draft.subject = sm_mime::reply_subject(&target.subject),
+        DraftKind::Forward => draft.subject = sm_mime::forward_subject(&target.subject),
+        DraftKind::New => {}
+    }
+    if draft.kind != DraftKind::New {
+        if quote(reads, draft, target)? {
+            draft.attachments = forwarded(reads, draft, target)?;
+        } else {
+            lifecycle::await_target_body(draft);
+        }
+    }
     Ok(())
 }
 

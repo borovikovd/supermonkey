@@ -33,6 +33,12 @@ fn strict_err(s: &str) -> String {
     Query::parse_rule(s).unwrap_err().to_string()
 }
 
+fn assert_parses(cases: &[(&str, &str)]) {
+    for (input, want) in cases {
+        assert_eq!(p(input), *want, "{input:?}");
+    }
+}
+
 #[test]
 fn empty_and_blank_input_is_the_empty_query() {
     assert_eq!(p(""), "(and)");
@@ -135,17 +141,19 @@ fn search_operators() {
 
 #[test]
 fn negation() {
-    assert_eq!(p("-foo bar "), r#"(and (not "foo") "bar")"#);
-    assert_eq!(p("-in:inbox "), r#"(not label:"inbox")"#);
-    assert_eq!(p(r#"-"a b" c "#), r#"(and (not "a b") "c")"#);
-    assert_eq!(p("-(a OR b) c "), r#"(and (not (or "a" "b")) "c")"#);
-    assert_eq!(p("--a "), r#"(not (not "a"))"#);
-    assert_eq!(p("-OR "), r#"(not "OR")"#);
-    assert_eq!(p("a OR -b "), r#"(or "a" (not "b"))"#);
-    assert_eq!(p("a - b "), r#"(and "a" "b")"#);
-    assert_eq!(p("e-mail "), r#""e-mail""#);
-    assert_eq!(p("(a -) "), r#""a""#);
-    assert_eq!(p("-& a "), r#""a""#);
+    assert_parses(&[
+        ("-foo bar ", r#"(and (not "foo") "bar")"#),
+        ("-in:inbox ", r#"(not label:"inbox")"#),
+        (r#"-"a b" c "#, r#"(and (not "a b") "c")"#),
+        ("-(a OR b) c ", r#"(and (not (or "a" "b")) "c")"#),
+        ("--a ", r#"(not (not "a"))"#),
+        ("-OR ", r#"(not "OR")"#),
+        ("a OR -b ", r#"(or "a" (not "b"))"#),
+        ("a - b ", r#"(and "a" "b")"#),
+        ("e-mail ", r#""e-mail""#),
+        ("(a -) ", r#""a""#),
+        ("-& a ", r#""a""#),
+    ]);
 }
 
 #[test]
@@ -188,20 +196,22 @@ fn unicode_words() {
 
 #[test]
 fn lenient_parse_degrades_gracefully() {
-    assert_eq!(p("(a OR b"), r#"(or "a" "b"*)"#);
-    assert_eq!(p("a) b "), r#"(and "a" "b")"#);
-    assert_eq!(p("a OR"), r#""a""#);
-    assert_eq!(p("OR a "), r#""a""#);
-    assert_eq!(p("a OR OR b "), r#"(or "a" "b")"#);
-    assert_eq!(p("a AND"), r#""a""#);
-    assert_eq!(p("from:"), "(and)");
-    assert_eq!(p("from: bob "), r#""bob""#);
-    assert_eq!(p("() a "), r#""a""#);
-    assert_eq!(p("a ()"), r#""a""#);
-    assert_eq!(p("& - ' "), "(and)");
-    assert_eq!(p(")))((("), "(and)");
-    assert_eq!(p(r#"""#), "(and)");
-    assert_eq!(p("::: "), "(and)");
+    assert_parses(&[
+        ("(a OR b", r#"(or "a" "b"*)"#),
+        ("a) b ", r#"(and "a" "b")"#),
+        ("a OR", r#""a""#),
+        ("OR a ", r#""a""#),
+        ("a OR OR b ", r#"(or "a" "b")"#),
+        ("a AND", r#""a""#),
+        ("from:", "(and)"),
+        ("from: bob ", r#""bob""#),
+        ("() a ", r#""a""#),
+        ("a ()", r#""a""#),
+        ("& - ' ", "(and)"),
+        (")))(((", "(and)"),
+        (r#"""#, "(and)"),
+        ("::: ", "(and)"),
+    ]);
 }
 
 #[test]
@@ -302,6 +312,12 @@ fn m(q: &str, mode: Mode) -> bool {
     matches_msg(q, &msg(), mode)
 }
 
+fn assert_matches(mode: Mode, cases: &[(&str, bool)]) {
+    for (q, want) in cases {
+        assert_eq!(m(q, mode), *want, "{q}");
+    }
+}
+
 #[test]
 fn address_operators_match_name_or_email() {
     for q in [
@@ -341,19 +357,24 @@ fn subject_operator() {
 
 #[test]
 fn label_operator() {
-    assert!(m("label:clients", Mode::Rule));
-    assert!(m("label:work-projects", Mode::Rule));
-    assert!(m("label:\"work/projects\"", Mode::Rule));
-    assert!(!m("label:work", Mode::Rule));
-    assert!(m("label:inbox", Mode::Rule));
-    assert!(m("label:CATEGORY_UPDATES", Mode::Rule));
-    assert!(m("label:category_updates", Mode::Rule));
-    assert!(m("label:\" inbox \"", Mode::Rule));
-    assert!(m("label:\"category_updates \"", Mode::Rule));
-    assert!(m("label:\" clients \"", Mode::Rule));
-    assert!(!m("label:CATEGORY_PROMOTIONS", Mode::Rule));
-    assert!(!m("label:starred", Mode::Rule));
-    assert!(!m("label:Label_7", Mode::Rule));
+    assert_matches(
+        Mode::Rule,
+        &[
+            ("label:clients", true),
+            ("label:work-projects", true),
+            ("label:\"work/projects\"", true),
+            ("label:work", false),
+            ("label:inbox", true),
+            ("label:CATEGORY_UPDATES", true),
+            ("label:category_updates", true),
+            ("label:\" inbox \"", true),
+            ("label:\"category_updates \"", true),
+            ("label:\" clients \"", true),
+            ("label:CATEGORY_PROMOTIONS", false),
+            ("label:starred", false),
+            ("label:Label_7", false),
+        ],
+    );
 }
 
 #[test]
@@ -382,14 +403,24 @@ fn empty_matches_everything_and_unsupported_nothing() {
 
 #[test]
 fn label_operators_in_search() {
-    assert!(m("in:inbox", Mode::Search));
-    assert!(m("in:INBOX alice", Mode::Search));
-    assert!(!m("in:sent", Mode::Search));
+    assert_matches(
+        Mode::Search,
+        &[
+            ("in:inbox", true),
+            ("in:INBOX alice", true),
+            ("in:sent", false),
+            ("in:work-projects", true),
+            ("category:updates", true),
+            ("category:primary", false),
+            ("is:unread", false),
+            ("is:read", true),
+        ],
+    );
     assert!(!m("in:sent alice", Mode::Search), "the reported bug");
-    assert!(m("in:work-projects", Mode::Search));
-    assert!(m("category:updates", Mode::Search));
-    assert!(!m("category:primary", Mode::Search));
-    assert!(!m("is:unread", Mode::Search));
+}
+
+#[test]
+fn label_states_in_search() {
     let unread_starred = MessageFacts {
         labels: crate::test_support::set(&["INBOX", "UNREAD", "STARRED", "IMPORTANT"]),
         ..msg()
@@ -399,7 +430,6 @@ fn label_operators_in_search() {
         assert!(!m(q, Mode::Search), "{q}");
     }
     assert!(!matches_msg("is:read", &unread_starred, Mode::Search));
-    assert!(m("is:read", Mode::Search));
 }
 
 #[test]
@@ -464,29 +494,24 @@ fn me_is_this_accounts_addresses_in_search_only() {
 #[test]
 fn dates_are_local_days_as_in_gmail() {
     let midnight = ny(2026, 11, 2, 0);
-    assert_eq!(s("after:2026/11/02 "), format!("after:{midnight}"));
-    assert_eq!(s("after:2026-11-2 "), format!("after:{midnight}"));
-    assert_eq!(s("newer:11/02/2026 "), format!("after:{midnight}"));
-    assert_eq!(s("before:2026/11/02 "), format!("before:{midnight}"));
-    assert_eq!(s("older:2026/11/02 "), format!("before:{midnight}"));
-    assert_eq!(
-        s("after:2026/10/31 "),
-        format!("after:{}", ny(2026, 10, 31, 0))
-    );
+    for (input, want) in [
+        ("after:2026/11/02 ", format!("after:{midnight}")),
+        ("after:2026-11-2 ", format!("after:{midnight}")),
+        ("newer:11/02/2026 ", format!("after:{midnight}")),
+        ("before:2026/11/02 ", format!("before:{midnight}")),
+        ("older:2026/11/02 ", format!("before:{midnight}")),
+        (
+            "after:2026/10/31 ",
+            format!("after:{}", ny(2026, 10, 31, 0)),
+        ),
+        ("after:1793419200 ", "after:1793419200000".to_owned()),
+        ("newer_than:2d ", format!("after:{}", ny(2026, 10, 31, 10))),
+        ("older_than:1M ", format!("before:{}", ny(2026, 10, 2, 10))),
+        ("older_than:1y ", format!("before:{}", ny(2025, 11, 2, 10))),
+    ] {
+        assert_eq!(s(input), want, "{input:?}");
+    }
     assert_eq!(ny(2026, 10, 31, 0), 1_793_419_200_000);
-    assert_eq!(s("after:1793419200 "), "after:1793419200000");
-    assert_eq!(
-        s("newer_than:2d "),
-        format!("after:{}", ny(2026, 10, 31, 10))
-    );
-    assert_eq!(
-        s("older_than:1M "),
-        format!("before:{}", ny(2026, 10, 2, 10))
-    );
-    assert_eq!(
-        s("older_than:1y "),
-        format!("before:{}", ny(2025, 11, 2, 10))
-    );
 }
 
 #[test]
@@ -514,44 +539,45 @@ fn date_bounds_include_after_and_exclude_before() {
 #[test]
 fn scope_widens_only_when_named() {
     use crate::query::Scope;
+    assert!(search("foo in:inbox -in:sent").scope().live_only());
+    let only_trash = Scope {
+        trash: true,
+        ..Scope::default()
+    };
+    for (q, want) in [
+        ("in:trash foo", only_trash),
+        (
+            "label:SPAM",
+            Scope {
+                spam: true,
+                ..Scope::default()
+            },
+        ),
+        ("-in:trash", only_trash),
+        (
+            "in:drafts",
+            Scope {
+                drafts: true,
+                ..Scope::default()
+            },
+        ),
+        (
+            "in:anywhere x",
+            Scope {
+                trash: true,
+                spam: true,
+                drafts: false,
+            },
+        ),
+    ] {
+        assert_eq!(search(q).scope(), want, "{q}");
+    }
+}
+
+#[test]
+fn scope_admits_what_it_names() {
+    use crate::query::Scope;
     let scope = |q: &str| search(q).scope();
-    assert!(scope("foo in:inbox -in:sent").live_only());
-    assert_eq!(
-        scope("in:trash foo"),
-        Scope {
-            trash: true,
-            ..Scope::default()
-        }
-    );
-    assert_eq!(
-        scope("label:SPAM"),
-        Scope {
-            spam: true,
-            ..Scope::default()
-        }
-    );
-    assert_eq!(
-        scope("-in:trash"),
-        Scope {
-            trash: true,
-            ..Scope::default()
-        }
-    );
-    assert_eq!(
-        scope("in:drafts"),
-        Scope {
-            drafts: true,
-            ..Scope::default()
-        }
-    );
-    assert_eq!(
-        scope("in:anywhere x"),
-        Scope {
-            trash: true,
-            spam: true,
-            drafts: false
-        }
-    );
     let trashed = MessageFacts {
         labels: crate::test_support::set(&["TRASH"]),
         ..msg()
@@ -618,33 +644,39 @@ fn fts_prefix_on_last_word_only() {
 
 #[test]
 fn fts_drops_what_it_cannot_express() {
-    assert_eq!(fts("label:work"), None);
-    assert_eq!(fts("is:list"), None);
-    assert_eq!(fts("bcc:dan"), None);
-    assert_eq!(fts("has:attachment"), None);
-    assert_eq!(fts(""), None);
-    assert_eq!(
-        fts("is:list from:a ").as_deref(),
-        Some(r#"from_text : "a""#)
-    );
-    assert_eq!(fts("from:a OR label:x "), None);
-    assert_eq!(
-        fts("(from:a OR label:x) b ").as_deref(),
-        Some(r#"{from_text subject body} : "b""#)
-    );
-    assert!(Query::parse("label:x a").needs_post_filter());
-    assert!(Query::parse("a OR bcc:b").needs_post_filter());
-    assert!(Query::parse("is:list").needs_post_filter());
-    assert!(Query::parse("a has:attachment").needs_post_filter());
-    assert!(Query::parse("a -b").needs_post_filter());
-    assert!(Query::parse("a in:sent").needs_post_filter());
-    assert!(Query::parse("a in:anywhere").needs_post_filter());
-    assert!(!Query::parse("from:a (b OR subject:c)").needs_post_filter());
-    assert_eq!(
-        fts("a -b ").as_deref(),
-        Some(r#"{from_text subject body} : "a""#)
-    );
-    assert_eq!(fts("a OR -b "), None);
+    for (input, want) in [
+        ("label:work", None),
+        ("is:list", None),
+        ("bcc:dan", None),
+        ("has:attachment", None),
+        ("", None),
+        ("is:list from:a ", Some(r#"from_text : "a""#)),
+        ("from:a OR label:x ", None),
+        (
+            "(from:a OR label:x) b ",
+            Some(r#"{from_text subject body} : "b""#),
+        ),
+        ("a -b ", Some(r#"{from_text subject body} : "a""#)),
+        ("a OR -b ", None),
+    ] {
+        assert_eq!(fts(input).as_deref(), want, "{input:?}");
+    }
+}
+
+#[test]
+fn post_filter_covers_what_fts_drops() {
+    for (input, want) in [
+        ("label:x a", true),
+        ("a OR bcc:b", true),
+        ("is:list", true),
+        ("a has:attachment", true),
+        ("a -b", true),
+        ("a in:sent", true),
+        ("a in:anywhere", true),
+        ("from:a (b OR subject:c)", false),
+    ] {
+        assert_eq!(Query::parse(input).needs_post_filter(), want, "{input:?}");
+    }
 }
 
 #[test]
@@ -763,20 +795,24 @@ fn fts_output_is_valid_sqlite() {
 
 #[test]
 fn gmail_query_strips_is_list() {
-    assert_eq!(gmail_query("from:a b"), "from:a b");
-    assert_eq!(gmail_query("is:list"), "");
-    assert_eq!(gmail_query("IS:LIST from:a"), "from:a");
-    assert_eq!(gmail_query("from:a is:list b"), "from:a b");
-    assert_eq!(gmail_query("is:list OR from:a"), "from:a");
-    assert_eq!(gmail_query("from:a OR is:list"), "from:a");
-    assert_eq!(gmail_query("a OR is:list OR b"), "a OR b");
-    assert_eq!(gmail_query("(is:list) a"), "a");
-    assert_eq!(gmail_query("(is:list OR x) a"), "(x) a");
-    assert_eq!(gmail_query("-is:list a"), "a");
-    assert_eq!(gmail_query("-is:list -b"), "-b");
-    assert_eq!(gmail_query("-b is:list"), "-b");
-    assert_eq!(gmail_query("-(is:list) a"), "a");
-    assert_eq!(gmail_query("\"is:list\" a"), "\"is:list\" a");
-    assert_eq!(gmail_query("is:listing a"), "is:listing a");
-    assert_eq!(gmail_query("has:attachment is:list"), "has:attachment");
+    for (input, want) in [
+        ("from:a b", "from:a b"),
+        ("is:list", ""),
+        ("IS:LIST from:a", "from:a"),
+        ("from:a is:list b", "from:a b"),
+        ("is:list OR from:a", "from:a"),
+        ("from:a OR is:list", "from:a"),
+        ("a OR is:list OR b", "a OR b"),
+        ("(is:list) a", "a"),
+        ("(is:list OR x) a", "(x) a"),
+        ("-is:list a", "a"),
+        ("-is:list -b", "-b"),
+        ("-b is:list", "-b"),
+        ("-(is:list) a", "a"),
+        ("\"is:list\" a", "\"is:list\" a"),
+        ("is:listing a", "is:listing a"),
+        ("has:attachment is:list", "has:attachment"),
+    ] {
+        assert_eq!(gmail_query(input), want, "{input:?}");
+    }
 }
