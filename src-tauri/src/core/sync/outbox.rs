@@ -737,7 +737,7 @@ async fn apply_outbox_event(
                     }
                 }
                 OutboxCommand::CancelToDraft { notice } => {
-                    restore_draft_from_outbox(tx, outbox_id, notice.clone())?;
+                    restore_draft_from_outbox(tx, state, outbox_id, notice.clone())?;
                 }
                 OutboxCommand::TrashSentAndDelete { message_id } => {
                     tx.delete_undo_for_outbox(acct, outbox_id)?;

@@ -525,10 +525,7 @@ fn undo_send(
     match cmd {
         OutboxCommand::CancelToDraft { .. } => {
             tx.delete_outbox(outbox)?;
-            if let Some(mut draft) = tx.read().draft(&rec.item.draft)? {
-                draft.lifecycle.keep();
-                tx.put_draft(&draft.as_write())?;
-            }
+            keep_cancelled_send_as_draft(tx, state, &rec.item)?;
         }
         OutboxCommand::Persist => {
             if let Some(next_snap) = next {
@@ -942,8 +939,25 @@ fn apply_remove_account(
     Ok(())
 }
 
+fn keep_cancelled_send_as_draft(
+    tx: &mut WriteTx<'_>,
+    state: &mut WriterState,
+    item: &crate::store::OutboxItem,
+) -> Result<(), StoreError> {
+    let Some(mut draft) = tx.read().draft(&item.draft)? else {
+        return Ok(());
+    };
+    draft.lifecycle.keep();
+    tx.put_draft(&draft.as_write())?;
+    if item.gmail_draft_id.is_none() {
+        schedule_draft_upsert(tx, state, &draft)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn restore_draft_from_outbox(
     tx: &mut WriteTx<'_>,
+    state: &mut WriterState,
     outbox: OutboxId,
     notice: Option<super::outbox::OutboxNotice>,
 ) -> Result<(), StoreError> {
@@ -952,10 +966,7 @@ pub(crate) fn restore_draft_from_outbox(
     };
     tx.delete_undo_for_outbox(rec.item.account, outbox)?;
     tx.delete_outbox(outbox)?;
-    if let Some(mut draft) = tx.read().draft(&rec.item.draft)? {
-        draft.lifecycle.keep();
-        tx.put_draft(&draft.as_write())?;
-    }
+    keep_cancelled_send_as_draft(tx, state, &rec.item)?;
     if let Some(n) = notice {
         let (kind, msg) = match n {
             super::outbox::OutboxNotice::Undone => {

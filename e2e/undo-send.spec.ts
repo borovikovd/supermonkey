@@ -1090,3 +1090,35 @@ test("SND-29 a send pressed while an autosave is on its way, then undone, keeps 
   expect(await gmail.requests("drafts.send")).toEqual([]);
   await app.expectNoErrorToasts();
 });
+
+test("SND-30 undoing a send whose last autosave never reached Gmail saves that text to Gmail", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const p4 = s.thread("p4").threadId;
+  const draftsOnP4 = async () =>
+    (await gmail.gmail(A)).drafts.filter((d) => d.message.threadId === p4);
+  await app.openThread("Person 4");
+  await app.reply();
+  await app.type("First words");
+  await app.settle();
+  expect(htmlOf(parseMime((await draftsOnP4())[0]?.message.raw ?? ""))).toContain("First words");
+
+  await gmail.offline(true);
+  await app.type(", then the last ones");
+  await app.settle();
+  await app.press("Meta+Enter");
+  await expect(app.editor).toHaveCount(0);
+  await undoOn(sendToast(app, "Person 4")).click();
+  await expect(app.editor).toContainText("First words, then the last ones");
+  await app.closeComposer();
+  await gmail.offline(false);
+  await app.settle();
+
+  const drafts = await draftsOnP4();
+  expect(drafts).toHaveLength(1);
+  expect(htmlOf(parseMime(drafts[0]?.message.raw ?? ""))).toContain("then the last ones");
+  expect(await gmail.requests("drafts.send")).toEqual([]);
+  await app.expectNoErrorToasts();
+});
