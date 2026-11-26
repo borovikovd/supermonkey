@@ -1,7 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use chrono::TimeZone as _;
-
 use crate::domain::query::Query;
 use crate::domain::{
     AccountId, DraftId, Identity, Rev, SettingKey, SplitId, SubId, SystemLabel, ThreadId, View,
@@ -505,17 +503,7 @@ fn build_search_update(
     clock: &Clock,
     first: bool,
 ) -> Result<SubUpdate, StoreError> {
-    let offset = clock.local_offset();
-    let now_dt = offset
-        .timestamp_millis_opt(clock.now().0)
-        .single()
-        .unwrap_or_else(|| {
-            offset
-                .timestamp_millis_opt(0)
-                .earliest()
-                .unwrap_or_else(|| chrono::Utc::now().with_timezone(&offset))
-        });
-    let parsed = Query::parse_search(query, &now_dt);
+    let parsed = Query::parse_search(query, &clock.local_now());
     let ordered = db.search_threads(account, &parsed, &state.listing.remote_hits)?;
     let remote_set: HashSet<ThreadId> = state.listing.remote_hits.iter().copied().collect();
     let pairs: Vec<(ThreadId, Option<SplitId>)> = ordered.iter().map(|id| (*id, None)).collect();

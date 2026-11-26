@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use chrono::{FixedOffset, Local, Offset as _, TimeZone as _, Utc};
+use chrono::{DateTime, FixedOffset, Local, Offset as _, TimeZone as _, Utc};
 use parking_lot::Mutex;
 #[cfg(any(test, feature = "fake"))]
 use tokio::sync::oneshot;
@@ -42,6 +42,14 @@ impl Clock {
             #[cfg(any(test, feature = "fake"))]
             Self::Manual(m) => m.now(),
         }
+    }
+
+    #[must_use]
+    pub fn local_now(&self) -> DateTime<Local> {
+        Local
+            .timestamp_millis_opt(self.now().0)
+            .single()
+            .unwrap_or_else(Local::now)
     }
 
     #[must_use]

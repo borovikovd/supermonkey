@@ -433,3 +433,22 @@ test("SNZ-08 Enter before the typed time's options arrive snoozes until that tim
   await expect(app.row("Person 1")).toHaveCount(1);
   await expect(wakeTime(app, "Person 1")).toHaveText(FRI_9AM);
 });
+
+test("SNZ-09 a time typed for after the clocks change wakes at that time on the clock", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await app.highlight("Person 1", { settle: true });
+  await snoozeTyped(app, "mar 15 9am", "Mon Mar 15, 9:00 AM");
+  await expect(app.row("Person 1")).toHaveCount(0);
+  await app.settle();
+
+  const nine = Date.parse("2027-03-15T09:00:00-04:00");
+  await app.sleep(nine - 2 * 60_000 - (await app.now()));
+  await app.sleepAndWake(0);
+  expect(await listed(app, "i", "Person 1"), "not woken before 9:00").toBe(false);
+  await app.advance(2 * 60_000);
+  await expectIn(app, "i", "Person 1");
+  await expectNotIn(app, "h", "Person 1");
+});

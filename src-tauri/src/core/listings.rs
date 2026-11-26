@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use chrono::TimeZone as _;
 use parking_lot::Mutex;
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -165,12 +164,7 @@ async fn run_listing(
                 set_listing_state(&inner.writer, &sub, ListingState::default()).await;
                 return;
             }
-            let offset = inner.clock.local_offset();
-            let now_dt = offset
-                .timestamp_millis_opt(inner.clock.now().0)
-                .single()
-                .unwrap_or_else(|| chrono::Utc::now().with_timezone(&offset));
-            let parsed = Query::parse_search(&query, &now_dt);
+            let parsed = Query::parse_search(&query, &inner.clock.local_now());
             RemoteQuery::Search {
                 q: gmail_q,
                 include_spam_trash: parsed.looks_in_trash(),

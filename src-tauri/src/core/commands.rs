@@ -1,6 +1,5 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
-use chrono::TimeZone as _;
 
 use crate::domain::contacts::{contact_matches, is_excluded, rank};
 use crate::domain::snooze::snooze_picker;
@@ -244,12 +243,7 @@ impl Core {
     }
 
     pub fn snooze_options(&self, text: &str) -> Vec<SnoozeChoice> {
-        let offset = self.clock.local_offset();
-        let now_dt = offset
-            .timestamp_millis_opt(self.clock.now().0)
-            .single()
-            .unwrap_or_else(|| chrono::Utc::now().with_timezone(&offset));
-        snooze_picker(text, &now_dt)
+        snooze_picker(text, &self.clock.local_now())
             .into_iter()
             .map(|p| SnoozeChoice {
                 label: p.label,

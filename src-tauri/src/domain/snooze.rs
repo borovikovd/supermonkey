@@ -173,6 +173,7 @@ struct Parsed {
     time: Option<NaiveTime>,
     roll: Option<Roll>,
     relative: Option<ChronoDuration>,
+    days: Option<u64>,
     months: Option<u32>,
 }
 
@@ -264,10 +265,10 @@ fn parse_relative(tokens: &[String], i: usize, parsed: &mut Parsed) -> Option<us
             parsed.relative = Some(ChronoDuration::hours(i64::from(count)));
         }
         "d" | "day" | "days" => {
-            parsed.relative = Some(ChronoDuration::days(i64::from(count)));
+            parsed.days = Some(u64::from(count));
         }
         "w" | "wk" | "wks" | "week" | "weeks" => {
-            parsed.relative = Some(ChronoDuration::weeks(i64::from(count)));
+            parsed.days = Some(u64::from(count).checked_mul(7)?);
         }
         "mo" | "month" | "months" => {
             parsed.months = Some(count);
@@ -422,11 +423,16 @@ fn parse_clock(tok: &str, suffix: Option<&str>) -> Option<NaiveTime> {
 fn apply_parsed<Tz: TimeZone>(parsed: Parsed, now: &DateTime<Tz>) -> Option<DateTime<Tz>> {
     let tz = now.timezone();
     if let Some(delta) = parsed.relative {
-        let target = now.clone() + delta;
+        let target = now.clone().checked_add_signed(delta)?;
         if let Some(time) = parsed.time {
             return resolve_local(&tz, target.date_naive().and_time(time));
         }
         return Some(target);
+    }
+    if let Some(days) = parsed.days {
+        let date = now.date_naive().checked_add_days(Days::new(days))?;
+        let time = parsed.time.unwrap_or_else(|| now.time());
+        return resolve_local(&tz, date.and_time(time));
     }
     if let Some(months) = parsed.months {
         let date = now.date_naive().checked_add_months(Months::new(months))?;
@@ -577,5 +583,18 @@ mod tests {
             .unwrap();
         let resolved = resolve_local(&New_York, spring_gap).unwrap();
         assert_eq!(resolved.hour(), 3, "spring-forward gap moves into 3:xx");
+    }
+
+    #[test]
+    fn relative_days_keep_the_time_on_the_clock_across_a_clock_change() {
+        let before = New_York.with_ymd_and_hms(2027, 3, 13, 10, 0, 0).unwrap();
+        let two_days = parse_snooze_text("in 2 days", &before).unwrap();
+        assert_eq!(format_datetime(&two_days), "Mon Mar 15, 10:00 AM");
+        let week = parse_snooze_text("in 1 week", &before).unwrap();
+        assert_eq!(format_datetime(&week), "Sat Mar 20, 10:00 AM");
+        let evening = parse_snooze_text("in 2 days 6pm", &before).unwrap();
+        assert_eq!(format_datetime(&evening), "Mon Mar 15, 6:00 PM");
+        let hours = parse_snooze_text("in 24 hours", &before).unwrap();
+        assert_eq!(format_datetime(&hours), "Sun Mar 14, 11:00 AM");
     }
 }
