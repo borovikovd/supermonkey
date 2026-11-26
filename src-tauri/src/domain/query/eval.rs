@@ -148,6 +148,15 @@ pub(super) fn reads_body(expr: &Expr) -> bool {
     }
 }
 
+pub(super) fn list_requirement(expr: &Expr) -> Option<bool> {
+    match expr {
+        Expr::Term(Term::IsList) => Some(true),
+        Expr::Not(inner) if matches!(**inner, Expr::Term(Term::IsList)) => Some(false),
+        Expr::And(items) => items.iter().find_map(list_requirement),
+        Expr::Term(_) | Expr::Not(_) | Expr::Or(_) | Expr::Unsupported => None,
+    }
+}
+
 pub(super) fn needs_post_filter(expr: &Expr) -> bool {
     match expr {
         Expr::Term(Term::Text { field, .. }) => !is_fts_field(*field),
@@ -338,16 +347,16 @@ fn normalize_label(name: &str) -> String {
 
 #[must_use]
 pub fn gmail_query(raw: &str) -> String {
-    let tokens = lex(raw);
-    let mut kept: Vec<(TokenKind, &str)> = tokens
-        .into_iter()
-        .filter_map(|tok| {
-            if matches!(&tok.kind, TokenKind::Word(w) if w.eq_ignore_ascii_case("is:list")) {
-                return None;
+    let mut kept: Vec<(TokenKind, &str)> = Vec::new();
+    for tok in lex(raw) {
+        if matches!(&tok.kind, TokenKind::Word(w) if w.eq_ignore_ascii_case("is:list")) {
+            while matches!(kept.last(), Some((TokenKind::Minus, _))) {
+                kept.pop();
             }
-            Some((tok.kind, &raw[tok.start..tok.end]))
-        })
-        .collect();
+            continue;
+        }
+        kept.push((tok.kind, &raw[tok.start..tok.end]));
+    }
 
     loop {
         let before = kept.len();

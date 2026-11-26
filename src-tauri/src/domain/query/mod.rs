@@ -125,6 +125,11 @@ impl Query {
     }
 
     #[must_use]
+    pub fn list_requirement(&self) -> Option<bool> {
+        eval::list_requirement(&self.expr)
+    }
+
+    #[must_use]
     pub fn needs_post_filter(&self) -> bool {
         eval::needs_post_filter(&self.expr)
     }
@@ -299,7 +304,40 @@ mod tests {
     }
 
     #[test]
+    fn or_joins_its_two_neighbours_and_a_spaced_hyphen_negates_nothing() {
+        let now = Utc.with_ymd_and_hms(2026, 11, 2, 15, 0, 0).unwrap();
+        let msg = sample_msg();
+        let id = Identity::new("ana@acme.test", "Ana", vec![]);
+        let labels = HashMap::new();
+        let target = MatchTarget::search(&msg, "The quokka arrived", &labels, &id, false);
+        let found = |raw: &str| Query::parse_search(raw, &now).matches(&target);
+
+        assert!(found("from:carol OR from:dave quokka"));
+        assert!(
+            !found("from:carol OR from:dave wombat"),
+            "the word after the OR applies to both senders"
+        );
+        assert!(found("wombat OR quokka from:carol"));
+        assert!(!found("wombat OR quokka from:dave"));
+        assert!(found("from:erin OR from:carol"));
+        assert!(found("from:carol AND wombat OR quokka"));
+        assert!(found("(from:erin wombat) OR quokka"));
+        assert!(
+            found("quokka - arrived"),
+            "a hyphen between spaces is not a minus"
+        );
+        assert!(!found("quokka -arrived"));
+        assert!(
+            Query::parse_rule("from:carol OR").is_err(),
+            "OR still needs a term after it"
+        );
+    }
+
+    #[test]
     fn gmail_query_strips_is_list_and_dangling_operators() {
+        assert_eq!(gmail_query("-is:list invoice"), "invoice");
+        assert_eq!(gmail_query("invoice -is:list"), "invoice");
+        assert_eq!(gmail_query("invoice - march"), "invoice march");
         assert_eq!(gmail_query("is:list digest"), "digest");
         assert_eq!(gmail_query("is:list"), "");
         assert_eq!(gmail_query("-is:list"), "");

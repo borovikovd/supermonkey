@@ -222,6 +222,33 @@ test("SRC-19 an address or a quoted phrase is matched whole, not as loose words 
   });
 });
 
+test("SRC-20 is:list and -is:list hold for what Gmail finds too", async ({ app, gmail }) => {
+  await seeds.standard(gmail, app);
+  await gmail.deliver({
+    account: A,
+    from: "Pat Person <pat@corp.test>",
+    subject: "Digest of my thoughts",
+    text: "Not from a list.",
+    labels: ["CATEGORY_PERSONAL"],
+    date: dates.daysAgo(200),
+    poll: false,
+  });
+  const since = await mark(gmail);
+
+  await search(app, "is:list digest");
+  await app.advance(300);
+  await app.settle();
+  await expect(app.row("Digest: daily")).toHaveCount(1);
+  await expect(app.row("Digest of my thoughts")).toHaveCount(0);
+
+  await search(app, "-is:list digest");
+  await app.advance(300);
+  await app.settle();
+  expect(await gmailSearches(gmail, since)).toEqual(["digest", "digest"]);
+  await expect(app.row("Digest of my thoughts")).toHaveCount(1);
+  await expect(app.row("Digest: daily")).toHaveCount(0);
+});
+
 test("SRC-03 Gmail hits are merged in as their metadata arrives", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
   const invoice = s.thread("invoiceOld").threadId;

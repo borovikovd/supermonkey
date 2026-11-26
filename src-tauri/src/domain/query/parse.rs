@@ -45,6 +45,10 @@ pub(super) fn lex(input: &str) -> Vec<Token> {
         if i >= bytes.len() {
             break;
         }
+        if bytes[i] == b'-' && bytes.get(i + 1).is_none_or(u8::is_ascii_whitespace) {
+            i += 1;
+            continue;
+        }
         let (token, next) = lex_one(input, i);
         out.push(token);
         i = next;
@@ -191,7 +195,7 @@ pub(super) fn parse_lenient<Tz: TimeZone>(input: &str, now: Option<&DateTime<Tz>
         now,
         errors: Vec::new(),
     };
-    let expr = parser.parse_or();
+    let expr = parser.parse_sequence();
     Query { expr }
 }
 
@@ -205,7 +209,7 @@ pub(super) fn parse_rule(input: &str) -> Result<Query, RuleError> {
         now: None,
         errors: Vec::new(),
     };
-    let expr = parser.parse_or();
+    let expr = parser.parse_sequence();
     if let Some(tok) = parser.tokens.get(parser.pos) {
         parser.push_error(
             tok.start,
@@ -239,44 +243,55 @@ impl<Tz: TimeZone> Parser<'_, Tz> {
         )
     }
 
-    fn parse_or(&mut self) -> Expr {
-        let mut branches = vec![self.parse_and()];
-        while self.is_word("OR") {
-            let or_tok = self.tokens[self.pos].clone();
-            self.pos += 1;
-            if self.peek().is_none()
-                || matches!(self.peek().map(|t| &t.kind), Some(TokenKind::RParen))
-            {
-                self.push_error(or_tok.start, "OR needs a term after it".to_owned());
-                break;
-            }
-            branches.push(self.parse_and());
-        }
-        branches.retain(|b| !matches!(b, Expr::And(items) if items.is_empty()));
-        match branches.len() {
-            0 => Expr::And(Vec::new()),
-            1 => branches.into_iter().next().unwrap_or(Expr::And(Vec::new())),
-            _ => Expr::Or(branches),
-        }
-    }
-
-    fn parse_and(&mut self) -> Expr {
+    fn parse_sequence(&mut self) -> Expr {
         let mut items = Vec::new();
         while let Some(tok) = self.peek() {
-            if matches!(tok.kind, TokenKind::RParen) || self.is_word("OR") {
+            if matches!(tok.kind, TokenKind::RParen) {
                 break;
             }
             if self.is_word("AND") {
                 self.pos += 1;
                 continue;
             }
-            if let Some(item) = self.parse_unary() {
+            if let Some(item) = self.parse_alternatives() {
                 items.push(item);
             }
         }
         match items.len() {
             1 => items.into_iter().next().unwrap_or(Expr::And(Vec::new())),
             _ => Expr::And(items),
+        }
+    }
+
+    fn parse_alternatives(&mut self) -> Option<Expr> {
+        let mut branches = Vec::new();
+        if !self.is_word("OR")
+            && let Some(first) = self.parse_unary()
+        {
+            branches.push(first);
+        }
+        while self.is_word("OR") {
+            let or_start = self.peek().map_or(0, |t| t.start);
+            self.pos += 1;
+            while self.is_word("AND") {
+                self.pos += 1;
+            }
+            if matches!(self.peek().map(|t| &t.kind), None | Some(TokenKind::RParen)) {
+                self.push_error(or_start, "OR needs a term after it".to_owned());
+                break;
+            }
+            if self.is_word("OR") {
+                continue;
+            }
+            if let Some(next) = self.parse_unary() {
+                branches.push(next);
+            }
+        }
+        branches.retain(|b| !matches!(b, Expr::And(items) if items.is_empty()));
+        match branches.len() {
+            0 => None,
+            1 => branches.pop(),
+            _ => Some(Expr::Or(branches)),
         }
     }
 
@@ -292,7 +307,7 @@ impl<Tz: TimeZone> Parser<'_, Tz> {
         }
         if matches!(tok.kind, TokenKind::LParen) {
             self.pos += 1;
-            let inner = self.parse_or();
+            let inner = self.parse_sequence();
             if matches!(self.peek().map(|t| &t.kind), Some(TokenKind::RParen)) {
                 self.pos += 1;
             } else {

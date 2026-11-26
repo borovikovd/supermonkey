@@ -26,8 +26,9 @@ impl Db<'_> {
         if !gmail_hits.is_empty() {
             let encoded = id_list(gmail_hits)?;
             let scope = query.scope();
+            let list_requirement = query.list_requirement();
             let extra = self.all(
-                "SELECT id, sort_time, has_live FROM threads WHERE account_id = ?1 AND id IN (SELECT value FROM json_each(?2))",
+                "SELECT id, sort_time, has_live, EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.is_list = 1) FROM threads WHERE account_id = ?1 AND id IN (SELECT value FROM json_each(?2))",
                 params![account, encoded],
                 "load gmail search hits",
                 |r| {
@@ -35,11 +36,14 @@ impl Db<'_> {
                         r.get::<_, ThreadId>(0)?,
                         r.get::<_, Millis>(1)?,
                         r.get::<_, i64>(2)? != 0,
+                        r.get::<_, i64>(3)? != 0,
                     ))
                 },
             )?;
-            for (tid, time, has_live) in extra {
-                if has_live || matches!(scope, Scope::Trash | Scope::Spam | Scope::Anywhere) {
+            for (tid, time, has_live, from_list) in extra {
+                let in_scope =
+                    has_live || matches!(scope, Scope::Trash | Scope::Spam | Scope::Anywhere);
+                if in_scope && list_requirement.is_none_or(|wanted| from_list == wanted) {
                     by_id.insert(tid, time);
                 }
             }
