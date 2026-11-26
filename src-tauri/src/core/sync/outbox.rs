@@ -195,21 +195,33 @@ async fn execute_draft_upsert(
                                     tx.put_draft(&rec.as_write())?;
                                 }
                             }
-                            _ => {
+                            other => {
                                 let owned_by_outbox =
                                     tx.read().outbox_unsent(acct)?.iter().any(|ob| {
                                         ob.item.draft == local_draft
                                             && ob.item.gmail_draft_id.as_ref()
                                                 == Some(&remote_draft)
                                     });
+                                let own = other.filter(|rec| {
+                                    rec.lifecycle.gmail_draft_id.as_ref() == Some(&remote_draft)
+                                });
                                 if !owned_by_outbox {
-                                    attach_created_id_to_delete(
-                                        tx,
-                                        acct,
-                                        &local_draft,
-                                        &remote_draft,
-                                    )?;
-                                    state.emit(Effect::KickOps(acct));
+                                    if let Some(mut rec) = own {
+                                        rec.lifecycle.record_gmail_ids(
+                                            remote_draft,
+                                            remote_msg,
+                                            remote_thread,
+                                        );
+                                        tx.put_draft(&rec.as_write())?;
+                                    } else {
+                                        attach_created_id_to_delete(
+                                            tx,
+                                            acct,
+                                            &local_draft,
+                                            &remote_draft,
+                                        )?;
+                                        state.emit(Effect::KickOps(acct));
+                                    }
                                 }
                             }
                         }

@@ -1050,3 +1050,43 @@ test("SND-28 undoing a waiting send while another composer's first load is on it
   expect(await gmail.requests("drafts.send")).toEqual([]);
   await app.expectNoErrorToasts();
 });
+
+test("SND-29 a send pressed while an autosave is on its way, then undone, keeps the draft here and in Gmail", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const p3 = s.thread("p3").threadId;
+  const draftsOnP3 = async () =>
+    (await gmail.gmail(A)).drafts.filter((d) => d.message.threadId === p3);
+  await app.openThread("Person 3");
+  await app.reply();
+  await app.type("Kept ");
+  await app.settle();
+  const saved = await draftsOnP3();
+  expect(saved).toHaveLength(1);
+
+  const update = await gmail.hold("drafts.update");
+  await app.type("through undo");
+  await expect
+    .poll(async () => (await gmail.requests("drafts.update")).some((r) => r.held))
+    .toBe(true);
+  await app.press("Meta+Enter");
+  await expect(app.editor).toHaveCount(0);
+  await update.release();
+  await app.settle();
+  await undoOn(sendToast(app, "Person 3")).click();
+  await expect(app.editor).toContainText("Kept through undo");
+  await app.closeComposer();
+  await app.advance(45_000);
+  await app.settle();
+
+  const kept = await draftsOnP3();
+  expect(kept.map((d) => d.id)).toEqual(saved.map((d) => d.id));
+  expect(kept[0]?.message.raw).toContain("Kept through undo");
+  expect(await gmail.requests("drafts.delete")).toEqual([]);
+  await app.press("Escape", "g", "d");
+  await expect(app.row("Kept through undo")).toHaveCount(1);
+  expect(await gmail.requests("drafts.send")).toEqual([]);
+  await app.expectNoErrorToasts();
+});
