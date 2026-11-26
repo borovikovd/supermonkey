@@ -175,7 +175,7 @@ impl Router {
     ) -> Option<SplitId> {
         let message = thread.latest_from_someone_else(identity)?;
         let labels = thread.labels();
-        self.place_with_labels(message, &labels, user_labels)
+        self.place_with_labels(message, &labels, user_labels, Some(identity))
     }
 
     #[must_use]
@@ -184,7 +184,7 @@ impl Router {
         message: &MessageFacts,
         user_labels: &HashMap<LabelId, String>,
     ) -> Option<SplitId> {
-        self.place_with_labels(message, &message.labels, user_labels)
+        self.place_with_labels(message, &message.labels, user_labels, None)
     }
 
     fn place_with_labels(
@@ -192,11 +192,12 @@ impl Router {
         message: &MessageFacts,
         labels: &LabelSet,
         user_labels: &HashMap<LabelId, String>,
+        identity: Option<&Identity>,
     ) -> Option<SplitId> {
         if let Some(id) = self.pinned_split(message, labels, user_labels) {
             return Some(id);
         }
-        let target = MatchTarget::rule_with_labels(message, labels, user_labels);
+        let target = MatchTarget::rule_with_labels(message, labels, user_labels, identity);
         for split in &self.splits {
             if !split.enabled || split.kind != SplitKind::Custom {
                 continue;

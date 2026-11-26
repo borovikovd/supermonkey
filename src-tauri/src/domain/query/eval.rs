@@ -29,8 +29,9 @@ impl<'a> MatchTarget<'a> {
         message: &'a MessageFacts,
         labels: &'a LabelSet,
         user_labels: &'a HashMap<LabelId, String>,
+        identity: Option<&'a Identity>,
     ) -> Self {
-        Self::build(message, labels, None, user_labels, None, false)
+        Self::build(message, labels, None, user_labels, identity, false)
     }
 
     #[must_use]

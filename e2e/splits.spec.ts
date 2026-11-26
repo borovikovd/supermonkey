@@ -551,3 +551,22 @@ test("SPL-11 a rule the core refuses keeps the sheet open with every edit", asyn
   await expectSplit(app, "Your receipt", "Receipts");
   await expectSplit(app, "Person 1", "Other", "with Important off");
 });
+
+test("SPL-12 a rule can name you: cc:me collects the mail you were copied on", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.splits(gmail, app);
+  await gmail.deliver({
+    account: A,
+    from: "Pat Person <pat@corp.test>",
+    to: ["lee@corp.test"],
+    cc: [A],
+    subject: "Copied you in",
+    text: "For your information.",
+  });
+  await app.settle();
+  await editSplits(app, (sheet) => addSplit(sheet, "Copied", "cc:me"));
+  await expectSplit(app, "Copied you in", "Copied");
+  await expectSplit(app, "Person 1", "Important", "addressed to you, not copied");
+});
