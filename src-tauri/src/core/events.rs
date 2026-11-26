@@ -36,6 +36,9 @@ pub(crate) enum Effect {
     CancelAccountListings(AccountId),
     ResetSubs,
     FetchSubscribedBodies,
+    NetworkChanged {
+        online: bool,
+    },
     RemoveAccount {
         account: AccountId,
         email: String,

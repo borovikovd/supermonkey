@@ -21,7 +21,8 @@ use crate::store::{Priority as StorePriority, ReadPool, StoreError, Writer};
 
 use super::drafts::DraftFiles;
 use super::events::Effect;
-use super::runtime::{Activity, Clock, Signal, Tasks};
+use super::network::Network;
+use super::runtime::{Activity, Clock, Tasks};
 use super::writer_state::{SubOp, WriterState};
 use super::{CoreError, Platform};
 use ops::run_op_worker;
@@ -58,10 +59,11 @@ impl AccountGmail {
     }
 
     pub(crate) async fn check<T>(&self, res: Result<T, GmailError>) -> Result<T, GmailError> {
-        if let Err(err) = &res
-            && matches!(err.outcome, Outcome::InvalidGrant | Outcome::Unauthorized)
-        {
-            self.slot.mark_auth_failed(self.grant_gen).await;
+        if let Err(err) = &res {
+            if matches!(err.outcome, Outcome::InvalidGrant | Outcome::Unauthorized) {
+                self.slot.mark_auth_failed(self.grant_gen).await;
+            }
+            self.slot.network.lost_if_unreachable(err).await;
         }
         res
     }
@@ -86,7 +88,7 @@ struct ManagerInner {
     pool: Arc<ReadPool>,
     writer: Writer<WriterState>,
     clock: Clock,
-    online: Signal<bool>,
+    network: Network,
     activity: Activity,
     files: DraftFiles,
     root_tasks: Tasks,
@@ -134,7 +136,7 @@ impl AccountManager {
         pool: Arc<ReadPool>,
         writer: Writer<WriterState>,
         clock: Clock,
-        online: Signal<bool>,
+        network: Network,
         activity: Activity,
         files: DraftFiles,
         root_tasks: Tasks,
@@ -150,7 +152,7 @@ impl AccountManager {
                 pool,
                 writer,
                 clock,
-                online,
+                network,
                 activity,
                 files,
                 root_tasks,
@@ -523,7 +525,7 @@ impl AccountManager {
             account,
             email,
             gmail,
-            self.inner.online.clone(),
+            self.inner.network.clone(),
             tasks.clone(),
             self.inner.writer.clone(),
             Arc::clone(&self.inner.pool),

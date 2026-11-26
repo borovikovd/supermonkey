@@ -36,7 +36,7 @@ use events::{Effect, EffectBus};
 use listings::ListingManager;
 use network::Network;
 use notify::{NotificationTracker, refresh_badge};
-use runtime::{Kick, Signal, Tasks};
+use runtime::{Kick, Tasks};
 use snooze::{run_snooze_loop, wake_due_snoozes};
 use sync::AccountManager;
 use sync::drafts::{download_carried_draft_attachments, reload_single_draft_from_gmail};
@@ -209,9 +209,15 @@ impl Core {
         )
         .map_err(|e| CoreError::internal(e.to_string()))?;
 
-        let online = Signal::new(true);
         let tasks = Tasks::new(activity.clone());
         let scheduler = Scheduler::new(config.quota);
+        let network = Network::new(
+            &config.gmail_base_url,
+            http.clone(),
+            writer.clone(),
+            config.clock.clone(),
+            activity.clone(),
+        );
 
         let accounts = AccountManager::new(
             http.clone(),
@@ -222,7 +228,7 @@ impl Core {
             Arc::clone(&pool),
             writer.clone(),
             config.clock.clone(),
-            online.clone(),
+            network.clone(),
             activity.clone(),
             files.clone(),
             tasks.child(),
@@ -232,18 +238,9 @@ impl Core {
             Arc::clone(&pool),
             writer.clone(),
             config.clock.clone(),
-            online.clone(),
+            network.clone(),
             activity.clone(),
             tasks.child(),
-        );
-        let network = Network::new(
-            online,
-            &config.gmail_base_url,
-            http.clone(),
-            writer.clone(),
-            accounts.clone(),
-            config.clock.clone(),
-            activity.clone(),
         );
 
         Ok(Arc::new(Self {
@@ -472,6 +469,11 @@ async fn handle_effect(core: &Arc<Core>, effect: Effect) {
         Effect::CancelAccountListings(account) => core.listings.cancel_account(account),
         Effect::ResetSubs => core.listings.reset(),
         Effect::FetchSubscribedBodies => fetch_subscribed_bodies(core).await,
+        Effect::NetworkChanged { online: true } => {
+            core.accounts.on_online();
+            fetch_subscribed_bodies(core).await;
+        }
+        Effect::NetworkChanged { online: false } => core.accounts.on_offline(),
         Effect::RemoveAccount { account, email } => {
             core.accounts.remove_account(account, email);
         }

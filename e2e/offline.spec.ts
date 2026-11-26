@@ -458,6 +458,47 @@ test("OFF-06 losing the network during replay leaves the rest queued", async ({ 
   ]);
 });
 
+test("OFF-11 Gmail going unreachable without notice is noticed, and what was queued lands once Gmail answers again", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await gmail.offline(true, { probe: true });
+
+  await app.highlight("Person 1", { settle: true });
+  await app.press("e");
+  await expect(app.row("Person 1")).toHaveCount(0);
+  await app.settle();
+
+  await app.press("/");
+  await app.type("venue");
+  await app.advance(300);
+  await expect(app.row("Offsite venue")).toHaveCount(1);
+  await expect(app.page.getByText("Results from this Mac")).toBeVisible();
+  await app.settle();
+  await app.press("Escape");
+
+  await app.highlight("Person 2", { settle: true });
+  await app.reply("r");
+  await app.type("Written in a tunnel");
+  await app.settle();
+  await app.press("Meta+Enter");
+  await expect(app.toast("Sending")).toHaveCount(1);
+  await app.advance(10_000);
+  await expect(app.toast("Email delayed")).toHaveCount(1);
+  expect(liveMessageHas(await gmail.gmail(A), s.thread("p1").threadId, "INBOX")).toBe(true);
+
+  await gmail.offline(false, { probe: true });
+  await app.advance(10_000);
+  await app.settle();
+  await expect(app.toast("Email delayed")).toHaveCount(0);
+  const a = await gmail.gmail(A);
+  expect(liveMessageHas(a, s.thread("p1").threadId, "INBOX")).toBe(false);
+  const reply = messagesOf(a, s.thread("p2").threadId).find((m) => m.labels.includes("SENT"));
+  expect(reply?.raw).toContain("Written in a tunnel");
+  await app.expectNoErrorToasts();
+});
+
 test("OFF-08 conversations opened offline read only the bodies still on screen when the network returns", async ({
   app,
   gmail,

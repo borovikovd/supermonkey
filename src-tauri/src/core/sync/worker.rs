@@ -18,7 +18,8 @@ use crate::store::{ContactSighting, Priority as StorePriority, ReadPool, StoreEr
 
 use super::super::drafts::DraftFiles;
 use super::super::events::Effect;
-use super::super::runtime::{Activity, Clock, Kick, Signal, Tasks};
+use super::super::network::Network;
+use super::super::runtime::{Activity, Clock, Kick, Tasks};
 use super::super::writer_state::{SubOp, WriterState};
 use super::drafts::reconcile_drafts_with_gmail;
 use super::ingest::{IngestResult, fetch_and_ingest_thread};
@@ -42,7 +43,7 @@ pub(crate) struct AccountSlot {
     pub(crate) email: String,
     gmail: RwLock<Option<(u64, Arc<Gmail>)>>,
     health: Mutex<HealthState>,
-    online: Signal<bool>,
+    pub(crate) network: Network,
     tasks: Tasks,
     pub(crate) fetch_queue: FetchQueue,
     pub(crate) poll_kick: Kick,
@@ -74,7 +75,7 @@ impl AccountSlot {
         account: AccountId,
         email: String,
         gmail: Option<Arc<Gmail>>,
-        online: Signal<bool>,
+        network: Network,
         tasks: Tasks,
         writer: Writer<WriterState>,
         pool: Arc<ReadPool>,
@@ -88,7 +89,7 @@ impl AccountSlot {
             email,
             gmail: RwLock::new(initial),
             health: Mutex::new(HealthState::default()),
-            online,
+            network,
             tasks,
             fetch_queue: FetchQueue::new(),
             poll_kick: Kick::new(),
@@ -132,7 +133,7 @@ impl AccountSlot {
 
     #[must_use]
     pub(crate) fn is_online(&self) -> bool {
-        self.online.get()
+        self.network.is_online()
     }
 
     #[cfg(any(test, feature = "fake"))]
@@ -222,7 +223,8 @@ impl AccountSlot {
             self.mark_auth_failed(grant_gen).await;
             return None;
         }
-        if err.outcome == Outcome::Offline || !self.is_online() {
+        self.network.lost_if_unreachable(err).await;
+        if !self.is_online() {
             self.health.lock().first_failure = None;
             self.set_status(SyncStatus::Offline).await;
             return None;
@@ -346,9 +348,10 @@ async fn run_fetch_worker(slot: Arc<AccountSlot>, cancel: CancellationToken) {
         match res {
             Ok(ingest) => handle_fetch_success(&slot, &gmail, grant_gen, ingest, &cancel).await,
             Err(err) => {
+                slot.network.lost_if_unreachable(&err).await;
                 if matches!(err.outcome, Outcome::InvalidGrant | Outcome::Unauthorized) {
                     slot.mark_auth_failed(grant_gen).await;
-                } else if err.outcome == Outcome::Offline || !slot.is_online() {
+                } else if !slot.is_online() {
                     slot.set_status(SyncStatus::Offline).await;
                 }
             }

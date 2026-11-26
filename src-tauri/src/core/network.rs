@@ -1,12 +1,13 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::gmail::HttpClient;
+use tokio::sync::watch;
+
+use crate::gmail::{GmailError, HttpClient, Outcome};
 use crate::store::{Priority as StorePriority, StoreError, Writer};
 
 use super::events::Effect;
 use super::runtime::{Activity, Clock, Kick, Signal, Tasks, WaitOutcome};
-use super::sync::AccountManager;
 use super::writer_state::WriterState;
 
 const PROBE_INTERVAL: Duration = Duration::from_secs(10);
@@ -21,7 +22,6 @@ struct NetworkInner {
     probe_url: String,
     http: HttpClient,
     writer: Writer<WriterState>,
-    accounts: AccountManager,
     clock: Clock,
     activity: Activity,
     kick: Kick,
@@ -36,28 +36,21 @@ impl std::fmt::Debug for Network {
 }
 
 impl Network {
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "network monitor links signal, HTTP probe, writer broadcast, and account workers"
-    )]
     #[must_use]
     pub(crate) fn new(
-        online: Signal<bool>,
         gmail_base_url: &str,
         http: HttpClient,
         writer: Writer<WriterState>,
-        accounts: AccountManager,
         clock: Clock,
         activity: Activity,
     ) -> Self {
         let probe_url = format!("{}/generate_204", gmail_base_url.trim_end_matches('/'));
         Self {
             inner: Arc::new(NetworkInner {
-                online,
+                online: Signal::new(true),
                 probe_url,
                 http,
                 writer,
-                accounts,
                 clock,
                 activity,
                 kick: Kick::new(),
@@ -70,28 +63,34 @@ impl Network {
         self.inner.online.get()
     }
 
+    #[must_use]
+    pub(crate) fn subscribe(&self) -> watch::Receiver<bool> {
+        self.inner.online.subscribe()
+    }
+
     pub(crate) async fn set_online(&self, online: bool) {
-        let changed = self.inner.online.set(online);
+        if !self.inner.online.set(online) {
+            return;
+        }
         super::log_err(
             "broadcast online state",
             self.inner
                 .writer
                 .call(StorePriority::Ui, move |_tx, state| {
                     state.stage_online(online);
-                    if online && changed {
-                        state.emit(Effect::FetchSubscribedBodies);
-                    }
+                    state.emit(Effect::NetworkChanged { online });
                     Ok::<_, StoreError>(())
                 })
                 .await,
         );
-        if changed {
-            if online {
-                self.inner.accounts.on_online();
-            } else {
-                self.inner.accounts.on_offline();
-                self.inner.kick.wake(&self.inner.activity);
-            }
+        if !online {
+            self.inner.kick.wake(&self.inner.activity);
+        }
+    }
+
+    pub(crate) async fn lost_if_unreachable(&self, err: &GmailError) {
+        if err.outcome == Outcome::Offline {
+            self.set_online(false).await;
         }
     }
 

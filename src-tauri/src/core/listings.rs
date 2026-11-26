@@ -15,7 +15,8 @@ use crate::gmail::{Format, Gmail, GmailError, Outcome, Priority as GmailPriority
 use crate::ipc::SubKey;
 use crate::store::{Priority as StorePriority, ReadPool, StoreError, Writer};
 
-use super::runtime::{Activity, Clock, Signal, Tasks};
+use super::network::Network;
+use super::runtime::{Activity, Clock, Tasks};
 use super::subs::ListingState;
 use super::sync::AccountManager;
 use super::sync::ingest::fetch_and_ingest_thread;
@@ -40,7 +41,7 @@ struct ListingInner {
     pool: Arc<ReadPool>,
     writer: Writer<WriterState>,
     clock: Clock,
-    online: Signal<bool>,
+    network: Network,
     activity: Activity,
     tasks: Tasks,
     subs: Mutex<HashMap<SubId, SubListing>>,
@@ -63,7 +64,7 @@ impl ListingManager {
         pool: Arc<ReadPool>,
         writer: Writer<WriterState>,
         clock: Clock,
-        online: Signal<bool>,
+        network: Network,
         activity: Activity,
         tasks: Tasks,
     ) -> Self {
@@ -73,7 +74,7 @@ impl ListingManager {
                 pool,
                 writer,
                 clock,
-                online,
+                network,
                 activity,
                 tasks,
                 subs: Mutex::new(HashMap::new()),
@@ -188,13 +189,13 @@ async fn run_listing(
     let mut page_token: Option<PageToken> = None;
     let mut remote_hits: Vec<ThreadId> = Vec::new();
     let mut seen_hits: HashSet<ThreadId> = HashSet::new();
-    let mut online_rx = inner.online.subscribe();
+    let mut online_rx = inner.network.subscribe();
 
     loop {
         if cancel.is_cancelled() {
             return;
         }
-        if !inner.online.get() {
+        if !inner.network.is_online() {
             set_listing_state(
                 &inner.writer,
                 &sub,
@@ -259,7 +260,8 @@ async fn run_listing(
                 slot.mark_auth_failed(grant_gen).await;
                 return;
             }
-            Err(err) if err.outcome == Outcome::Offline || !inner.online.get() => {
+            Err(err) if err.outcome == Outcome::Offline || !inner.network.is_online() => {
+                inner.network.lost_if_unreachable(&err).await;
                 set_listing_state(
                     &inner.writer,
                     &sub,
