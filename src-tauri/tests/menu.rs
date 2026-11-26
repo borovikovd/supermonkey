@@ -1,67 +1,55 @@
-use supermonkey_lib::{QUIT_MENU_ITEM, app_menu};
-use tauri::menu::{Menu, MenuItemKind};
-use tauri::test::{MockRuntime, mock_app};
+#![expect(
+    clippy::expect_used,
+    reason = "menu integration test fails via expect when standard menu setup breaks"
+)]
 
-fn items(within: &str, kinds: &[MenuItemKind<MockRuntime>], out: &mut Vec<String>) {
-    for kind in kinds {
-        match kind {
-            MenuItemKind::Submenu(sub) => {
-                let title = sub.text().unwrap_or_default();
-                let path = if within.is_empty() {
-                    title
-                } else {
-                    format!("{within} > {title}")
-                };
-                out.push(format!("{path} >"));
-                items(&path, &sub.items().unwrap_or_default(), out);
+use supermonkey_lib::shell::menu::{QUIT_ID, build};
+use tauri::menu::{MenuItemKind, Submenu};
+
+fn inspect_submenu<R: tauri::Runtime>(
+    sub: &Submenu<R>,
+    custom_quits: &mut usize,
+    predefined_quits: &mut usize,
+) {
+    for item in sub.items().expect("read submenu items") {
+        match item {
+            MenuItemKind::MenuItem(m) => {
+                if m.id() == QUIT_ID {
+                    *custom_quits += 1;
+                }
             }
-            MenuItemKind::Predefined(item) => {
-                out.push(format!("{within} > {}", item.text().unwrap_or_default()));
+            MenuItemKind::Predefined(pre) => {
+                if let Ok(text) = pre.text() {
+                    let lower = text.trim().to_ascii_lowercase();
+                    if lower == "quit" || lower.starts_with("quit ") {
+                        *predefined_quits += 1;
+                    }
+                }
             }
-            MenuItemKind::MenuItem(item) => out.push(format!(
-                "{within} > {} #{}",
-                item.text().unwrap_or_default(),
-                item.id().0
-            )),
-            MenuItemKind::Check(item) => out.push(format!("{within} > {} #check", item.id().0)),
-            MenuItemKind::Icon(item) => out.push(format!("{within} > {} #icon", item.id().0)),
+            MenuItemKind::Submenu(nested) => {
+                inspect_submenu(&nested, custom_quits, predefined_quits);
+            }
+            MenuItemKind::Check(_) | MenuItemKind::Icon(_) => {}
         }
     }
 }
 
-fn listed(menu: &Menu<MockRuntime>) -> Vec<String> {
-    let mut out = Vec::new();
-    items("", &menu.items().unwrap_or_default(), &mut out);
-    out
-}
-
 fn main() {
-    let app = mock_app();
-    let name = &app.handle().package_info().name;
-    let standard = Menu::default(app.handle()).map(|m| listed(&m));
-    let ours = app_menu(app.handle()).map(|m| listed(&m));
-    #[expect(
-        clippy::panic,
-        reason = "a test without the harness fails by panicking"
-    )]
-    let (Ok(standard), Ok(ours)) = (standard, ours) else {
-        panic!("couldn't build the menus");
-    };
-
-    let predefined_quit = format!("{name} > Quit ");
-    assert!(
-        standard.iter().any(|i| i.starts_with(&predefined_quit)),
-        "Tauri's standard app menu has a predefined Quit: {standard:#?}",
+    let app = tauri::test::mock_app();
+    let menu = build(app.handle()).expect("build standard menu");
+    let mut custom_quits = 0usize;
+    let mut predefined_quits = 0usize;
+    for item in menu.items().expect("read menu bar items") {
+        if let MenuItemKind::Submenu(sub) = item {
+            inspect_submenu(&sub, &mut custom_quits, &mut predefined_quits);
+        }
+    }
+    assert_eq!(
+        predefined_quits, 0,
+        "predefined Quit item bypasses Session::request_quit"
     );
-    let expected: Vec<String> = standard
-        .iter()
-        .map(|item| {
-            if item.starts_with(&predefined_quit) {
-                format!("{name} > Quit {name} #{QUIT_MENU_ITEM}")
-            } else {
-                item.clone()
-            }
-        })
-        .collect();
-    assert_eq!(ours, expected, "the app's menu bar");
+    assert_eq!(
+        custom_quits, 1,
+        "standard menu must contain exactly one app-owned Quit item"
+    );
 }

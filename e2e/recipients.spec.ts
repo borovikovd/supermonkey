@@ -1,4 +1,4 @@
-import ADDRESSES from "../src-tauri/crates/sm-mime/tests/fixtures/email-addresses.json" with { type: "json" };
+import ADDRESSES from "../src-tauri/tests/fixtures/email-addresses.json" with { type: "json" };
 import type { App } from "./app.ts";
 import { expect, test } from "./fixtures.ts";
 import { emails, sentWithSubject } from "./helpers.ts";

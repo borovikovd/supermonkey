@@ -1,37 +1,49 @@
-use std::path::Path;
-use std::time::Instant;
+use std::path::PathBuf;
 
-use anyhow::Context as _;
-use sm_core::clock::{Clock as _, SystemClock};
-use sm_testkit::fixture::{PERF, generate};
+use supermonkey_lib::testkit::fixture::generate_perf_db;
 
-const ACCOUNTS: [&str; 2] = ["alex@example.com", "sam@example.com"];
-
-fn main() -> anyhow::Result<()> {
-    supermonkey_lib::init_logging();
-    let path = std::env::args()
-        .nth(1)
-        .context("usage: perf-fixture <db path>")?;
-    let path = Path::new(&path);
-    for suffix in ["", "-wal", "-shm"] {
-        let mut file = path.as_os_str().to_owned();
-        file.push(suffix);
-        match std::fs::remove_file(&file) {
-            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-                return Err(e).with_context(|| format!("remove {}", Path::new(&file).display()));
+#[expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "perf-fixture CLI reports output path and stats on stdout and errors on stderr"
+)]
+fn main() {
+    let mut out = PathBuf::from("/tmp/supermonkey-perf.db");
+    let mut threads = 5_000usize;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--out" => {
+                if let Some(v) = args.next() {
+                    out = PathBuf::from(v);
+                }
+            }
+            "--threads" => {
+                if let Some(v) = args.next()
+                    && let Ok(n) = v.parse()
+                {
+                    threads = n;
+                }
+            }
+            other if !other.starts_with("--") => {
+                out = PathBuf::from(other);
             }
             _ => {}
         }
     }
-    let started = Instant::now();
-    generate(path, PERF, &ACCOUNTS, SystemClock.now())?;
-    #[expect(clippy::print_stdout, reason = "a command-line tool reports on stdout")]
-    {
-        println!(
-            "wrote {} in {:.1} s",
-            path.display(),
-            started.elapsed().as_secs_f64()
-        );
+
+    match generate_perf_db(&out, threads) {
+        Ok(stats) => {
+            println!(
+                "wrote {} ({} threads, {} messages, {} contacts)",
+                out.display(),
+                stats.threads,
+                stats.messages,
+                stats.contacts
+            );
+        }
+        Err(err) => {
+            eprintln!("failed to generate perf fixture: {err}");
+        }
     }
-    Ok(())
 }

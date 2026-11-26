@@ -301,16 +301,18 @@ The only section that changes from project to project.
   ```
 
 - **Layout.**
-  - `src-tauri/src`: the Tauri shell and the `e2e-server` and `perf-fixture`
-    binaries.
-  - `src-tauri/crates`, lowest layer first (`src-tauri/tests/layers.rs` checks the
-    edges): `sm-domain` (newtypes, mail model, views, splits, the query language),
-    `sm-mime`, `sm-gmail` (client, quota, OAuth, token store), `sm-store` (schema,
-    writer, read pool), `sm-ipc` (types generated into `src/bindings`), `sm-core`
-    (actions, subscriptions, per-account workers), `sm-bridge` (command dispatch
-    for Tauri and the debug web bridge, and the `Session` both the shell and the
-    E2E server run: connect, window show, focus, quit), `sm-testkit` (E2E server, demo, perf
-    fixture), `sm-fake-gmail`.
+  - `src-tauri/src` (`src-tauri/tests/architecture.rs` checks the module edges):
+    `domain/` (newtypes, mail model, draft lifecycle, views, splits, snooze, contacts, query language),
+    `mime/` (parsing, sanitizer, unsubscribe, outgoing MIME), `gmail/` (client,
+    quota scheduler, OAuth, token file), `store/` (schema, queries, search, contacts, writer actor,
+    read pool), `ipc/` (pure wire types generated into `src/bindings`),
+    `core/` (engine, writer state, actions, subscriptions, drafts, outbox, listings,
+    snooze, network, notifications, unwanted, attachments, sync workers),
+    `session/` (`Session`, `Host`, optional `web` bridge),
+    `shell/` (Tauri commands, standard menu with app-owned Quit, platform adapters, logging),
+    `testkit/` (`feature = "fake"`: E2E server, demo seed, perf fixture), and `bin/` (`e2e-server`, `perf-fixture`).
+  - `src-tauri/crates/sm-fake-gmail`: standalone in-process fake Gmail server used
+    by tests and demo mode.
   - `src`: the UI: `store/` (mirror and chrome state), `keyboard/`, `ui/`,
     `compose/`, `ipc/`; `src/theme.css` holds the design tokens.
     `src/ui/UntrustedFrame.tsx` is the one path that renders mail HTML: its CSP,

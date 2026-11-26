@@ -9,7 +9,7 @@ default-run = "supermonkey"
 
 [lib]
 name = "supermonkey_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [[bin]]
 name = "supermonkey"
@@ -25,51 +25,71 @@ name = "perf-fixture"
 path = "src/bin/perf_fixture.rs"
 required-features = ["fake"]
 
-# macOS makes menus only on the main thread, where a test runs only
-# without the harness.
 [[test]]
 name = "menu"
 harness = false
+
+[[test]]
+name = "engine"
+required-features = ["fake"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 serde_json = "1"
 
 [dependencies]
-sm-core = { path = "crates/sm-core" }
-sm-bridge = { path = "crates/sm-bridge" }
-sm-ipc = { path = "crates/sm-ipc" }
-sm-domain = { path = "crates/sm-domain" }
-sm-gmail = { path = "crates/sm-gmail" }
-sm-testkit = { path = "crates/sm-testkit", optional = true }
+ammonia = "4"
+axum = { version = "0.8", optional = true }
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+encoding_rs = "0.8"
+futures-core = { version = "0.3", optional = true }
+futures-util = { version = "0.3", optional = true }
+html-escape = "0.3"
+html5ever = "0.40"
+mail-builder = "2"
+parking_lot = "0.12"
+percent-encoding = "2"
+rand = "0.9"
+regex = "1"
+reqwest = { version = "0.13", default-features = false, features = ["form", "json", "query", "rustls"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+sm-fake-gmail = { path = "crates/sm-fake-gmail", optional = true }
 tauri = { version = "2.12", features = ["macos-private-api"] }
 tauri-plugin-notification = "2"
 tauri-plugin-opener = "2"
-tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = "2"
-anyhow = "1"
-serde_json = "1"
-tokio = { version = "1", features = ["sync"] }
+tauri-plugin-window-state = "2"
+tempfile = { version = "3", optional = true }
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+ts-rs = "12"
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+xattr = "1"
 
 [dev-dependencies]
-# `tauri::test`: a mock app to build the menu bar on (tests/menu.rs).
+chrono-tz = "0.10"
+proptest = "1"
+sm-fake-gmail = { path = "crates/sm-fake-gmail" }
 tauri = { version = "2.12", features = ["macos-private-api", "test"] }
+tempfile = "3"
+tokio = { version = "1", features = ["test-util"] }
 
 [features]
-# Debug only: the web bridge on 127.0.0.1:1430 (SUPERMONKEY_WEB_BRIDGE=1), for
-# the UI in a browser. Release builds leave it off.
-web = ["sm-bridge/web"]
-# Debug only: the E2E server (`e2e-server`), demo mode (SUPERMONKEY_FAKE=1),
-# against an in-process fake Gmail, and the perf fixture (`perf-fixture`).
-fake = ["web", "dep:sm-testkit", "tokio/rt-multi-thread", "tokio/macros"]
+web = ["dep:axum", "dep:futures-core", "dep:futures-util"]
+fake = ["web", "dep:sm-fake-gmail", "dep:tempfile"]
 
 [lints]
 workspace = true
 
 [workspace.package]
-# An application, not a library: its minimum Rust is the pinned toolchain.
 edition = "2024"
 rust-version = "1.99"
 license = "MIT"
@@ -77,14 +97,6 @@ license = "MIT"
 [workspace]
 members = [
     ".",
-    "crates/sm-domain",
-    "crates/sm-mime",
-    "crates/sm-gmail",
-    "crates/sm-store",
-    "crates/sm-core",
-    "crates/sm-ipc",
-    "crates/sm-bridge",
-    "crates/sm-testkit",
     "crates/sm-fake-gmail",
 ]
 resolver = "3"
@@ -94,9 +106,7 @@ unsafe_code = "forbid"
 unused_must_use = "deny"
 rust_2018_idioms = { level = "deny", priority = -1 }
 unused_qualifications = "warn"
-# Every type can be printed while debugging. Items carry no doc comments.
 missing_debug_implementations = "warn"
-# `pub` means exported: an item only the crate uses is `pub(crate)`.
 unreachable_pub = "warn"
 unnameable_types = "warn"
 redundant_imports = "warn"
@@ -107,12 +117,10 @@ explicit_outlives_requirements = "warn"
 unsafe_op_in_unsafe_fn = "warn"
 unused_extern_crates = "warn"
 unused_lifetimes = "warn"
-# A lifetime named once can be elided: fewer names to follow through a signature.
 single_use_lifetimes = "warn"
 
 [workspace.lints.rustdoc]
 all = { level = "warn", priority = -1 }
-# Doc warnings fail `cargo doc` (the `lint:rust` task).
 broken_intra_doc_links = "deny"
 private_intra_doc_links = "deny"
 invalid_codeblock_attributes = "deny"
@@ -121,21 +129,13 @@ invalid_rust_codeblocks = "deny"
 bare_urls = "deny"
 redundant_explicit_links = "deny"
 
-# The groups, then single lints on top. The single lints and the thresholds in
-# clippy.toml follow github.com/deltartificial/vulcan, merged with what was here:
-# nothing that was on is off. A vulcan lint left off says why, with its count on
-# this workspace when it was tried (2026-11-10).
 [workspace.lints.clippy]
 all = { level = "deny", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
-# Pedantic lints that do not fit an application crate:
-# - errors are typed per crate and documented on the enum, and nothing here is a published API;
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
-# - every hash map and set uses the default hasher; generic hashers would only add type noise.
 implicit_hasher = "allow"
 
-# No panics outside tests (clippy.toml allows them there).
 unwrap_used = "deny"
 expect_used = "deny"
 panic = "deny"
@@ -143,63 +143,36 @@ unwrap_in_result = "warn"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
-# The process ends through the app's quit path, and nothing is leaked on purpose.
 exit = "warn"
 mem_forget = "warn"
 
-# Nothing is dropped silently.
 let_underscore_must_use = "warn"
 must_use_candidate = "warn"
-# Keep the cause when mapping errors.
 map_err_ignore = "warn"
-# A match on an enum names its variants, so a new one is a compile error, not a
-# silent fall into `_`.
 wildcard_enum_match_arm = "warn"
 rest_pat_in_fully_bound_structs = "warn"
 
-# Exceptions are `#[expect(lint, reason = "...")]`, so a stale one is reported.
 allow_attributes = "warn"
 allow_attributes_without_reason = "warn"
 missing_assert_message = "warn"
 
-# Ownership (AGENTS.md): borrow to read, `&mut` to change, take by value to keep.
-# `all` and `pedantic` above already check most of it: `ptr_arg` (`&str` over
-# `&String`), `needless_pass_by_value`, `trivially_copy_pass_by_ref`,
-# `large_types_passed_by_value`, `ref_option`, `borrowed_box`, `box_collection`,
-# `redundant_allocation`, `unnecessary_box_returns`, `implicit_clone`,
-# `clone_on_copy`, `unnecessary_to_owned`, `wrong_self_convention`. These are the
-# ones outside those groups. No lint sees a `&T` cloned inside, a reference kept in
-# a long-lived struct, or an `Arc` with one owner, and `needless_pass_by_value`
-# does not look inside an `async fn`: the ownership review does.
-# An Arc clone reads as `Arc::clone(&x)`, never like a deep copy.
 clone_on_ref_ptr = "warn"
-# A clone of a value never used again is a move.
 redundant_clone = "warn"
+redundant_allocation = "warn"
+large_futures = "warn"
 needless_pass_by_ref_mut = "warn"
-# A collection built only to be iterated or counted is an iterator.
 needless_collect = "warn"
 rc_buffer = "warn"
 rc_mutex = "warn"
 str_to_string = "warn"
 unnecessary_struct_initialization = "warn"
-# A future that is not `Send` holds an `Rc`, a `RefCell`, or a guard across an
-# `.await`, and can't move between the runtime's threads.
 future_not_send = "warn"
 
-# Locks.
-# A guard held through a `match` or `if let` body is a deadlock waiting to happen.
 significant_drop_in_scrutinee = "warn"
 await_holding_lock = "warn"
-# A lock around a bool or an integer is an atomic.
 mutex_atomic = "warn"
 mutex_integer = "warn"
-# significant_drop_tightening stays off: 18 hits (tried 2026-11-11), 12 sampled,
-# none a lock held over slow work. Each guard is needed to the end of its scope (a
-# condvar loop, a block that is already the critical section) or outlives its last
-# use by one expression that builds the return value.
 
-# Numbers.
-# Numeric conversions are explicit (`From` / `try_from`), never `as`.
 as_conversions = "warn"
 lossy_float_literal = "warn"
 imprecise_flops = "warn"
@@ -207,13 +180,10 @@ suboptimal_flops = "warn"
 unused_rounding = "warn"
 while_float = "warn"
 
-# Output goes through `tracing`.
 print_stdout = "warn"
 print_stderr = "warn"
 
-# Plain code.
 branches_sharing_code = "warn"
-# The threshold is 15 (clippy.toml).
 cognitive_complexity = "warn"
 clear_with_drain = "warn"
 collection_is_never_read = "warn"
@@ -248,14 +218,3 @@ unused_peekable = "warn"
 use_self = "warn"
 useless_let_if_seq = "warn"
 verbose_file_reads = "warn"
-
-# vulcan lints left off:
-# - shadow_reuse: 188 hits, 12 sampled, all a value refined under its own name
-#   (`let subject = subject.trim()`, `let Some(row) = row else`). A second name
-#   would leave the stale value in scope to be used by mistake.
-# - tests_outside_test_module: 53 hits, all in integration test crates
-#   (`crates/*/tests`, `tests/`), which only ever build as tests.
-# - the lints vulcan allows (len_without_is_empty, wrong_self_convention,
-#   result_large_err, manual_unwrap_or, and so on) stay on:
-#   this workspace passes them.
-

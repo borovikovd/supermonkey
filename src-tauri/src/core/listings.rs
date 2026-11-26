@@ -1,0 +1,488 @@
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::Duration;
+
+use chrono::TimeZone as _;
+use parking_lot::Mutex;
+use tokio::sync::Notify;
+use tokio_util::sync::CancellationToken;
+
+use crate::domain::query::{Query, gmail_query};
+use crate::domain::{
+    AccountId, GmailListing, GmailThreadId, PageToken, SubId, SystemLabel, ThreadId,
+};
+use crate::gmail::{Format, Gmail, GmailError, Outcome, Priority as GmailPriority, ThreadQuery};
+use crate::ipc::SubKey;
+use crate::store::{Priority as StorePriority, ReadPool, StoreError, Writer};
+
+use super::runtime::{Activity, Clock, Signal, Tasks};
+use super::subs::ListingState;
+use super::sync::AccountManager;
+use super::sync::ingest::fetch_and_ingest_thread;
+use super::writer_state::{SubOp, WriterState};
+
+const LISTING_PAGE_SIZE: u32 = 15;
+const SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
+
+struct SubListing {
+    account: AccountId,
+    cancel: CancellationToken,
+    more: Arc<Notify>,
+}
+
+#[derive(Clone)]
+pub(crate) struct ListingManager {
+    inner: Arc<ListingInner>,
+}
+
+struct ListingInner {
+    accounts: AccountManager,
+    pool: Arc<ReadPool>,
+    writer: Writer<WriterState>,
+    clock: Clock,
+    online: Signal<bool>,
+    activity: Activity,
+    tasks: Tasks,
+    subs: Mutex<HashMap<SubId, SubListing>>,
+}
+
+impl std::fmt::Debug for ListingManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ListingManager").finish_non_exhaustive()
+    }
+}
+
+impl ListingManager {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "listing manager coordinates Gmail pagination, storage writes, clock debounce, and network state"
+    )]
+    #[must_use]
+    pub(crate) fn new(
+        accounts: AccountManager,
+        pool: Arc<ReadPool>,
+        writer: Writer<WriterState>,
+        clock: Clock,
+        online: Signal<bool>,
+        activity: Activity,
+        tasks: Tasks,
+    ) -> Self {
+        Self {
+            inner: Arc::new(ListingInner {
+                accounts,
+                pool,
+                writer,
+                clock,
+                online,
+                activity,
+                tasks,
+                subs: Mutex::new(HashMap::new()),
+            }),
+        }
+    }
+
+    pub(crate) fn subscribe(&self, sub: SubId, account: AccountId, key: SubKey) {
+        self.unsubscribe(&sub);
+        let cancel = self.inner.tasks.token().child_token();
+        let more = Arc::new(Notify::new());
+        self.inner.subs.lock().insert(
+            sub.clone(),
+            SubListing {
+                account,
+                cancel: cancel.clone(),
+                more: Arc::clone(&more),
+            },
+        );
+        let inner = Arc::clone(&self.inner);
+        self.inner.tasks.spawn(async move {
+            run_listing(inner, sub, account, key, more, cancel).await;
+        });
+    }
+
+    pub(crate) fn more_results(&self, sub: &SubId) {
+        if let Some(entry) = self.inner.subs.lock().get(sub) {
+            entry.more.notify_one();
+        }
+    }
+
+    pub(crate) fn unsubscribe(&self, sub: &SubId) {
+        let entry = self.inner.subs.lock().remove(sub);
+        if let Some(entry) = entry {
+            entry.cancel.cancel();
+        }
+    }
+
+    pub(crate) fn cancel_account(&self, account: AccountId) {
+        self.inner.subs.lock().retain(|_, entry| {
+            if entry.account == account {
+                entry.cancel.cancel();
+                false
+            } else {
+                true
+            }
+        });
+    }
+
+    pub(crate) fn reset(&self) {
+        let all = std::mem::take(&mut *self.inner.subs.lock());
+        for (_, entry) in all {
+            entry.cancel.cancel();
+        }
+    }
+}
+
+enum RemoteQuery {
+    Search { q: String, include_spam_trash: bool },
+    View(GmailListing),
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    clippy::too_many_lines,
+    clippy::cognitive_complexity,
+    reason = "pagination loop handles search debounce, offline pause/resume, auth failures, and MoreResults"
+)]
+async fn run_listing(
+    inner: Arc<ListingInner>,
+    sub: SubId,
+    account: AccountId,
+    key: SubKey,
+    more: Arc<Notify>,
+    cancel: CancellationToken,
+) {
+    let remote_query = match key {
+        SubKey::Search { query, .. } => {
+            let sleep = inner.clock.sleep(SEARCH_DEBOUNCE);
+            tokio::pin!(sleep);
+            tokio::select! {
+                biased;
+                () = cancel.cancelled() => return,
+                () = &mut sleep => {}
+            }
+            let gmail_q = gmail_query(&query);
+            if gmail_q.trim().is_empty() {
+                set_listing_state(&inner.writer, &sub, ListingState::default()).await;
+                return;
+            }
+            let offset = inner.clock.local_offset();
+            let now_dt = offset
+                .timestamp_millis_opt(inner.clock.now().0)
+                .single()
+                .unwrap_or_else(|| chrono::Utc::now().with_timezone(&offset));
+            let parsed = Query::parse_search(&query, &now_dt);
+            RemoteQuery::Search {
+                q: gmail_q,
+                include_spam_trash: parsed.looks_in_trash(),
+            }
+        }
+        SubKey::List { view, .. } => match view.gmail_listing() {
+            Some(listing) => RemoteQuery::View(listing),
+            None => return,
+        },
+        SubKey::App
+        | SubKey::Account { .. }
+        | SubKey::Conversation { .. }
+        | SubKey::Composer { .. } => return,
+    };
+
+    let mut page_token: Option<PageToken> = None;
+    let mut remote_hits: Vec<ThreadId> = Vec::new();
+    let mut seen_hits: HashSet<ThreadId> = HashSet::new();
+    let mut online_rx = inner.online.subscribe();
+
+    loop {
+        if cancel.is_cancelled() {
+            return;
+        }
+        if !inner.online.get() {
+            set_listing_state(
+                &inner.writer,
+                &sub,
+                ListingState {
+                    remote_hits: remote_hits.clone(),
+                    searching: false,
+                    more: page_token.is_some(),
+                },
+            )
+            .await;
+            if !wait_for_online(&mut online_rx, &cancel).await {
+                return;
+            }
+            continue;
+        }
+
+        let Some(slot) = inner.accounts.slot(account) else {
+            return;
+        };
+        let Some((grant_gen, gmail)) = slot.gmail() else {
+            set_listing_state(
+                &inner.writer,
+                &sub,
+                ListingState {
+                    remote_hits: remote_hits.clone(),
+                    searching: false,
+                    more: false,
+                },
+            )
+            .await;
+            return;
+        };
+
+        let busy = inner.activity.enter();
+        set_listing_state(
+            &inner.writer,
+            &sub,
+            ListingState {
+                remote_hits: remote_hits.clone(),
+                searching: true,
+                more: page_token.is_some(),
+            },
+        )
+        .await;
+
+        let Some(page_res) = cancel
+            .run_until_cancelled(fetch_listing_page(
+                &gmail,
+                &inner.pool,
+                account,
+                &remote_query,
+                page_token.as_ref(),
+            ))
+            .await
+        else {
+            return;
+        };
+
+        let page = match page_res {
+            Ok(p) => p,
+            Err(err) if matches!(err.outcome, Outcome::InvalidGrant | Outcome::Unauthorized) => {
+                slot.mark_auth_failed(grant_gen).await;
+                return;
+            }
+            Err(err) if err.outcome == Outcome::Offline || !inner.online.get() => {
+                set_listing_state(
+                    &inner.writer,
+                    &sub,
+                    ListingState {
+                        remote_hits: remote_hits.clone(),
+                        searching: false,
+                        more: page_token.is_some(),
+                    },
+                )
+                .await;
+                drop(busy);
+                if !wait_for_online(&mut online_rx, &cancel).await {
+                    return;
+                }
+                continue;
+            }
+            Err(_) => {
+                set_listing_state(
+                    &inner.writer,
+                    &sub,
+                    ListingState {
+                        remote_hits: remote_hits.clone(),
+                        searching: false,
+                        more: page_token.is_some(),
+                    },
+                )
+                .await;
+                return;
+            }
+        };
+
+        for tref in page.threads {
+            if cancel.is_cancelled() {
+                return;
+            }
+            let Some(local_tid) = cancel
+                .run_until_cancelled(resolve_or_fetch_hit(
+                    account,
+                    &gmail,
+                    &inner.pool,
+                    &inner.writer,
+                    &inner.clock,
+                    &tref.id,
+                ))
+                .await
+            else {
+                return;
+            };
+            if let Some(tid) = local_tid
+                && seen_hits.insert(tid)
+            {
+                remote_hits.push(tid);
+            }
+        }
+
+        page_token = page.next_page_token;
+        let has_more = page_token.is_some();
+        set_listing_state(
+            &inner.writer,
+            &sub,
+            ListingState {
+                remote_hits: remote_hits.clone(),
+                searching: false,
+                more: has_more,
+            },
+        )
+        .await;
+        drop(busy);
+
+        if !has_more {
+            return;
+        }
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => return,
+            () = more.notified() => {}
+        }
+    }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "maps search, query view, and label view listings to Gmail threads.list parameters"
+)]
+async fn fetch_listing_page(
+    gmail: &Gmail,
+    pool: &ReadPool,
+    account: AccountId,
+    query: &RemoteQuery,
+    page_token: Option<&PageToken>,
+) -> Result<crate::gmail::ThreadPage, GmailError> {
+    match query {
+        RemoteQuery::Search {
+            q,
+            include_spam_trash,
+        } => {
+            gmail
+                .list_threads(
+                    ThreadQuery {
+                        q: Some(q.as_str()),
+                        label_id: None,
+                        include_spam_trash: *include_spam_trash,
+                        max_results: Some(LISTING_PAGE_SIZE),
+                        page_token,
+                    },
+                    GmailPriority::P3,
+                )
+                .await
+        }
+        RemoteQuery::View(GmailListing::Query(q)) => {
+            gmail
+                .list_threads(
+                    ThreadQuery {
+                        q: (!q.is_empty()).then_some(q.as_str()),
+                        label_id: None,
+                        include_spam_trash: false,
+                        max_results: Some(LISTING_PAGE_SIZE),
+                        page_token,
+                    },
+                    GmailPriority::P3,
+                )
+                .await
+        }
+        RemoteQuery::View(GmailListing::Label {
+            label,
+            include_spam_trash,
+        }) => {
+            let owned_gid;
+            let wire_label = if SystemLabel::is_system_id(label.as_str()) {
+                label
+            } else {
+                let found = pool
+                    .with(|db| db.label_by_id(account, label))
+                    .ok()
+                    .flatten()
+                    .and_then(|l| l.gmail_id);
+                let Some(gid) = found else {
+                    return Ok(crate::gmail::ThreadPage::default());
+                };
+                owned_gid = gid;
+                &owned_gid
+            };
+            gmail
+                .list_threads(
+                    ThreadQuery {
+                        q: None,
+                        label_id: Some(wire_label),
+                        include_spam_trash: *include_spam_trash,
+                        max_results: Some(LISTING_PAGE_SIZE),
+                        page_token,
+                    },
+                    GmailPriority::P3,
+                )
+                .await
+        }
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "resolves cached thread or fetches full thread from Gmail with clock and writer"
+)]
+async fn resolve_or_fetch_hit(
+    account: AccountId,
+    gmail: &Gmail,
+    pool: &ReadPool,
+    writer: &Writer<WriterState>,
+    clock: &Clock,
+    gtid: &GmailThreadId,
+) -> Option<ThreadId> {
+    if let Some(tid) = pool
+        .with(|db| db.thread_by_gmail(account, gtid))
+        .ok()
+        .flatten()
+    {
+        return Some(tid);
+    }
+    fetch_and_ingest_thread(
+        account,
+        gmail,
+        pool,
+        writer,
+        clock,
+        None,
+        gtid,
+        Format::Metadata,
+        GmailPriority::P3,
+        false,
+    )
+    .await
+    .ok()
+    .and_then(|r| r.thread_id)
+}
+
+async fn set_listing_state(writer: &Writer<WriterState>, sub: &SubId, listing: ListingState) {
+    let id = sub.clone();
+    super::log_err(
+        "update listing state",
+        writer
+            .call(StorePriority::Sync, move |_tx, state| {
+                state.stage_sub(SubOp::SetListing(id, listing));
+                Ok::<_, StoreError>(())
+            })
+            .await,
+    );
+}
+
+async fn wait_for_online(
+    rx: &mut tokio::sync::watch::Receiver<bool>,
+    cancel: &CancellationToken,
+) -> bool {
+    loop {
+        if *rx.borrow_and_update() {
+            return true;
+        }
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => return false,
+            res = rx.changed() => {
+                if res.is_err() {
+                    return false;
+                }
+            }
+        }
+    }
+}

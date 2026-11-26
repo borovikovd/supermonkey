@@ -492,7 +492,7 @@ Events: close, repeat, send, discard, undo, quit, elsewhere, account, offline.
 - repeat: SND-26
 - send: n/a: the draft is in the outbox and is never resumed
 - discard: n/a: no composer or Drafts row reaches a draft in the outbox
-- undo: SND-05, SND-15, SND-21, SND-17, `crates/sm-core/src/outbox/machine.rs`
+- undo: SND-05, SND-15, SND-21, SND-17, `src/core/outbox.rs`
 - quit: SND-09, SND-14
 - elsewhere: SND-23
 - account: SND-24
@@ -536,26 +536,26 @@ Events: close, repeat, send, discard, undo, quit, elsewhere, account, offline.
 
 ## Not covered end-to-end, and why
 
-- The native shell's own glue (a second launch focuses the window, closing hides it, a Dock click shows it, size and position restored but not visibility, the overlay title bar, and which window and macOS events reach the session): the native shell is not exercised. What the app does on those events is `sm-bridge`'s `Session`, which the E2E server runs too: the suite's quit is the session's quit request, which the menu bar's Quit calls (UIC-05, UIC-10, UIC-11, ATT-09); its crash is the session's end, which macOS's terminate (Quit in the Dock, logout) calls; the window's show is UIC-09. `tests/menu.rs` checks that the menu bar's Quit is the app's own. Checked by hand on a real Mac with the release build, on a test account:
+- The native shell's own glue (a second launch focuses the window, closing hides it, a Dock click shows it, size and position restored but not visibility, the overlay title bar, and which window and macOS events reach the session): the native shell is not exercised. What the app does on those events is `src/session/mod.rs`'s `Session`, which the E2E server runs too: the suite's quit is the session's quit request, which the menu bar's Quit calls (UIC-05, UIC-10, UIC-11, ATT-09); its crash is the session's end, which macOS's terminate (Quit in the Dock, logout) calls; the window's show is UIC-09. `tests/menu.rs` checks that the menu bar's Quit is the app's own. Checked by hand on a real Mac with the release build, on a test account:
   - type in a composer and `Cmd+Q` within 0.5 s: the text is there on relaunch, and in the Gmail draft;
   - the same with the window hidden (`Cmd+W`) and with it minimized;
   - archive, `Cmd+Q` at once: archived on relaunch, and in Gmail once online;
   - archive, then Quit in the Dock at once: archived on relaunch;
   - in a debug build, with the page paused at a breakpoint in the Web Inspector: the app quits 10 s after `Cmd+Q`.
 - Real Google OAuth (the system browser, the unverified-app warning, a production consent screen): the fake OAuth stands in, and ACC-01 checks the token file and the auth URL's scope, PKCE, and loopback. Checked by hand against two real accounts.
-- Performance budgets, the keydown-to-paint meter, 60 fps scrolling, cold launch: CI WebKit is not the M1 target. Checked on the perf fixture (`crates/sm-core/src/tests/perf.rs`).
+- Performance budgets, the keydown-to-paint meter, 60 fps scrolling, cold launch: CI WebKit is not the M1 target. Checked on the perf fixture (`tests/perf.rs`).
 - Look, Motion, and Reduce Motion: visual, not behavior; SET-03 checks the hint size and the shortcut sheet. Design review.
-- The quota bucket, the six priorities, and at most 8 requests per account: internal scheduling, not stable through the UI; SYN-07 is a smoke check. `crates/sm-gmail/tests/gmail/scheduler.rs`.
-- The back-off jitter: random; ERR-02 checks `Retry-After` and that gaps grow. `crates/sm-gmail/tests/gmail/scheduler.rs`.
-- OAuth protocol edges (a wrong `state`, concurrent 401s sharing one refresh, refresh before expiry, secrets out of debug output): below the UI. `crates/sm-gmail/tests/gmail/oauth.rs`.
+- The quota bucket, the six priorities, and at most 8 requests per account: internal scheduling, not stable through the UI; SYN-07 is a smoke check. `tests/gmail.rs`.
+- The back-off jitter: random; ERR-02 checks `Retry-After` and that gaps grow. `tests/gmail.rs`.
+- OAuth protocol edges (a wrong `state`, concurrent 401s sharing one refresh, refresh before expiry, secrets out of debug output): below the UI. `tests/gmail.rs`.
 - How each HTTP response maps to an outcome: the ERR cases and SND-08 cover each outcome's behavior; the mapping is implied.
-- The sanitizer policy, element by element: SEC-01 checks a hostile sample end to end. `crates/sm-mime/tests/sanitize.rs`.
-- MIME parsing robustness (charsets, malformed headers, random input): fuzzing, not E2E; ATT-04 has one encoded-subject round trip. `crates/sm-mime/tests/no_panic.rs`.
-- The query language's grammar, errors, FTS translation, and Unicode matching: pure parsing; SRC-02, SRC-11, SRC-12, and SPL-06 check one query per family and the wiring. `crates/sm-domain/src/query/tests.rs`.
-- Snooze times across weekdays and DST, and the phrase grammar: pure; SNZ-01 checks a normal hour and SNZ-02 the 18:00 boundary. `crates/sm-domain/src/snooze/options.rs`.
-- Contact scores (recency halving every 90 days, word-start matching): pure; RCP-02 checks tier order and exclusions from real mail. `crates/sm-domain/src/contacts.rs`.
-- Person-to-person routing over every label combination: pure; SPL-01 checks the list flag and four categories. `crates/sm-domain/src/tests.rs`.
-- Writer and channel ordering (`rev`, `ack`, patches against first loads): races E2E can't force; UIC-01 checks the visible no-flash rule. `crates/sm-core/src/tests/writer_channel.rs`.
+- The sanitizer policy, element by element: SEC-01 checks a hostile sample end to end. `tests/mime.rs`.
+- MIME parsing robustness (charsets, malformed headers, random input): fuzzing, not E2E; ATT-04 has one encoded-subject round trip. `tests/mime.rs`.
+- The query language's grammar, errors, FTS translation, and Unicode matching: pure parsing; SRC-02, SRC-11, SRC-12, and SPL-06 check one query per family and the wiring. `src/domain/query/mod.rs`.
+- Snooze times across weekdays and DST, and the phrase grammar: pure; SNZ-01 checks a normal hour and SNZ-02 the 18:00 boundary. `src/domain/snooze.rs`.
+- Contact scores (recency halving every 90 days, word-start matching): pure; RCP-02 checks tier order and exclusions from real mail. `src/domain/contacts.rs`.
+- Person-to-person routing over every label combination: pure; SPL-01 checks the list flag and four categories. `src/domain/thread.rs`.
+- Writer and channel ordering (`rev`, `ack`, patches against first loads): races E2E can't force; UIC-01 checks the visible no-flash rule. `tests/engine.rs`.
 - The mirror's re-application of pending actions in detail: UND-05, UIC-01, TRI-01, and TRI-10 cover the behavior; exact `ack` interleavings can't be forced E2E.
 - Table schemas and `rev` and action-number values: internal.
 - A due snooze not yet woken staying in Snoozed: true only while the app is not running; SNZ-04 checks that Gmail keeps it out of Inbox meanwhile and that it wakes before the first paint.
@@ -567,28 +567,23 @@ Events: close, repeat, send, discard, undo, quit, elsewhere, account, offline.
 
 Unit tests only for complex algorithms, security properties, and races the suite can't reach (AGENTS.md); the suite doesn't repeat their partitions. Paths are under `src-tauri/`.
 
-- `crates/sm-domain/src/query/tests.rs`: lenient and strict parsing and its errors, operator case and precedence, search operators and scope, split rules refusing search terms, FTS5 translation and escaping, `is:list` stripped for Gmail (E2E: SRC-02, SRC-11, SRC-12, SPL-06).
-- `crates/sm-domain/src/tests.rs`: a thread's latest message, digest and views, label changes and their undo, split routing and pin precedence, the latest message from someone else, and which message a Gmail draft answers (SPL-03, SPL-07).
-- `crates/sm-domain/src/snooze/options.rs` and `crates/sm-domain/src/snooze/text.rs`: options before and after 18:00 and on every weekday, DST gaps and folds, the phrase grammar (SNZ-01, SNZ-02).
-- `crates/sm-domain/src/contacts.rs`: autocomplete matching, ranking, and no-reply addresses.
-- `crates/sm-mime/tests/sanitize.rs`: the hostile fixture, what is kept and dropped, `rel=noopener`, `cid:` to `data:`, text extraction (SEC-01).
-- `crates/sm-mime/tests/payload.rs`: a charset with no decoder read as undeclared text; the attachments inside an attached message, and not its body or inline images; an image is inline only when the HTML body shows it, by a plain or percent-encoded `cid:` reference, here and inside an attached message, and only those are fetched for the body (ATT-18).
-- `crates/sm-mime/tests/no_panic.rs`: 3,000 seeded random inputs through every parser and the sanitizer.
-- `crates/sm-mime/tests/addresses.rs`: `is_valid_email` against the address table the composer's copy of the rule is held to (RCP-11).
-- `crates/sm-mime/src/unsubscribe.rs`: the `List-Unsubscribe` parser and when one-click applies.
-- `crates/sm-mime/src/outgoing.rs`: user text can't add headers to an outgoing message.
-- `crates/sm-gmail/tests/gmail/scheduler.rs`: priorities, concurrency, quota, and a removed account starting afresh.
-- `crates/sm-gmail/tests/gmail/oauth.rs`: the `state` check, one refresh shared by concurrent 401s, secrets out of debug output.
-- `crates/sm-gmail/tests/gmail/client.rs`: one-click unsubscribe posts only to `https` and follows no redirect.
+- `src/domain/query/mod.rs`: lenient and strict parsing and its errors, operator case and precedence, search operators and scope, split rules refusing search terms, FTS5 translation and escaping, `is:list` stripped for Gmail (E2E: SRC-02, SRC-11, SRC-12, SPL-06).
+- `src/domain/thread.rs`: a thread's latest message, digest and views, label changes and their undo, split routing and pin precedence, and the latest message from someone else (SPL-03, SPL-07).
+- `src/domain/draft.rs`: draft lifecycle transitions and which message a Gmail draft answers.
+- `src/domain/snooze.rs`: options before and after 18:00 and on every weekday, DST gaps and folds, the phrase grammar (SNZ-01, SNZ-02).
+- `src/domain/contacts.rs`: autocomplete matching, ranking, and no-reply addresses.
+- `tests/mime.rs`: the hostile fixture, what is kept and dropped, `rel=noopener`, `cid:` to `data:`, text extraction (SEC-01); a charset with no decoder read as undeclared text; attachments inside an attached message and inline `cid:` selection (ATT-18); 3,000 seeded random inputs through every parser and the sanitizer; `is_valid_email` against the address table (RCP-11).
+- `src/mime/unsubscribe.rs`: the `List-Unsubscribe` parser and when one-click applies.
+- `src/mime/outgoing.rs`: user text can't add headers to an outgoing message.
+- `tests/gmail.rs`: priorities, concurrency, quota, and a removed account starting afresh; the `state` check, one refresh shared by concurrent 401s, secrets out of debug output; one-click unsubscribe posts only to `https` and follows no redirect.
 - `crates/sm-fake-gmail/tests/holds.rs`: a release racing a held reply never strands it.
-- `crates/sm-store/tests/store/writer.rs`, `crates/sm-store/src/writer.rs`, and `crates/sm-store/src/reply.rs`: writer priority and order, rollbacks and savepoints, panics, `rev`, stopping, awaiting results.
-- `crates/sm-store/src/open.rs`: a database of another schema version, or not a database, is moved aside and a fresh one made; a locked one, or one that can't be opened, is left in place and the open fails.
-- `crates/sm-core/src/tests/writer_channel.rs`: proptest that a list built from its first load and patches equals a fresh load at that `rev`; action numbers after a reload, first loads after a failed commit, `ack` never moving back and a failed batch's actions refused no later than the message that acks them, a panicking commit still going idle, searches and label reads whose commit failed (UIC-01).
-- `crates/sm-core/src/subs/diff.rs`: list diffs as moves.
-- `crates/sm-core/src/tests/clock.rs`: the activity tracking `settle()` relies on, and a stopping task group waiting for the groups inside it.
-- `crates/sm-core/src/outbox/machine.rs`: every send event in every outbox state.
-- `crates/sm-core/src/drafts/lifecycle/state.rs`: every draft transition in every stage: the untouched rule, waits for parts and a target's body, Gmail's ids and a create in question, a skipped Gmail change.
-- `crates/sm-core/src/tests/perf.rs` (ignored; needs `SUPERMONKEY_PERF_DB`): local search and autocomplete against the performance budgets.
-- `crates/sm-bridge/src/web.rs`: the debug web bridge answers only loopback hosts and its own origins.
-- `tests/layers.rs`: the crate layering: which workspace crates each may depend on, and which crates alone may use `rusqlite`, `reqwest`, `tauri`, and `axum`.
+- `tests/store.rs` and `src/store/actor.rs`: writer priority and order, rollbacks and savepoints, panics, `rev`, stopping, awaiting results; a database of another schema version, or not a database, is moved aside and a fresh one made; a locked one, or one that can't be opened, is left in place and the open fails.
+- `tests/engine.rs`: proptest that a list built from its first load and patches equals a fresh load at that `rev`; action numbers after a reload, first loads after a failed commit, `ack` never moving back and a failed batch's actions refused no later than the message that acks them, a panicking commit still going idle, searches and label reads whose commit failed (UIC-01).
+- `src/core/subs.rs`: list diffs as moves.
+- `src/core/runtime.rs`: the activity tracking `settle()` relies on, and a stopping task group waiting for the groups inside it.
+- `src/core/outbox.rs`: every send event in every outbox state.
+- `src/core/drafts.rs`: attachment merging and untouched rules.
+- `tests/perf.rs` (ignored; needs `SUPERMONKEY_PERF_DB`): local search and autocomplete against the performance budgets.
+- `src/session/web.rs`: the debug web bridge answers only loopback hosts and its own origins.
+- `tests/architecture.rs`: the module and crate layering: workspace membership, and which modules alone may use `rusqlite`, `reqwest`, `tauri`, and `axum`.
 - `tests/menu.rs`: the menu bar is Tauri's standard one with the app's own Quit in place of the predefined one, which would end the app without asking the page (UIC-05).
