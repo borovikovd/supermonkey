@@ -1,4 +1,4 @@
-use crate::domain::{AccountId, Addr, SystemLabel, ThreadId, email_domain};
+use crate::domain::{AccountId, Addr, ThreadId, email_domain};
 use crate::gmail::{HttpClient, Priority as GmailPriority, one_click_unsubscribe};
 use crate::ipc::{BlockResult, BlockedSender, BlockedSenders, Unsubscribed};
 use crate::mime::{Mailto, PlainMessage, build_plain, list_unsubscribe};
@@ -220,16 +220,12 @@ pub(crate) async fn list_blocked_senders(
     {
         Ok(filters) => {
             let senders = filters
-                .into_iter()
-                .filter(|f| {
-                    f.action
-                        .add_label_ids
-                        .iter()
-                        .any(|l| l.as_str() == SystemLabel::Trash.id())
-                })
+                .iter()
                 .filter_map(|f| {
-                    let from = f.criteria.from?;
-                    (!from.trim().is_empty()).then_some(BlockedSender { id: f.id.0, from })
+                    f.blocked_sender().map(|from| BlockedSender {
+                        id: f.id.0.clone(),
+                        from: from.to_owned(),
+                    })
                 })
                 .collect();
             Ok(BlockedSenders::List { senders })
@@ -249,17 +245,10 @@ pub(crate) async fn unblock_sender(
         .check(client.gmail().list_filters(GmailPriority::P1).await)
         .await
         .map_err(|err| CoreError::other(err.to_string()))?;
-    let Some(matched) = filters.into_iter().find(|f| {
-        f.id.0 == filter_id
-            && f.criteria
-                .from
-                .as_deref()
-                .is_some_and(|from| !from.trim().is_empty())
-            && f.action
-                .add_label_ids
-                .iter()
-                .any(|l| l.as_str() == SystemLabel::Trash.id())
-    }) else {
+    let Some(matched) = filters
+        .into_iter()
+        .find(|f| f.id.0 == filter_id && f.blocked_sender().is_some())
+    else {
         return Err(CoreError::other("Blocked sender not found"));
     };
     client

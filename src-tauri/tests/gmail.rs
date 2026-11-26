@@ -214,3 +214,40 @@ fn a_token_stored_under_a_mixed_case_address_is_found() {
         Some("1//earlier".to_owned())
     );
 }
+
+#[test]
+fn only_a_filter_that_trashes_all_mail_from_a_sender_counts_as_a_block() {
+    let filters: Vec<supermonkey_lib::gmail::Filter> = serde_json::from_value(serde_json::json!([
+        {
+            "id": "block",
+            "criteria": { "from": "news@news.test" },
+            "action": { "addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"] }
+        },
+        {
+            "id": "narrow-subject",
+            "criteria": { "from": "boss@corp.test", "subject": "lunch menu" },
+            "action": { "addLabelIds": ["TRASH"] }
+        },
+        {
+            "id": "narrow-attachment",
+            "criteria": { "from": "scans@corp.test", "hasAttachment": true },
+            "action": { "addLabelIds": ["TRASH"] }
+        },
+        {
+            "id": "label-only",
+            "criteria": { "from": "list@corp.test" },
+            "action": { "addLabelIds": ["Label_1"] }
+        },
+        {
+            "id": "no-sender",
+            "criteria": { "query": "unsubscribe" },
+            "action": { "addLabelIds": ["TRASH"] }
+        }
+    ]))
+    .unwrap();
+    let blocked: Vec<&str> = filters
+        .iter()
+        .filter_map(supermonkey_lib::gmail::Filter::blocked_sender)
+        .collect();
+    assert_eq!(blocked, vec!["news@news.test"]);
+}

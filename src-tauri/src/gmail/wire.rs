@@ -1,7 +1,10 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Deserializer, de};
 
 use crate::domain::{
     FilterId, GmailDraftId, GmailMessageId, GmailThreadId, HistoryId, LabelId, Millis, PageToken,
+    SystemLabel,
 };
 use crate::mime::WirePart;
 
@@ -181,10 +184,25 @@ pub struct Filter {
     pub action: FilterAction,
 }
 
+impl Filter {
+    #[must_use]
+    pub fn blocked_sender(&self) -> Option<&str> {
+        let from = self.criteria.from.as_deref()?;
+        let trashes = self
+            .action
+            .add_label_ids
+            .iter()
+            .any(|l| l.as_str() == SystemLabel::Trash.id());
+        (trashes && !from.trim().is_empty() && self.criteria.narrowed_by.is_empty()).then_some(from)
+    }
+}
+
 #[derive(Debug, Default, Clone, Deserialize)]
 pub struct FilterCriteria {
     #[serde(default)]
     pub from: Option<String>,
+    #[serde(flatten)]
+    pub narrowed_by: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
