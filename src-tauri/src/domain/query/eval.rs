@@ -240,11 +240,7 @@ fn fts_term(field: Field, value: &str, prefix: bool) -> Option<String> {
             }
         })
         .collect();
-    if terms.len() == 1 {
-        Some(format!("{col} : {}", terms[0]))
-    } else {
-        Some(format!("({col} : {})", terms.join(" AND ")))
-    }
+    Some(format!("{col} : {}", terms.join(" + ")))
 }
 
 pub(super) fn matches(expr: &Expr, target: &MatchTarget<'_>) -> bool {

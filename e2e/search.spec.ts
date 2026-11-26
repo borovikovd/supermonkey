@@ -169,6 +169,59 @@ test("SRC-02 local query language, and what is sent to Gmail", async ({ app, gma
   expect(await gmailSearches(gmail, since)).toEqual(["digest"]);
 });
 
+test("SRC-19 an address or a quoted phrase is matched whole, not as loose words anywhere in the message", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.empty(gmail, app);
+  await gmail.deliverMany([
+    {
+      account: A,
+      from: "Carol Stone <carol@other.test>",
+      to: [A],
+      subject: "Another Carol",
+      text: "Nothing to see.",
+    },
+    {
+      account: A,
+      from: "Carol Acme <carol@acme.test>",
+      to: [A],
+      subject: "The Carol asked for",
+      text: "Nothing to see.",
+    },
+    {
+      account: A,
+      from: "Pat Person <pat@corp.test>",
+      subject: "Has the phrase",
+      text: "You must be brilliant today.",
+    },
+    {
+      account: A,
+      from: "Pat Person <pat@corp.test>",
+      subject: "Has only the words",
+      text: "Brilliant ideas should be shared.",
+    },
+  ]);
+  await app.settle();
+
+  const table: [string, string[], string[]][] = [
+    ["from:carol@acme.test", ["The Carol asked for"], ["Another Carol"]],
+    ['"be brilliant"', ["Has the phrase"], ["Has only the words"]],
+    ["from:carol", ["The Carol asked for", "Another Carol"], ["Has the phrase"]],
+  ];
+  await inOrder(table, async ([query, include, exclude]) => {
+    await search(app, query);
+    await Promise.all([
+      ...include.map((subject) =>
+        expect(app.row(subject), `${query} finds ${subject}`).toHaveCount(1),
+      ),
+      ...exclude.map((subject) =>
+        expect(app.row(subject), `${query} skips ${subject}`).toHaveCount(0),
+      ),
+    ]);
+  });
+});
+
 test("SRC-03 Gmail hits are merged in as their metadata arrives", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
   const invoice = s.thread("invoiceOld").threadId;
