@@ -321,4 +321,23 @@ test.describe("notifications", () => {
     await app.settle();
     await expect(app.row("Person 1")).toBeVisible();
   });
+
+  test("NOT-07 new mail read by a poll that then fails still notifies once the poll goes through", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    await gmail.clearRecorded();
+    await gmail.fault("drafts.list", { kind: "status", status: 503 }, { account: A, times: 1 });
+    await gmail.deliver(fresh(A, "Read by a failed poll"));
+    await gmail.poll();
+    await app.settle();
+    await expect(app.row("Read by a failed poll")).toHaveCount(1);
+
+    await app.advance(60_000);
+    await app.settle();
+    const raised = await notes(gmail);
+    expect(raised.map((n) => n.account)).toEqual([A]);
+    expect(raised[0]?.title).toContain("Nia New");
+  });
 });

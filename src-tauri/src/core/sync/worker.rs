@@ -17,7 +17,7 @@ use crate::mime::parse_message;
 use crate::store::{ContactSighting, Priority as StorePriority, ReadPool, StoreError, Writer};
 
 use super::super::drafts::DraftFiles;
-use super::super::events::Effect;
+use super::super::events::{Effect, NewMailAlert};
 use super::super::network::Network;
 use super::super::runtime::{Activity, Clock, Kick, Tasks};
 use super::super::writer_state::{SubOp, WriterState};
@@ -43,6 +43,7 @@ pub(crate) struct AccountSlot {
     pub(crate) email: String,
     gmail: RwLock<Option<(u64, Arc<Gmail>)>>,
     health: Mutex<HealthState>,
+    unsent_alerts: Mutex<Vec<NewMailAlert>>,
     pub(crate) network: Network,
     tasks: Tasks,
     pub(crate) fetch_queue: FetchQueue,
@@ -89,6 +90,7 @@ impl AccountSlot {
             email,
             gmail: RwLock::new(initial),
             health: Mutex::new(HealthState::default()),
+            unsent_alerts: Mutex::new(Vec::new()),
             network,
             tasks,
             fetch_queue: FetchQueue::new(),
@@ -716,7 +718,6 @@ async fn run_incremental_poll(
     }
 
     let att_dir = slot.files.attachments_dir();
-    let mut alerts = Vec::new();
     let mut saw_unknown_label = false;
     for gtid in &changes.changed_threads {
         if cancel.is_cancelled() {
@@ -737,7 +738,7 @@ async fn run_incremental_poll(
         .await?;
         saw_unknown_label |= res.unknown_labels;
         enqueue_full_if_missing_body(slot, gtid, &res);
-        alerts.extend(res.alerts);
+        slot.unsent_alerts.lock().extend(res.alerts);
     }
 
     if saw_unknown_label {
@@ -782,6 +783,7 @@ async fn run_incremental_poll(
     let acct = slot.account;
     let email = slot.email.clone();
     let newest = changes.newest_history;
+    let alerts = std::mem::take(&mut *slot.unsent_alerts.lock());
     super::super::log_err(
         "advance history cursor",
         slot.writer
