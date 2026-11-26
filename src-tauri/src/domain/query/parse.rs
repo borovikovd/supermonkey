@@ -542,9 +542,9 @@ fn parse_date<Tz: TimeZone>(val: &str, now: &DateTime<Tz>) -> Option<Millis> {
 
 fn parse_relative<Tz: TimeZone>(val: &str, now: &DateTime<Tz>) -> Option<Millis> {
     let trimmed = val.trim();
-    let unit = trimmed.chars().last()?.to_ascii_lowercase();
-    let count: u32 = trimmed[..trimmed.len() - 1].parse().ok()?;
-    let target = match unit {
+    let unit = trimmed.chars().last()?;
+    let count: u32 = trimmed.strip_suffix(unit)?.parse().ok()?;
+    let target = match unit.to_ascii_lowercase() {
         'd' => now.clone().checked_sub_days(Days::new(u64::from(count)))?,
         'm' => now.clone().checked_sub_months(Months::new(count))?,
         'y' => now

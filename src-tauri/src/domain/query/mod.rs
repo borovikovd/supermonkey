@@ -287,6 +287,18 @@ mod tests {
     }
 
     #[test]
+    fn relative_date_with_a_non_ascii_unit_is_left_to_gmail() {
+        let now = Utc.with_ymd_and_hms(2026, 11, 2, 15, 0, 0).unwrap();
+        for raw in ["older_than:1年", "newer_than:2д", "newer_than:é"] {
+            assert!(
+                Query::parse_search(raw, &now).needs_gmail(),
+                "{raw} is not a unit this app reads"
+            );
+        }
+        assert!(!Query::parse_search("older_than:2D", &now).needs_gmail());
+    }
+
+    #[test]
     fn gmail_query_strips_is_list_and_dangling_operators() {
         assert_eq!(gmail_query("is:list digest"), "digest");
         assert_eq!(gmail_query("is:list"), "");
