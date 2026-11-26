@@ -453,6 +453,31 @@ test("SYN-12 a quit during the first sync loses none of it: starred and recent s
   await expect(app.row("Sent 89 days ago")).toHaveCount(1);
 });
 
+test("SYN-14 a quit while the first sync still reads starred and sent mail leaves it unfinished: the relaunch reads them", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app, { open: false });
+  const trip = s.thread("starredOld").threadId;
+  const read = await gmail.hold({ api: "threads.get", path: `*/threads/${trip}`, account: A });
+  await app.open();
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await app.settle();
+  await expect
+    .poll(async () => (await gmail.requests("threads.get", { account: A })).some((r) => r.held))
+    .toBe(true);
+
+  await app.restart(async () => {
+    await gmail.release({ id: read.id });
+  });
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await app.settle();
+
+  await app.press("g", "s");
+  await app.settle();
+  await expect(app.row("Trip ideas")).toHaveCount(1);
+});
+
 test("SYN-13 a quit during the contacts backfill does not end it: it runs again after the relaunch", async ({
   app,
   gmail,

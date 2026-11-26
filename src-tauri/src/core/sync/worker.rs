@@ -589,6 +589,10 @@ async fn run_connect_sync(
     .await;
     enqueue_full_batch(slot, &secondary, FetchPriority::ConnectSecondary);
 
+    if cancel.is_cancelled() {
+        return Ok(());
+    }
+
     let acct = slot.account;
     super::super::log_err(
         "mark account connected",
