@@ -186,7 +186,7 @@ async fn channel_ack_rejections_and_snooze_wake_work() {
                     ]
                     .into_iter()
                     .collect(),
-                    has_attachments: false,
+                    has_attachments: Some(false),
                 },
             )?;
             tx.derive_thread(tid)?;

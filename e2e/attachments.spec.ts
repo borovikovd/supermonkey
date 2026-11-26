@@ -735,4 +735,31 @@ test.describe("attachments", () => {
     await expect(refused).not.toContainText(/error|directory/i);
     await expect(app.page.getByRole("button", { name: "Remove notes.txt" })).toHaveCount(0);
   });
+
+  test("ATT-24 a conversation keeps its paperclip after it is read here or changed elsewhere", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    const scan = await gmail.deliver({
+      account: A,
+      from: "Ann Apple <ann@apple.test>",
+      subject: "Scan for you",
+      text: "The scan is attached.",
+      attachments: [attachment(files.reportPdf)],
+    });
+    await app.settle();
+    await expect(app.row("Scan for you")).toHaveAttribute("data-attachments");
+
+    await app.openAndSettle("Scan for you");
+    await app.press("Escape");
+    await app.pollAndSettle(A);
+    await expect(app.row("Scan for you")).not.toHaveAttribute("data-unread");
+    await expect(app.row("Scan for you")).toHaveAttribute("data-attachments");
+
+    await gmail.modify(A, scan.id, ["STARRED"], [], { poll: true });
+    await app.settle();
+    await app.press("g", "s");
+    await expect(app.row("Scan for you")).toHaveAttribute("data-attachments");
+  });
 });

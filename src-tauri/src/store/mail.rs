@@ -224,7 +224,7 @@ pub struct NewMessage {
     pub is_draft: bool,
     pub sm_draft_id: Option<DraftId>,
     pub labels: LabelSet,
-    pub has_attachments: bool,
+    pub has_attachments: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -732,7 +732,7 @@ impl WriteTx<'_> {
         encoded: &EncodedMessage,
     ) -> Result<(), StoreError> {
         self.read().execute(
-            "UPDATE messages SET thread_id = ?2, internal_date = ?3, from_name = ?4, from_email = ?5, to_addrs = ?6, cc_addrs = ?7, bcc_addrs = ?8, reply_to = ?9, subject = ?10, snippet = ?11, message_id_hdr = ?12, in_reply_to = ?13, references_hdr = ?14, is_list = ?15, is_draft = ?16, is_live = ?17, sm_draft_id = COALESCE(?18, sm_draft_id), label_ids = ?19, has_attachments = ?20, rev = ?21 WHERE id = ?1",
+            "UPDATE messages SET thread_id = ?2, internal_date = ?3, from_name = ?4, from_email = ?5, to_addrs = ?6, cc_addrs = ?7, bcc_addrs = ?8, reply_to = ?9, subject = ?10, snippet = ?11, message_id_hdr = ?12, in_reply_to = ?13, references_hdr = ?14, is_list = ?15, is_draft = ?16, is_live = ?17, sm_draft_id = COALESCE(?18, sm_draft_id), label_ids = ?19, has_attachments = COALESCE(?20, has_attachments), rev = ?21 WHERE id = ?1",
             params![
                 id,
                 thread,
@@ -753,7 +753,7 @@ impl WriteTx<'_> {
                 i64::from(encoded.is_live),
                 msg.sm_draft_id,
                 encoded.labels,
-                i64::from(msg.has_attachments),
+                msg.has_attachments.map(i64::from),
                 encoded.rev,
             ],
             "update message",
@@ -792,7 +792,7 @@ impl WriteTx<'_> {
                 i64::from(encoded.is_live),
                 msg.sm_draft_id,
                 encoded.labels,
-                i64::from(msg.has_attachments),
+                i64::from(msg.has_attachments.unwrap_or(false)),
                 encoded.rev,
             ],
             "insert message",

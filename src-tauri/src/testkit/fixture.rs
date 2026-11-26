@@ -141,7 +141,7 @@ pub fn generate_perf_db(path: &Path, thread_count: usize) -> Result<PerfStats, S
                         is_draft: false,
                         sm_draft_id: None,
                         labels,
-                        has_attachments: has_att,
+                        has_attachments: Some(has_att),
                     },
                 )?;
 

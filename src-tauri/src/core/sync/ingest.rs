@@ -224,7 +224,8 @@ async fn prepare_wire_thread(
             None
         };
 
-        let has_attachments = parsed.parts.iter().any(|p| !p.is_inline);
+        let has_attachments =
+            (format == Format::Full).then(|| parsed.parts.iter().any(|p| !p.is_inline));
         let snippet = if msg.snippet.is_empty() {
             body.as_ref()
                 .map(|b| snippet_text(&b.html))
