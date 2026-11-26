@@ -102,6 +102,7 @@ enum ApiError {
     NotFound,
     BadRequest(String),
     DuplicateLabel,
+    DuplicateFilter,
 }
 
 impl IntoResponse for ApiError {
@@ -125,6 +126,9 @@ impl IntoResponse for ApiError {
             Self::BadRequest(message) => google_error(400, "invalidArgument", &message, None),
             Self::DuplicateLabel => {
                 google_error(409, "duplicate", "Label name exists or conflicts", None)
+            }
+            Self::DuplicateFilter => {
+                google_error(400, "failedPrecondition", "Filter already exists", None)
             }
         }
     }
@@ -522,11 +526,19 @@ async fn create_filter(caller: Caller, body: Bytes) -> ApiResult {
                 })
                 .unwrap_or_default()
         };
+        let (add, remove) = (labels("addLabelIds"), labels("removeLabelIds"));
+        if mb
+            .filters
+            .iter()
+            .any(|f| f.from.eq_ignore_ascii_case(from) && f.add == add && f.remove == remove)
+        {
+            return Err(ApiError::DuplicateFilter);
+        }
         let filter = Filter {
             id: format!("ANe1Bm{}", mb.new_id()),
             from: from.to_owned(),
-            add: labels("addLabelIds"),
-            remove: labels("removeLabelIds"),
+            add,
+            remove,
         };
         let out = filter.json();
         mb.filters.push(filter);

@@ -98,6 +98,18 @@ impl Outcome {
     }
 
     #[must_use]
+    pub fn is_duplicate_filter(&self) -> bool {
+        matches!(
+            self,
+            Self::Rejected {
+                status: 400,
+                message,
+                ..
+            } if message.eq_ignore_ascii_case("Filter already exists")
+        )
+    }
+
+    #[must_use]
     pub const fn retry_after(&self) -> Option<Duration> {
         match self {
             Self::RateLimited { retry_after } => *retry_after,
@@ -138,6 +150,11 @@ impl GmailError {
     #[must_use]
     pub fn is_missing_scope(&self) -> bool {
         self.outcome.is_missing_scope()
+    }
+
+    #[must_use]
+    pub fn is_duplicate_filter(&self) -> bool {
+        self.outcome.is_duplicate_filter()
     }
 
     #[must_use]

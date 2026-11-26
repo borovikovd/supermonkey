@@ -203,6 +203,7 @@ pub(crate) async fn block_sender(
         .await
     {
         Ok(_) => Ok(BlockResult::Blocked { from: pattern }),
+        Err(err) if err.is_duplicate_filter() => Ok(BlockResult::Blocked { from: pattern }),
         Err(err) if err.is_missing_scope() => Ok(BlockResult::NeedsPermission),
         Err(err) => Err(CoreError::other(err.to_string())),
     }

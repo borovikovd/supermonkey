@@ -342,3 +342,29 @@ test("UNW-11 trash all after replying to the list leaves alone the conversations
   await expect(app.row("Person 1")).toHaveCount(1);
   await app.expectNoErrorToasts();
 });
+
+test("UNW-12 blocking a sender who is already blocked trashes that conversation too", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.empty(gmail, app);
+  const [first, second] = await gmail.deliverMany([
+    { account: A, from: NEWS, subject: "Sale one" },
+    { account: A, from: NEWS, subject: "Sale two" },
+  ]);
+  await app.settle();
+  await app.highlight("Sale one");
+  await choose(app, "Block", "Block news@news.test");
+  await expect(app.row("Sale one")).toHaveCount(0);
+  await app.settle();
+  await expect(app.row("Sale two")).toHaveCount(1);
+
+  await app.highlight("Sale two");
+  await choose(app, "Block", "Block news@news.test");
+  await expect(app.row("Sale two")).toHaveCount(0);
+  await app.settle();
+  expect(await gmail.labelsOf(A, first?.id ?? "")).toContain("TRASH");
+  expect(await gmail.labelsOf(A, second?.id ?? "")).toContain("TRASH");
+  expect(await gmail.filters(A)).toHaveLength(1);
+  await app.expectNoErrorToasts();
+});
