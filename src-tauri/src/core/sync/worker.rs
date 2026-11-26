@@ -492,10 +492,6 @@ fn enqueue_full_batch(slot: &AccountSlot, ids: &[GmailThreadId], priority: Fetch
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "connect sync executes the phased inbox, drafts, starred, and sent initial sync pipeline"
-)]
 async fn run_connect_sync(
     slot: &AccountSlot,
     gmail: &Gmail,
@@ -507,19 +503,7 @@ async fn run_connect_sync(
 
     refresh_labels_and_send_as(slot, gmail, GmailPriority::P2).await?;
 
-    let inbox_label = SystemLabel::Inbox.label_id();
-    let inbox_ids = list_all_thread_ids(
-        gmail,
-        ThreadQuery {
-            q: None,
-            label_id: Some(&inbox_label),
-            include_spam_trash: false,
-            max_results: Some(500),
-            page_token: None,
-        },
-        GmailPriority::P2,
-    )
-    .await?;
+    let inbox_ids = list_inbox_thread_ids(gmail, GmailPriority::P2).await?;
 
     fetch_batch_and_wait(
         slot,
@@ -544,31 +528,8 @@ async fn run_connect_sync(
     )
     .await?;
 
-    let starred_label = SystemLabel::Starred.label_id();
-    let (starred_ids, sent_ids) = tokio::try_join!(
-        list_all_thread_ids(
-            gmail,
-            ThreadQuery {
-                q: None,
-                label_id: Some(&starred_label),
-                include_spam_trash: false,
-                max_results: Some(500),
-                page_token: None,
-            },
-            GmailPriority::P5,
-        ),
-        list_all_thread_ids(
-            gmail,
-            ThreadQuery {
-                q: Some("in:sent newer_than:90d"),
-                label_id: None,
-                include_spam_trash: false,
-                max_results: Some(500),
-                page_token: None,
-            },
-            GmailPriority::P5,
-        ),
-    )?;
+    let (starred_ids, sent_ids) =
+        list_starred_and_recent_sent_thread_ids(gmail, GmailPriority::P5).await?;
 
     let inbox_set: HashSet<&GmailThreadId> = inbox_ids.iter().collect();
     let mut secondary: Vec<GmailThreadId> = Vec::new();
@@ -841,6 +802,56 @@ async fn run_incremental_poll(
     Ok(())
 }
 
+async fn list_inbox_thread_ids(
+    gmail: &Gmail,
+    priority: GmailPriority,
+) -> Result<Vec<GmailThreadId>, GmailError> {
+    let inbox_label = SystemLabel::Inbox.label_id();
+    list_all_thread_ids(
+        gmail,
+        ThreadQuery {
+            q: None,
+            label_id: Some(&inbox_label),
+            include_spam_trash: false,
+            max_results: Some(500),
+            page_token: None,
+        },
+        priority,
+    )
+    .await
+}
+
+async fn list_starred_and_recent_sent_thread_ids(
+    gmail: &Gmail,
+    priority: GmailPriority,
+) -> Result<(Vec<GmailThreadId>, Vec<GmailThreadId>), GmailError> {
+    let starred_label = SystemLabel::Starred.label_id();
+    tokio::try_join!(
+        list_all_thread_ids(
+            gmail,
+            ThreadQuery {
+                q: None,
+                label_id: Some(&starred_label),
+                include_spam_trash: false,
+                max_results: Some(500),
+                page_token: None,
+            },
+            priority,
+        ),
+        list_all_thread_ids(
+            gmail,
+            ThreadQuery {
+                q: Some("in:sent newer_than:90d"),
+                label_id: None,
+                include_spam_trash: false,
+                max_results: Some(500),
+                page_token: None,
+            },
+            priority,
+        ),
+    )
+}
+
 async fn list_all_remote_threads(
     gmail: &Gmail,
 ) -> Result<HashMap<GmailThreadId, Option<HistoryId>>, GmailError> {
@@ -886,6 +897,14 @@ async fn run_full_resync(
 
     refresh_labels_and_send_as(slot, gmail, GmailPriority::P2).await?;
     let remote_map = list_all_remote_threads(gmail).await?;
+    let inbox_ids = list_inbox_thread_ids(gmail, GmailPriority::P2).await?;
+    let (starred_ids, sent_ids) =
+        list_starred_and_recent_sent_thread_ids(gmail, GmailPriority::P2).await?;
+    let first_sync_scope: HashSet<GmailThreadId> = inbox_ids
+        .into_iter()
+        .chain(starred_ids)
+        .chain(sent_ids)
+        .collect();
 
     let local_states = slot
         .pool
@@ -900,12 +919,12 @@ async fn run_full_resync(
     let mut to_clear_history = Vec::new();
     for (gtid, remote_hid) in &remote_map {
         match local_by_gid.get(gtid) {
-            None => to_fetch.push(gtid.clone()),
+            None if first_sync_scope.contains(gtid) => to_fetch.push(gtid.clone()),
             Some((tid, local_hid)) if local_hid.is_none() || *local_hid != *remote_hid => {
                 to_clear_history.push(*tid);
                 to_fetch.push(gtid.clone());
             }
-            Some(_) => {}
+            None | Some(_) => {}
         }
     }
 
@@ -969,16 +988,27 @@ async fn run_full_resync(
         );
     }
 
-    drop(
-        reconcile_drafts_with_gmail(
-            slot.account,
-            gmail,
-            &slot.pool,
-            &slot.writer,
-            GmailPriority::P2,
-        )
-        .await?,
-    );
+    let draft_threads = reconcile_drafts_with_gmail(
+        slot.account,
+        gmail,
+        &slot.pool,
+        &slot.writer,
+        GmailPriority::P2,
+    )
+    .await?;
+    let fetched: HashSet<&GmailThreadId> = to_fetch.iter().collect();
+    for gtid in &draft_threads {
+        if !fetched.contains(gtid) {
+            slot.fetch_queue.enqueue(
+                gtid.clone(),
+                Format::Full,
+                FetchPriority::SyncNew,
+                false,
+                None,
+                &slot.activity,
+            );
+        }
+    }
 
     let acct = slot.account;
     super::super::log_err(

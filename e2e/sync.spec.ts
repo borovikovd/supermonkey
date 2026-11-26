@@ -478,6 +478,47 @@ test("SYN-14 a quit while the first sync still reads starred and sent mail leave
   await expect(app.row("Trip ideas")).toHaveCount(1);
 });
 
+test("SYN-15 a full resync reads new mail only where the first sync would, not the whole mailbox", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  await gmail.expireHistory(A);
+  const [missed, archived] = await gmail.deliverMany([
+    {
+      account: A,
+      from: "Fay Five <fay@five.test>",
+      subject: "Missed in the Inbox",
+      text: "Arrived while history expired.",
+      labels: ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      poll: false,
+    },
+    {
+      account: A,
+      from: "Fay Five <fay@five.test>",
+      subject: "Missed and already archived",
+      text: "Arrived and was archived while history expired.",
+      labels: ["CATEGORY_PERSONAL"],
+      poll: false,
+    },
+  ]);
+  const since = (await gmail.requests()).at(-1)?.seq ?? -1;
+
+  await gmail.poll();
+  await app.settle();
+
+  const log = (await gmail.requests()).filter((r) => r.seq > since && r.account === A);
+  expect(log.find((r) => r.api === "history.list")?.answer).toBe(404);
+  const read = log.filter((r) => r.api === "threads.get").map((r) => r.path.split("/").at(-1));
+  expect(read).toContain(missed?.threadId);
+  for (const key of ["archivedOld", "projOld1", "invoiceOld"]) {
+    expect(read, key).not.toContain(s.thread(key).threadId);
+  }
+  expect(read, "archived while expired").not.toContain(archived?.threadId);
+  await expect(app.row("Missed in the Inbox")).toHaveCount(1);
+  await expectInboxMatchesGmail(app, A);
+});
+
 test("SYN-13 a quit during the contacts backfill does not end it: it runs again after the relaunch", async ({
   app,
   gmail,
