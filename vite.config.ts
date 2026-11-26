@@ -128,6 +128,10 @@ export default defineConfig({
     jsPlugins: [{ name: "vite-plus", specifier: "vite-plus/oxlint-plugin" }],
   },
 
+  test: {
+    include: ["checks/**/*.test.ts"],
+  },
+
   // `vp run <task>`. `gate` runs every check; run it before each commit.
   run: {
     // Off: the task cache's file tracking misses files the native tsc (TS 7)
@@ -136,7 +140,7 @@ export default defineConfig({
     cache: false,
     tasks: {
       // Also regenerates src/bindings (ts-rs), which the TypeScript checks read.
-      "test:rust": { command: "cargo test --workspace -q", cwd: "src-tauri" },
+      "test:rust": { command: "cargo test --workspace --features fake -q", cwd: "src-tauri" },
       "lint:rust": {
         command: [
           "cargo fmt --all --check",
@@ -154,6 +158,7 @@ export default defineConfig({
         cwd: "src-tauri",
       },
       "lint:ts": { command: "vp check", dependsOn: ["test:rust"] },
+      "check:static": "vp test run",
       typecheck: {
         command: [
           "tsc -p tsconfig.app.json --noEmit",
@@ -175,7 +180,7 @@ export default defineConfig({
       // Last and alone: the end-to-end suite is timing-sensitive under load.
       gate: {
         command: "vp run e2e",
-        dependsOn: ["lint:rust", "lint:ts", "typecheck", "bindings"],
+        dependsOn: ["lint:rust", "lint:ts", "typecheck", "bindings", "check:static"],
       },
     },
   },

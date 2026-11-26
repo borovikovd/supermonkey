@@ -352,3 +352,192 @@ pub fn is_forward_subject(subject: &str) -> bool {
     s.get(..4).is_some_and(|p| p.eq_ignore_ascii_case("fwd:"))
         || s.get(..3).is_some_and(|p| p.eq_ignore_ascii_case("fw:"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{
+        LabelDelta, ModifyError, ModifyKind, SendAsAddress, SnoozeEdit, ThreadId, ThreadModify,
+        plan_modify,
+    };
+
+    fn msg(id: i64, date: i64, from: &str, labels: &[LabelId]) -> MessageFacts {
+        MessageFacts {
+            id: MessageId(id),
+            gmail_id: GmailMessageId(format!("gm{id}")),
+            date: Millis(date),
+            from: Addr::new(from),
+            to: vec![Addr::new("me@acme.test")],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
+            subject: format!("Subj {id}"),
+            snippet: format!("Snip {id}"),
+            message_id_hdr: Some(format!("<m{id}@acme.test>")),
+            in_reply_to: None,
+            references: Vec::new(),
+            is_list: false,
+            is_draft: false,
+            has_attachments: false,
+            labels: labels.iter().cloned().collect(),
+        }
+    }
+
+    #[test]
+    fn thread_latest_digest_and_views_follow_message_labels() {
+        let mut draft = msg(3, 300, "me@acme.test", &[SystemLabel::Draft.label_id()]);
+        draft.is_draft = true;
+        let live = msg(
+            1,
+            100,
+            "alice@x.test",
+            &[
+                SystemLabel::Inbox.label_id(),
+                SystemLabel::Unread.label_id(),
+                LabelId("L_WORK".to_owned()),
+            ],
+        );
+        let trashed = msg(2, 200, "bob@x.test", &[SystemLabel::Trash.label_id()]);
+        let thread = Thread::new(vec![draft, trashed, live]);
+
+        let digest = thread.digest().expect("thread has a digest");
+        assert_eq!(digest.latest.id, MessageId(1), "live beats trashed/draft");
+        assert_eq!(digest.message_count, 1, "counts only live messages");
+        assert!(digest.unread, "live unread propagates");
+        assert!(View::Inbox.lists(&digest, false), "listed in Inbox");
+        assert!(!View::Done.lists(&digest, false), "Inbox thread not Done");
+        assert!(
+            View::Trash.lists(&digest, false),
+            "trashed msg puts in Trash"
+        );
+        assert!(
+            View::AllMail.lists(&digest, false),
+            "live thread in AllMail"
+        );
+        assert!(
+            View::Label {
+                label: LabelId("L_WORK".to_owned())
+            }
+            .lists(&digest, false),
+            "custom label matches"
+        );
+        assert!(
+            !View::Drafts.lists(&digest, false),
+            "Drafts view lists drafts only"
+        );
+    }
+
+    #[test]
+    fn latest_from_someone_else_and_reply_addressing_respect_identity() {
+        let identity = Identity::new(
+            "me@acme.test",
+            "Me",
+            vec![SendAsAddress {
+                email: "alias@acme.test".to_owned(),
+                display_name: "Alias".to_owned(),
+                primary: false,
+            }],
+        );
+        let mut from_bob = msg(1, 100, "bob@x.test", &[SystemLabel::Inbox.label_id()]);
+        from_bob.to = vec![Addr::new("alias@acme.test"), Addr::new("carol@x.test")];
+        from_bob.cc = vec![Addr::new("dave@x.test"), Addr::new("me@acme.test")];
+        let from_me = msg(2, 200, "me@acme.test", &[SystemLabel::Sent.label_id()]);
+        let thread = Thread::new(vec![from_bob.clone(), from_me]);
+
+        assert_eq!(
+            thread.latest_from_someone_else(&identity).map(|m| m.id),
+            Some(MessageId(1)),
+            "skips own newer reply"
+        );
+
+        let reply_all = addressing(
+            ReplyTarget {
+                from: &from_bob.from,
+                to: &from_bob.to,
+                cc: &from_bob.cc,
+                reply_to: &from_bob.reply_to,
+            },
+            &identity,
+            true,
+        );
+        assert_eq!(
+            reply_all.from.email, "alias@acme.test",
+            "picks matching alias"
+        );
+        assert_eq!(
+            reply_all.to,
+            vec![Addr::new("bob@x.test")],
+            "replies to sender"
+        );
+        assert_eq!(
+            reply_all.cc,
+            vec![Addr::new("carol@x.test"), Addr::new("dave@x.test")],
+            "reply-all excludes own addresses"
+        );
+    }
+
+    #[test]
+    fn plan_modify_and_revert_handle_unread_isolation_and_undo() {
+        assert_eq!(
+            LabelDelta::new(
+                vec![SystemLabel::Unread.label_id()],
+                vec![SystemLabel::Inbox.label_id()],
+            ),
+            Err(ModifyError::UnreadMixed),
+            "UNREAD cannot mix with other label edits"
+        );
+
+        let m1 = msg(1, 100, "a@x.test", &[SystemLabel::Inbox.label_id()]);
+        let m2 = msg(2, 200, "b@x.test", &[SystemLabel::Inbox.label_id()]);
+        let thread = Thread::new(vec![m1.clone(), m2]);
+
+        let unread = LabelDelta::new(vec![SystemLabel::Unread.label_id()], Vec::new()).unwrap();
+        let unread_change = plan_modify(
+            ThreadModify {
+                thread_id: ThreadId(7),
+                thread: &thread,
+                kind: ModifyKind::Unread,
+                snooze_before: None,
+                snooze_edit: None,
+            },
+            &unread,
+        );
+        assert_eq!(
+            unread_change.messages.len(),
+            1,
+            "mark unread touches latest only"
+        );
+        assert_eq!(
+            unread_change.messages[0].message,
+            MessageId(2),
+            "targets latest live"
+        );
+
+        let done = LabelDelta::new(Vec::new(), vec![SystemLabel::Inbox.label_id()]).unwrap();
+        let done_change = plan_modify(
+            ThreadModify {
+                thread_id: ThreadId(7),
+                thread: &thread,
+                kind: ModifyKind::Done,
+                snooze_before: Some(Millis(500)),
+                snooze_edit: Some(SnoozeEdit::Clear),
+            },
+            &done,
+        );
+        assert_eq!(
+            done_change.messages.len(),
+            2,
+            "archive touches every message"
+        );
+        assert!(done_change.restores_snooze(), "undo knows snooze changed");
+        let after = done_change.messages[0].apply(&m1.labels);
+        assert!(!after.has(SystemLabel::Inbox), "INBOX removed");
+        let reverted = done_change.messages[0]
+            .reverted(&after)
+            .expect("revert restores removed label");
+        assert!(
+            reverted.apply(&after).has(SystemLabel::Inbox),
+            "INBOX restored on undo"
+        );
+    }
+}

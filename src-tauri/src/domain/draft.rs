@@ -293,3 +293,151 @@ fn find_by_header(thread: &Thread, message_id: &str) -> Option<MessageId> {
         (!m.is_draft && hdr.eq_ignore_ascii_case(want)).then_some(m.id)
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{LabelSet, MessageFacts, Millis, SystemLabel};
+
+    fn defaults() -> DraftDefaults {
+        DraftDefaults {
+            from: Some(Addr::new("me@acme.test")),
+            to: vec![Addr::new("bob@x.test")],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Re: Hi".to_owned(),
+            body_html: String::new(),
+            attachments: vec!["a1".to_owned()],
+        }
+    }
+
+    #[test]
+    fn draft_lifecycle_tracks_fresh_edit_waits_and_gmail_writes() {
+        let defs = defaults();
+        let mut lc = DraftLifecycle::fresh(defs.clone(), Some(DraftWait::TargetBody));
+        assert!(!lc.is_kept(), "new draft starts fresh");
+        assert!(
+            lc.is_untouched(defs.content_ref(), ["a1"], true),
+            "blank body matching defaults is untouched"
+        );
+        assert_eq!(
+            lc.next_gmail_write(),
+            GmailWrite::Create,
+            "starts needing create"
+        );
+
+        assert!(
+            lc.finish_wait(DraftWait::TargetBody),
+            "matching wait clears"
+        );
+        assert!(
+            !lc.finish_wait(DraftWait::TargetBody),
+            "already cleared wait returns false"
+        );
+
+        let edited = DraftContentRef {
+            body_html: "<p>Hello</p>",
+            ..defs.content_ref()
+        };
+        lc.note_edit(edited, ["a1"], false);
+        assert!(lc.is_kept(), "real edit promotes Fresh to Kept");
+        assert!(
+            !lc.is_untouched(defs.content_ref(), ["a1"], true),
+            "Kept is never untouched"
+        );
+
+        lc.mark_create_sent();
+        assert_eq!(
+            lc.next_gmail_write(),
+            GmailWrite::Recover,
+            "in-flight create enters Recover"
+        );
+        lc.record_gmail_ids(
+            GmailDraftId("gd1".to_owned()),
+            Some(GmailMessageId("gm1".to_owned())),
+            Some(GmailThreadId("gt1".to_owned())),
+        );
+        assert_eq!(
+            lc.next_gmail_write(),
+            GmailWrite::Update(GmailDraftId("gd1".to_owned())),
+            "recorded id switches to Update"
+        );
+        lc.mark_gmail_change_skipped();
+        assert!(lc.take_gmail_change_skipped(), "takes skipped flag once");
+        assert!(!lc.take_gmail_change_skipped(), "second take is false");
+        lc.clear_gmail_ids();
+        assert_eq!(
+            lc.next_gmail_write(),
+            GmailWrite::Create,
+            "cleared ids return to Create"
+        );
+    }
+
+    fn sample_msg(id: i64, date: i64, hdr: &str) -> MessageFacts {
+        MessageFacts {
+            id: MessageId(id),
+            gmail_id: GmailMessageId(format!("gm{id}")),
+            date: Millis(date),
+            from: Addr::new("alice@x.test"),
+            to: vec![Addr::new("me@acme.test")],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
+            subject: "Plan".to_owned(),
+            snippet: String::new(),
+            message_id_hdr: Some(hdr.to_owned()),
+            in_reply_to: None,
+            references: Vec::new(),
+            is_list: false,
+            is_draft: false,
+            has_attachments: false,
+            labels: std::iter::once(SystemLabel::Inbox.label_id()).collect::<LabelSet>(),
+        }
+    }
+
+    #[test]
+    fn gmail_draft_aim_resolves_reply_target_and_forward_kind() {
+        let thread = Thread::new(vec![
+            sample_msg(10, 100, "<M10@X.TEST>"),
+            sample_msg(20, 200, "<m20@x.test>"),
+        ]);
+
+        assert_eq!(
+            gmail_draft_aim(None, "New", None, &[]),
+            DraftAim {
+                kind: DraftKind::New,
+                target: None,
+            },
+            "no thread yields New"
+        );
+        assert_eq!(
+            gmail_draft_aim(Some(&thread), "Re: Plan", Some("m10@x.test"), &[]),
+            DraftAim {
+                kind: DraftKind::Reply,
+                target: Some(MessageId(10)),
+            },
+            "In-Reply-To matches case-insensitively without angle brackets"
+        );
+        assert_eq!(
+            gmail_draft_aim(
+                Some(&thread),
+                "Fwd: Plan",
+                None,
+                &["<missing@x.test>".to_owned(), "<m10@x.test>".to_owned()],
+            ),
+            DraftAim {
+                kind: DraftKind::Forward,
+                target: Some(MessageId(10)),
+            },
+            "References fallback picks newest matching header with Forward kind"
+        );
+        assert_eq!(
+            gmail_draft_aim(Some(&thread), "Re: Plan", None, &[]),
+            DraftAim {
+                kind: DraftKind::Reply,
+                target: Some(MessageId(20)),
+            },
+            "missing headers fall back to latest live message"
+        );
+    }
+}

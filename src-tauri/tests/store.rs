@@ -124,3 +124,31 @@ fn open_writer_moves_aside_wrong_version_or_corrupt_db_and_fails_on_unopenable()
     .unwrap();
     w.stop().wait().unwrap();
 }
+
+#[test]
+fn open_writer_leaves_locked_database_in_place_and_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("locked.db");
+    let conn = open_writer(&path).unwrap();
+    drop(conn);
+
+    let locker = Connection::open(&path).unwrap();
+    locker
+        .execute_batch(
+            "PRAGMA locking_mode = EXCLUSIVE; BEGIN EXCLUSIVE; UPDATE meta SET rev = rev;",
+        )
+        .unwrap();
+    let err = open_writer(&path);
+    assert!(err.is_err(), "locked database fails to open");
+    assert!(path.exists(), "locked database file stays in place");
+    assert!(
+        !dir.path().join("locked.db.old-1").exists(),
+        "locked database is never moved aside"
+    );
+    drop(locker);
+
+    assert!(
+        open_writer(&path).is_ok(),
+        "opens cleanly once lock releases"
+    );
+}

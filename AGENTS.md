@@ -162,11 +162,11 @@ Assume every `.await` lets the world change.
 - **Deterministic, zero retries.** Wait on app idle signals and advance a fake
   clock — never sleep. Select by role, label, or `data-*`. Never retry flaky
   tests — fix the race.
-- **Systematic E2E and focused unit tests.** Maintain an ID-indexed test plan
-  synced by the gate covering every effect × trigger, perception (size, contrast,
-  overlap, small window, axe), startup/modes/migrations, failure paths, and a
-  complete interruption grid (no empty cells). Use unit/property tests only for
-  complex pure logic, security invariants, and races E2E cannot reach.
+- **Systematic E2E and focused unit tests.** Cover every effect × trigger,
+  perception (size, contrast, overlap, small window, axe),
+  startup/modes/migrations, failure paths, and long-op interruptions. Use
+  unit/property tests only for complex pure logic, security invariants, and
+  races E2E cannot reach.
 
 ## Review and QA
 
@@ -185,8 +185,8 @@ Assume every `.await` lets the world change.
 
 - **Product:** Supermonkey, a keyboard-first Gmail client for macOS (Tauri 2,
   React 19 + React Compiler, TypeScript 7, Tailwind 4, Vite+, Rust + SQLite).
-- **Spec:** Behavior lives in [e2e/COVERAGE.md](e2e/COVERAGE.md) and its tests
-  (no separate spec doc). Behavior changes start by updating its case.
+- **Spec:** Behavior lives in the E2E suite (`e2e/*.spec.ts`) and Rust tests
+  (no separate spec doc). Behavior changes start by updating or adding a test.
 - **Commands:** Use `vp` (Vite+) for JS tooling — never `npm`, `pnpm`, or `npx`.
   Run `cargo` from `src-tauri/`.
 
@@ -197,7 +197,7 @@ Assume every `.await` lets the world change.
   vp run tauri build    # release .app
   vp check --fix        # UI format, lint, type check
   vp run gate           # full gate; run before each commit
-  vp run <task>         # single check: test:rust, lint:rust, lint:ts, typecheck, bindings, e2e
+  vp run <task>         # single check: test:rust, lint:rust, lint:ts, typecheck, bindings, check:static, e2e
   ```
 
 - **Layout:**
@@ -218,10 +218,10 @@ Assume every `.await` lets the world change.
     in `src/theme.css`. `src/ui/UntrustedFrame.tsx` is the single path for mail
     HTML (sandbox keeps `allow-scripts` only because WebKit otherwise drops
     parent listeners; its CSP executes nothing).
-- **Tests:** [e2e/COVERAGE.md](e2e/COVERAGE.md) lists all E2E cases and allowed
-  unit tests, verified by `e2e/plan.spec.ts`; `e2e/tokens.spec.ts` checks tokens.
-  Harness: `e2e/app.ts`, `e2e/control.ts`, `e2e/seeds.ts` (`app.advance()`,
-  `app.settle()`).
+- **Tests:** E2E tests live in `e2e/*.spec.ts` using `e2e/app.ts`,
+  `e2e/control.ts`, and `e2e/seeds.ts` (`app.advance()`, `app.settle()`).
+  Static checks (`checks/tokens.test.ts`, `checks/deps.test.ts`) run fast via
+  `vp run check:static`.
 - **Releases:** `.github/workflows/release.yml` manages a "release X.Y.Z" PR on
   `main` (merged only by the user) using `GOOGLE_OAUTH_CLIENT_JSON`. Versions
   live in `package.json` and `src-tauri/Cargo.toml`.

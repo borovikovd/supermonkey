@@ -260,3 +260,127 @@ impl Router {
             .min_by_key(|split| self.order.get(split).copied().unwrap_or(usize::MAX))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{Addr, GmailMessageId, MessageId, Millis};
+
+    fn msg(from: &str, is_list: bool, labels: &[LabelId]) -> MessageFacts {
+        MessageFacts {
+            id: MessageId(1),
+            gmail_id: GmailMessageId("gm1".to_owned()),
+            date: Millis(100),
+            from: Addr::new(from),
+            to: vec![Addr::new("me@acme.test")],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            reply_to: Vec::new(),
+            subject: "Hello".to_owned(),
+            snippet: String::new(),
+            message_id_hdr: None,
+            in_reply_to: None,
+            references: Vec::new(),
+            is_list,
+            is_draft: false,
+            has_attachments: false,
+            labels: labels.iter().cloned().collect(),
+        }
+    }
+
+    fn split(id: i64, kind: SplitKind, position: i32, query: &str, enabled: bool) -> Split {
+        Split {
+            id: SplitId(id),
+            name: format!("Split {id}"),
+            kind,
+            position,
+            query: query.to_owned(),
+            enabled,
+            hide_when_empty: false,
+        }
+    }
+
+    #[test]
+    fn person_to_person_rejects_lists_and_non_personal_categories() {
+        let plain = msg("alice@x.test", false, &[SystemLabel::Inbox.label_id()]);
+        assert!(is_person_to_person(&plain), "plain person mail is personal");
+        let list = msg("news@x.test", true, &[SystemLabel::Inbox.label_id()]);
+        assert!(!is_person_to_person(&list), "list mail is not personal");
+        for cat in [
+            SystemLabel::CategoryPromotions,
+            SystemLabel::CategorySocial,
+            SystemLabel::CategoryUpdates,
+            SystemLabel::CategoryForums,
+        ] {
+            let m = msg("bot@x.test", false, &[cat.label_id()]);
+            assert!(!is_person_to_person(&m), "category {cat:?} is not personal");
+        }
+        let personal = msg(
+            "friend@x.test",
+            false,
+            &[SystemLabel::CategoryPersonal.label_id()],
+        );
+        assert!(
+            is_person_to_person(&personal),
+            "CATEGORY_PERSONAL stays personal"
+        );
+    }
+
+    #[test]
+    fn router_enforces_pin_precedence_rules_and_disabled_splits() {
+        let splits = vec![
+            split(10, SplitKind::Custom, 0, "from:alice@x.test", true),
+            split(20, SplitKind::Custom, 1, "is:list", true),
+            split(30, SplitKind::Custom, 2, "", false),
+            split(1, SplitKind::Important, IMPORTANT_POSITION, "", true),
+            split(2, SplitKind::Other, OTHER_POSITION, "", true),
+        ];
+        let pins = vec![
+            Pin::new(PinKind::Sender, "alice@x.test", SplitId(2)).unwrap(),
+            Pin::new(PinKind::Domain, "x.test", SplitId(20)).unwrap(),
+            Pin::new(PinKind::Label, "vip", SplitId(1)).unwrap(),
+            Pin::new(PinKind::Sender, "disabled@y.test", SplitId(30)).unwrap(),
+        ];
+        let router = Router::new(splits, pins);
+        let user_labels = HashMap::from([(LabelId("L_VIP".to_owned()), "VIP".to_owned())]);
+
+        let sender_win = msg("alice@x.test", false, &[LabelId("L_VIP".to_owned())]);
+        assert_eq!(
+            router.place(&sender_win, &user_labels),
+            Some(SplitId(2)),
+            "sender pin beats domain pin, label pin, and custom rule"
+        );
+
+        let domain_win = msg("bob@x.test", false, &[LabelId("L_VIP".to_owned())]);
+        assert_eq!(
+            router.place(&domain_win, &user_labels),
+            Some(SplitId(20)),
+            "domain pin beats label pin"
+        );
+
+        let label_win = msg("carol@z.test", true, &[LabelId("L_VIP".to_owned())]);
+        assert_eq!(
+            router.place(&label_win, &user_labels),
+            Some(SplitId(1)),
+            "label pin beats custom list rule"
+        );
+
+        let disabled_pin = msg("disabled@y.test", false, &[]);
+        assert_eq!(
+            router.place(&disabled_pin, &user_labels),
+            Some(SplitId(1)),
+            "pin to disabled split falls through to Important"
+        );
+
+        let fallback_other = msg(
+            "promo@z.test",
+            false,
+            &[SystemLabel::CategoryPromotions.label_id()],
+        );
+        assert_eq!(
+            router.place(&fallback_other, &user_labels),
+            Some(SplitId(2)),
+            "non-personal mail falls through to Other"
+        );
+    }
+}

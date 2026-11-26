@@ -9,13 +9,12 @@ use supermonkey_lib::core::{
     ChannelSink, Clock, Core, CoreConfig, CoreError, Notification, Platform, diff_list,
 };
 use supermonkey_lib::domain::{
-    AccountId, ActionNo, Addr, DraftId, DraftKind, Millis, ModifyKind, OutboxState, Rev, SplitId,
-    SubId, SystemLabel,
+    AccountId, ActionNo, Addr, Millis, ModifyKind, SplitId, SubId, SystemLabel,
 };
 use supermonkey_lib::gmail::{OAuthConfig, QuotaConfig};
 use supermonkey_lib::ipc::{
-    Action, AppEvent, ChannelMessage, DraftFields, DraftSave, ListEntry, ListMove, ModifyAction,
-    NumberedAction, RejectReason, SnoozeChange, SplitInfo, SubKey, Submitted,
+    Action, AppEvent, ChannelMessage, ListEntry, ListMove, ModifyAction, NumberedAction,
+    RejectReason, SnoozeChange, SplitInfo, SubKey, SubUpdate, Submitted,
 };
 use supermonkey_lib::session::{Host, Session};
 use supermonkey_lib::store::{NewMessage, Priority as StorePriority, StoreError};
@@ -107,16 +106,12 @@ proptest! {
     clippy::unwrap_used,
     reason = "integration test harness fails via unwrap on setup errors"
 )]
-async fn open_test_core(
+async fn open_core_in(
+    data_dir: &Path,
     start: Millis,
-) -> (
-    tempfile::TempDir,
-    Arc<Core>,
-    Arc<Mutex<Vec<ChannelMessage>>>,
-) {
-    let dir = tempfile::tempdir().unwrap();
+) -> (Arc<Core>, Arc<Mutex<Vec<ChannelMessage>>>) {
     let cfg = CoreConfig {
-        data_dir: dir.path().to_path_buf(),
+        data_dir: data_dir.to_path_buf(),
         gmail_base_url: "http://127.0.0.1:9".to_owned(),
         oauth: OAuthConfig::google("cid", "csec"),
         quota: QuotaConfig::default(),
@@ -130,6 +125,22 @@ async fn open_test_core(
         sink_msgs.lock().push(msg);
     })));
     core.start().await.unwrap();
+    (core, msgs)
+}
+
+#[expect(
+    clippy::unwrap_used,
+    reason = "integration test harness fails via unwrap on setup errors"
+)]
+async fn open_test_core(
+    start: Millis,
+) -> (
+    tempfile::TempDir,
+    Arc<Core>,
+    Arc<Mutex<Vec<ChannelMessage>>>,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let (core, msgs) = open_core_in(dir.path(), start).await;
     (dir, core, msgs)
 }
 
@@ -270,101 +281,111 @@ async fn channel_ack_rejections_and_snooze_wake_work() {
     core.stop().await;
 }
 
-#[tokio::test]
-#[expect(
-    clippy::too_many_lines,
-    reason = "exercises full draft create, update, send, outbox, and undo lifecycle"
-)]
-async fn draft_create_edit_send_and_undo_before_delay() {
-    let (_dir, core, _msgs) = open_test_core(Millis(2_000_000)).await;
-    let acct_id: AccountId = core
-        .writer()
-        .call(StorePriority::Ui, |tx, _state| {
-            Ok::<_, StoreError>(tx.create_account("ana@acme.test", "Ana")?.id)
-        })
-        .await
-        .unwrap();
+fn sub_app(n: i64, sub: &str) -> Submitted {
+    Submitted::from(NumberedAction {
+        n: ActionNo(n),
+        action: Action::Subscribe {
+            sub: SubId(sub.to_owned()),
+            key: SubKey::App,
+        },
+    })
+}
 
-    let draft_id = DraftId("d-local-1".to_owned());
+#[tokio::test]
+async fn action_numbers_persist_across_reload_and_ack_never_moves_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _msgs) = open_core_in(dir.path(), Millis(2_000_000)).await;
     core.submit(vec![
-        Submitted::from(NumberedAction {
-            n: ActionNo(1),
-            action: Action::SaveDraft {
-                draft: draft_id.clone(),
-                save: DraftSave::Create {
-                    account: acct_id,
-                    kind: DraftKind::New,
-                    reply_all: false,
-                    thread: None,
-                    target: None,
-                    started_on_latest: false,
-                },
-            },
-        }),
+        sub_app(1, "app"),
         Submitted::from(NumberedAction {
             n: ActionNo(2),
-            action: Action::SaveDraft {
-                draft: draft_id.clone(),
-                save: DraftSave::Update {
-                    fields: DraftFields {
-                        from: Some(Addr::new("ana@acme.test")),
-                        to: vec![Addr::new("bob@x.test")],
-                        cc: vec![],
-                        bcc: vec![],
-                        subject: "Hi".to_owned(),
-                        body_html: "<p>Hello</p>".to_owned(),
-                        attachments: vec![],
-                    },
-                    rev: Rev(1),
-                },
-            },
-        }),
-        Submitted::from(NumberedAction {
-            n: ActionNo(3),
-            action: Action::SendDraft {
-                draft: draft_id.clone(),
+            action: Action::Unsubscribe {
+                sub: SubId("app".to_owned()),
             },
         }),
     ])
     .await
     .unwrap();
+    core.stop().await;
 
-    let outbox = core
-        .read_pool()
-        .with(|db| db.outbox_for_account(acct_id))
-        .unwrap();
-    assert_eq!(outbox.len(), 1, "send creates one outbox row");
-    assert_eq!(outbox[0].item.state, OutboxState::Waiting);
-    let undo_id = outbox[0].undo_entry.unwrap();
+    let (reloaded, msgs) = open_core_in(dir.path(), Millis(2_001_000)).await;
+    let info = reloaded.connect().unwrap();
     assert_eq!(
-        undo_id.0, 3,
-        "undo entry id matches SendDraft action number"
+        info.last_action,
+        ActionNo(2),
+        "reloaded core reports prior last_action"
     );
 
-    core.submit(vec![Submitted::from(NumberedAction {
-        n: ActionNo(4),
-        action: Action::Undo {
-            account: acct_id,
-            entry: undo_id,
-        },
-    })])
-    .await
-    .unwrap();
+    reloaded.submit(vec![sub_app(1, "stale")]).await.unwrap();
+    assert!(
+        msgs.lock().is_empty(),
+        "stale action number is deduplicated without moving ack backward"
+    );
 
-    let outbox_after = core
-        .read_pool()
-        .with(|db| db.outbox_for_account(acct_id))
-        .unwrap();
-    assert!(outbox_after.is_empty(), "undo during delay cancels outbox");
-    let restored = core
-        .read_pool()
-        .with(|db| db.draft(&draft_id))
-        .unwrap()
-        .unwrap();
-    assert!(!restored.in_outbox, "draft is restored out of outbox");
-    assert!(restored.lifecycle.is_kept(), "restored draft is kept");
-    assert_eq!(SystemLabel::Inbox.label_id(), SystemLabel::Inbox.label_id());
+    reloaded.submit(vec![sub_app(3, "fresh")]).await.unwrap();
+    let last = msgs.lock().last().cloned().unwrap();
+    assert_eq!(
+        last.ack,
+        ActionNo(3),
+        "next action advances ack monotonically"
+    );
+    assert!(
+        matches!(
+            last.updates.as_slice(),
+            [SubUpdate::App { first: true, .. }]
+        ),
+        "new subscription emits first load"
+    );
+    reloaded.stop().await;
+}
 
+#[tokio::test]
+async fn failed_commit_and_panicking_job_leave_core_consistent_and_idle() {
+    let (_dir, core, msgs) = open_test_core(Millis(2_500_000)).await;
+
+    let failed = core
+        .writer()
+        .call(StorePriority::Ui, |tx, _state| {
+            let _acct: AccountId = tx.create_account("ghost@acme.test", "Ghost")?.id;
+            tx.fail_commit();
+            Ok::<_, StoreError>(())
+        })
+        .await;
+    assert!(failed.is_err(), "injected commit failure returns error");
+
+    let panicked: Result<(), StoreError> = core
+        .writer()
+        .call(StorePriority::Sync, |_tx, _state| panic!("writer boom"))
+        .await;
+    assert!(
+        matches!(panicked, Err(StoreError::JobPanicked(_))),
+        "panicking writer job surfaces JobPanicked"
+    );
+    assert!(
+        core.wait_idle(Duration::from_secs(2)).await,
+        "core returns to idle after failed and panicking commits"
+    );
+
+    core.submit(vec![sub_app(1, "app")]).await.unwrap();
+    let last = msgs.lock().last().cloned().unwrap();
+    assert_eq!(
+        last.ack,
+        ActionNo(1),
+        "writer keeps serving after rollback/panic"
+    );
+    match last.updates.as_slice() {
+        [
+            SubUpdate::App {
+                first: true, state, ..
+            },
+        ] => {
+            assert!(
+                state.accounts.is_empty(),
+                "rolled-back account never appears in snapshot"
+            );
+        }
+        other => panic!("expected first App snapshot, got {other:?}"),
+    }
     core.stop().await;
 }
 

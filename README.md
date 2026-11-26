@@ -63,8 +63,8 @@ the Release workflow by hand builds the `.dmg` as an artifact without releasing.
 ### Checks
 
 ```sh
-vp run gate             # every check: Rust tests, lints, type checks, bindings, then the E2E suite
-vp run lint:rust        # one step (tasks are in vite.config.ts): test:rust, lint:rust, lint:ts, typecheck, bindings, e2e
+vp run gate             # every check: Rust tests, lints, type checks, bindings, static checks, then E2E
+vp run lint:rust        # one step (tasks are in vite.config.ts): test:rust, lint:rust, lint:ts, typecheck, bindings, check:static, e2e
 vp exec playwright test # E2E suite alone (Playwright + WebKit; `vp exec playwright install webkit` once)
 vp config --hooks       # once per clone: pre-commit runs `vp staged`, commit-msg runs commitlint
 ```
@@ -87,7 +87,7 @@ Perf fixture (two accounts × 20,000 threads):
 ```sh
 cargo run --manifest-path src-tauri/Cargo.toml --release --features fake --bin perf-fixture -- /tmp/perf.db
 SUPERMONKEY_DB=/tmp/perf.db vp run tauri dev
-SUPERMONKEY_PERF_DB=/tmp/perf.db cargo test --manifest-path src-tauri/Cargo.toml -p sm-core --release --lib perf -- --ignored --nocapture
+SUPERMONKEY_PERF_DB=/tmp/perf.db cargo test --manifest-path src-tauri/Cargo.toml --release --test perf -- --ignored --nocapture
 ```
 
 Debug builds log keydown-to-paint for each shortcut and warn when one is over
@@ -97,17 +97,15 @@ against the real core.
 
 ### Layout
 
-- `src-tauri/src` — the Tauri shell, and the `e2e-server` and `perf-fixture`
-  binaries.
-- `src-tauri/crates`, lowest layer first: `sm-domain` (newtypes, mail model,
-  views, splits, the query language), `sm-mime`, `sm-gmail` (client, quota,
-  OAuth, token store), `sm-store` (schema, writer, read pool), `sm-ipc` (IPC
-  types), `sm-core` (actions, subscriptions, per-account workers), `sm-bridge`
-  (command dispatch for Tauri and the debug web bridge), `sm-testkit` (E2E
-  server, demo, perf fixture), `sm-fake-gmail`.
+- `src-tauri/src` — layered Rust backend (`domain/`, `mime/`, `gmail/`,
+  `store/`, `ipc/`, `core/`, `session/`, `shell/`, `testkit/`), plus the
+  `e2e-server` and `perf-fixture` binaries in `bin/`.
+- `src-tauri/crates/sm-fake-gmail` — standalone in-process fake Gmail server.
 - `src` — the React UI: `store/` (mirror and chrome state), `keyboard/`, `ui/`,
-  `compose/`, `ipc/`. `src/bindings` is generated from `sm-ipc` by ts-rs.
-- `e2e` — the end-to-end suite and its test plan, `COVERAGE.md`.
+  `compose/`, `ipc/`. `src/bindings` is generated from `src-tauri/src/ipc` by
+  ts-rs.
+- `checks` — fast static checks (`tokens.test.ts`, `deps.test.ts`).
+- `e2e` — Playwright WebKit end-to-end suite.
 
 How to work on the code, for people and coding agents, is in
 [AGENTS.md](AGENTS.md).

@@ -351,3 +351,111 @@ impl WriterState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::actions::apply_batch;
+    use crate::core::runtime::{Activity, Busy};
+    use crate::domain::Millis;
+    use crate::ipc::{Action, NumberedAction, SubUpdate, Submitted};
+    use crate::store::{Priority as StorePriority, StoreError, Writer};
+
+    struct TestWriter {
+        _dir: tempfile::TempDir,
+        writer: Writer<WriterState>,
+        effects_rx: tokio::sync::mpsc::UnboundedReceiver<(Effect, Busy)>,
+        msgs: Arc<Mutex<Vec<ChannelMessage>>>,
+    }
+
+    fn test_writer() -> TestWriter {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("mail.db");
+        let (bus, effects_rx) = EffectBus::new(Activity::new());
+        let msgs: Arc<Mutex<Vec<ChannelMessage>>> = Arc::new(Mutex::new(Vec::new()));
+        let sink_msgs = Arc::clone(&msgs);
+        let channel = Arc::new(Mutex::new(Some(ChannelSink::new(move |msg| {
+            sink_msgs.lock().push(msg);
+        }))));
+        let state = WriterState::new(
+            ActionNo(0),
+            Rev(0),
+            true,
+            Clock::manual(Millis(1_000)),
+            bus,
+            channel,
+        );
+        let writer = Writer::start(
+            &db_path,
+            state,
+            WriterState::on_commit,
+            WriterState::on_rollback,
+        )
+        .unwrap();
+        TestWriter {
+            _dir: dir,
+            writer,
+            effects_rx,
+            msgs,
+        }
+    }
+
+    fn sub_app(n: i64) -> Vec<Submitted> {
+        vec![Submitted::from(NumberedAction {
+            n: ActionNo(n),
+            action: Action::Subscribe {
+                sub: SubId("s1".to_owned()),
+                key: SubKey::App,
+            },
+        })]
+    }
+
+    #[test]
+    fn failed_batch_commit_rejects_actions_drops_effects_and_keeps_first_load() {
+        let TestWriter {
+            _dir,
+            writer,
+            mut effects_rx,
+            msgs,
+        } = test_writer();
+
+        let err = writer
+            .call(StorePriority::Ui, |tx, st| {
+                apply_batch(tx, st, sub_app(1))?;
+                st.emit(Effect::RefreshBadge);
+                tx.fail_commit();
+                Ok::<_, StoreError>(())
+            })
+            .wait();
+        assert!(err.is_err(), "fail_commit aborts transaction");
+        assert!(
+            effects_rx.try_recv().is_err(),
+            "rollback drops staged effects"
+        );
+
+        let sent = msgs.lock().clone();
+        assert_eq!(sent.len(), 1, "rollback emits one channel message");
+        assert_eq!(sent[0].ack, ActionNo(0), "ack does not advance on rollback");
+        assert_eq!(sent[0].rejected.len(), 1, "failed batch action is rejected");
+        assert_eq!(
+            sent[0].rejected[0].n,
+            ActionNo(1),
+            "rejection names failed action"
+        );
+
+        writer
+            .call(StorePriority::Ui, |tx, st| apply_batch(tx, st, sub_app(2)))
+            .wait()
+            .unwrap();
+        let last = msgs.lock().last().cloned().unwrap();
+        assert_eq!(last.ack, ActionNo(2), "subsequent batch advances ack");
+        assert!(
+            matches!(
+                last.updates.as_slice(),
+                [SubUpdate::App { first: true, .. }]
+            ),
+            "retry subscribe still delivers first snapshot"
+        );
+        writer.stop().wait().unwrap();
+    }
+}

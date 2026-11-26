@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "vite-plus/test";
 
 const SRC = path.join(import.meta.dirname, "..", "src");
 

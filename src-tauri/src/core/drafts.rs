@@ -771,4 +771,54 @@ mod tests {
             "Fix these addresses: not-an-email, also-bad"
         );
     }
+
+    #[test]
+    fn draft_is_untouched_treats_blank_editor_html_as_empty_and_kept_as_touched() {
+        let defaults = DraftDefaults {
+            from: Some(Addr::new("me@acme.test")),
+            to: vec![Addr::new("bob@x.test")],
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: "Re: Hi".to_owned(),
+            body_html: String::new(),
+            attachments: Vec::new(),
+        };
+        let mut draft = DraftRecord {
+            id: DraftId("d-fresh".to_owned()),
+            account: AccountId(1),
+            kind: DraftKind::Reply,
+            reply_all: false,
+            thread: None,
+            target: None,
+            started_on_latest: true,
+            from: defaults.from.clone(),
+            to: defaults.to.clone(),
+            cc: Vec::new(),
+            bcc: Vec::new(),
+            subject: defaults.subject.clone(),
+            body_html: "<p><br></p>".to_owned(),
+            snippet: String::new(),
+            quote_html: None,
+            attachments: Vec::new(),
+            in_reply_to: None,
+            references: Vec::new(),
+            updated_at: Millis(0),
+            lifecycle: DraftLifecycle::fresh(defaults, None),
+            rev: Rev(1),
+            in_outbox: false,
+        };
+        assert!(
+            draft_is_untouched(&draft),
+            "empty paragraph html is untouched"
+        );
+        draft.body_html = "<p>Hi</p>".to_owned();
+        assert!(!draft_is_untouched(&draft), "text marks draft touched");
+        draft.body_html = "<p>&nbsp;</p>".to_owned();
+        assert!(
+            draft_is_untouched(&draft),
+            "nbsp-only html is still untouched"
+        );
+        draft.lifecycle.keep();
+        assert!(!draft_is_untouched(&draft), "kept draft is never untouched");
+    }
 }

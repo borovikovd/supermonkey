@@ -35,6 +35,9 @@ fn inspect_submenu<R: tauri::Runtime>(
 }
 
 fn main() {
+    if std::env::args().any(|arg| arg == "--list") {
+        return;
+    }
     let app = tauri::test::mock_app();
     let menu = build(app.handle()).expect("build standard menu");
     let mut custom_quits = 0usize;
