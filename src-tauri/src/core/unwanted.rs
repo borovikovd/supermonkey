@@ -41,6 +41,14 @@ async fn send_unsubscribe_mailto(
     Ok(())
 }
 
+fn newest_from_someone_else(
+    msgs: &[crate::store::MessageRecord],
+    identity: &crate::domain::Identity,
+) -> Option<usize> {
+    msgs.iter()
+        .rposition(|m| m.is_live && !identity.is_mine(&m.from.email))
+}
+
 fn select_unsubscribe_target(
     pool: &ReadPool,
     account: AccountId,
@@ -58,9 +66,7 @@ fn select_unsubscribe_target(
         }
         let mut msgs = db.thread_messages(thread)?;
         let identity = acct.identity();
-        let pos = msgs
-            .iter()
-            .rposition(|m| m.is_live && !identity.is_mine(&m.from.email))
+        let pos = newest_from_someone_else(&msgs, &identity)
             .or_else(|| msgs.iter().rposition(|m| !m.is_draft))
             .ok_or(StoreError::NotFound("message"))?;
         Ok::<_, StoreError>((acct, msgs.swap_remove(pos)))
@@ -135,7 +141,17 @@ pub(crate) fn sender_threads(
         if row.account != account {
             return Ok(Vec::new());
         }
-        db.sender_inbox_threads(account, &row.sender_email)
+        let Some(acct) = db.account(account)? else {
+            return Ok(Vec::new());
+        };
+        let msgs = db.thread_messages(thread)?;
+        let Some(pos) = newest_from_someone_else(&msgs, &acct.identity()) else {
+            return Ok(Vec::new());
+        };
+        let Some(sender) = msgs.get(pos) else {
+            return Ok(Vec::new());
+        };
+        db.sender_inbox_threads(account, &sender.from.email)
     })
     .map_err(|e| CoreError::internal(e.to_string()))
 }
@@ -160,9 +176,7 @@ pub(crate) async fn block_sender(
             }
             let identity = acct.identity();
             let mut msgs = db.thread_messages(thread)?;
-            let sender = msgs
-                .iter()
-                .rposition(|m| m.is_live && !identity.is_mine(&m.from.email))
+            let sender = newest_from_someone_else(&msgs, &identity)
                 .map_or(row.sender_email, |pos| msgs.swap_remove(pos).from.email);
             Ok::<_, StoreError>(sender)
         })

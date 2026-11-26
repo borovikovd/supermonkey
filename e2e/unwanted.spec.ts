@@ -308,3 +308,37 @@ test("UNW-10 block and unsubscribe act on their own account when another one is 
   await expect(app.row("News one")).toHaveCount(0);
   await expect(app.row("News two")).toHaveCount(0);
 });
+
+test("UNW-11 trash all after replying to the list leaves alone the conversations where you wrote last", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const news = await gmail.deliver(
+    newsletter("Weekly news", [["List-Unsubscribe", "<mailto:leave@news.test>"]]),
+  );
+  await app.settle();
+  const replyTo = async (subject: string, text: string) => {
+    await app.openThread(subject);
+    await app.reply();
+    await app.type(text);
+    await app.send();
+    await app.press("g", "i");
+    await expect(app.row(subject)).toHaveCount(1);
+  };
+  await replyTo("Person 1", "I wrote last here");
+  await replyTo("Weekly news", "Please stop");
+
+  await app.highlight("Weekly news");
+  await unsubscribe(app, "Unsubscribe, and trash all");
+  await expect(app.page.getByText("Unsubscribed from News Co")).toBeVisible();
+  await app.settle();
+
+  expect(await gmail.labelsOf(A, news.id)).toContain("TRASH");
+  const p1 = await gmail.labelsOf(A, s.message("p1", 1).id);
+  expect(p1).toContain("INBOX");
+  expect(p1).not.toContain("TRASH");
+  await expect(app.row("Weekly news")).toHaveCount(0);
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await app.expectNoErrorToasts();
+});
