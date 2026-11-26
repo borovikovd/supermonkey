@@ -1,334 +1,233 @@
 # AGENTS.md
 
-How to build and change a Tauri app: a Rust core with a web UI. The rules apply to
-any coding agent and any human, on any Tauri project. Everything specific to this
-one is in [Project specifics](#project-specifics) at the end.
+Principles for building and changing a Tauri app (Rust core + web UI). Everything
+specific to this repository is in [Project specifics](#project-specifics).
 
 ## How to work
 
-- The spec is the source of truth for behavior and is always current. A change to
-  behavior starts in the spec: update it first, then the tests and the code, in the
-  same commit. Where the spec is silent, decide, and write the decision into the
-  spec. There is no separate decisions log. Ask only when a choice is hard to undo.
-- Work is done when the gate is green and you have used the change in the running
-  app. Passing checks alone is not done.
-- Report what happened: which tests failed or are flaky, which steps you skipped,
-  what you didn't check.
-- A bug you find outside your task gets fixed with a test or written down, never
-  left unmentioned.
+- **Spec first.** The spec is the source of truth for behavior. Update it first,
+  then tests and code, in the same commit. Where it is silent, decide and write
+  the decision in; ask only when a choice is hard to undo.
+- **Done means verified live.** Passing the gate is necessary, not sufficient:
+  exercise the change in the running app.
+- **Report honestly.** State failures, flakes, skipped steps, and what you did
+  not check. Fix unrelated bugs you spot with a test, or write them down — never
+  leave them unmentioned.
 
 ## Git and releases
 
-- No AI attribution anywhere: no `Co-Authored-By` trailer, no "generated with"
-  line, even when a tool suggests one.
-- One logical change per commit, with a body that says why. Subjects follow
-  Conventional Commits (`type(scope): summary`, `!` for breaking), checked by a
-  commit-msg hook.
-- Release notes come from `feat`, `fix`, and `perf` subjects, so write those for
-  the people who use the app.
-- A tool that reads the commits (release-please or similar) cuts releases. Never
-  bump versions or edit the changelog by hand. To release only other changes, use
-  the tool's override (release-please: a `Release-As: x.y.z` footer).
-- Squash-merge a long-lived branch into one commit, so its internal fixes don't
-  become release notes. Keep the branch for history.
-- Commit only on a green gate. Never skip hooks. Push after each commit. Never
-  force-push, rewrite pushed history, or delete branches without asking.
-- Parallel agents each work in their own worktree. Shared lists (test plans, id
-  tables) conflict on merge: merge by union and renumber. Delete finished
-  worktrees with their build folders.
-
-## Build and the gate
-
-- Every command is a named task in one task runner. No shell scripts in the build.
-- One `gate` task runs every check: Rust tests and lints, UI lint, format and type
-  check, generated-file freshness, and the end-to-end suite. Each check is also a
-  task of its own. Warnings fail the gate.
-- **Check what you ship.** Lint and build each configuration that ships, not just
-  the workspace as a whole. Cargo unifies features across a workspace, so code that
-  only a test or debug feature uses passes a workspace build and warns in the
-  app's own debug and release builds.
-- Checks need no secrets. Where a release build requires one, the gate points it at
-  a committed placeholder with fake values.
-- No task cache may skip a check unless it tracks every input the check reads.
-- No unused dependencies, in Rust or the UI.
-- Test runs clean up after themselves. A test server deletes its data folder on
-  every exit, including SIGTERM, or a few hundred runs fill the disk. Rust build
-  folders fill it too: clean them when space runs low.
+- **No AI attribution** anywhere (`Co-Authored-By`, "generated with", etc.).
+- **One logical change per commit**, Conventional Commits (`type(scope): summary`,
+  `!` for breaking), with a body explaining why. `feat`, `fix`, and `perf`
+  subjects become user-facing release notes.
+- **Automated releases.** Never bump versions or edit the changelog by hand; use
+  the release tool's override (`Release-As: x.y.z`) when releasing other changes.
+- **Branch discipline.** Commit only on a green gate, never skip hooks, push
+  after each commit, and never force-push, rewrite pushed history, or delete
+  branches without asking. Squash-merge long-lived branches into one commit so
+  internal fixes stay out of release notes, keeping the branch for history.
+- **Parallel work.** Separate agents use separate git worktrees; merge shared
+  lists (test plans, id tables) by union and renumber; delete finished worktrees
+  and their build folders.
 
 ## Architecture
 
-- Rust owns all state. The UI holds a mirror of it plus the user's pending actions,
-  and never works out truth the core doesn't send.
-- One writer owns the database. Reads use a pool; writes go through the writer.
-- IPC types are defined once, in Rust, and generated for the UI (ts-rs, specta).
-  Never hand-write a duplicate. Commit the generated files; the gate fails when
-  they are stale.
-- Crates form layers, and a test checks the dependency edges. External services sit
-  behind one client that owns auth, rate limits, retries, and error mapping.
-- **One path per concern.** Quitting, rendering untrusted content, and binding keys
-  each go through exactly one path; a second path is a second policy that drifts.
-  Platform defaults count as paths: the default macOS menu's Quit bypasses Tauri's
-  exit hooks.
-- Background work is ordered by what the user is looking at. On first sync, what is
-  on screen loads before backfills and secondary data.
-- The bundle identifier names the app's data folder. Changing it orphans the
-  user's data unless the app migrates it: decide that before renaming.
-- Every way to run the app (dev, demo, test, release) is one command from a known
-  state. Dev, demo, and test never touch the user's real data, and demo data is
-  rebuilt at each launch.
-- To rewrite a layer, freeze its contract first: the generated types, the
-  end-to-end suite, and the spec judge the new code. Work on a branch, slice by
-  slice, each slice green.
+- **Layered modules, strict DAG.** Prefer layered modules inside one app crate
+  over premature multi-crate splits; reserve separate crates for standalone
+  binaries or test doubles. Enforce module edges and external-crate boundaries
+  in an architecture test.
+- **Cohesive modules, narrow facades.** Keep internal submodules `pub(crate)`
+  behind a small facade. Split by responsibility (no catch-all "features" or
+  "utils"), keep pure state machines in `domain`, and centralize repeated guards
+  and worker loops.
+- **Pure IPC, shared session.** Define wire types once in Rust, generate UI
+  bindings (committed; gate fails if stale), and keep `ipc` depending only on
+  `domain`. Put session/host glue above `core` so the native shell and test
+  harness share one entry path.
+- **Single ownership of concerns.** Rust owns truth (UI mirrors state + pending
+  actions); one writer actor owns SQLite writes (reads use a pool); one client
+  per external service owns auth, rate limits, retries, and error mapping;
+  quitting (including macOS menu Quit, which by default bypasses Tauri exit
+  hooks), untrusted HTML rendering, and keybindings each have exactly one path.
+- **User-visible priority.** Schedule on-screen work ahead of backfills and
+  secondary sync.
+- **Reproducible modes and data.** Every mode (`dev`, `demo`, `test`, `release`)
+  runs via one command; non-release modes never touch real user data, and `demo`
+  rebuilds fresh each launch. The bundle ID names the data folder — plan
+  migration before renaming it.
+- **Contract-first rewrites.** Freeze generated types, the E2E suite, and the
+  spec first; rewrite slice by slice on a branch, every slice green.
 
-## Tauri security
+## Build and the gate
 
-- Least privilege: each window gets only the capabilities it uses. Add a plugin or a
-  wide permission (shell, fs, http) only with a stated need.
-- Strict CSP: no `unsafe-eval`, no remote scripts. Untrusted HTML renders in a
-  sandboxed iframe whose CSP blocks scripts.
-- External content is hostile. Sanitize it in Rust, never inject it into the app's
-  own DOM, and open links in the system browser.
-- Validate every command's input in Rust. The webview is not trusted.
-- Requests to URLs taken from untrusted content: https only, a short timeout, and no
-  redirects to private or loopback addresses.
-- A file saved from untrusted content gets the OS quarantine flag (macOS
-  `com.apple.quarantine`) before it can be opened.
-- Debug servers and test hooks are compiled out of release builds, not switched
-  off. A debug server on localhost checks `Origin` and `Sec-Fetch-Site`, because
-  any web page can send requests to it.
-- The release webview's origin (`tauri://localhost`) differs from dev's
-  (`http://localhost`). Try the release build before calling a change done.
+- **One runner, one gate.** Named tasks only (no build shell scripts). One `gate`
+  task runs all checks (Rust tests/lints, UI format/lint/typecheck, binding
+  freshness, E2E) and fails on warnings; each check also runs standalone.
+- **Check every shipped target.** Cargo workspace builds unify features and hide
+  warnings; lint and build default, debug-feature, and release configs.
+- **Hermetic and clean.** Checks need no secrets (use committed placeholders),
+  avoid untracked task caches, keep zero unused dependencies, and delete temp
+  test data on every exit including `SIGTERM`.
 
-## Secrets
+## Security and secrets
 
-- Credential files stay git-ignored. Never commit, print, or paste them into logs,
-  tests, or chat.
-- Tokens live in the OS keychain, or in a file only the user can read when the
-  keychain gets in the way (an unsigned macOS build makes it prompt after every
-  update). Never in the database, the repo, or logs. Never log tokens, auth codes,
-  or user content.
+- **Least privilege and strict webview boundary.** Grant minimal window
+  capabilities; justify plugins and broad permissions (`shell`, `fs`, `http`).
+  Validate every command input in Rust (the webview is untrusted). Enforce strict
+  CSP (no `unsafe-eval`, no remote scripts); sanitize untrusted HTML in Rust,
+  render only in a script-blocked sandboxed iframe, and open links in the system
+  browser.
+- **Untrusted URLs and files.** Untrusted fetches require `https`, a short
+  timeout, and no redirects to private/loopback IPs. Quarantine saved untrusted
+  files (`com.apple.quarantine` on macOS) before opening.
+- **Release isolation.** Compile debug servers and test hooks out of release
+  builds; localhost debug servers must check `Origin` and `Sec-Fetch-Site`. Test
+  release builds explicitly (`tauri://localhost` differs from dev
+  `http://localhost`).
+- **Secrets.** Keep credential files git-ignored. Store tokens in the OS keychain
+  (or a `0600` file when unsigned macOS prompts block workflow) — never in
+  SQLite, git, tests, chat, or logs. Never log tokens, auth codes, or user
+  content.
 
 ## Concurrency
 
-Most bugs in an app that syncs live here. Assume every `await` lets the world change.
+Assume every `.await` lets the world change.
 
-- **Decide every interruption.** For each operation that takes time (a send, an
-  upload, a load, a sync, a quit), the spec says what happens when anything else
-  arrives mid-way: the user closes, repeats, undoes, or quits; the data changes or
-  is deleted elsewhere; its owner goes away; the network drops. An undecided case
-  is a bug waiting.
-- **An action is bound to what the user saw.** Its target (account, items) is fixed
-  when the user acts. Anything that runs later (a reply, a timer, a frame callback)
-  checks that its target still holds before it acts.
-- **Stale answers.** Before applying a response, check a version, generation, or
-  sequence number, and drop it if a newer one already landed.
-- **Local changes win.** A user's write made while a remote read was in flight
-  survives that read: re-apply pending local changes on top of what comes back.
-- **Ids are never reused.** Use `AUTOINCREMENT` or a stored sequence, never
-  `max(id) + 1`. Subscription and listener ids are unique too.
-- **Idempotent retries.** Anything sent may arrive twice or not at all. Number each
-  request, have the receiver drop numbers it already applied, retry with backoff.
-- **Everything in progress ends.** A spinner, a busy flag, or a "sending" state ends
-  on every path: success, failure, cancellation, and panic. Release such state in a
-  drop guard, not at the end of the happy path.
-- **Locks.** Hold them briefly, never across `.await`, and never while calling
-  outside code (callbacks, clocks, I/O). State that must agree lives under one
-  lock.
-- **Isolation.** A slow or failing resource (one account, one connection) never
-  blocks the others: each gets its own queue, slots, and limits.
-- **Shutdown** waits, with a deadline, for work the user already did to commit, then
-  exits anyway.
-- **Tests.** Every concurrency fix comes with a test that forces the interleaving,
-  for example a fake server that holds a reply until the test releases it, or a
-  note why it can't be forced.
+- **Decide every interruption.** Specify how every long operation handles
+  mid-flight close, repeat, undo, quit, remote mutation/deletion, owner removal,
+  or offline.
+- **Bind targets; stale loses, local wins.** Capture the user's target (account,
+  items) at action time and re-verify before late work applies. Guard remote
+  replies with versions/generations/sequences, and re-apply pending local writes
+  over remote reads.
+- **Monotonic IDs and idempotent retries.** Never reuse IDs (`AUTOINCREMENT` or
+  stored sequence, never `max(id) + 1`). Number requests so retries with backoff
+  deduplicate safely.
+- **Drop guards for in-progress state.** Clear spinners, busy flags, and sending
+  states on every path (success, error, cancellation, panic).
+- **Brief locks.** Never hold a lock across `.await` or external calls/I/O; keep
+  coupled invariants under one lock.
+- **Isolation and bounded shutdown.** Isolate queues, slots, and limits per
+  resource; on quit, wait up to a deadline for user writes to commit, then exit.
+- **Force the race in tests.** Every concurrency fix includes a test that holds
+  and releases the interleaving (or explains why it cannot be forced).
 
 ## Rust
 
-- Production lints: `clippy::pedantic` plus strict extras, rustdoc lints denied.
-  Never loosen them. Use `#[expect(lint, reason = "...")]`, never a bare `#[allow]`.
-  A lint or threshold is left off only on evidence that its hits are false
-  positives: the count and what a sample showed, written beside it in the config.
-- No `unwrap` or `expect` outside tests, no `unsafe`, no silent `as` casts
-  (`try_from`).
-- **Ownership.** Borrow to read (`&T`), `&mut T` to change, take by value to keep,
-  store, or send. A function that ends a value's life takes `self`. Ask for the
-  least: `&str` over `&String`, `&[T]` over `&Vec<T>`, one field over the whole
-  context; `Copy` types go by value. Never take `&T` and clone inside. A `clone()`
-  is for two independent values: one added to satisfy the borrow checker means the
-  ownership is wrong, so reshape the data.
-- **Fields and pointers.** A struct owns its fields. It holds a reference only when
-  it lives for one call or one transaction, since the lifetime spreads to every
-  holder. Add a pointer type only for a need you can name: `Box` for a large,
-  recursive, or trait-object value; `Arc` for several owners across threads; `Cow`
-  for a function that mostly returns its input. Before sharing, try one owner plus
-  ids: things that point back at each other (timers, queues, callbacks) hold an id
-  into the owner's collection. `Arc<Mutex<T>>` and `Rc<RefCell<T>>` are a last
-  resort. No alias hides an `Arc` or `Box`. Take `&Arc<T>` only to clone the handle
-  into a task. Interior mutability only where shared ownership needs it.
-  `parking_lot` locks; an async mutex only when held across `.await`, with the
-  reason.
-- **Lint what can be linted.** Where a lint checks one of these rules, enable it
-  (clippy `redundant_clone`, `needless_pass_by_value`; `disallowed-types` for a
-  pointer type that must state its need). Clippy does not see a `&T` cloned inside,
-  an owned parameter only read in an `async fn`, a reference in a long-lived
-  struct, or an `Arc` with one owner: the focused ownership review covers those.
-- **Types.** Every kind of id and unit is a newtype, converted to raw types only at
-  the edges (SQL, serde, IPC). No trait with a single implementation. Parsers return
-  slices or `Cow`. Helpers that only read take a connection, not the app context.
+- **Strict lints, zero panics/unsafe.** Enforce `clippy::pedantic` + strict
+  extras and deny rustdoc lints. Never loosen them; use
+  `#[expect(lint, reason = "...")]` only, and record false-positive evidence
+  (count + sample) beside any disabled lint. Forbid `unsafe`,
+  `unwrap`/`expect`/`panic` outside tests, and silent `as` casts (`try_from`).
+- **Own or borrow deliberately.** Borrow to read (`&T`, `&str`, `&[T]`, single
+  field over whole context), `&mut T` to mutate, take by value to store, send,
+  or consume (`Copy` by value). Never take `&T` and clone inside; never clone to
+  appease the borrow checker — reshape ownership.
+- **Minimal pointers and locks.** Structs own their fields (references only in
+  single-call or single-tx scopes). Add `Box`, `Arc`, or `Cow` only for a named
+  need; prefer one owner + IDs over `Arc<Mutex<T>>` / `Rc<RefCell<T>>`. Never
+  hide `Arc` or `Box` behind a type alias; take `&Arc<T>` only to clone into a
+  task. Use `parking_lot` locks; justify any async mutex held across `.await`.
+- **Clear types.** Wrap IDs and units in newtypes (convert only at SQL/serde/IPC
+  edges). Avoid single-implementation traits. Return slices or `Cow` from
+  parsers. Read helpers take a DB handle, not app context.
+- **Explicit errors and clean logs.** Return errors or log with context (`let _ =`
+  only for closed channels). Emit one-line event logs without user content or
+  secrets; filter noisy third-party targets at the logger.
 
 ## UI
 
-- Strict, type-aware lint: no `any`, no non-null assertions, every suppression names
-  its rule and reason. Never suppress a framework's correctness rules (such as
-  React's hooks rules).
-- **Design tokens.** One file defines every color, text size, radius, shadow, font,
-  and fixed width, named by role. Switch off the CSS framework's own palette and
-  scales, so only the tokens produce classes. The gate rejects color literals and
-  one-off values (Tailwind's `x-[...]`) in components, and two token kinds that make
-  the same class (Tailwind 4: `--color-x` and `--text-x` both make `text-x`).
-- Layout holds up with long text, small windows, and empty states. Minimum heights,
-  not fixed ones.
-- Never show a blank or half-built screen. Show what is already known (a cached
-  summary, a preview) at once. A loading indicator appears only after a short
-  delay, so fast loads don't flash.
-- A local stand-in for a remote result (instant local search, a cached count) must
-  be exact, or absent until the remote answer arrives. Never a superset: a filter
-  the local code can't evaluate must not match everything.
-- Every screen shows only the hints and actions that work there.
-- The input path (keydown to paint) has performance budgets, measured on a fixture
-  of realistic size. Keep work off it.
-
-## Errors and logs
-
-- Never drop an error silently. Return it, or log it with context. `let _ =` only
-  for results with nowhere to go (a send to a closed channel).
-- Logs are for people: one line per event, with context, no user content or secrets.
-- Filter noisy third-party crates by target at the logger; don't raise the global
-  level.
+- **Strict types and rules.** Type-aware lint, no `any`, no non-null assertions;
+  every suppression names its rule and reason; never suppress framework
+  correctness rules (e.g., React hooks).
+- **Design tokens.** Define every color, type scale, radius, shadow, font, and
+  fixed width by role in one file, disabling default framework palettes/scales.
+  The gate rejects color literals, arbitrary values (`x-[...]`), and colliding
+  token classes.
+- **Honest, resilient UI.** Hold up under long text, small windows, and empty
+  states (min heights, not fixed). Never flash blank screens or instant spinners
+  (show cached state immediately; delay loading indicators). Local stand-ins for
+  remote results must be exact or absent, never supersets. Show only working
+  actions/hints per screen, and keep heavy work off keydown-to-paint.
 
 ## Testing
 
-### What a good test is
-
-- **Behavior through the real app.** End-to-end tests drive the built UI against
-  the real Rust core. External services are replaced by a fake that can produce any
-  outcome: errors, timeouts, held or late replies, data changed elsewhere. Tests
-  never touch the network or real accounts.
-- **Expected values from outside the code:** the spec, a fixture, or a literal
-  worked out by hand. Never computed by the code under test; never just "a mock was
-  called".
-- **Test first.** Write the test before the fix or feature, run it, and see it fail
-  for the right reason; then make it pass. That one red run is the proof the test
-  can catch the bug. Don't break working code afterwards to re-check it.
-- **Every bug fix comes with a test that failed before the fix.** A known bug not
-  yet fixed is an expected-fail test with a `BUG:` reason.
-- **Conditions, never sleeps.** The app exposes its pending work (requests,
-  timers, queued actions) so a test can wait until it is idle, and tests move app
-  time with a fake clock.
-- **Stable selectors.** Tests find elements by role, label, and app-owned `data-*`
-  attributes, not by utility classes or a UI library's internals, so the UI can
-  change without rewriting the suite.
-
-### What to cover
-
-The test plan is a document with an id per case, and each test title starts with
-its id. A new user-visible behavior adds a case and a test. Plan along these axes:
-
-- **Every effect × every path that triggers it.** If opening marks an item read,
-  test click, key, auto-advance, notification, and deep link.
-- **What the user perceives:** text size and contrast, no overlap, fit in a small
-  window, an accessibility check (axe) per screen. "Visible" only means present.
-- **Startup and modes:** first launch, restart with data, demo mode, an old
-  database.
-- **Failure paths:** offline, a server error at each step, timeouts, late replies.
-- **Interruptions:** a grid of each operation that takes time × each event that
-  can arrive mid-way. Every cell names a test, or says why it can't happen; the
-  gate fails on an empty cell.
-- **Realistic limits.** The fake applies production rate limits and latency by
-  default, or the suite runs under both. An unlimited fake hides ordering and
-  starvation bugs.
-
-### Keeping the suite honest
-
-- A flaky test is a bug. Never retry until green. Record its failure rate and fix
-  the race.
-- Unit tests only for complex pure logic the end-to-end suite can't reach (parsers,
-  schedulers, rule engines).
-- The gate checks the test plan against the suite: every case has a test, and
-  every test id is a case.
+- **Real app, controllable fake.** E2E tests drive the built UI + real Rust core
+  against a fake server supporting errors, timeouts, holds, external edits, and
+  realistic rate limits/latency — never the network or real accounts.
+- **Test first, external oracles.** Expected values come from the spec, fixtures,
+  or hand calculations — never code under test. Write the test first and observe
+  it fail for the right reason before fixing; mark unfixed bugs expected-fail
+  with `BUG:`.
+- **Deterministic, zero retries.** Wait on app idle signals and advance a fake
+  clock — never sleep. Select by role, label, or `data-*`. Never retry flaky
+  tests — fix the race.
+- **Systematic E2E and focused unit tests.** Maintain an ID-indexed test plan
+  synced by the gate covering every effect × trigger, perception (size, contrast,
+  overlap, small window, axe), startup/modes/migrations, failure paths, and a
+  complete interruption grid (no empty cells). Use unit/property tests only for
+  complex pure logic, security invariants, and races E2E cannot reach.
 
 ## Review and QA
 
-Tests catch what their author thought of. Close the gap from outside:
-
-- **Use the app.** Look at every UI change in the running app. After each feature,
-  someone who didn't write it (a fresh agent or a human) checks every screen,
-  shortcut, and mode, small windows and long text, the console and the logs.
-- **Real data before a release.** Use a real account of realistic size. Fakes miss
-  slow networks, quotas, and odd data.
-- **Focused reviews.** After large changes, run separate passes for ownership,
-  concurrency, security, and test strength; a general code review does not replace
-  them. Every finding is verified before it is fixed, and every fix comes with a
-  test or a note why none is possible.
-- **Review by flow, until clean.** Slice a review along data flows end to end, not
-  by directory: a race spans the UI, the core, a worker, and the remote service. A
-  concurrency pass checks every await point against what can arrive there (the
-  user acts again, quits, or switches; the data changes elsewhere; the network
-  drops). Repeat a pass until a round finds nothing: fixes bring new findings.
-- **Learn from escapes.** When a bug gets past the gate, add the test or rule that
-  would have caught it, here if it is general.
+- **Use the app.** Inspect every UI change in the running app; test against a
+  real account of realistic size before release. Have a fresh eye check screens,
+  shortcuts, modes, small windows, long text, console, and logs.
+- **Focused flow-based passes.** After large changes, run separate passes for
+  architecture, ownership, concurrency, security, and test strength, sliced end
+  to end by data flow rather than directory, repeating until a pass finds
+  nothing. Verify every finding before fixing, and add a test (or note why none
+  is possible).
+- **Learn from escapes.** When a bug passes the gate, add the test or rule that
+  would have caught it.
 
 ## Project specifics
 
-The only section that changes from project to project.
-
-- **Product:** Supermonkey, a keyboard-first Gmail client for macOS. Tauri 2, React
-  19 with the React Compiler, TypeScript 7, Tailwind 4, Vite+, Rust with SQLite.
-- **No spec document.** Behavior is what the cases in
-  [e2e/COVERAGE.md](e2e/COVERAGE.md) and their tests check; where the rules above
-  say "the spec", read the test plan. A change in behavior starts with its case.
-- **Commands.** `vp` (Vite+) for JS tooling, never `npm`, `pnpm`, or `npx`. `cargo`
-  runs from `src-tauri`.
+- **Product:** Supermonkey, a keyboard-first Gmail client for macOS (Tauri 2,
+  React 19 + React Compiler, TypeScript 7, Tailwind 4, Vite+, Rust + SQLite).
+- **Spec:** Behavior lives in [e2e/COVERAGE.md](e2e/COVERAGE.md) and its tests
+  (no separate spec doc). Behavior changes start by updating its case.
+- **Commands:** Use `vp` (Vite+) for JS tooling — never `npm`, `pnpm`, or `npx`.
+  Run `cargo` from `src-tauri/`.
 
   ```sh
   vp install            # dependencies
-  vp run demo           # app against the in-process fake Gmail, fresh data each launch
+  vp run demo           # app against in-process fake Gmail, fresh each launch
   vp run tauri dev      # app against real Gmail (needs google-oauth-client.json)
   vp run tauri build    # release .app
   vp check --fix        # UI format, lint, type check
-  vp run gate           # every check; run before each commit
-  vp run <task>         # one step: test:rust, lint:rust, lint:ts, typecheck, bindings, e2e
+  vp run gate           # full gate; run before each commit
+  vp run <task>         # single check: test:rust, lint:rust, lint:ts, typecheck, bindings, e2e
   ```
 
-- **Layout.**
-  - `src-tauri/src` (`src-tauri/tests/architecture.rs` checks the module edges):
-    `domain/` (newtypes, mail model, draft lifecycle, views, splits, snooze, contacts, query language),
-    `mime/` (parsing, sanitizer, unsubscribe, outgoing MIME), `gmail/` (client,
-    quota scheduler, OAuth, token file), `store/` (schema, queries, search, contacts, writer actor,
-    read pool), `ipc/` (pure wire types generated into `src/bindings`),
+- **Layout:**
+  - `src-tauri/src` (edges checked by `src-tauri/tests/architecture.rs`):
+    `domain/` (newtypes, mail/draft models, views, splits, snooze, contacts, query language),
+    `mime/` (parsing, sanitizer, unsubscribe, outgoing MIME),
+    `gmail/` (client, quota scheduler, OAuth, token file),
+    `store/` (schema, queries, search, contacts, writer actor, read pool),
+    `ipc/` (pure wire types generated into `src/bindings`),
     `core/` (engine, writer state, actions, subscriptions, drafts, outbox, listings,
     snooze, network, notifications, unwanted, attachments, sync workers),
     `session/` (`Session`, `Host`, optional `web` bridge),
     `shell/` (Tauri commands, standard menu with app-owned Quit, platform adapters, logging),
-    `testkit/` (`feature = "fake"`: E2E server, demo seed, perf fixture), and `bin/` (`e2e-server`, `perf-fixture`).
-  - `src-tauri/crates/sm-fake-gmail`: standalone in-process fake Gmail server used
-    by tests and demo mode.
-  - `src`: the UI: `store/` (mirror and chrome state), `keyboard/`, `ui/`,
-    `compose/`, `ipc/`; `src/theme.css` holds the design tokens.
-    `src/ui/UntrustedFrame.tsx` is the one path that renders mail HTML: its CSP,
-    sandbox, and link handling. Its sandbox keeps `allow-scripts` because WebKit
-    never fires the parent's listeners in a frame without it; the CSP runs nothing.
-- **Tests.** [e2e/COVERAGE.md](e2e/COVERAGE.md) is the test plan, one line per case;
-  its "Kept unit and property tests" list holds the allowed unit tests.
-  `e2e/plan.spec.ts` checks it and `e2e/tokens.spec.ts` checks the tokens.
-  Harness: `e2e/app.ts`, `e2e/control.ts` (faults, held replies), `e2e/seeds.ts`.
-  `app.advance()` moves time; `app.settle()` waits for idle.
-- **Releases.** `.github/workflows/release.yml` keeps a "release X.Y.Z" pull request
-  open on `main`; merging it builds the universal `.dmg` and publishes the release.
-  Only the user merges it. The build reads the OAuth client from the
-  `GOOGLE_OAUTH_CLIENT_JSON` secret. Versions live in `package.json` and
-  `src-tauri/Cargo.toml`.
-- **No comments.** Code and tests carry no comments, doc comments included (`missing_docs` is off). Lint directives stay, with the reason inline after `--` or in `reason = "..."`.
-- **Secrets.** `google-oauth-client.json` is git-ignored;
-  `src-tauri/lint/oauth-client.json` is the gate's placeholder. Refresh tokens are in
-  `tokens.json` (mode 0600) in the app's data folder.
+    `testkit/` (`feature = "fake"`: E2E server, demo seed, perf fixture),
+    `bin/` (`e2e-server`, `perf-fixture`).
+  - `src-tauri/crates/sm-fake-gmail`: standalone in-process fake Gmail server.
+  - `src/`: UI (`store/`, `keyboard/`, `ui/`, `compose/`, `ipc/`); design tokens
+    in `src/theme.css`. `src/ui/UntrustedFrame.tsx` is the single path for mail
+    HTML (sandbox keeps `allow-scripts` only because WebKit otherwise drops
+    parent listeners; its CSP executes nothing).
+- **Tests:** [e2e/COVERAGE.md](e2e/COVERAGE.md) lists all E2E cases and allowed
+  unit tests, verified by `e2e/plan.spec.ts`; `e2e/tokens.spec.ts` checks tokens.
+  Harness: `e2e/app.ts`, `e2e/control.ts`, `e2e/seeds.ts` (`app.advance()`,
+  `app.settle()`).
+- **Releases:** `.github/workflows/release.yml` manages a "release X.Y.Z" PR on
+  `main` (merged only by the user) using `GOOGLE_OAUTH_CLIENT_JSON`. Versions
+  live in `package.json` and `src-tauri/Cargo.toml`.
+- **No comments:** Code and tests carry no comments, doc comments included
+  (`missing_docs` is off). Keep lint directives with inline reasons (`--` or
+  `reason = "..."`).
+- **Secrets:** `google-oauth-client.json` is git-ignored;
+  `src-tauri/lint/oauth-client.json` is the gate placeholder; refresh tokens live
+  in `tokens.json` (`0600`) in the app's data folder.
