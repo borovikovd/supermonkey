@@ -904,3 +904,27 @@ test("CONV-28 a conversation still loading when the app quits stays unread", asy
   await app.settle();
   expect(await app.gmail.labelsOf(A, s.message("p5", 1).id)).not.toContain("UNREAD");
 });
+
+test("CONV-29 a reply written below the quoted mail is shown, not folded away with the quote", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const p1 = s.message("p1", 1);
+  await gmail.deliver({
+    account: A,
+    from: seeds.PERSONS[0] ?? "",
+    subject: "Re: Person 1",
+    html:
+      '<div class="moz-cite-prefix">On 02/11/26 09:00, Ana wrote:<br></div>' +
+      '<blockquote type="cite"><p>The earlier question</p></blockquote>' +
+      "<p>Answer written below the quote</p>",
+    threadId: p1.threadId,
+    inReplyTo: p1.messageId,
+  });
+  await app.settle();
+  await app.openAndSettle("Person 1");
+  const body = app.messageBody(1);
+  await expect(body.getByText("Answer written below the quote")).toBeVisible();
+  await expect(body.getByText("The earlier question")).toBeVisible();
+});

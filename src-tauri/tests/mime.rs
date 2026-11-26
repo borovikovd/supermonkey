@@ -269,3 +269,38 @@ fn parsers_and_sanitizer_never_panic_on_3000_seeded_inputs() {
         std::hint::black_box(list_unsubscribe(Some(&s), Some(&s)));
     }
 }
+
+#[test]
+fn only_a_quote_that_ends_the_message_is_folded_away() {
+    let attribution = r#"<div class="moz-cite-prefix">On 02/11/26 09:00, Ana wrote:<br></div>"#;
+    let quote = r#"<blockquote type="cite" cite="mid:q1"><p>The earlier question</p><blockquote type="cite"><p>Older still</p></blockquote></blockquote>"#;
+
+    let below = format!("{attribution}{quote}<p>Answer written below the quote</p>");
+    assert_eq!(
+        split_quoted_history(&below),
+        (below.as_str(), None),
+        "a reply below the quote stays in view"
+    );
+
+    let between =
+        format!("<p>First point</p>{attribution}{quote}<p>Second point, after the quote</p>");
+    assert_eq!(
+        split_quoted_history(&between),
+        (between.as_str(), None),
+        "a reply around the quote stays in view"
+    );
+
+    let above = format!("<p>Answer written above</p>{attribution}{quote}<br>");
+    let (shown, folded) = split_quoted_history(&above);
+    assert_eq!(
+        shown,
+        format!("<p>Answer written above</p>{attribution}"),
+        "a quote that ends the message is folded"
+    );
+    assert_eq!(folded, Some(format!("{quote}<br>").as_str()));
+
+    let outlook = r#"<p>Outlook reply</p><div id="appendonsend"></div><hr><div id="divRplyFwdMsg">From: Ana</div><div>The earlier question</div>"#;
+    let (shown, folded) = split_quoted_history(outlook);
+    assert_eq!(shown, "<p>Outlook reply</p>");
+    assert!(folded.is_some_and(|q| q.contains("The earlier question")));
+}

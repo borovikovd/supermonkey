@@ -647,7 +647,40 @@ pub fn split_quoted_history(html: &str) -> (&str, Option<&str>) {
     if html_to_text(before).is_empty() {
         return (html, None);
     }
+    if let Some(end) = quoted_block_end(html, m.as_str(), m.end())
+        && !html_to_text(&html[end..]).is_empty()
+    {
+        return (html, None);
+    }
     (before, Some(&html[m.start()..]))
+}
+
+fn quoted_block_end(html: &str, open_tag: &str, after_open: usize) -> Option<usize> {
+    static BLOCKQUOTE_TAGS: LazyLock<Option<Regex>> =
+        LazyLock::new(|| Regex::new(r"(?i)</?blockquote\b[^>]*>").ok());
+    static DIV_TAGS: LazyLock<Option<Regex>> =
+        LazyLock::new(|| Regex::new(r"(?i)</?div\b[^>]*>").ok());
+    let lower = open_tag.to_ascii_lowercase();
+    let tags = if lower.starts_with("<blockquote") {
+        BLOCKQUOTE_TAGS.as_ref()?
+    } else if lower.contains("gmail_quote") {
+        DIV_TAGS.as_ref()?
+    } else {
+        return None;
+    };
+    let rest = html.get(after_open..)?;
+    let mut depth = 1usize;
+    for tag in tags.find_iter(rest) {
+        if tag.as_str().starts_with("</") {
+            depth = depth.saturating_sub(1);
+            if depth == 0 {
+                return Some(after_open.saturating_add(tag.end()));
+            }
+        } else {
+            depth = depth.saturating_add(1);
+        }
+    }
+    None
 }
 
 #[must_use]
