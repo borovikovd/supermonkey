@@ -1,6 +1,7 @@
 mod accounts;
 mod actor;
 mod contacts;
+mod legacy;
 mod mail;
 mod queues;
 mod search;
@@ -19,6 +20,7 @@ use crate::domain::{AccountId, DraftId, Identity, LabelId, Rev, Router, ThreadId
 pub use accounts::{AccountRecord, LabelRecord, NewNotice, NoticeRecord};
 pub use actor::{Pending, Priority, ReadPool, Writer};
 pub use contacts::ContactSighting;
+pub use legacy::{LEGACY_DB_FILE, import_legacy};
 pub use mail::{
     AttachmentRecord, ConversationView, MessageBodyRecord, MessageBodyWrite, MessageRecord,
     NewAttachment, NewMessage, ThreadRow, ThreadSyncState,

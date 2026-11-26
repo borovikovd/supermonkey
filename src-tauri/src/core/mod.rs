@@ -175,6 +175,7 @@ impl Core {
     pub fn open(config: CoreConfig, platform: Box<dyn Platform>) -> Result<Arc<Self>, CoreError> {
         let http = HttpClient::new().map_err(|e| CoreError::internal(e.to_string()))?;
         let db_path = config.data_dir.join("mail.db");
+        import_earlier_database(&config.data_dir, &db_path);
         let tokens = Arc::new(TokenFile::new(config.data_dir.join("tokens.json")));
         let files = DraftFiles::new(&config.data_dir);
         let activity = Activity::new();
@@ -429,6 +430,16 @@ impl Core {
     #[must_use]
     pub const fn writer(&self) -> &Writer<WriterState> {
         &self.writer
+    }
+}
+
+fn import_earlier_database(data_dir: &Path, db_path: &Path) {
+    let earlier = data_dir.join(crate::store::LEGACY_DB_FILE);
+    if !db_path.exists() && earlier.exists() {
+        log_err(
+            "import the database of an earlier version",
+            crate::store::import_legacy(&earlier, db_path),
+        );
     }
 }
 

@@ -412,4 +412,8 @@ export class Control {
   async blockDraftFolders(): Promise<void> {
     await this.call("POST", "/__test/draft-folders/block");
   }
+
+  earlierData(dir: string): Promise<null> {
+    return this.call("POST", "/__test/earlier-data", { dir });
+  }
 }

@@ -201,3 +201,16 @@ async fn one_click_unsubscribe_requires_https_and_follows_no_redirect() {
     drop(server.await);
     drop(TcpStream::connect(addr).await);
 }
+
+#[test]
+fn a_token_stored_under_a_mixed_case_address_is_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tokens.json");
+    std::fs::write(&path, r#"{"Me@Acme.com":"1//earlier"}"#).unwrap();
+    let tokens = supermonkey_lib::gmail::TokenFile::new(path);
+    let found = tokens.load("me@acme.com").unwrap();
+    assert_eq!(
+        found.map(|t| t.expose().to_owned()),
+        Some("1//earlier".to_owned())
+    );
+}

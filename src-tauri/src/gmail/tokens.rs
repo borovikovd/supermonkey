@@ -121,7 +121,12 @@ impl TokenFile {
                 });
             }
         };
-        serde_json::from_str(&raw).map_err(|_json| TokenStoreError::Corrupt)
+        let stored: BTreeMap<String, String> =
+            serde_json::from_str(&raw).map_err(|_json| TokenStoreError::Corrupt)?;
+        Ok(stored
+            .into_iter()
+            .map(|(email, token)| (normalize(&email), token))
+            .collect())
     }
 
     fn write_map(&self, map: &BTreeMap<String, String>) -> Result<(), TokenStoreError> {

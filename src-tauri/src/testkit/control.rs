@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -72,7 +73,47 @@ pub fn router(state: Arc<ServerState>) -> Router {
             get(list_draft_folders).post(create_draft_folder),
         )
         .route("/__test/draft-folders/block", post(block_draft_folders))
+        .route("/__test/earlier-data", post(plant_earlier_data))
         .with_state(state)
+}
+
+#[derive(Deserialize)]
+struct EarlierDataBody {
+    dir: PathBuf,
+}
+
+async fn plant_earlier_data(
+    State(state): State<Arc<ServerState>>,
+    Json(body): Json<EarlierDataBody>,
+) -> Response {
+    if state.bridge.session().is_some() {
+        return err_resp(StatusCode::BAD_REQUEST, "stop the app before planting data");
+    }
+    let planted = (|| {
+        std::fs::create_dir_all(&state.data_dir)?;
+        for entry in std::fs::read_dir(&body.dir)? {
+            let from = entry?.path();
+            if let Some(name) = from.file_name().filter(|_| from.is_file()) {
+                std::fs::copy(&from, state.data_dir.join(name))?;
+            }
+        }
+        Ok::<_, std::io::Error>(())
+    })();
+    if let Err(err) = planted {
+        return err_resp(StatusCode::INTERNAL_SERVER_ERROR, err);
+    }
+    let users: Vec<(String, String)> = state
+        .users
+        .lock()
+        .iter()
+        .map(|(email, user)| (email.clone(), user.refresh_token().to_owned()))
+        .collect();
+    for (email, token) in users {
+        if let Err(err) = state.tokens().store(&email, &RefreshToken::new(token)) {
+            return err_resp(StatusCode::INTERNAL_SERVER_ERROR, err);
+        }
+    }
+    Json(Value::Null).into_response()
 }
 
 fn err_resp(status: StatusCode, msg: impl std::fmt::Display) -> Response {
