@@ -476,7 +476,8 @@ fn undo_modify(
             revert_msgs.push(rev_mc);
         }
         let prev_before_undo = row.snooze_until;
-        tx.set_thread_snooze(change.thread, change.snooze_before)?;
+        let snooze_now = change.snooze_undone(prev_before_undo);
+        tx.set_thread_snooze(change.thread, snooze_now)?;
         tx.derive_thread(change.thread)?;
 
         for ((add, remove), gmail_msg_ids) in by_delta {
@@ -489,7 +490,7 @@ fn undo_modify(
                     thread: change.thread,
                     messages: revert_msgs.clone(),
                     snooze_before: prev_before_undo,
-                    snooze_after: change.snooze_before,
+                    snooze_after: snooze_now,
                 },
             };
             tx.queue_op(&NewOp {

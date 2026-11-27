@@ -452,3 +452,51 @@ test("SNZ-09 a time typed for after the clocks change wakes at that time on the 
   await expectIn(app, "i", "Person 1");
   await expectNotIn(app, "h", "Person 1");
 });
+
+async function gmailStarred(gmail: Control, threadId: string): Promise<boolean> {
+  const state = await gmail.gmail(A);
+  return state.messages.some((m) => m.threadId === threadId && m.labels.includes("STARRED"));
+}
+
+test("SNZ-10 undoing a star given while snoozed does not snooze again a conversation a reply brought back", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app);
+  const p3 = s.thread("p3");
+  await app.highlight("Person 3");
+  await snoozeNamed(app, "Next week");
+  await expectIn(app, "h", "Person 3");
+  await app.highlight("Person 3");
+  await app.press("s");
+  await app.settle();
+
+  const reply = await gmail.deliver({
+    account: A,
+    from: "Carol Chen <carol@corp.test>",
+    to: [A],
+    subject: "Re: Person 3",
+    text: "A reply that brings it back.",
+    threadId: p3.threadId,
+    inReplyTo: s.latest("p3").messageId,
+    labels: ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+    poll: false,
+  });
+  await app.pollAndSettle(A);
+  await expectIn(app, "i", "Person 3");
+  expect(await listed(app, "h", "Person 3"), "the reply ended the snooze").toBe(false);
+
+  expect(await gmailStarred(gmail, p3.threadId), "starred before the undo").toBe(true);
+  await app.press("z");
+  await app.settle();
+  expect(await gmailStarred(gmail, p3.threadId), "the undo took the star off").toBe(false);
+  await expectIn(app, "i", "Person 3");
+
+  await gmail.modify(A, reply.id, [], ["INBOX"], { poll: true });
+  await app.settle();
+  await expectNotIn(app, "i", "Person 3");
+  expect(
+    await listed(app, "h", "Person 3"),
+    "archived elsewhere, it is done, not snoozed again",
+  ).toBe(false);
+});

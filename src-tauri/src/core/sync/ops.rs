@@ -356,7 +356,7 @@ fn revert_thread_change(
             tx.set_message_labels(msg.id, &next)?;
         }
     }
-    tx.set_thread_snooze(change.thread, change.snooze_before)?;
+    tx.set_thread_snooze(change.thread, change.snooze_undone(row.snooze_until))?;
     tx.derive_thread(change.thread)?;
     Ok(())
 }

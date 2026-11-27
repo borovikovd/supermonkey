@@ -145,6 +145,15 @@ impl ThreadChange {
     pub fn restores_snooze(&self) -> bool {
         self.snooze_before.is_some() && self.snooze_before != self.snooze_after
     }
+
+    #[must_use]
+    pub fn snooze_undone(&self, current: Option<Millis>) -> Option<Millis> {
+        if self.snooze_before != self.snooze_after && current == self.snooze_after {
+            self.snooze_before
+        } else {
+            current
+        }
+    }
 }
 
 #[must_use]
