@@ -176,8 +176,16 @@ Assume every `.await` lets the world change.
 - **Focused flow-based passes.** After large changes, run separate passes for
   architecture, ownership, concurrency, security, and test strength, sliced end
   to end by data flow rather than directory, repeating until a pass finds
-  nothing. Verify every finding before fixing, and add a test (or note why none
-  is possible).
+  nothing.
+- **Converging bug review.** Put batch fixes on a branch, never dueling commits
+  on `main`. State the two-sided invariant before editing (both safety/no-waste
+  and completeness/soundness) and lock both sides with an invariant or
+  state-machine test rather than a single example. A reviewer challenges the
+  branch without rewriting it and blocks only on a runnable counterexample or a
+  checked baseline/external fact (`git show`, primary spec, live probe) — never
+  memory or unprobed hunches. Resolve only verified blockers, freeze
+  unverifiable external questions for a live check, and stop at zero blockers on
+  a green gate.
 - **Learn from escapes.** When a bug passes the gate, add the test or rule that
   would have caught it.
 
@@ -220,8 +228,9 @@ Assume every `.await` lets the world change.
     parent listeners; its CSP executes nothing).
 - **Tests:** E2E tests live in `e2e/*.spec.ts` using `e2e/app.ts`,
   `e2e/control.ts`, and `e2e/seeds.ts` (`app.advance()`, `app.settle()`).
-  Static checks (`checks/tokens.test.ts`, `checks/deps.test.ts`) run fast via
-  `vp run check:static`.
+  Rust invariant/chaos tests live in `src-tauri/tests/invariants.rs` and
+  `src-tauri/tests/engine.rs`; static and mirror checks (`checks/*.test.ts`,
+  `src/store/mirror-core.test.ts`) run fast via `vp run check:static`.
 - **Releases:** `.github/workflows/release.yml` manages a "release X.Y.Z" PR on
   `main` (merged only by the user) using `GOOGLE_OAUTH_CLIENT_JSON`. Versions
   live in `package.json` and `src-tauri/Cargo.toml`.
