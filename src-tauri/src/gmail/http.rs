@@ -1,14 +1,16 @@
 use std::time::Duration;
 
 use rand::Rng as _;
-use reqwest::header::RETRY_AFTER;
-use reqwest::{Client, Response, StatusCode, redirect};
+use reqwest::header::{CONTENT_TYPE, RETRY_AFTER};
+use reqwest::{Client, Method, RequestBuilder, Response, StatusCode, Url, redirect};
 use serde::Deserialize;
 use thiserror::Error;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const LISTS_TIMEOUT: Duration = Duration::from_secs(10);
+const SLOWEST_UPLOAD_BYTES_PER_SEC: u64 = 32 * 1024;
+const LARGE_UPLOAD_BYTES: usize = 256 * 1024;
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(300);
 const BASE_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
@@ -20,16 +22,27 @@ pub struct HttpClientError(#[from] reqwest::Error);
 #[derive(Debug, Clone)]
 pub struct HttpClient {
     google: Client,
+    uploads: Client,
     lists: Client,
+    idle: Duration,
+    slowest_upload: u64,
 }
 
 impl HttpClient {
     pub fn new() -> Result<Self, HttpClientError> {
+        Self::with_limits(IDLE_TIMEOUT, SLOWEST_UPLOAD_BYTES_PER_SEC)
+    }
+
+    pub fn with_limits(idle: Duration, slowest_upload: u64) -> Result<Self, HttpClientError> {
         let user_agent = format!("Supermonkey/{}", env!("CARGO_PKG_VERSION"));
         let google = Client::builder()
             .user_agent(&user_agent)
             .connect_timeout(CONNECT_TIMEOUT)
-            .timeout(REQUEST_TIMEOUT)
+            .read_timeout(idle)
+            .build()?;
+        let uploads = Client::builder()
+            .user_agent(&user_agent)
+            .connect_timeout(CONNECT_TIMEOUT)
             .build()?;
         let lists = Client::builder()
             .user_agent(&user_agent)
@@ -37,7 +50,13 @@ impl HttpClient {
             .timeout(LISTS_TIMEOUT)
             .redirect(redirect::Policy::none())
             .build()?;
-        Ok(Self { google, lists })
+        Ok(Self {
+            google,
+            uploads,
+            lists,
+            idle,
+            slowest_upload,
+        })
     }
 
     #[must_use]
@@ -48,6 +67,22 @@ impl HttpClient {
     #[must_use]
     pub const fn lists(&self) -> &Client {
         &self.lists
+    }
+
+    pub fn google_json(&self, method: Method, url: Url, body: Option<Vec<u8>>) -> RequestBuilder {
+        let Some(bytes) = body else {
+            return self.google.request(method, url);
+        };
+        let request = if bytes.len() > LARGE_UPLOAD_BYTES {
+            let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+            let for_size = Duration::from_secs(size / self.slowest_upload.max(1));
+            self.uploads
+                .request(method, url)
+                .timeout(self.idle.saturating_add(for_size))
+        } else {
+            self.google.request(method, url)
+        };
+        request.header(CONTENT_TYPE, "application/json").body(bytes)
     }
 }
 

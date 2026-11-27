@@ -561,16 +561,16 @@ impl Gmail {
         url: &Url,
         token: &str,
     ) -> Result<ReadResponse, GmailError> {
+        let body =
+            call.body.map(serde_json::to_vec).transpose().map_err(|e| {
+                GmailError::new(Outcome::InvalidRequest(e.to_string()), e.to_string())
+            })?;
         let mut req = self
             .http
-            .google()
-            .request(call.method.clone(), url.clone())
+            .google_json(call.method.clone(), url.clone(), body)
             .bearer_auth(token);
         if !call.query.is_empty() {
             req = req.query(call.query);
-        }
-        if let Some(b) = call.body {
-            req = req.json(b);
         }
         let response = req
             .send()

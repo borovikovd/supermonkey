@@ -251,3 +251,138 @@ fn only_a_filter_that_trashes_all_mail_from_a_sender_counts_as_a_block() {
         .collect();
     assert_eq!(blocked, vec!["news@news.test"]);
 }
+
+fn serve_once<F, Fut>(listener: TcpListener, respond: F)
+where
+    F: FnOnce(TcpStream, Vec<u8>) -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send,
+{
+    tokio::spawn(async move {
+        let Ok((mut stream, _)) = listener.accept().await else {
+            return;
+        };
+        let mut request = Vec::new();
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            let Ok(n) = stream.read(&mut buf).await else {
+                return;
+            };
+            request.extend_from_slice(&buf[..n]);
+            let Some(head_end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
+                if n == 0 {
+                    return;
+                }
+                continue;
+            };
+            let head = String::from_utf8_lossy(&request[..head_end]).to_ascii_lowercase();
+            let length: usize = head
+                .lines()
+                .find_map(|line| line.strip_prefix("content-length:"))
+                .and_then(|v| v.trim().parse().ok())
+                .unwrap_or(0);
+            if n == 0 || request.len() >= head_end + 4 + length {
+                break;
+            }
+        }
+        respond(stream, request).await;
+    });
+}
+
+#[tokio::test]
+async fn a_download_that_keeps_arriving_outlasts_the_idle_limit_and_a_stalled_one_does_not() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let steady = format!("http://{}/", listener.local_addr().unwrap());
+    serve_once(listener, |mut stream, _| async move {
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 60\r\nconnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        for _ in 0..6 {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            stream.write_all(b"0123456789").await.unwrap();
+            stream.flush().await.unwrap();
+        }
+    });
+    let http = HttpClient::with_limits(Duration::from_millis(400), 1).unwrap();
+    let body = http
+        .google()
+        .get(&steady)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(
+        body.len(),
+        60,
+        "900 ms of steady arrival under a 400 ms idle limit"
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let stalled = format!("http://{}/", listener.local_addr().unwrap());
+    serve_once(listener, |mut stream, _| async move {
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\ncontent-length: 60\r\nconnection: close\r\n\r\n0123456789",
+            )
+            .await
+            .unwrap();
+        stream.flush().await.unwrap();
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    });
+    let res = http
+        .google()
+        .get(&stalled)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await;
+    assert!(
+        res.is_err(),
+        "nothing for longer than the idle limit ends the read"
+    );
+}
+
+#[tokio::test]
+async fn a_large_upload_is_given_time_for_its_size_and_a_small_request_is_not() {
+    let slow_answer = |mut stream: TcpStream, _request: Vec<u8>| async move {
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}")
+            .await
+            .unwrap();
+        stream.flush().await.unwrap();
+    };
+    let http = HttpClient::with_limits(Duration::from_millis(300), 512 * 1024).unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    serve_once(listener, slow_answer);
+    let large = vec![b'a'; 1024 * 1024];
+    let res = http
+        .google_json(reqwest::Method::POST, url.parse().unwrap(), Some(large))
+        .send()
+        .await;
+    assert!(
+        res.is_ok_and(|r| r.status().is_success()),
+        "1 MB at no less than 512 KB/s may take 2 s beyond the idle limit"
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/", listener.local_addr().unwrap());
+    serve_once(listener, slow_answer);
+    let res = http
+        .google_json(
+            reqwest::Method::POST,
+            url.parse().unwrap(),
+            Some(b"{}".to_vec()),
+        )
+        .send()
+        .await;
+    assert!(
+        res.is_err(),
+        "a small request still waits no longer than the idle limit"
+    );
+}
