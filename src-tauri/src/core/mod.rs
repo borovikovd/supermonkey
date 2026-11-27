@@ -507,11 +507,11 @@ async fn handle_effect(core: &Arc<Core>, effect: Effect) {
 
 fn spawn_ensure_attachments(core: &Arc<Core>, account: AccountId, draft: crate::domain::DraftId) {
     let core_c = Arc::clone(core);
+    let cancel = core.tasks.token();
     core.tasks.spawn_busy(async move {
-        if let Some((_, gmail)) = core_c.accounts.gmail_for(account) {
-            log_err(
-                "download carried draft attachments",
-                download_carried_draft_attachments(
+        if let Some((_, gmail)) = core_c.accounts.gmail_for(account)
+            && let Some(res) = cancel
+                .run_until_cancelled(download_carried_draft_attachments(
                     account,
                     &draft,
                     &gmail,
@@ -519,9 +519,10 @@ fn spawn_ensure_attachments(core: &Arc<Core>, account: AccountId, draft: crate::
                     &core_c.writer,
                     &core_c.files,
                     GmailPriority::P1,
-                )
-                .await,
-            );
+                ))
+                .await
+        {
+            log_err("download carried draft attachments", res);
         }
     });
 }
@@ -533,18 +534,20 @@ fn spawn_reload_draft(
     gmail_draft_id: crate::domain::GmailDraftId,
 ) {
     let core_c = Arc::clone(core);
+    let cancel = core.tasks.token();
     core.tasks.spawn_busy(async move {
         if let Some((_, gmail)) = core_c.accounts.gmail_for(account) {
-            reload_single_draft_from_gmail(
-                account,
-                draft,
-                &gmail_draft_id,
-                &gmail,
-                &core_c.pool,
-                &core_c.writer,
-                GmailPriority::P2,
-            )
-            .await;
+            cancel
+                .run_until_cancelled(reload_single_draft_from_gmail(
+                    account,
+                    draft,
+                    &gmail_draft_id,
+                    &gmail,
+                    &core_c.pool,
+                    &core_c.writer,
+                    GmailPriority::P2,
+                ))
+                .await;
         }
     });
 }

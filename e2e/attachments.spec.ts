@@ -786,4 +786,35 @@ test.describe("attachments", () => {
       /^data:image\/png;base64,/,
     );
   });
+
+  test("ATT-26 Cmd+Q while a forwarded file is still downloading quits without waiting for it, and the forward keeps the file", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    const download = await gmail.hold("attachments.get");
+    await app.openAndSettle("Contract");
+    await app.reply("f");
+    await app.type("Forwarding the contract");
+    await expect
+      .poll(async () => (await gmail.requests("attachments.get")).some((r) => r.held))
+      .toBe(true);
+
+    const quit = await Promise.race([
+      app.quit().then(() => "finished"),
+      new Promise<string>((resolve) => setTimeout(() => resolve("still waiting"), 8_000)),
+    ]);
+    expect(quit, "the quit while the download is held").toBe("finished");
+    await gmail.release({ id: download.id });
+    await app.launch();
+    await app.settle();
+    await app.eventually(
+      A,
+      (g) =>
+        g.drafts.some((d) =>
+          attachments(parseMime(d.message.raw)).some((p) => p.filename === "contract.pdf"),
+        ),
+      "the forward in Gmail carries contract.pdf",
+    );
+  });
 });
