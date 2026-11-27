@@ -104,7 +104,7 @@ impl<R: Runtime> Host for TauriHost<R> {
     fn emit(&self, event: AppEvent) {
         #[cfg(feature = "web")]
         if let Some(web) = &self.web_events {
-            web.emit(&event);
+            web.emit(event);
         }
         if let Ok((name, payload)) = event.parts() {
             log_err("emit tauri event", self.app.emit(&name, payload));

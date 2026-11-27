@@ -249,22 +249,14 @@ struct Waiter {
     notify: Arc<Notify>,
 }
 
-struct State {
+struct Budget {
     config: QuotaConfig,
     bucket: Bucket,
     bg_window: BackgroundWindow,
     in_flight: usize,
-    next_seq: u64,
-    queue: BTreeMap<(Priority, u64), Waiter>,
 }
 
-enum Admit {
-    Now,
-    WhenSlotFrees,
-    At(Instant),
-}
-
-impl State {
+impl Budget {
     fn can_admit(&mut self, cost: Units, background: bool, now: Instant) -> Admit {
         if self.in_flight >= self.config.max_in_flight {
             return Admit::WhenSlotFrees;
@@ -286,53 +278,55 @@ impl State {
         }
         Admit::Now
     }
+}
 
+struct State {
+    budget: Budget,
+    next_seq: u64,
+    queue: BTreeMap<(Priority, u64), Waiter>,
+}
+
+enum Admit {
+    Now,
+    WhenSlotFrees,
+    At(Instant),
+}
+
+impl State {
     fn pump(&mut self, now: Instant) {
         let mut blocked = false;
-        let keys: Vec<(Priority, u64)> = self.queue.keys().copied().collect();
-        for key in keys {
-            let Some(w) = self.queue.get(&key) else {
-                continue;
-            };
+        for (&(_, seq), w) in &mut self.queue {
             if w.granted {
                 continue;
             }
             if blocked {
-                if let Some(w) = self.queue.get_mut(&key) {
-                    w.wake_at = None;
-                }
+                w.wake_at = None;
                 continue;
             }
             let (cost, bg) = (w.cost, w.background);
-            match self.can_admit(cost, bg, now) {
+            match self.budget.can_admit(cost, bg, now) {
                 Admit::Now => {
-                    self.in_flight += 1;
-                    self.bucket.level -= f64::from(cost.0);
+                    self.budget.in_flight += 1;
+                    self.budget.bucket.level -= f64::from(cost.0);
                     if bg {
-                        self.bg_window.record(key.1, cost.0, now);
+                        self.budget.bg_window.record(seq, cost.0, now);
                     }
-                    if let Some(w) = self.queue.get_mut(&key) {
-                        w.granted = true;
-                        w.wake_at = None;
-                        w.notify.notify_one();
-                    }
+                    w.granted = true;
+                    w.wake_at = None;
+                    w.notify.notify_one();
                 }
                 Admit::WhenSlotFrees => {
-                    if let Some(w) = self.queue.get_mut(&key) {
-                        w.wake_at = None;
-                    }
+                    w.wake_at = None;
                     blocked = true;
                 }
                 Admit::At(at) => {
-                    if let Some(w) = self.queue.get_mut(&key) {
-                        let changed = w.wake_at.is_none_or(|prev| {
-                            let diff = if prev > at { prev - at } else { at - prev };
-                            diff > Duration::from_millis(1)
-                        });
-                        w.wake_at = Some(at);
-                        if changed {
-                            w.notify.notify_one();
-                        }
+                    let changed = w.wake_at.is_none_or(|prev| {
+                        let diff = if prev > at { prev - at } else { at - prev };
+                        diff > Duration::from_millis(1)
+                    });
+                    w.wake_at = Some(at);
+                    if changed {
+                        w.notify.notify_one();
                     }
                     blocked = true;
                 }
@@ -357,10 +351,12 @@ impl AccountScheduler {
         let now = Instant::now();
         Self {
             state: Mutex::new(State {
-                config,
-                bucket: Bucket::new(config, now),
-                bg_window: BackgroundWindow::new(config.background_per_minute.0),
-                in_flight: 0,
+                budget: Budget {
+                    config,
+                    bucket: Bucket::new(config, now),
+                    bg_window: BackgroundWindow::new(config.background_per_minute.0),
+                    in_flight: 0,
+                },
                 next_seq: 0,
                 queue: BTreeMap::new(),
             }),
@@ -388,11 +384,10 @@ impl AccountScheduler {
         };
 
         let mut in_line = InLine {
-            scheduler: Arc::clone(self),
+            scheduler: Some(Arc::clone(self)),
             key,
             cost,
             background: priority.is_background(),
-            active: true,
         };
 
         loop {
@@ -401,10 +396,8 @@ impl AccountScheduler {
                 st.pump(Instant::now());
                 if st.queue.get(&key).is_some_and(|w| w.granted) {
                     st.queue.remove(&key);
-                    in_line.active = false;
-                    return Permit {
-                        scheduler: Arc::clone(self),
-                    };
+                    let scheduler = in_line.scheduler.take().unwrap_or_else(|| Arc::clone(self));
+                    return Permit { scheduler };
                 }
                 st.queue.get(&key).and_then(|w| w.wake_at)
             };
@@ -424,7 +417,7 @@ impl AccountScheduler {
 
     #[must_use]
     pub fn in_flight(&self) -> usize {
-        self.state.lock().in_flight
+        self.state.lock().budget.in_flight
     }
 
     #[must_use]
@@ -435,32 +428,32 @@ impl AccountScheduler {
     #[must_use]
     pub fn bucket_level(&self) -> f64 {
         let mut st = self.state.lock();
-        st.bucket.refill(Instant::now());
-        st.bucket.level
+        st.budget.bucket.refill(Instant::now());
+        st.budget.bucket.level
     }
 }
 
 struct InLine {
-    scheduler: Arc<AccountScheduler>,
+    scheduler: Option<Arc<AccountScheduler>>,
     key: (Priority, u64),
     cost: Units,
     background: bool,
-    active: bool,
 }
 
 impl Drop for InLine {
     fn drop(&mut self) {
-        if !self.active {
+        let Some(scheduler) = self.scheduler.take() else {
             return;
-        }
-        let mut st = self.scheduler.state.lock();
+        };
+        let mut st = scheduler.state.lock();
         if let Some(waiter) = st.queue.remove(&self.key)
             && waiter.granted
         {
-            st.in_flight = st.in_flight.saturating_sub(1);
-            st.bucket.level = (st.bucket.level + f64::from(self.cost.0)).min(st.bucket.capacity);
+            st.budget.in_flight = st.budget.in_flight.saturating_sub(1);
+            st.budget.bucket.level =
+                (st.budget.bucket.level + f64::from(self.cost.0)).min(st.budget.bucket.capacity);
             if self.background {
-                st.bg_window.cancel(self.key.1);
+                st.budget.bg_window.cancel(self.key.1);
             }
         }
         st.pump(Instant::now());
@@ -480,7 +473,7 @@ impl fmt::Debug for Permit {
 impl Drop for Permit {
     fn drop(&mut self) {
         let mut st = self.scheduler.state.lock();
-        st.in_flight = st.in_flight.saturating_sub(1);
+        st.budget.in_flight = st.budget.in_flight.saturating_sub(1);
         st.pump(Instant::now());
     }
 }

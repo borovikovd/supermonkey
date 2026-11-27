@@ -18,6 +18,7 @@ use super::http::{GmailError, HttpClient, Outcome};
 
 pub const GMAIL_MODIFY_SCOPE: &str = "https://www.googleapis.com/auth/gmail.modify";
 pub const GMAIL_SETTINGS_SCOPE: &str = "https://www.googleapis.com/auth/gmail.settings.basic";
+const OAUTH_SCOPES: &str = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.settings.basic";
 
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
@@ -77,6 +78,10 @@ impl RefreshToken {
     #[must_use]
     pub fn expose(&self) -> &str {
         &self.0
+    }
+
+    pub(super) fn into_inner(self) -> String {
+        self.0
     }
 }
 
@@ -191,13 +196,12 @@ impl SignIn {
         let verifier = random_token(32);
         let challenge = pkce_challenge(&verifier);
         let state = random_token(16);
-        let scope = format!("{GMAIL_MODIFY_SCOPE} {GMAIL_SETTINGS_SCOPE}");
 
         let mut params = vec![
             ("response_type", "code"),
             ("client_id", config.client_id.as_str()),
             ("redirect_uri", redirect_uri.as_str()),
-            ("scope", scope.as_str()),
+            ("scope", OAUTH_SCOPES),
             ("state", state.as_str()),
             ("code_challenge", challenge.as_str()),
             ("code_challenge_method", "S256"),
@@ -207,7 +211,7 @@ impl SignIn {
         if let Some(hint) = login_hint {
             params.push(("login_hint", hint));
         }
-        let auth_url = Url::parse_with_params(&config.auth_url, &params)?.to_string();
+        let auth_url = String::from(Url::parse_with_params(&config.auth_url, &params)?);
 
         Ok((
             Self {
@@ -298,16 +302,20 @@ impl Tokens {
         Self::new(http, config, grant.refresh_token, Some(grant.access_token))
     }
 
+    fn fresh_cached(&self) -> Option<AccessToken> {
+        self.cached
+            .lock()
+            .as_ref()
+            .filter(|t| t.is_fresh())
+            .cloned()
+    }
+
     pub async fn access_token(&self) -> Result<AccessToken, GmailError> {
-        if let Some(tok) = self.cached.lock().clone()
-            && tok.is_fresh()
-        {
+        if let Some(tok) = self.fresh_cached() {
             return Ok(tok);
         }
         let _guard = self.refreshing.lock().await;
-        if let Some(tok) = self.cached.lock().clone()
-            && tok.is_fresh()
-        {
+        if let Some(tok) = self.fresh_cached() {
             return Ok(tok);
         }
         self.do_refresh().await
@@ -315,16 +323,15 @@ impl Tokens {
 
     pub async fn refresh_after_401(&self, rejected: &str) -> Result<AccessToken, GmailError> {
         let _guard = self.refreshing.lock().await;
-        if let Some(tok) = self.cached.lock().clone()
-            && tok.expose() != rejected
-            && tok.is_fresh()
-        {
-            return Ok(tok);
-        }
         {
             let mut slot = self.cached.lock();
-            if slot.as_ref().is_some_and(|t| t.expose() == rejected) {
-                *slot = None;
+            if let Some(tok) = slot.as_ref() {
+                if tok.expose() != rejected && tok.is_fresh() {
+                    return Ok(tok.clone());
+                }
+                if tok.expose() == rejected {
+                    *slot = None;
+                }
             }
         }
         self.do_refresh().await
@@ -415,15 +422,15 @@ async fn token_request(
 }
 
 fn map_oauth_error(status: u16, body: &str) -> GmailError {
-    let parsed = serde_json::from_str::<OAuthErrorBody>(body).ok();
-    let code = parsed.as_ref().map_or("", |p| p.error.as_str());
-    let desc = parsed
-        .as_ref()
-        .filter(|p| !p.error_description.is_empty())
-        .map_or_else(
-            || format!("OAuth returned HTTP {status}"),
-            |p| p.error_description.clone(),
-        );
+    let (code, err_desc) = serde_json::from_str::<OAuthErrorBody>(body).map_or_else(
+        |_| (String::new(), String::new()),
+        |p| (p.error, p.error_description),
+    );
+    let desc = if err_desc.is_empty() {
+        format!("OAuth returned HTTP {status}")
+    } else {
+        err_desc
+    };
     if code == "invalid_grant" {
         return GmailError::new(Outcome::InvalidGrant, desc);
     }
@@ -433,7 +440,7 @@ fn map_oauth_error(status: u16, body: &str) -> GmailError {
         _ => GmailError::new(
             Outcome::Rejected {
                 status,
-                reason: (!code.is_empty()).then(|| code.to_owned()),
+                reason: (!code.is_empty()).then_some(code),
                 message: desc.clone(),
             },
             desc,
@@ -513,17 +520,17 @@ async fn handle_conn(mut stream: TcpStream, expected_state: String) -> CallbackO
         return CallbackOutcome::Ignore;
     }
     let mut code = None;
-    let mut state = None;
+    let mut state_ok = false;
     let mut err = None;
     for (k, v) in url.query_pairs() {
         match k.as_ref() {
             "code" => code = Some(v.into_owned()),
-            "state" => state = Some(v.into_owned()),
+            "state" => state_ok = v.as_ref() == expected_state,
             "error" => err = Some(v.into_owned()),
             _ => {}
         }
     }
-    if state.as_deref() != Some(expected_state.as_str()) {
+    if !state_ok {
         write_http(&mut stream, "400 Bad Request", FAILED_PAGE).await;
         return CallbackOutcome::Ignore;
     }

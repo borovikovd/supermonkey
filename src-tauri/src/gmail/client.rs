@@ -212,29 +212,29 @@ impl Gmail {
         q: ThreadQuery<'_>,
         priority: Priority,
     ) -> Result<ThreadPage, GmailError> {
-        let mut query: Vec<(&str, String)> = Vec::new();
+        let max_str = q.max_results.map(|m| m.to_string());
+        let mut query: Vec<(&str, &str)> = Vec::with_capacity(5);
         if let Some(text) = q.q
             && !text.is_empty()
         {
-            query.push(("q", text.to_owned()));
+            query.push(("q", text));
         }
         if let Some(label) = q.label_id {
-            query.push(("labelIds", label.0.clone()));
+            query.push(("labelIds", label.as_str()));
         }
         if q.include_spam_trash {
-            query.push(("includeSpamTrash", "true".to_owned()));
+            query.push(("includeSpamTrash", "true"));
         }
-        if let Some(max) = q.max_results {
-            query.push(("maxResults", max.to_string()));
+        if let Some(max) = max_str.as_deref() {
+            query.push(("maxResults", max));
         }
         if let Some(tok) = q.page_token {
-            query.push(("pageToken", tok.0.clone()));
+            query.push(("pageToken", tok.as_str()));
         }
-        let pairs: Vec<(&str, &str)> = query.iter().map(|(k, v)| (*k, v.as_str())).collect();
         self.json(Call {
             method: Method::GET,
             segments: &["threads"],
-            query: &pairs,
+            query: &query,
             body: None::<&()>,
             priority,
             cost: COST_THREADS_LIST,
@@ -534,14 +534,17 @@ impl Gmail {
         let token = self.tokens.access_token().await.map_err(not_sent)?;
         let _permit = self.scheduler.acquire(call.priority, call.cost).await;
 
-        let first = self.dispatch_once(call, &url, token.expose()).await?;
+        let first = self.dispatch_once(call, url, token.expose()).await?;
         if first.status.as_u16() == 401 {
             let refreshed = self
                 .tokens
                 .refresh_after_401(token.expose())
                 .await
                 .map_err(not_sent)?;
-            let second = self.dispatch_once(call, &url, refreshed.expose()).await?;
+            let retry_url = self.endpoint(call.segments)?;
+            let second = self
+                .dispatch_once(call, retry_url, refreshed.expose())
+                .await?;
             return if second.status.is_success() {
                 Ok(second)
             } else {
@@ -558,7 +561,7 @@ impl Gmail {
     async fn dispatch_once<B: Serialize + Sync>(
         &self,
         call: &Call<'_, B>,
-        url: &Url,
+        url: Url,
         token: &str,
     ) -> Result<ReadResponse, GmailError> {
         let body =
@@ -567,7 +570,7 @@ impl Gmail {
             })?;
         let mut req = self
             .http
-            .google_json(call.method.clone(), url.clone(), body)
+            .google_json(call.method.clone(), url, body)
             .bearer_auth(token);
         if !call.query.is_empty() {
             req = req.query(call.query);
@@ -647,10 +650,10 @@ fn may_post_unsubscribe(url: &Url) -> bool {
 fn is_loopback_or_private(url: &Url) -> bool {
     match url.host() {
         Some(Host::Domain(host)) => {
-            let h = host.to_ascii_lowercase();
-            h == "localhost"
-                || h.rsplit('.').next() == Some("localhost")
-                || h.rsplit('.').next() == Some("local")
+            host.eq_ignore_ascii_case("localhost")
+                || host.rsplit('.').next().is_some_and(|tld| {
+                    tld.eq_ignore_ascii_case("localhost") || tld.eq_ignore_ascii_case("local")
+                })
         }
         Some(Host::Ipv4(ip)) => is_private_ip(IpAddr::V4(ip)),
         Some(Host::Ipv6(ip)) => is_private_ip(IpAddr::V6(ip)),

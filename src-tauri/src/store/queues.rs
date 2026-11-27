@@ -13,7 +13,11 @@ use crate::domain::{
 use super::sql::{id_list, json_col, json_col_opt, to_json};
 use super::{Db, StoreError, Table, UNDO_KEPT, WriteTx};
 
-const DRAFT_COLS: &str = "id, account_id, kind, reply_all, thread_id, target_message_id, started_on_latest, from_addr, to_addrs, cc_addrs, bcc_addrs, subject, body_html, snippet, quote_html, attachments, in_reply_to, references_hdr, updated_at, stage, defaults, waits_for, gmail_draft_id, gmail_message_id, gmail_thread_id, gmail_create_sent, gmail_change_skipped, rev";
+macro_rules! draft_cols {
+    () => {
+        "id, account_id, kind, reply_all, thread_id, target_message_id, started_on_latest, from_addr, to_addrs, cc_addrs, bcc_addrs, subject, body_html, snippet, quote_html, attachments, in_reply_to, references_hdr, updated_at, stage, defaults, waits_for, gmail_draft_id, gmail_message_id, gmail_thread_id, gmail_create_sent, gmail_change_skipped, rev"
+    };
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -97,9 +101,9 @@ impl DraftRecord {
     }
 
     fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
-        let stage_str: String = row.get(19)?;
+        let stage_str = row.get_ref(19)?.as_str()?;
         let defaults: Option<DraftDefaults> = json_col_opt(row, 20)?;
-        let stage = match (stage_str.as_str(), defaults) {
+        let stage = match (stage_str, defaults) {
             ("fresh", Some(d)) => DraftStage::Fresh { defaults: d },
             ("kept", None) => DraftStage::Kept,
             _ => {
@@ -110,11 +114,11 @@ impl DraftRecord {
                 ));
             }
         };
-        let from_raw: String = row.get(7)?;
+        let from_raw = row.get_ref(7)?.as_str()?;
         let from = if from_raw.is_empty() || from_raw == "null" {
             None
         } else {
-            serde_json::from_str(&from_raw).map_err(|e| {
+            serde_json::from_str(from_raw).map_err(|e| {
                 rusqlite::Error::FromSqlConversionFailure(
                     7,
                     rusqlite::types::Type::Text,
@@ -258,7 +262,11 @@ pub struct OutboxRecord {
     pub undo_entry: Option<UndoEntryId>,
 }
 
-const OUTBOX_JOIN_SELECT: &str = "SELECT o.id, o.account_id, o.draft_id, o.thread_id, o.send_after, o.state, o.gmail_draft_id, o.sent_message_id, o.undo_requested, o.toast_closed, o.delayed, o.rev, COALESCE(d.to_addrs, '[]'), COALESCE(d.snippet, ''), COALESCE(d.subject, ''), (SELECT u.id FROM undo_entries u WHERE u.outbox_id = o.id LIMIT 1) FROM outbox o LEFT JOIN drafts d ON d.id = o.draft_id";
+macro_rules! outbox_join_select {
+    () => {
+        "SELECT o.id, o.account_id, o.draft_id, o.thread_id, o.send_after, o.state, o.gmail_draft_id, o.sent_message_id, o.undo_requested, o.toast_closed, o.delayed, o.rev, COALESCE(d.to_addrs, '[]'), COALESCE(d.snippet, ''), COALESCE(d.subject, ''), (SELECT u.id FROM undo_entries u WHERE u.outbox_id = o.id LIMIT 1) FROM outbox o LEFT JOIN drafts d ON d.id = o.draft_id"
+    };
+}
 
 impl OutboxRecord {
     fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
@@ -351,10 +359,16 @@ impl UndoRecord {
 
 impl Db<'_> {
     pub fn draft(self, id: &DraftId) -> Result<Option<DraftRecord>, StoreError> {
-        let sql = format!(
-            "SELECT {DRAFT_COLS}, EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) FROM drafts WHERE id = ?1"
-        );
-        self.optional(&sql, [id], "read draft", DraftRecord::from_row)
+        self.optional(
+            concat!(
+                "SELECT ",
+                draft_cols!(),
+                ", EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) FROM drafts WHERE id = ?1"
+            ),
+            [id],
+            "read draft",
+            DraftRecord::from_row,
+        )
     }
 
     pub fn draft_by_gmail(
@@ -362,11 +376,12 @@ impl Db<'_> {
         account: AccountId,
         gmail_id: &GmailDraftId,
     ) -> Result<Option<DraftRecord>, StoreError> {
-        let sql = format!(
-            "SELECT {DRAFT_COLS}, EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) FROM drafts WHERE account_id = ?1 AND gmail_draft_id = ?2"
-        );
         self.optional(
-            &sql,
+            concat!(
+                "SELECT ",
+                draft_cols!(),
+                ", EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) FROM drafts WHERE account_id = ?1 AND gmail_draft_id = ?2"
+            ),
             params![account, gmail_id],
             "read draft by gmail id",
             DraftRecord::from_row,
@@ -374,11 +389,12 @@ impl Db<'_> {
     }
 
     pub fn drafts_for_account(self, account: AccountId) -> Result<Vec<DraftRecord>, StoreError> {
-        let sql = format!(
-            "SELECT {DRAFT_COLS}, EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) FROM drafts WHERE account_id = ?1 ORDER BY updated_at DESC, id"
-        );
         self.all(
-            &sql,
+            concat!(
+                "SELECT ",
+                draft_cols!(),
+                ", EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) FROM drafts WHERE account_id = ?1 ORDER BY updated_at DESC, id"
+            ),
             [account],
             "list account drafts",
             DraftRecord::from_row,
@@ -386,11 +402,12 @@ impl Db<'_> {
     }
 
     pub fn drafts_list(self, account: AccountId) -> Result<Vec<DraftRecord>, StoreError> {
-        let sql = format!(
-            "SELECT {DRAFT_COLS}, 0 FROM drafts WHERE account_id = ?1 AND stage = 'kept' AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) ORDER BY updated_at DESC, id"
-        );
         self.all(
-            &sql,
+            concat!(
+                "SELECT ",
+                draft_cols!(),
+                ", 0 FROM drafts WHERE account_id = ?1 AND stage = 'kept' AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) ORDER BY updated_at DESC, id"
+            ),
             [account],
             "list visible drafts",
             DraftRecord::from_row,
@@ -402,25 +419,38 @@ impl Db<'_> {
             return Ok(Vec::new());
         }
         let encoded = id_list(ids)?;
-        let sql = format!(
-            "SELECT {DRAFT_COLS}, EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) FROM drafts WHERE id IN (SELECT value FROM json_each(?1))"
-        );
-        self.all(&sql, [encoded], "batch read drafts", DraftRecord::from_row)
+        self.all(
+            concat!(
+                "SELECT ",
+                draft_cols!(),
+                ", EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) FROM drafts WHERE id IN (SELECT value FROM json_each(?1))"
+            ),
+            [encoded],
+            "batch read drafts",
+            DraftRecord::from_row,
+        )
     }
 
     pub fn drafts_on_thread(self, thread: ThreadId) -> Result<Vec<DraftRecord>, StoreError> {
-        let sql = format!(
-            "SELECT {DRAFT_COLS}, 0 FROM drafts WHERE thread_id = ?1 AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) ORDER BY updated_at ASC, id"
-        );
-        self.all(&sql, [thread], "list thread drafts", DraftRecord::from_row)
+        self.all(
+            concat!(
+                "SELECT ",
+                draft_cols!(),
+                ", 0 FROM drafts WHERE thread_id = ?1 AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) ORDER BY updated_at ASC, id"
+            ),
+            [thread],
+            "list thread drafts",
+            DraftRecord::from_row,
+        )
     }
 
     pub fn drafts_awaiting_body(self, message: MessageId) -> Result<Vec<DraftRecord>, StoreError> {
-        let sql = format!(
-            "SELECT {DRAFT_COLS}, EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) FROM drafts WHERE target_message_id = ?1 AND waits_for = ?2"
-        );
         self.all(
-            &sql,
+            concat!(
+                "SELECT ",
+                draft_cols!(),
+                ", EXISTS(SELECT 1 FROM outbox o WHERE o.draft_id = drafts.id) FROM drafts WHERE target_message_id = ?1 AND waits_for = ?2"
+            ),
             params![message, DraftWait::TargetBody],
             "list drafts awaiting target body",
             DraftRecord::from_row,
@@ -435,9 +465,11 @@ impl Db<'_> {
     }
 
     pub fn outbox_for_account(self, account: AccountId) -> Result<Vec<OutboxRecord>, StoreError> {
-        let sql = format!("{OUTBOX_JOIN_SELECT} WHERE o.account_id = ?1 ORDER BY o.id");
         self.all(
-            &sql,
+            concat!(
+                outbox_join_select!(),
+                " WHERE o.account_id = ?1 ORDER BY o.id"
+            ),
             [account],
             "list account outbox",
             OutboxRecord::from_row,
@@ -445,16 +477,23 @@ impl Db<'_> {
     }
 
     pub fn outbox_for_thread(self, thread: ThreadId) -> Result<Vec<OutboxRecord>, StoreError> {
-        let sql = format!("{OUTBOX_JOIN_SELECT} WHERE o.thread_id = ?1 ORDER BY o.id");
-        self.all(&sql, [thread], "list thread outbox", OutboxRecord::from_row)
+        self.all(
+            concat!(
+                outbox_join_select!(),
+                " WHERE o.thread_id = ?1 ORDER BY o.id"
+            ),
+            [thread],
+            "list thread outbox",
+            OutboxRecord::from_row,
+        )
     }
 
     pub fn outbox_unsent(self, account: AccountId) -> Result<Vec<OutboxRecord>, StoreError> {
-        let sql = format!(
-            "{OUTBOX_JOIN_SELECT} WHERE o.account_id = ?1 AND o.state != ?2 ORDER BY o.send_after, o.id"
-        );
         self.all(
-            &sql,
+            concat!(
+                outbox_join_select!(),
+                " WHERE o.account_id = ?1 AND o.state != ?2 ORDER BY o.send_after, o.id"
+            ),
             params![account, OutboxState::Sent],
             "list unsent outbox",
             OutboxRecord::from_row,
@@ -462,13 +501,21 @@ impl Db<'_> {
     }
 
     pub fn outbox_all(self) -> Result<Vec<OutboxRecord>, StoreError> {
-        let sql = format!("{OUTBOX_JOIN_SELECT} ORDER BY o.id");
-        self.all(&sql, [], "list all outbox", OutboxRecord::from_row)
+        self.all(
+            concat!(outbox_join_select!(), " ORDER BY o.id"),
+            [],
+            "list all outbox",
+            OutboxRecord::from_row,
+        )
     }
 
     pub fn outbox_row(self, id: OutboxId) -> Result<Option<OutboxRecord>, StoreError> {
-        let sql = format!("{OUTBOX_JOIN_SELECT} WHERE o.id = ?1");
-        self.optional(&sql, [id], "read outbox row", OutboxRecord::from_row)
+        self.optional(
+            concat!(outbox_join_select!(), " WHERE o.id = ?1"),
+            [id],
+            "read outbox row",
+            OutboxRecord::from_row,
+        )
     }
 
     pub fn outbox_gmail_draft_ids(
@@ -564,10 +611,10 @@ impl Db<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct NewOutbox<'a> {
     pub account: AccountId,
-    pub draft: &'a DraftId,
+    pub draft: DraftId,
     pub thread: Option<ThreadId>,
     pub send_after: Millis,
     pub gmail_draft_id: Option<&'a GmailDraftId>,
@@ -584,17 +631,26 @@ pub struct NewOp<'a, P> {
 }
 
 impl WriteTx<'_> {
+    fn draft_thread_id(&self, id: &DraftId) -> Result<Option<ThreadId>, StoreError> {
+        Ok(self
+            .read()
+            .optional(
+                "SELECT thread_id FROM drafts WHERE id = ?1",
+                [id],
+                "read draft thread",
+                |r| r.get::<_, Option<ThreadId>>(0),
+            )?
+            .flatten())
+    }
+
     pub fn put_draft(&mut self, draft: &DraftWrite<'_>) -> Result<Rev, StoreError> {
-        let old_thread = self.read().draft(draft.id)?.and_then(|d| d.thread);
+        let old_thread = self.draft_thread_id(draft.id)?;
         let rev = self.stamp();
         let (stage_str, defaults_json) = match &draft.lifecycle.stage {
             DraftStage::Fresh { defaults } => ("fresh", Some(to_json(defaults)?)),
             DraftStage::Kept => ("kept", None),
         };
-        let from_json = match draft.from {
-            Some(a) => to_json(a)?,
-            None => String::new(),
-        };
+        let from_json = draft.from.map(to_json).transpose()?.unwrap_or_default();
         self.read().execute(
             "INSERT INTO drafts (id, account_id, kind, reply_all, thread_id, target_message_id, started_on_latest, from_addr, to_addrs, cc_addrs, bcc_addrs, subject, body_html, snippet, quote_html, attachments, in_reply_to, references_hdr, updated_at, stage, defaults, waits_for, gmail_draft_id, gmail_message_id, gmail_thread_id, gmail_create_sent, gmail_change_skipped, rev)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)
@@ -647,19 +703,25 @@ impl WriteTx<'_> {
         Ok(rev)
     }
 
-    pub fn delete_draft(&mut self, id: &DraftId) -> Result<Option<DraftRecord>, StoreError> {
-        let Some(existing) = self.read().draft(id)? else {
-            return Ok(None);
+    pub fn delete_draft(&mut self, id: &DraftId) -> Result<(), StoreError> {
+        let Some((account, thread)) = self.read().optional(
+            "SELECT account_id, thread_id FROM drafts WHERE id = ?1",
+            [id],
+            "read draft before delete",
+            |r| Ok((r.get::<_, AccountId>(0)?, r.get::<_, Option<ThreadId>>(1)?)),
+        )?
+        else {
+            return Ok(());
         };
         let rev = self.stamp();
         self.read()
             .execute("DELETE FROM drafts WHERE id = ?1", [id], "delete draft")?;
-        self.record().draft(existing.account, existing.id.clone());
-        self.stamp_threads(existing.account, [existing.thread], rev)?;
-        Ok(Some(existing))
+        self.record().draft(account, id.clone());
+        self.stamp_threads(account, [thread], rev)?;
+        Ok(())
     }
 
-    pub fn insert_outbox(&mut self, item: &NewOutbox<'_>) -> Result<OutboxId, StoreError> {
+    pub fn insert_outbox(&mut self, item: NewOutbox<'_>) -> Result<OutboxId, StoreError> {
         let rev = self.stamp();
         let id = OutboxId(self.read().insert(
             "INSERT INTO outbox (account_id, draft_id, thread_id, send_after, state, gmail_draft_id, rev) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -675,13 +737,21 @@ impl WriteTx<'_> {
             "insert outbox row",
         )?);
         self.touch(Some(item.account), Table::Outbox);
-        self.record().draft(item.account, item.draft.clone());
+        self.record().draft(item.account, item.draft);
         self.stamp_threads(item.account, [item.thread], rev)?;
         Ok(id)
     }
 
     pub fn update_outbox(&mut self, item: &OutboxItem) -> Result<(), StoreError> {
-        let old_thread = self.read().outbox_row(item.id)?.and_then(|r| r.item.thread);
+        let old_thread = self
+            .read()
+            .optional(
+                "SELECT thread_id FROM outbox WHERE id = ?1",
+                [item.id],
+                "read outbox thread",
+                |r| r.get::<_, Option<ThreadId>>(0),
+            )?
+            .flatten();
         let rev = self.stamp();
         self.read().execute(
             "UPDATE outbox SET thread_id = ?2, send_after = ?3, state = ?4, gmail_draft_id = ?5, sent_message_id = ?6, undo_requested = ?7, toast_closed = ?8, delayed = ?9, rev = ?10 WHERE id = ?1",
@@ -704,9 +774,21 @@ impl WriteTx<'_> {
         Ok(())
     }
 
-    pub fn delete_outbox(&mut self, id: OutboxId) -> Result<Option<OutboxRecord>, StoreError> {
-        let Some(existing) = self.read().outbox_row(id)? else {
-            return Ok(None);
+    pub fn delete_outbox(&mut self, id: OutboxId) -> Result<(), StoreError> {
+        let Some((account, draft, thread)) = self.read().optional(
+            "SELECT account_id, draft_id, thread_id FROM outbox WHERE id = ?1",
+            [id],
+            "read outbox before delete",
+            |r| {
+                Ok((
+                    r.get::<_, AccountId>(0)?,
+                    r.get::<_, DraftId>(1)?,
+                    r.get::<_, Option<ThreadId>>(2)?,
+                ))
+            },
+        )?
+        else {
+            return Ok(());
         };
         let rev = self.stamp();
         self.read().execute(
@@ -714,11 +796,10 @@ impl WriteTx<'_> {
             [id],
             "delete outbox row",
         )?;
-        self.touch(Some(existing.item.account), Table::Outbox);
-        self.record()
-            .draft(existing.item.account, existing.item.draft.clone());
-        self.stamp_threads(existing.item.account, [existing.item.thread], rev)?;
-        Ok(Some(existing))
+        self.touch(Some(account), Table::Outbox);
+        self.record().draft(account, draft);
+        self.stamp_threads(account, [thread], rev)?;
+        Ok(())
     }
 
     pub fn queue_op<P: Serialize>(&mut self, op: &NewOp<'_, P>) -> Result<OpId, StoreError> {

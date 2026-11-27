@@ -24,7 +24,7 @@ impl Db<'_> {
     ) -> Result<Vec<ContactStats>, StoreError> {
         let trimmed = query.trim();
         let rows = if trimmed.is_ascii() && !trimmed.is_empty() {
-            let pattern = format!("%{}%", escape_like(&trimmed.to_ascii_lowercase()));
+            let pattern = like_contains_lower(trimmed);
             self.all(
                 "SELECT email, name, sent_count, recv_count, list_only, last_contact
                  FROM contacts WHERE account_id = ?1 AND (lower(name) LIKE ?2 ESCAPE '\\' OR lower(email) LIKE ?2 ESCAPE '\\')",
@@ -160,13 +160,16 @@ fn contact_from_row(r: &Row<'_>) -> rusqlite::Result<ContactStats> {
     })
 }
 
-fn escape_like(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
+fn like_contains_lower(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 2);
+    out.push('%');
     for ch in input.chars() {
-        if matches!(ch, '%' | '_' | '\\') {
+        let lower = ch.to_ascii_lowercase();
+        if matches!(lower, '%' | '_' | '\\') {
             out.push('\\');
         }
-        out.push(ch);
+        out.push(lower);
     }
+    out.push('%');
     out
 }

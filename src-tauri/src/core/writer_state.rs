@@ -1,12 +1,12 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{
-    AccountId, ActionNo, DraftId, GmailDraftId, GmailMessageId, HistoryId, LabelId, Rev, SubId,
-    ThreadChange, ThreadId,
+    AccountId, ActionNo, DraftId, GmailDraftId, GmailMessageId, HistoryId, LabelId, MessageChange,
+    Millis, Rev, SubId, ThreadChange, ThreadId,
 };
 use crate::ipc::{ChannelMessage, RejectReason, Rejection, SubKey};
 use crate::store::{Commit, Db};
@@ -47,11 +47,36 @@ pub(crate) struct ModifyOpPayload {
     pub(crate) revert: ThreadChange,
 }
 
+#[derive(Debug, Clone, Copy, Serialize)]
+pub(crate) struct ThreadChangeRef<'a> {
+    pub(crate) thread: ThreadId,
+    pub(crate) messages: &'a [MessageChange],
+    pub(crate) snooze_before: Option<Millis>,
+    pub(crate) snooze_after: Option<Millis>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ModifyOpPayloadRef<'a> {
+    pub(crate) thread: ThreadId,
+    pub(crate) gmail_msg_ids: &'a [&'a GmailMessageId],
+    pub(crate) add: &'a [LabelId],
+    pub(crate) remove: &'a [LabelId],
+    pub(crate) revert: ThreadChangeRef<'a>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CreateLabelOpPayload {
     pub(crate) local_id: LabelId,
     pub(crate) name: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CreateLabelOpPayloadRef<'a> {
+    pub(crate) local_id: &'a LabelId,
+    pub(crate) name: &'a str,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,7 +86,7 @@ pub(crate) struct DraftOpPayload {
     pub(crate) gmail_draft_id: Option<GmailDraftId>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DraftOpPayloadRef<'a> {
     pub(crate) draft_id: &'a DraftId,
@@ -121,17 +146,16 @@ impl Freshness {
         }
     }
 
-    #[must_use]
-    pub(crate) fn landed_since(&self, account: AccountId, since_rev: Rev) -> Vec<LandedOp> {
+    pub(crate) fn landed_since(
+        &self,
+        account: AccountId,
+        since_rev: Rev,
+    ) -> impl Iterator<Item = &LandedOp> {
         self.landed
             .get(&account)
-            .map(|list| {
-                list.iter()
-                    .filter(|op| op.at_rev > since_rev)
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default()
+            .into_iter()
+            .flat_map(VecDeque::iter)
+            .filter(move |op| op.at_rev > since_rev)
     }
 
     pub(crate) fn clear_account(&mut self, account: AccountId) {
@@ -163,7 +187,6 @@ pub struct WriterState {
     pub(crate) channel: Arc<Mutex<Option<ChannelSink>>>,
     staged_effects: Vec<Effect>,
     staged_sub_ops: Vec<SubOp>,
-    staged_force_subs: HashSet<SubId>,
     pub(crate) staged_rejections: Vec<Rejection>,
     pub(crate) staged_ack: Option<ActionNo>,
     pub(crate) staged_batch_ns: Vec<ActionNo>,
@@ -206,7 +229,6 @@ impl WriterState {
             channel,
             staged_effects: Vec::new(),
             staged_sub_ops: Vec::new(),
-            staged_force_subs: HashSet::new(),
             staged_rejections: Vec::new(),
             staged_ack: None,
             staged_batch_ns: Vec::new(),
@@ -236,32 +258,18 @@ impl WriterState {
         self.staged_sub_ops.truncate(mark.1);
     }
 
-    fn apply_sub_ops(&mut self, sub_ops: Vec<SubOp>, force_subs: &mut HashSet<SubId>) {
+    fn apply_sub_ops(&mut self, sub_ops: Vec<SubOp>) {
         for op in sub_ops {
             match op {
                 SubOp::Reset => self.registry.clear(),
-                SubOp::Subscribe(id, key) => {
-                    self.registry.subscribe(id.clone(), key);
-                    force_subs.insert(id);
-                }
+                SubOp::Subscribe(id, key) => self.registry.subscribe(id, key),
                 SubOp::Unsubscribe(id) => {
                     self.registry.unsubscribe(&id);
                 }
-                SubOp::DropComposer(draft) => {
-                    let drop_ids = self.registry.all_composer_subs(&draft);
-                    for id in drop_ids {
-                        self.registry.unsubscribe(&id);
-                    }
-                }
-                SubOp::SetListing(id, listing) => {
-                    if self.registry.set_listing(&id, listing) {
-                        force_subs.insert(id);
-                    }
-                }
+                SubOp::DropComposer(draft) => self.registry.drop_composer(&draft),
+                SubOp::SetListing(id, listing) => self.registry.set_listing(&id, listing),
                 SubOp::StopSearching(account) => {
-                    for id in self.registry.stop_searching_for_account(account) {
-                        force_subs.insert(id);
-                    }
+                    self.registry.stop_searching_for_account(account);
                 }
             }
         }
@@ -278,12 +286,9 @@ impl WriterState {
             changed
         });
         let sub_ops = std::mem::take(&mut self.staged_sub_ops);
-        let mut force_subs = std::mem::take(&mut self.staged_force_subs);
-        self.apply_sub_ops(sub_ops, &mut force_subs);
+        self.apply_sub_ops(sub_ops);
         if online_changed {
-            for id in self.registry.app_and_search_subs() {
-                force_subs.insert(id);
-            }
+            self.registry.force_app_and_search();
         }
 
         let rejected = std::mem::take(&mut self.staged_rejections);
@@ -291,14 +296,7 @@ impl WriterState {
         self.staged_batch_ns.clear();
         let updates = self
             .registry
-            .evaluate_commit(
-                db,
-                &commit.changes,
-                commit.rev,
-                self.online,
-                &self.clock,
-                &force_subs,
-            )
+            .evaluate_commit(db, &commit.changes, commit.rev, self.online, &self.clock)
             .unwrap_or_else(|err| {
                 super::log_err::<(), _>("project subscription updates", Err(err));
                 Vec::new()
@@ -322,7 +320,6 @@ impl WriterState {
     pub(crate) fn on_rollback(&mut self) {
         self.staged_effects.clear();
         self.staged_sub_ops.clear();
-        self.staged_force_subs.clear();
         self.staged_rejections.clear();
         self.staged_ack = None;
         self.staged_online = None;
@@ -358,7 +355,6 @@ mod tests {
     use super::*;
     use crate::core::actions::apply_batch;
     use crate::core::runtime::{Activity, Busy};
-    use crate::domain::Millis;
     use crate::ipc::{Action, NumberedAction, SubUpdate, Submitted};
     use crate::store::{Priority as StorePriority, StoreError, Writer};
 

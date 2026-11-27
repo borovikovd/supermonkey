@@ -222,7 +222,7 @@ impl Core {
 
         let accounts = AccountManager::new(
             http.clone(),
-            config.gmail_base_url.clone(),
+            config.gmail_base_url,
             config.oauth,
             tokens,
             scheduler,
@@ -503,7 +503,7 @@ async fn handle_effect(core: &Arc<Core>, effect: Effect) {
             account,
             email,
             items,
-        } => dispatch_new_mail_notification(core, account, &email, &items).await,
+        } => dispatch_new_mail_notification(core, account, email, items).await,
     }
 }
 
@@ -572,8 +572,8 @@ async fn fetch_subscribed_bodies(core: &Core) {
 async fn dispatch_new_mail_notification(
     core: &Core,
     account: AccountId,
-    email: &str,
-    items: &[events::NewMailAlert],
+    email: String,
+    items: Vec<events::NewMailAlert>,
 ) {
     let muted = core
         .pool

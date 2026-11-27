@@ -392,7 +392,7 @@ impl Host for TestHost {
                 .events
                 .push(RecordedEvent { event: name });
         }
-        self.state.events.emit(&event);
+        self.state.events.emit(event);
     }
 
     fn exit(&self) {

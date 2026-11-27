@@ -117,8 +117,8 @@ impl ParsedMessage {
 }
 
 #[must_use]
-pub fn parse_message(root: &WirePart) -> ParsedMessage {
-    let headers = extract_headers(&root.headers);
+pub fn parse_message(mut root: WirePart) -> ParsedMessage {
+    let headers = extract_headers(&mut root.headers);
     let mut acc = WalkAcc::default();
     walk_part(root, 0, &mut acc);
     finish_walk(headers, acc)
@@ -138,7 +138,7 @@ struct Candidate {
     part: Part,
 }
 
-fn walk_part(part: &WirePart, scope: usize, acc: &mut WalkAcc) {
+fn walk_part(mut part: WirePart, scope: usize, acc: &mut WalkAcc) {
     let mime = header_kind(if part.mime_type.is_empty() {
         find_header(&part.headers, "content-type").unwrap_or("text/plain")
     } else {
@@ -146,22 +146,24 @@ fn walk_part(part: &WirePart, scope: usize, acc: &mut WalkAcc) {
     });
 
     if mime.starts_with("multipart/") {
-        for child in &part.parts {
+        for child in part.parts {
             walk_part(child, scope, acc);
         }
         return;
     }
 
     if mime == "message/rfc822" && !part.parts.is_empty() {
+        let children = std::mem::take(&mut part.parts);
         if part.body.attachment_id.is_some() {
+            let filename = resolve_filename(&mut part);
             acc.candidates.push(Candidate {
                 scope,
-                part: build_part(part, mime, resolve_filename(part)),
+                part: build_part(part, mime, filename),
             });
         }
         let nested_scope = acc.nested_cids.len() + 1;
         acc.nested_cids.push(HashSet::new());
-        for child in &part.parts {
+        for child in children {
             walk_part(child, nested_scope, acc);
         }
         return;
@@ -169,13 +171,13 @@ fn walk_part(part: &WirePart, scope: usize, acc: &mut WalkAcc) {
 
     let disp_kind = header_kind(find_header(&part.headers, "content-disposition").unwrap_or(""));
     let is_attachment_disp = disp_kind == "attachment";
-    let filename = resolve_filename(part);
+    let filename = resolve_filename(&mut part);
     let has_att_id = part.body.attachment_id.is_some();
 
     if !is_attachment_disp
         && filename.is_empty()
         && !has_att_id
-        && record_body(part, &mime, scope, acc)
+        && record_body(&part, &mime, scope, acc)
     {
         return;
     }
@@ -215,7 +217,7 @@ fn record_body(part: &WirePart, mime: &str, scope: usize, acc: &mut WalkAcc) -> 
     false
 }
 
-fn build_part(part: &WirePart, mime: String, filename: String) -> Part {
+fn build_part(part: WirePart, mime: String, filename: String) -> Part {
     let content_id = find_header(&part.headers, "content-id").and_then(normalize_cid);
     let inline_data = if part.body.attachment_id.is_none() {
         part.body.data.as_deref().map(decode_base64_lenient)
@@ -235,11 +237,11 @@ fn build_part(part: &WirePart, mime: String, filename: String) -> Part {
         filename
     };
     Part {
-        id: part.part_id.clone(),
+        id: part.part_id,
         filename: name,
         mime_type: mime,
         size,
-        attachment_id: part.body.attachment_id.clone(),
+        attachment_id: part.body.attachment_id,
         content_id,
         is_inline: false,
         inline_data,
@@ -276,7 +278,7 @@ fn finish_walk(headers: MessageHeaders, acc: WalkAcc) -> ParsedMessage {
     }
 }
 
-fn extract_headers(headers: &[WireHeader]) -> MessageHeaders {
+fn extract_headers(headers: &mut [WireHeader]) -> MessageHeaders {
     let mut out = MessageHeaders::default();
     let mut has_list_hdr = false;
     for h in headers {
@@ -286,7 +288,12 @@ fn extract_headers(headers: &[WireHeader]) -> MessageHeaders {
             "cc" => out.cc.extend(parse_address_list(&h.value)),
             "bcc" => out.bcc.extend(parse_address_list(&h.value)),
             "reply-to" => out.reply_to.extend(parse_address_list(&h.value)),
-            "subject" => out.subject = decode_encoded_words(&h.value).into_owned(),
+            "subject" => {
+                out.subject = match decode_encoded_words(&h.value) {
+                    Cow::Borrowed(_) => std::mem::take(&mut h.value),
+                    Cow::Owned(decoded) => decoded,
+                };
+            }
             "date" => out.date = parse_date(&h.value),
             "message-id" => out.message_id = bare_id(&h.value),
             "in-reply-to" => out.in_reply_to = bare_id(&h.value),
@@ -294,9 +301,11 @@ fn extract_headers(headers: &[WireHeader]) -> MessageHeaders {
             "list-id" => has_list_hdr = true,
             "list-unsubscribe" => {
                 has_list_hdr = true;
-                out.list_unsubscribe = Some(h.value.clone());
+                out.list_unsubscribe = Some(std::mem::take(&mut h.value));
             }
-            "list-unsubscribe-post" => out.list_unsubscribe_post = Some(h.value.clone()),
+            "list-unsubscribe-post" => {
+                out.list_unsubscribe_post = Some(std::mem::take(&mut h.value));
+            }
             "precedence"
                 if matches!(
                     h.value.trim().to_ascii_lowercase().as_str(),
@@ -322,9 +331,16 @@ fn find_header<'a>(headers: &'a [WireHeader], target: &str) -> Option<&'a str> {
         .map(|h| h.value.as_str())
 }
 
-fn resolve_filename(part: &WirePart) -> String {
-    if !part.filename.trim().is_empty() {
-        return decode_encoded_words(part.filename.trim()).into_owned();
+fn resolve_filename(part: &mut WirePart) -> String {
+    let trimmed = part.filename.trim();
+    if !trimmed.is_empty() {
+        return match decode_encoded_words(trimmed) {
+            Cow::Borrowed(_) if trimmed.len() == part.filename.len() => {
+                std::mem::take(&mut part.filename)
+            }
+            Cow::Borrowed(s) => s.to_owned(),
+            Cow::Owned(decoded) => decoded,
+        };
     }
     if let Some(disp) = find_header(&part.headers, "content-disposition")
         && let Some(name) = header_param(disp, "filename")
@@ -360,34 +376,71 @@ fn decode_part_text(part: &WirePart) -> Option<String> {
     let bytes = decode_base64_lenient(raw);
     let charset =
         find_header(&part.headers, "content-type").and_then(|ct| header_param(ct, "charset"));
-    Some(decode_text_bytes(&bytes, charset.as_deref()))
+    Some(decode_text_bytes_owned(bytes, charset.as_deref()))
 }
 
-fn decode_text_bytes(bytes: &[u8], charset: Option<&str>) -> String {
+fn decode_text_bytes_owned(bytes: Vec<u8>, charset: Option<&str>) -> String {
+    if bytes.iter().any(|&b| b >= 0x80) {
+        match String::from_utf8(bytes) {
+            Ok(text) => return text,
+            Err(err) => return decode_text_bytes_fallback(err.into_bytes(), charset),
+        }
+    }
+    decode_text_bytes_fallback(bytes, charset)
+}
+
+fn decode_text_bytes_fallback(bytes: Vec<u8>, charset: Option<&str>) -> String {
+    if let Some(label) = charset
+        && let Some(enc) = Encoding::for_label(label.trim().as_bytes())
+    {
+        if enc == encoding_rs::UTF_8 && !bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+            match String::from_utf8(bytes) {
+                Ok(text) => return text,
+                Err(err) => {
+                    let raw = err.into_bytes();
+                    return enc.decode(&raw).0.into_owned();
+                }
+            }
+        }
+        return enc.decode(&bytes).0.into_owned();
+    }
+    match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(err) => encoding_rs::WINDOWS_1252
+            .decode(&err.into_bytes())
+            .0
+            .into_owned(),
+    }
+}
+
+fn decode_text_bytes<'a>(bytes: &'a [u8], charset: Option<&str>) -> Cow<'a, str> {
     if bytes.iter().any(|&b| b >= 0x80)
         && let Ok(text) = std::str::from_utf8(bytes)
     {
-        return text.to_owned();
+        return Cow::Borrowed(text);
     }
     if let Some(label) = charset
         && let Some(enc) = Encoding::for_label(label.trim().as_bytes())
     {
-        let (decoded, _, _) = enc.decode(bytes);
-        return decoded.into_owned();
+        return enc.decode(bytes).0;
     }
     match std::str::from_utf8(bytes) {
-        Ok(text) => text.to_owned(),
-        Err(_) => encoding_rs::WINDOWS_1252.decode(bytes).0.into_owned(),
+        Ok(text) => Cow::Borrowed(text),
+        Err(_) => encoding_rs::WINDOWS_1252.decode(bytes).0,
     }
 }
 
 #[must_use]
 pub fn decode_base64_lenient(input: &str) -> Vec<u8> {
-    let cleaned: String = input.chars().filter(|c| !c.is_ascii_whitespace()).collect();
-    if let Ok(bytes) = URL_SAFE_NO_PAD.decode(&cleaned) {
+    let cleaned: Cow<'_, str> = if input.bytes().any(|b| b.is_ascii_whitespace()) {
+        Cow::Owned(input.chars().filter(|c| !c.is_ascii_whitespace()).collect())
+    } else {
+        Cow::Borrowed(input)
+    };
+    if let Ok(bytes) = URL_SAFE_NO_PAD.decode(cleaned.as_bytes()) {
         return bytes;
     }
-    if let Ok(bytes) = URL_SAFE.decode(&cleaned) {
+    if let Ok(bytes) = URL_SAFE.decode(cleaned.as_bytes()) {
         return bytes;
     }
     let standard = cleaned.replace('-', "+").replace('_', "/");
@@ -409,7 +462,7 @@ pub(crate) fn header_kind(value: &str) -> String {
 }
 
 pub(crate) fn header_param(header: &str, want: &str) -> Option<String> {
-    let mut ext_parts: Vec<(u32, String)> = Vec::new();
+    let mut ext_parts: Vec<(u32, Cow<'_, str>)> = Vec::new();
     let mut ext_single: Option<String> = None;
     let mut plain: Option<String> = None;
     for segment in split_header_params(header).into_iter().skip(1) {
@@ -418,12 +471,14 @@ pub(crate) fn header_param(header: &str, want: &str) -> Option<String> {
         };
         let key = raw_key.trim().to_ascii_lowercase();
         let val = unquote_param(raw_val.trim());
-        if key == format!("{want}*") {
-            ext_single = Some(decode_rfc2231(&val));
-        } else if let Some(rest) = key.strip_prefix(&format!("{want}*")) {
-            let idx_str = rest.trim_end_matches('*');
-            if let Ok(idx) = idx_str.parse::<u32>() {
-                ext_parts.push((idx, val.into_owned()));
+        if let Some(rest) = key.strip_prefix(want).and_then(|s| s.strip_prefix('*')) {
+            if rest.is_empty() {
+                ext_single = Some(decode_rfc2231(&val));
+            } else {
+                let idx_str = rest.trim_end_matches('*');
+                if let Ok(idx) = idx_str.parse::<u32>() {
+                    ext_parts.push((idx, val));
+                }
             }
         } else if key == want {
             plain = Some(decode_encoded_words(&val).into_owned());
@@ -434,7 +489,10 @@ pub(crate) fn header_param(header: &str, want: &str) -> Option<String> {
     }
     if !ext_parts.is_empty() {
         ext_parts.sort_by_key(|(i, _)| *i);
-        let joined: String = ext_parts.into_iter().map(|(_, v)| v).collect();
+        let mut joined = String::new();
+        for (_, v) in ext_parts {
+            joined.push_str(&v);
+        }
         return Some(decode_rfc2231(&joined));
     }
     plain
@@ -492,7 +550,7 @@ fn decode_rfc2231(val: &str) -> String {
         && let Some((_, encoded)) = rest.split_once('\'')
     {
         let bytes = percent_decode_str(encoded).collect::<Vec<u8>>();
-        return decode_text_bytes(&bytes, Some(charset));
+        return decode_text_bytes_owned(bytes, Some(charset));
     }
     percent_decode_str(val).decode_utf8_lossy().into_owned()
 }
@@ -511,7 +569,7 @@ pub fn decode_encoded_words(input: &str) -> Cow<'_, str> {
     }
     let mut out = String::with_capacity(input.len());
     let mut rest = input;
-    let mut pending_charset: Option<String> = None;
+    let mut pending_charset: Option<&str> = None;
     let mut pending_bytes: Vec<u8> = Vec::new();
     let mut pending_ws = String::new();
 
@@ -529,10 +587,7 @@ pub fn decode_encoded_words(input: &str) -> Cow<'_, str> {
             } else {
                 pending_ws.clear();
             }
-            if pending_charset
-                .as_deref()
-                .is_some_and(|c| c.eq_ignore_ascii_case(&charset))
-            {
+            if pending_charset.is_some_and(|c| c.eq_ignore_ascii_case(charset)) {
                 pending_bytes.extend_from_slice(&bytes);
             } else {
                 flush_encoded(&mut out, &mut pending_charset, &mut pending_bytes);
@@ -553,14 +608,14 @@ pub fn decode_encoded_words(input: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-fn flush_encoded(out: &mut String, charset: &mut Option<String>, bytes: &mut Vec<u8>) {
+fn flush_encoded(out: &mut String, charset: &mut Option<&str>, bytes: &mut Vec<u8>) {
     if let Some(cs) = charset.take() {
-        out.push_str(&decode_text_bytes(bytes, Some(&cs)));
+        out.push_str(&decode_text_bytes(bytes, Some(cs)));
         bytes.clear();
     }
 }
 
-fn parse_encoded_word(s: &str) -> Option<(String, Vec<u8>, usize)> {
+fn parse_encoded_word(s: &str) -> Option<(&str, Vec<u8>, usize)> {
     let body = s.strip_prefix("=?")?;
     let q1 = body.find('?')?;
     let charset_raw = &body[..q1];
@@ -586,7 +641,7 @@ fn parse_encoded_word(s: &str) -> Option<(String, Vec<u8>, usize)> {
         _ => return None,
     };
     let consumed = 2 + q1 + 1 + q2 + 1 + end + 2;
-    Some((charset.to_owned(), bytes, consumed))
+    Some((charset, bytes, consumed))
 }
 
 fn decode_q_encoding(encoded: &str) -> Vec<u8> {
@@ -752,7 +807,13 @@ fn clean_display_name(raw: &str) -> Option<String> {
     let unquoted = unquote_param(raw.trim());
     let decoded = decode_encoded_words(&unquoted);
     let trimmed = decoded.trim().trim_matches('"').trim();
-    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(match decoded {
+        Cow::Owned(s) if trimmed.len() == s.len() => s,
+        Cow::Borrowed(_) | Cow::Owned(_) => trimmed.to_owned(),
+    })
 }
 
 #[must_use]

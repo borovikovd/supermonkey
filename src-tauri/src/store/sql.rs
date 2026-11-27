@@ -209,8 +209,8 @@ pub(super) fn to_json<T: Serialize + ?Sized>(value: &T) -> Result<String, StoreE
 }
 
 pub(super) fn json_col<T: DeserializeOwned>(row: &Row<'_>, idx: usize) -> rusqlite::Result<T> {
-    let raw: String = row.get(idx)?;
-    serde_json::from_str(&raw).map_err(|e| {
+    let raw = row.get_ref(idx)?.as_str()?;
+    serde_json::from_str(raw).map_err(|e| {
         rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e))
     })
 }
@@ -219,9 +219,9 @@ pub(super) fn json_col_opt<T: DeserializeOwned>(
     row: &Row<'_>,
     idx: usize,
 ) -> rusqlite::Result<Option<T>> {
-    let raw: Option<String> = row.get(idx)?;
+    let raw = row.get_ref(idx)?.as_str_or_null()?;
     raw.map(|s| {
-        serde_json::from_str(&s).map_err(|e| {
+        serde_json::from_str(s).map_err(|e| {
             rusqlite::Error::FromSqlConversionFailure(idx, rusqlite::types::Type::Text, Box::new(e))
         })
     })

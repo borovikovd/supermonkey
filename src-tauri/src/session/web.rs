@@ -66,7 +66,7 @@ impl WebEvents {
         })
     }
 
-    pub fn emit(&self, event: &AppEvent) {
+    pub fn emit(&self, event: AppEvent) {
         if let Ok((name, payload)) = event.parts()
             && let Ok(data) = serde_json::to_string(&payload)
         {
@@ -182,19 +182,17 @@ async fn guard_request(allowed_origins: Arc<[String]>, req: Request, next: Next)
 
     if req.method() == Method::OPTIONS {
         let mut resp = StatusCode::NO_CONTENT.into_response();
-        apply_cors(resp.headers_mut(), origin.as_deref());
+        apply_cors(resp.headers_mut(), origin);
         return resp;
     }
 
     let mut resp = next.run(req).await;
-    apply_cors(resp.headers_mut(), origin.as_deref());
+    apply_cors(resp.headers_mut(), origin);
     resp
 }
 
-fn apply_cors(headers: &mut HeaderMap, origin: Option<&str>) {
-    if let Some(orig) = origin
-        && let Ok(val) = HeaderValue::from_str(orig)
-    {
+fn apply_cors(headers: &mut HeaderMap, origin: Option<HeaderValue>) {
+    if let Some(val) = origin {
         headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, val);
         headers.insert(
             ACCESS_CONTROL_ALLOW_METHODS,
@@ -227,18 +225,20 @@ fn is_allowed_fetch_site(headers: &HeaderMap) -> bool {
     matches!(raw, "same-origin" | "same-site" | "none")
 }
 
-fn check_origin(headers: &HeaderMap, allowed: &[String]) -> Result<Option<String>, ()> {
-    let Some(raw) = headers.get(ORIGIN).and_then(|v| v.to_str().ok()) else {
+fn check_origin(headers: &HeaderMap, allowed: &[String]) -> Result<Option<HeaderValue>, ()> {
+    let Some(val) = headers.get(ORIGIN) else {
+        return Ok(None);
+    };
+    let Ok(raw) = val.to_str() else {
         return Ok(None);
     };
     if allowed.iter().any(|a| a == raw) {
-        return Ok(Some(raw.to_owned()));
+        return Ok(Some(val.clone()));
     }
-    if let Some(host_hdr) = headers.get(HOST).and_then(|v| v.to_str().ok()) {
-        let same_http = format!("http://{host_hdr}");
-        if raw == same_http {
-            return Ok(Some(raw.to_owned()));
-        }
+    if let Some(host_hdr) = headers.get(HOST).and_then(|v| v.to_str().ok())
+        && raw.strip_prefix("http://") == Some(host_hdr)
+    {
+        return Ok(Some(val.clone()));
     }
     Err(())
 }

@@ -27,8 +27,9 @@ fn search_and_autocomplete_meet_latency_budgets() {
         !accounts.is_empty(),
         "perf database must contain at least one account"
     );
-    let acct: AccountId = accounts[0].id;
-    let identity = accounts[0].identity();
+    let first = accounts.into_iter().next().unwrap();
+    let acct: AccountId = first.id;
+    let identity = first.into_identity();
     let now = Utc.with_ymd_and_hms(2026, 11, 2, 15, 0, 0).unwrap();
     let now_ms = Millis(now.timestamp_millis());
 
@@ -64,7 +65,7 @@ fn search_and_autocomplete_meet_latency_budgets() {
                         scored.push((rank(&s, now_ms), s, span));
                     }
                 }
-                scored.sort_by(|a, b| a.0.cmp_desc(&b.0));
+                scored.sort_by(|a, b| a.0.cmp_desc(b.0));
                 scored.truncate(8);
                 Ok::<_, supermonkey_lib::store::StoreError>(scored.len())
             })

@@ -69,10 +69,10 @@ fn seed_demo_world(fake: &FakeGmail, data_dir: &std::path::Path) -> std::io::Res
 
     let tokens = TokenFile::new(data_dir.join("tokens.json"));
     tokens
-        .store(ana.email(), &RefreshToken::new(ana.refresh_token()))
+        .store(ana.email(), RefreshToken::new(ana.refresh_token()))
         .map_err(|e| std::io::Error::other(e.to_string()))?;
     tokens
-        .store(ben.email(), &RefreshToken::new(ben.refresh_token()))
+        .store(ben.email(), RefreshToken::new(ben.refresh_token()))
         .map_err(|e| std::io::Error::other(e.to_string()))?;
 
     with_write_tx(&data_dir.join("mail.db"), |wtx| {

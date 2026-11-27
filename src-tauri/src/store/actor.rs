@@ -273,7 +273,7 @@ fn run_job<S, T, E: From<StoreError>>(
     match catch_unwind(AssertUnwindSafe(|| job(write, state))) {
         Ok(result) => result,
         Err(panic) => {
-            let message = panic_message(panic.as_ref());
+            let message = panic_message(panic);
             tracing::error!(%message, "writer job panicked; rolled back");
             Err(StoreError::JobPanicked(message).into())
         }
@@ -317,24 +317,25 @@ fn committed<S>(
     commit: &Commit,
 ) {
     if let Err(panic) = catch_unwind(AssertUnwindSafe(|| on_commit(state, Db(conn), commit))) {
-        let message = panic_message(panic.as_ref());
+        let message = panic_message(panic);
         tracing::error!(%message, rev = commit.rev.0, "on_commit panicked");
     }
 }
 
 fn rolled_back<S>(on_rollback: &mut dyn FnMut(&mut S), state: &mut S) {
     if let Err(panic) = catch_unwind(AssertUnwindSafe(|| on_rollback(state))) {
-        let message = panic_message(panic.as_ref());
+        let message = panic_message(panic);
         tracing::error!(%message, "on_rollback panicked");
     }
 }
 
-fn panic_message(panic: &(dyn Any + Send)) -> String {
-    panic
-        .downcast_ref::<&str>()
-        .map(|s| (*s).to_owned())
-        .or_else(|| panic.downcast_ref::<String>().cloned())
-        .unwrap_or_else(|| "a panic with no message".to_owned())
+fn panic_message(panic: Box<dyn Any + Send>) -> String {
+    match panic.downcast::<String>() {
+        Ok(msg) => *msg,
+        Err(panic) => panic
+            .downcast_ref::<&str>()
+            .map_or_else(|| "a panic with no message".to_owned(), |s| (*s).to_owned()),
+    }
 }
 
 fn run<S>(shared: &Shared<S>, mut runner: Runner<S>) {

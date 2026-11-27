@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::collections::VecDeque;
 
 use chrono::{DateTime, Days, Months, NaiveDate, NaiveTime, TimeZone};
 
@@ -19,7 +20,7 @@ const GMAIL_ONLY_OPS: &[&str] = &[
     "around",
 ];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(super) enum TokenKind<'a> {
     LParen,
     RParen,
@@ -28,7 +29,7 @@ pub(super) enum TokenKind<'a> {
     Quoted(Cow<'a, str>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct Token<'a> {
     pub(super) kind: TokenKind<'a>,
     pub(super) start: usize,
@@ -194,19 +195,16 @@ fn scan_balanced_parens(input: &str, start: usize) -> (usize, bool) {
 
 struct Parser<'a, Tz: TimeZone> {
     input: &'a str,
-    tokens: Vec<Token<'a>>,
-    pos: usize,
+    tokens: VecDeque<Token<'a>>,
     rule_mode: bool,
     now: Option<&'a DateTime<Tz>>,
     errors: Vec<RuleError>,
 }
 
 pub(super) fn parse_lenient<Tz: TimeZone>(input: &str, now: Option<&DateTime<Tz>>) -> Query {
-    let tokens = lex(input);
     let mut parser = Parser {
         input,
-        tokens,
-        pos: 0,
+        tokens: VecDeque::from(lex(input)),
         rule_mode: false,
         now,
         errors: Vec::new(),
@@ -216,21 +214,17 @@ pub(super) fn parse_lenient<Tz: TimeZone>(input: &str, now: Option<&DateTime<Tz>
 }
 
 pub(super) fn parse_rule(input: &str) -> Result<Query, RuleError> {
-    let tokens = lex(input);
     let mut parser: Parser<'_, chrono::Utc> = Parser {
         input,
-        tokens,
-        pos: 0,
+        tokens: VecDeque::from(lex(input)),
         rule_mode: true,
         now: None,
         errors: Vec::new(),
     };
     let expr = parser.parse_or();
-    if let Some(tok) = parser.tokens.get(parser.pos) {
-        parser.push_error(
-            tok.start,
-            format!("unexpected {}", &input[tok.start..tok.end]),
-        );
+    if let Some(tok) = parser.peek() {
+        let (start, end) = (tok.start, tok.end);
+        parser.push_error(start, || format!("unexpected {}", &input[start..end]));
     }
     if let Some(err) = parser.errors.into_iter().min_by_key(|e| e.offset) {
         return Err(err);
@@ -239,14 +233,26 @@ pub(super) fn parse_rule(input: &str) -> Result<Query, RuleError> {
 }
 
 impl<'a, Tz: TimeZone> Parser<'a, Tz> {
-    fn push_error(&mut self, offset: usize, message: String) {
+    fn push_error(&mut self, offset: usize, make: impl FnOnce() -> String) {
         if self.rule_mode {
-            self.errors.push(RuleError { offset, message });
+            self.errors.push(RuleError {
+                offset,
+                message: make(),
+            });
+        }
+    }
+
+    fn push_static_error(&mut self, offset: usize, message: &'static str) {
+        if self.rule_mode {
+            self.errors.push(RuleError {
+                offset,
+                message: message.to_owned(),
+            });
         }
     }
 
     fn peek(&self) -> Option<&Token<'a>> {
-        self.tokens.get(self.pos)
+        self.tokens.front()
     }
 
     fn is_word(&self, expected: &str) -> bool {
@@ -266,18 +272,18 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
             && self.is_word("OR")
             && let Some(tok) = self.peek()
         {
-            self.push_error(tok.start, "OR needs a term before it".to_owned());
+            let start = tok.start;
+            self.push_static_error(start, "OR needs a term before it");
         }
         branches.push(first);
         while self.is_word("OR") {
-            let or_start = self.peek().map_or(0, |t| t.start);
-            self.pos += 1;
+            let or_start = self.tokens.pop_front().map_or(0, |t| t.start);
             if matches!(self.peek().map(|t| &t.kind), None | Some(TokenKind::RParen)) {
-                self.push_error(or_start, "OR needs a term after it".to_owned());
+                self.push_static_error(or_start, "OR needs a term after it");
                 break;
             }
             if self.is_word("OR") {
-                self.push_error(or_start, "OR needs a term after it".to_owned());
+                self.push_static_error(or_start, "OR needs a term after it");
                 continue;
             }
             branches.push(self.parse_and());
@@ -298,13 +304,13 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
             }
             if self.is_word("AND") {
                 let start = tok.start;
-                self.pos += 1;
+                self.tokens.pop_front();
                 let right_missing =
                     matches!(self.peek().map(|t| &t.kind), None | Some(TokenKind::RParen))
                         || self.is_word("OR")
                         || self.is_word("AND");
                 if items.is_empty() || right_missing {
-                    self.push_error(start, "AND needs a term on both sides".to_owned());
+                    self.push_static_error(start, "AND needs a term on both sides");
                 }
                 continue;
             }
@@ -319,55 +325,70 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
     }
 
     fn parse_unary(&mut self) -> Option<Expr> {
-        let tok = self.peek()?.clone();
-        if matches!(tok.kind, TokenKind::Minus) {
-            self.pos += 1;
-            let end_before = self.peek().map_or(tok.end, |t| t.end);
-            let inner = self.parse_unary();
-            let raw = self.input.get(tok.start..end_before).unwrap_or("-");
-            self.push_error(tok.start, format!("{raw} isn't supported in split rules"));
-            return inner.map(|e| Expr::Not(Box::new(e)));
-        }
-        if matches!(tok.kind, TokenKind::LParen) {
-            self.pos += 1;
-            let inner = self.parse_or();
-            if matches!(self.peek().map(|t| &t.kind), Some(TokenKind::RParen)) {
-                self.pos += 1;
-            } else {
-                self.push_error(tok.start, "unclosed (".to_owned());
+        match self.peek()? {
+            Token {
+                kind: TokenKind::Minus,
+                start,
+                end,
+                ..
+            } => {
+                let (start, end) = (*start, *end);
+                self.tokens.pop_front();
+                let end_before = self.peek().map_or(end, |t| t.end);
+                let inner = self.parse_unary();
+                let raw = self.input.get(start..end_before).unwrap_or("-");
+                self.push_error(start, || format!("{raw} isn't supported in split rules"));
+                inner.map(|e| Expr::Not(Box::new(e)))
             }
-            return Some(inner);
+            Token {
+                kind: TokenKind::LParen,
+                start,
+                ..
+            } => {
+                let open = *start;
+                self.tokens.pop_front();
+                let inner = self.parse_or();
+                if matches!(self.peek().map(|t| &t.kind), Some(TokenKind::RParen)) {
+                    self.tokens.pop_front();
+                } else {
+                    self.push_static_error(open, "unclosed (");
+                }
+                Some(inner)
+            }
+            _ => self.parse_atom(),
         }
-        self.parse_atom()
     }
 
     fn parse_atom(&mut self) -> Option<Expr> {
-        let tok = self.peek()?.clone();
-        self.pos += 1;
-        let is_last = self.pos == self.tokens.len();
+        let tok = self.tokens.pop_front()?;
+        let is_last = self.tokens.is_empty();
         match tok.kind {
             TokenKind::Quoted(text) => {
                 if tok.unclosed {
-                    self.push_error(tok.start, "unclosed quote".to_owned());
+                    self.push_static_error(tok.start, "unclosed quote");
                 }
                 let trimmed = text.trim();
                 if trimmed.is_empty() {
                     return None;
                 }
+                let value = match text {
+                    Cow::Owned(s) if trimmed.len() == s.len() => s,
+                    Cow::Borrowed(_) | Cow::Owned(_) => trimmed.to_owned(),
+                };
                 Some(Expr::Term(Term::Text {
                     field: Field::Any,
-                    value: trimmed.to_owned(),
+                    value,
                     prefix: !self.rule_mode && tok.unclosed && is_last,
                 }))
             }
-            TokenKind::Word(word) => self.parse_word(word, &tok, is_last),
+            TokenKind::Word(word) => self.parse_word(word, tok.start, is_last),
             TokenKind::LParen | TokenKind::RParen | TokenKind::Minus => None,
         }
     }
 
-    fn parse_word(&mut self, word: &str, tok: &Token<'_>, is_last: bool) -> Option<Expr> {
+    fn parse_word(&mut self, word: &str, start: usize, is_last: bool) -> Option<Expr> {
         if let Some((op, val)) = word.split_once(':') {
-            return self.parse_operator(op, val, tok, is_last);
+            return self.parse_operator(op, val, start, is_last);
         }
         Some(Expr::Term(Term::Text {
             field: Field::Any,
@@ -376,35 +397,25 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
         }))
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "dispatches every Gmail/Supermonkey query operator in one flat match"
-    )]
     fn parse_operator(
         &mut self,
         op: &str,
         raw_val: &str,
-        tok: &Token<'_>,
+        start: usize,
         is_last: bool,
     ) -> Option<Expr> {
-        let (val, quoted) = unquote_value(raw_val);
         if raw_val.starts_with('(') {
-            if self.rule_mode {
-                self.push_error(
-                    tok.start,
-                    format!(
-                        "{}: isn't supported in split rules",
-                        op.to_ascii_lowercase()
-                    ),
-                );
-            }
+            self.push_error(start, || {
+                format!(
+                    "{}: isn't supported in split rules",
+                    op.to_ascii_lowercase()
+                )
+            });
             return Some(Expr::Unsupported);
         }
+        let (val, quoted) = unquote_value(raw_val);
         if val.is_empty() {
-            if self.rule_mode {
-                self.push_error(tok.start, format!("{op}: needs a value"));
-                return None;
-            }
+            self.push_error(start, || format!("{op}: needs a value"));
             return None;
         }
         let op_lower = op.to_ascii_lowercase();
@@ -426,22 +437,19 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
             )),
             "subject" => Some(Expr::Term(Term::Text {
                 field: Field::Subject,
-                value: val,
+                value: val.into_owned(),
                 prefix: !self.rule_mode && !quoted && is_last,
             })),
-            "label" => Some(Expr::Term(Term::Label(val))),
-            "is" => Some(self.parse_is(&val, tok)),
-            "in" => Some(self.parse_in(&val, tok)),
-            "has" => Some(self.parse_has(&val, tok)),
-            "category" => Some(self.parse_category(&val, tok)),
+            "label" => Some(Expr::Term(Term::Label(val.into_owned()))),
+            "is" => Some(self.parse_is(&val, start)),
+            "in" => Some(self.parse_in(val, start)),
+            "has" => Some(self.parse_has(&val, start)),
+            "category" => Some(self.parse_category(&val, start)),
             "after" | "before" | "newer_than" | "older_than" => {
-                Some(self.parse_date_op(&op_lower, &val, tok))
+                Some(self.parse_date_op(&op_lower, &val, start))
             }
             other if GMAIL_ONLY_OPS.contains(&other) => {
-                self.push_error(
-                    tok.start,
-                    format!("{other}: isn't supported in split rules"),
-                );
+                self.push_error(start, || format!("{other}: isn't supported in split rules"));
                 Some(Expr::Unsupported)
             }
             _ => Some(Expr::Term(Term::Text {
@@ -452,15 +460,12 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
         }
     }
 
-    fn parse_is(&mut self, val: &str, tok: &Token<'_>) -> Expr {
+    fn parse_is(&mut self, val: &str, start: usize) -> Expr {
         if val.eq_ignore_ascii_case("list") {
             return Expr::Term(Term::IsList);
         }
         if self.rule_mode {
-            self.push_error(
-                tok.start,
-                format!("is:{val} isn't supported in split rules"),
-            );
+            self.push_error(start, || format!("is:{val} isn't supported in split rules"));
             return Expr::Unsupported;
         }
         match val.to_ascii_lowercase().as_str() {
@@ -472,12 +477,9 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
         }
     }
 
-    fn parse_in(&mut self, val: &str, tok: &Token<'_>) -> Expr {
+    fn parse_in(&mut self, val: Cow<'_, str>, start: usize) -> Expr {
         if self.rule_mode {
-            self.push_error(
-                tok.start,
-                format!("in:{val} isn't supported in split rules"),
-            );
+            self.push_error(start, || format!("in:{val} isn't supported in split rules"));
             return Expr::Unsupported;
         }
         match val.to_ascii_lowercase().as_str() {
@@ -488,16 +490,15 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
             "draft" | "drafts" => Expr::Term(Term::InDrafts),
             "anywhere" => Expr::Term(Term::InAnywhere),
             "snoozed" => Expr::Term(Term::IsSnoozed),
-            _ => Expr::Term(Term::Label(val.to_owned())),
+            _ => Expr::Term(Term::Label(val.into_owned())),
         }
     }
 
-    fn parse_has(&mut self, val: &str, tok: &Token<'_>) -> Expr {
+    fn parse_has(&mut self, val: &str, start: usize) -> Expr {
         if self.rule_mode {
-            self.push_error(
-                tok.start,
-                format!("has:{val} isn't supported in split rules"),
-            );
+            self.push_error(start, || {
+                format!("has:{val} isn't supported in split rules")
+            });
             return Expr::Unsupported;
         }
         if val.eq_ignore_ascii_case("attachment") {
@@ -507,20 +508,19 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
         }
     }
 
-    fn parse_category(&mut self, val: &str, tok: &Token<'_>) -> Expr {
+    fn parse_category(&mut self, val: &str, start: usize) -> Expr {
         if self.rule_mode {
-            self.push_error(
-                tok.start,
-                format!("category:{val} isn't supported in split rules"),
-            );
+            self.push_error(start, || {
+                format!("category:{val} isn't supported in split rules")
+            });
             return Expr::Unsupported;
         }
         Expr::Term(Term::Category(val.to_ascii_uppercase()))
     }
 
-    fn parse_date_op(&mut self, op: &str, val: &str, tok: &Token<'_>) -> Expr {
+    fn parse_date_op(&mut self, op: &str, val: &str, start: usize) -> Expr {
         if self.rule_mode {
-            self.push_error(tok.start, format!("{op}: isn't supported in split rules"));
+            self.push_error(start, || format!("{op}: isn't supported in split rules"));
             return Expr::Unsupported;
         }
         let Some(now) = self.now else {
@@ -543,24 +543,28 @@ impl<'a, Tz: TimeZone> Parser<'a, Tz> {
     }
 }
 
-fn field_or_me(field: Field, val: String, prefix: bool) -> Expr {
+fn field_or_me(field: Field, val: Cow<'_, str>, prefix: bool) -> Expr {
     if val.eq_ignore_ascii_case("me") {
         Expr::Term(Term::Me(field))
     } else {
         Expr::Term(Term::Text {
             field,
-            value: val,
+            value: val.into_owned(),
             prefix,
         })
     }
 }
 
-fn unquote_value(raw: &str) -> (String, bool) {
+fn unquote_value(raw: &str) -> (Cow<'_, str>, bool) {
     if let Some(rest) = raw.strip_prefix('"') {
         let stripped = rest.strip_suffix('"').unwrap_or(rest);
-        (stripped.replace("\\\"", "\""), true)
+        if stripped.contains("\\\"") {
+            (Cow::Owned(stripped.replace("\\\"", "\"")), true)
+        } else {
+            (Cow::Borrowed(stripped), true)
+        }
     } else {
-        (raw.to_owned(), false)
+        (Cow::Borrowed(raw), false)
     }
 }
 

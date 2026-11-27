@@ -34,18 +34,18 @@ impl HttpClient {
     }
 
     pub fn with_limits(idle: Duration, slowest_upload: u64) -> Result<Self, HttpClientError> {
-        let user_agent = format!("Supermonkey/{}", env!("CARGO_PKG_VERSION"));
+        const USER_AGENT: &str = concat!("Supermonkey/", env!("CARGO_PKG_VERSION"));
         let google = Client::builder()
-            .user_agent(&user_agent)
+            .user_agent(USER_AGENT)
             .connect_timeout(CONNECT_TIMEOUT)
             .read_timeout(idle)
             .build()?;
         let uploads = Client::builder()
-            .user_agent(&user_agent)
+            .user_agent(USER_AGENT)
             .connect_timeout(CONNECT_TIMEOUT)
             .build()?;
         let lists = Client::builder()
-            .user_agent(&user_agent)
+            .user_agent(USER_AGENT)
             .connect_timeout(CONNECT_TIMEOUT)
             .timeout(LISTS_TIMEOUT)
             .redirect(redirect::Policy::none())

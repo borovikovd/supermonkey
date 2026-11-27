@@ -43,14 +43,14 @@ impl TokenFile {
 
     pub fn load(&self, email: &str) -> Result<Option<RefreshToken>, TokenStoreError> {
         let _guard = self.lock.lock();
-        let map = self.read_map()?;
-        Ok(map.get(&normalize(email)).map(RefreshToken::new))
+        let mut map = self.read_map()?;
+        Ok(map.remove(&normalize(email)).map(RefreshToken::new))
     }
 
-    pub fn store(&self, email: &str, token: &RefreshToken) -> Result<(), TokenStoreError> {
+    pub fn store(&self, email: &str, token: RefreshToken) -> Result<(), TokenStoreError> {
         let _guard = self.lock.lock();
         let mut map = self.read_map()?;
-        map.insert(normalize(email), token.expose().to_owned());
+        map.insert(normalize(email), token.into_inner());
         self.write_map(&map)
     }
 
@@ -92,7 +92,7 @@ impl TokenFile {
         token: RefreshToken,
     ) -> Result<(), TokenStoreError> {
         let store = Arc::clone(self);
-        tokio::task::spawn_blocking(move || store.store(&email, &token))
+        tokio::task::spawn_blocking(move || store.store(&email, token))
             .await
             .map_err(|_join| TokenStoreError::Io {
                 action: "join token write for",

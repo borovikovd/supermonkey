@@ -10,21 +10,21 @@ use super::{CoreError, Platform};
 
 async fn send_unsubscribe_mailto(
     client: &AccountGmail,
-    acct_rec: &crate::store::AccountRecord,
+    identity: &crate::domain::Identity,
     mailto: Mailto,
     clock: &Clock,
 ) -> Result<(), CoreError> {
-    let from = acct_rec.identity().default_from();
+    let from = identity.default_from();
     let to = Addr::new(mailto.to);
     let subject = if mailto.subject.is_empty() {
-        "Unsubscribe".to_owned()
+        "Unsubscribe"
     } else {
-        mailto.subject
+        &mailto.subject
     };
     let raw = build_plain(&PlainMessage {
         from: &from,
         to: &to,
-        subject: &subject,
+        subject,
         body: &mailto.body,
         date: clock.now(),
     })
@@ -53,7 +53,7 @@ fn select_unsubscribe_target(
     pool: &ReadPool,
     account: AccountId,
     thread: ThreadId,
-) -> Result<(crate::store::AccountRecord, crate::store::MessageRecord), CoreError> {
+) -> Result<(crate::domain::Identity, crate::store::MessageRecord), CoreError> {
     pool.with(|db| {
         let acct = db
             .account(account)?
@@ -65,11 +65,11 @@ fn select_unsubscribe_target(
             return Err(StoreError::Invalid("thread belongs to another account"));
         }
         let mut msgs = db.thread_messages(thread)?;
-        let identity = acct.identity();
+        let identity = acct.into_identity();
         let pos = newest_from_someone_else(&msgs, &identity)
             .or_else(|| msgs.iter().rposition(|m| !m.is_draft))
             .ok_or(StoreError::NotFound("message"))?;
-        Ok::<_, StoreError>((acct, msgs.swap_remove(pos)))
+        Ok::<_, StoreError>((identity, msgs.swap_remove(pos)))
     })
     .map_err(|e| CoreError::other(e.to_string()))
 }
@@ -87,9 +87,13 @@ pub(crate) async fn unsubscribe_thread(
     clock: &Clock,
     platform: &dyn Platform,
 ) -> Result<Unsubscribed, CoreError> {
-    let (acct_rec, target_msg) = select_unsubscribe_target(pool, account, thread)?;
+    let (identity, target_msg) = select_unsubscribe_target(pool, account, thread)?;
 
-    let sender = target_msg.from.display_name().to_owned();
+    let sender = target_msg
+        .from
+        .name
+        .filter(|n| !n.is_empty())
+        .unwrap_or(target_msg.from.email);
     let client = accounts.gmail_session(account, "Sign in again to unsubscribe")?;
     client.ensure_online("Couldn't unsubscribe while offline")?;
 
@@ -119,7 +123,7 @@ pub(crate) async fn unsubscribe_thread(
         return Ok(Unsubscribed::OneClick { sender });
     }
     if let Some(mailto) = parsed.mailto {
-        send_unsubscribe_mailto(&client, &acct_rec, mailto, clock).await?;
+        send_unsubscribe_mailto(&client, &identity, mailto, clock).await?;
         return Ok(Unsubscribed::Emailed { sender });
     }
     if let Some(url) = parsed.url {
@@ -145,7 +149,7 @@ pub(crate) fn sender_threads(
             return Ok(Vec::new());
         };
         let msgs = db.thread_messages(thread)?;
-        let Some(pos) = newest_from_someone_else(&msgs, &acct.identity()) else {
+        let Some(pos) = newest_from_someone_else(&msgs, &acct.into_identity()) else {
             return Ok(Vec::new());
         };
         let Some(sender) = msgs.get(pos) else {
@@ -174,7 +178,7 @@ pub(crate) async fn block_sender(
             if row.account != account {
                 return Err(StoreError::Invalid("thread belongs to another account"));
             }
-            let identity = acct.identity();
+            let identity = acct.into_identity();
             let mut msgs = db.thread_messages(thread)?;
             let sender = newest_from_someone_else(&msgs, &identity)
                 .map_or(row.sender_email, |pos| msgs.swap_remove(pos).from.email);
@@ -220,11 +224,12 @@ pub(crate) async fn list_blocked_senders(
     {
         Ok(filters) => {
             let senders = filters
-                .iter()
+                .into_iter()
                 .filter_map(|f| {
-                    f.blocked_sender().map(|from| BlockedSender {
-                        id: f.id.0.clone(),
-                        from: from.to_owned(),
+                    f.blocked_sender()?;
+                    Some(BlockedSender {
+                        id: f.id.0,
+                        from: f.criteria.from?,
                     })
                 })
                 .collect();

@@ -167,8 +167,8 @@ async fn execute_draft_upsert(
         Ok((remote_draft, remote_msg, remote_thread)) => {
             let acct = slot.account;
             let op_id = op.id;
-            let local_draft = draft.id.clone();
-            let old_gid = draft.lifecycle.gmail_draft_id.clone();
+            let local_draft = draft.id;
+            let old_gid = draft.lifecycle.gmail_draft_id;
             super::super::log_err(
                 "save synced draft ids",
                 slot.writer
@@ -288,17 +288,19 @@ async fn execute_draft_delete(
     draft_id: &DraftId,
     known_gid: Option<&GmailDraftId>,
 ) -> OpOutcome {
-    let target_ids = if let Some(gid) = known_gid.or(op.gmail_draft_id.as_ref()) {
-        vec![gid.clone()]
+    let found;
+    let target_ids: &[GmailDraftId] = if let Some(gid) = known_gid.or(op.gmail_draft_id.as_ref()) {
+        std::slice::from_ref(gid)
     } else {
-        match find_gmail_drafts_by_local_id(gmail, draft_id, GmailPriority::P1).await {
+        found = match find_gmail_drafts_by_local_id(gmail, draft_id, GmailPriority::P1).await {
             Ok(ids) => ids,
             Err(err) => return classify_error(slot, op.id, err).await,
-        }
+        };
+        &found
     };
 
     for gid in target_ids {
-        match gmail.delete_draft(&gid, GmailPriority::P1).await {
+        match gmail.delete_draft(gid, GmailPriority::P1).await {
             Ok(()) => {}
             Err(err) if err.outcome == Outcome::NotFound => {}
             Err(err) => return classify_error(slot, op.id, err).await,
@@ -313,6 +315,16 @@ enum WriteDraftError {
     Build(String),
 }
 
+fn draft_ids(
+    draft: crate::gmail::Draft,
+) -> (GmailDraftId, Option<GmailMessageId>, Option<GmailThreadId>) {
+    let (remote_msg, remote_thread) = match draft.message {
+        Some(m) => (Some(m.id), m.thread_id),
+        None => (None, None),
+    };
+    (draft.id, remote_msg, remote_thread)
+}
+
 async fn write_draft_to_gmail(
     slot: &AccountSlot,
     gmail: &Gmail,
@@ -321,7 +333,12 @@ async fn write_draft_to_gmail(
 ) -> Result<(GmailDraftId, Option<GmailMessageId>, Option<GmailThreadId>), WriteDraftError> {
     let identity = slot
         .pool
-        .with(|db| Ok::<_, StoreError>(db.account(slot.account)?.map(|a| a.identity())))
+        .with(|db| {
+            Ok::<_, StoreError>(
+                db.account(slot.account)?
+                    .map(crate::store::AccountRecord::into_identity),
+            )
+        })
         .ok()
         .flatten()
         .ok_or_else(|| WriteDraftError::Build("account missing".to_owned()))?;
@@ -348,11 +365,7 @@ async fn write_draft_to_gmail(
 
     if let Some(gid) = resolved {
         match gmail.update_draft(&gid, &raw, thread_id, priority).await {
-            Ok(updated) => {
-                let remote_msg = updated.message.as_ref().map(|m| m.id.clone());
-                let remote_thread = updated.message.and_then(|m| m.thread_id);
-                return Ok((updated.id, remote_msg, remote_thread));
-            }
+            Ok(updated) => return Ok(draft_ids(updated)),
             Err(err) if err.outcome == Outcome::NotFound => {}
             Err(err) => return Err(WriteDraftError::Gmail(err)),
         }
@@ -385,11 +398,7 @@ async fn create_or_recover_draft(
     let draft_id = &draft.id;
     let thread_id = draft.lifecycle.gmail_thread_id.as_ref();
     match gmail.create_draft(raw, thread_id, priority).await {
-        Ok(created) => {
-            let remote_msg = created.message.as_ref().map(|m| m.id.clone());
-            let remote_thread = created.message.and_then(|m| m.thread_id);
-            Ok((created.id, remote_msg, remote_thread))
-        }
+        Ok(created) => Ok(draft_ids(created)),
         Err(err) if err.outcome == Outcome::NotFound && thread_id.is_some() => {
             let local_draft = draft_id.clone();
             super::super::log_err(
@@ -408,9 +417,7 @@ async fn create_or_recover_draft(
                 .create_draft(raw, None, priority)
                 .await
                 .map_err(WriteDraftError::Gmail)?;
-            let remote_msg = created.message.as_ref().map(|m| m.id.clone());
-            let remote_thread = created.message.and_then(|m| m.thread_id);
-            Ok((created.id, remote_msg, remote_thread))
+            Ok(draft_ids(created))
         }
         Err(err) if err.outcome == Outcome::NoResponse => {
             let found = find_gmail_drafts_by_local_id(gmail, draft_id, priority)
@@ -427,9 +434,7 @@ async fn create_or_recover_draft(
                     .update_draft(&gid, raw, thread_id, priority)
                     .await
                     .map_err(WriteDraftError::Gmail)?;
-                let remote_msg = updated.message.as_ref().map(|m| m.id.clone());
-                let remote_thread = updated.message.and_then(|m| m.thread_id);
-                Ok((updated.id, remote_msg, remote_thread))
+                Ok(draft_ids(updated))
             } else {
                 Err(WriteDraftError::Gmail(err))
             }
@@ -527,7 +532,7 @@ async fn process_outbox_row(slot: &AccountSlot, gmail: &Gmail, row: &OutboxRecor
 
     let gmail_draft_id = match write_draft_to_gmail(slot, gmail, &draft, GmailPriority::P1).await {
         Ok((remote_draft, remote_msg, remote_thread)) => {
-            let local_draft = draft.id.clone();
+            let local_draft = draft.id;
             let draft_id_copy = remote_draft.clone();
             super::super::log_err(
                 "persist outbox gmail draft id",
@@ -601,8 +606,8 @@ async fn probe_uncertain_outbox(
         .await
     {
         Ok(_) => {
-            let cmd = apply_outbox_event(slot, outbox_id, OutboxEvent::ProbeDraftPresent).await;
-            if matches!(cmd, OutboxCommand::RetrySend) {
+            let step = apply_outbox_event(slot, outbox_id, OutboxEvent::ProbeDraftPresent).await;
+            if step == OutboxStep::RetrySend {
                 send_gmail_draft(slot, gmail, outbox_id, gmail_draft_id).await
             } else {
                 OpOutcome::Done
@@ -678,27 +683,33 @@ async fn handle_outbox_draft_write_error(
         apply_outbox_event(slot, outbox_id, OutboxEvent::AuthFailed).await;
         return OpOutcome::AuthFailed;
     }
-    let transient = err.is_transient();
-    let msg = err.detail.clone();
-    apply_outbox_event(
-        slot,
-        outbox_id,
-        OutboxEvent::DraftWriteFailed {
-            transient,
-            message: msg,
-        },
-    )
-    .await;
-    if transient {
+    if err.is_transient() {
+        apply_outbox_event(
+            slot,
+            outbox_id,
+            OutboxEvent::DraftWriteFailed {
+                transient: true,
+                message: String::new(),
+            },
+        )
+        .await;
         OpOutcome::Retry(err)
     } else {
+        apply_outbox_event(
+            slot,
+            outbox_id,
+            OutboxEvent::DraftWriteFailed {
+                transient: false,
+                message: err.detail,
+            },
+        )
+        .await;
         OpOutcome::Done
     }
 }
 
 async fn transition_outbox_due(slot: &AccountSlot, outbox_id: OutboxId) -> bool {
-    let cmd = apply_outbox_event(slot, outbox_id, OutboxEvent::Due).await;
-    matches!(cmd, OutboxCommand::Persist)
+    apply_outbox_event(slot, outbox_id, OutboxEvent::Due).await == OutboxStep::Persist
 }
 
 async fn defer_outbox_offline(slot: &AccountSlot, row: &OutboxRecord) {
@@ -711,6 +722,13 @@ async fn defer_outbox_auth(slot: &AccountSlot, row: &OutboxRecord) {
     apply_outbox_event(slot, row.item.id, OutboxEvent::AuthFailed).await;
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OutboxStep {
+    Persist,
+    RetrySend,
+    Other,
+}
+
 #[expect(
     clippy::too_many_lines,
     reason = "applies outbox FSM command to SQLite outbox, draft, undo, and notice tables atomically"
@@ -719,25 +737,34 @@ async fn apply_outbox_event(
     slot: &AccountSlot,
     outbox_id: OutboxId,
     event: OutboxEvent,
-) -> OutboxCommand {
+) -> OutboxStep {
     let acct = slot.account;
     slot.writer
         .call(StorePriority::Sync, move |tx, state| {
             let Some(mut rec) = tx.read().outbox_row(outbox_id)? else {
-                return Ok::<_, StoreError>(OutboxCommand::None);
+                return Ok::<_, StoreError>(OutboxStep::Other);
             };
             let snap = outbox_snapshot(&rec.item);
             let (next, cmd) = step_outbox(snap, event);
-            match &cmd {
-                OutboxCommand::None => {}
-                OutboxCommand::Persist | OutboxCommand::RetrySend => {
+            let step = match cmd {
+                OutboxCommand::None => OutboxStep::Other,
+                OutboxCommand::Persist => {
                     if let Some(n) = next {
                         apply_outbox_snapshot(&mut rec.item, n);
                         tx.update_outbox(&rec.item)?;
                     }
+                    OutboxStep::Persist
+                }
+                OutboxCommand::RetrySend => {
+                    if let Some(n) = next {
+                        apply_outbox_snapshot(&mut rec.item, n);
+                        tx.update_outbox(&rec.item)?;
+                    }
+                    OutboxStep::RetrySend
                 }
                 OutboxCommand::CancelToDraft { notice } => {
-                    restore_draft_from_outbox(tx, state, outbox_id, notice.clone())?;
+                    restore_draft_from_outbox(tx, state, outbox_id, notice.as_ref())?;
+                    OutboxStep::Other
                 }
                 OutboxCommand::TrashSentAndDelete { message_id } => {
                     tx.delete_undo_for_outbox(acct, outbox_id)?;
@@ -751,17 +778,19 @@ async fn apply_outbox_event(
                         draft_id: None,
                         gmail_draft_id: None,
                         payload: &TrashSentOpPayload {
-                            gmail_msg_id: message_id.clone(),
+                            gmail_msg_id: message_id,
                         },
                     })?;
                     state.emit(Effect::KickOps(acct));
                     state.emit(Effect::RefreshBadge);
+                    OutboxStep::Other
                 }
                 OutboxCommand::DeleteRowAndUndo => {
                     tx.delete_undo_for_outbox(acct, outbox_id)?;
                     tx.delete_outbox(outbox_id)?;
                     tx.delete_draft(&rec.item.draft)?;
                     state.emit(Effect::RemoveDraftFiles(rec.item.draft));
+                    OutboxStep::Other
                 }
                 OutboxCommand::FetchSentThread { .. } => {
                     if let Some(n) = next {
@@ -773,10 +802,11 @@ async fn apply_outbox_event(
                         tx.delete_draft(&rec.item.draft)?;
                         state.emit(Effect::RemoveDraftFiles(rec.item.draft));
                     }
+                    OutboxStep::Other
                 }
-            }
-            Ok(cmd)
+            };
+            Ok(step)
         })
         .await
-        .unwrap_or(OutboxCommand::None)
+        .unwrap_or(OutboxStep::Other)
 }

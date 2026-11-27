@@ -235,25 +235,25 @@ const fn is_fts_field(field: Field) -> bool {
     )
 }
 
-pub(super) fn highlight_terms(expr: &Expr) -> Vec<String> {
+pub(super) fn into_highlight_terms(expr: Expr) -> Vec<String> {
     let mut out = Vec::new();
     collect_highlights(expr, false, &mut out);
     out
 }
 
-fn collect_highlights(expr: &Expr, negated: bool, out: &mut Vec<String>) {
+fn collect_highlights(expr: Expr, negated: bool, out: &mut Vec<String>) {
     match expr {
         Expr::Term(Term::Text {
             field: Field::Any | Field::Subject,
             value,
             ..
         }) if !negated => {
-            if !value.is_empty() && !out.iter().any(|t| t.eq_ignore_ascii_case(value)) {
-                out.push(value.clone());
+            if !value.is_empty() && !out.iter().any(|t| t.eq_ignore_ascii_case(&value)) {
+                out.push(value);
             }
         }
         Expr::Term(_) | Expr::Unsupported => {}
-        Expr::Not(inner) => collect_highlights(inner, !negated, out),
+        Expr::Not(inner) => collect_highlights(*inner, !negated, out),
         Expr::And(items) | Expr::Or(items) => {
             for item in items {
                 collect_highlights(item, negated, out);
@@ -408,17 +408,33 @@ fn normalize_label(name: &str) -> String {
         .collect()
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PruneKind {
+    LParen,
+    RParen,
+    Minus,
+    BoolOp,
+    Other,
+}
+
 #[must_use]
 pub fn gmail_query(raw: &str) -> String {
-    let mut kept: Vec<(TokenKind<'_>, &str)> = Vec::new();
+    let mut kept: Vec<(PruneKind, &str)> = Vec::new();
     for tok in lex(raw) {
-        if matches!(&tok.kind, TokenKind::Word(w) if w.eq_ignore_ascii_case("is:list")) {
-            while matches!(kept.last(), Some((TokenKind::Minus, _))) {
+        if matches!(tok.kind, TokenKind::Word(w) if w.eq_ignore_ascii_case("is:list")) {
+            while matches!(kept.last(), Some((PruneKind::Minus, _))) {
                 kept.pop();
             }
             continue;
         }
-        kept.push((tok.kind, &raw[tok.start..tok.end]));
+        let kind = match tok.kind {
+            TokenKind::LParen => PruneKind::LParen,
+            TokenKind::RParen => PruneKind::RParen,
+            TokenKind::Minus => PruneKind::Minus,
+            TokenKind::Word("OR" | "AND") => PruneKind::BoolOp,
+            TokenKind::Word(_) | TokenKind::Quoted(_) => PruneKind::Other,
+        };
+        kept.push((kind, &raw[tok.start..tok.end]));
     }
 
     loop {
@@ -430,13 +446,13 @@ pub fn gmail_query(raw: &str) -> String {
     }
 
     let mut out = String::new();
-    for (idx, (kind, slice)) in kept.iter().enumerate() {
+    for (idx, &(kind, slice)) in kept.iter().enumerate() {
         let prev = idx.checked_sub(1).and_then(|p| kept.get(p));
         let need_space = idx > 0
-            && !matches!(kind, TokenKind::RParen)
+            && kind != PruneKind::RParen
             && !matches!(
-                prev.map(|(k, _)| k),
-                Some(TokenKind::LParen | TokenKind::Minus)
+                prev.map(|(k, _)| *k),
+                Some(PruneKind::LParen | PruneKind::Minus)
             );
         if need_space {
             out.push(' ');
@@ -446,42 +462,39 @@ pub fn gmail_query(raw: &str) -> String {
     out
 }
 
-fn prune_pass<'a>(items: &[(TokenKind<'a>, &'a str)]) -> Vec<(TokenKind<'a>, &'a str)> {
-    let mut out: Vec<(TokenKind<'a>, &'a str)> = Vec::with_capacity(items.len());
+fn prune_pass<'a>(items: &[(PruneKind, &'a str)]) -> Vec<(PruneKind, &'a str)> {
+    let mut out: Vec<(PruneKind, &'a str)> = Vec::with_capacity(items.len());
     let mut i = 0;
     while i < items.len() {
-        let (kind, slice) = &items[i];
-        let next = items.get(i + 1).map(|(k, _)| k);
-        if matches!(kind, TokenKind::LParen) && matches!(next, Some(TokenKind::RParen)) {
-            while matches!(out.last(), Some((TokenKind::Minus, _))) {
+        let (kind, slice) = items[i];
+        let next = items.get(i + 1).map(|(k, _)| *k);
+        if kind == PruneKind::LParen && next == Some(PruneKind::RParen) {
+            while matches!(out.last(), Some((PruneKind::Minus, _))) {
                 out.pop();
             }
             i += 2;
             continue;
         }
-        if matches!(kind, TokenKind::Minus)
-            && matches!(next, None | Some(TokenKind::RParen | TokenKind::Minus))
+        if kind == PruneKind::Minus
+            && matches!(next, None | Some(PruneKind::RParen | PruneKind::Minus))
         {
             i += 1;
             continue;
         }
-        if is_bool_op(kind, slice) {
-            let prev = out.last().map(|(k, s)| (k, *s));
-            let prev_missing = prev.is_none()
-                || matches!(prev, Some((TokenKind::LParen | TokenKind::Minus, _)))
-                || prev.is_some_and(|(k, s)| is_bool_op(k, s));
-            let next_missing = next.is_none() || matches!(next, Some(TokenKind::RParen));
+        if kind == PruneKind::BoolOp {
+            let prev = out.last().map(|(k, _)| *k);
+            let prev_missing = matches!(
+                prev,
+                None | Some(PruneKind::LParen | PruneKind::Minus | PruneKind::BoolOp)
+            );
+            let next_missing = matches!(next, None | Some(PruneKind::RParen));
             if prev_missing || next_missing {
                 i += 1;
                 continue;
             }
         }
-        out.push((kind.clone(), slice));
+        out.push((kind, slice));
         i += 1;
     }
     out
-}
-
-fn is_bool_op(kind: &TokenKind<'_>, slice: &str) -> bool {
-    matches!(kind, TokenKind::Word(_)) && matches!(slice, "OR" | "AND")
 }

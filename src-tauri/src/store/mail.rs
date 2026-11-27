@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Row, params};
@@ -11,11 +12,23 @@ use crate::domain::{
 use super::sql::{id_list, json_col, to_json};
 use super::{CachedRouting, Db, StoreError, Table, WriteTx};
 
-const THREAD_ROW_COLS: &str = "t.id, t.account_id, t.gmail_id, t.subject, t.snippet, t.sender, t.sender_email, t.sort_time, t.message_count, t.unread, t.has_attachments, t.has_live, t.in_inbox, t.snooze_until, t.split_id, t.history_id, t.rev";
+macro_rules! thread_row_cols {
+    () => {
+        "t.id, t.account_id, t.gmail_id, t.subject, t.snippet, t.sender, t.sender_email, t.sort_time, t.message_count, t.unread, t.has_attachments, t.has_live, t.in_inbox, t.snooze_until, t.split_id, t.history_id, t.rev"
+    };
+}
 
-const MSG_COLS: &str = "id, account_id, thread_id, gmail_id, internal_date, from_name, from_email, to_addrs, cc_addrs, bcc_addrs, reply_to, subject, snippet, message_id_hdr, in_reply_to, references_hdr, is_list, is_draft, is_live, sm_draft_id, label_ids, has_attachments, has_body, rev";
+macro_rules! msg_cols {
+    () => {
+        "id, account_id, thread_id, gmail_id, internal_date, from_name, from_email, to_addrs, cc_addrs, bcc_addrs, reply_to, subject, snippet, message_id_hdr, in_reply_to, references_hdr, is_list, is_draft, is_live, sm_draft_id, label_ids, has_attachments, has_body, rev"
+    };
+}
 
-const ATT_COLS: &str = "id, message_id, part_id, filename, mime_type, size, gmail_att_id, content_id, is_inline, local_path";
+macro_rules! att_cols {
+    () => {
+        "id, message_id, part_id, filename, mime_type, size, gmail_att_id, content_id, is_inline, local_path"
+    };
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[expect(
@@ -108,7 +121,6 @@ pub struct MessageRecord {
 
 impl MessageRecord {
     fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
-        let label_vec: Vec<LabelId> = json_col(row, 20)?;
         Ok(Self {
             id: row.get(0)?,
             account: row.get(1)?,
@@ -132,7 +144,7 @@ impl MessageRecord {
             is_draft: row.get::<_, i64>(17)? != 0,
             is_live: row.get::<_, i64>(18)? != 0,
             sm_draft_id: row.get(19)?,
-            labels: label_vec.into_iter().collect(),
+            labels: json_col(row, 20)?,
             has_attachments: row.get::<_, i64>(21)? != 0,
             has_body: row.get::<_, i64>(22)? != 0,
             rev: row.get(23)?,
@@ -242,8 +254,16 @@ pub struct MessageBodyRecord {
 
 impl Db<'_> {
     pub fn thread_row(self, id: ThreadId) -> Result<Option<ThreadRow>, StoreError> {
-        let sql = format!("SELECT {THREAD_ROW_COLS} FROM threads t WHERE t.id = ?1");
-        let Some(mut row) = self.optional(&sql, [id], "read thread row", ThreadRow::from_row)?
+        let Some(mut row) = self.optional(
+            concat!(
+                "SELECT ",
+                thread_row_cols!(),
+                " FROM threads t WHERE t.id = ?1"
+            ),
+            [id],
+            "read thread row",
+            ThreadRow::from_row,
+        )?
         else {
             return Ok(None);
         };
@@ -256,10 +276,16 @@ impl Db<'_> {
             return Ok(Vec::new());
         }
         let ids_json = id_list(ids)?;
-        let sql = format!(
-            "SELECT {THREAD_ROW_COLS} FROM threads t WHERE t.id IN (SELECT value FROM json_each(?1))"
-        );
-        let mut rows = self.all(&sql, [&ids_json], "read thread rows", ThreadRow::from_row)?;
+        let mut rows = self.all(
+            concat!(
+                "SELECT ",
+                thread_row_cols!(),
+                " FROM threads t WHERE t.id IN (SELECT value FROM json_each(?1))"
+            ),
+            [&ids_json],
+            "read thread rows",
+            ThreadRow::from_row,
+        )?;
         self.attach_thread_labels(&mut rows, &ids_json)?;
         Ok(rows)
     }
@@ -362,25 +388,29 @@ impl Db<'_> {
             return Ok(None);
         };
         let sql = if trash_mode {
-            format!(
-                "SELECT {MSG_COLS} FROM messages WHERE thread_id = ?1 AND is_draft = 0 ORDER BY internal_date, id"
+            concat!(
+                "SELECT ",
+                msg_cols!(),
+                " FROM messages WHERE thread_id = ?1 AND is_draft = 0 ORDER BY internal_date, id"
             )
         } else {
-            format!(
-                "SELECT {MSG_COLS} FROM messages WHERE thread_id = ?1 AND is_live = 1 ORDER BY internal_date, id"
+            concat!(
+                "SELECT ",
+                msg_cols!(),
+                " FROM messages WHERE thread_id = ?1 AND is_live = 1 ORDER BY internal_date, id"
             )
         };
         let msgs = self.all(
-            &sql,
+            sql,
             [id],
             "read conversation messages",
             MessageRecord::from_row,
         )?;
-        let att_map = self.attachments_for_messages(&msgs)?;
+        let mut att_map = self.attachments_for_messages(&msgs)?;
         let messages = msgs
             .into_iter()
             .map(|m| {
-                let atts = att_map.get(&m.id).cloned().unwrap_or_default();
+                let atts = att_map.remove(&m.id).unwrap_or_default();
                 (m, atts)
             })
             .collect();
@@ -388,10 +418,16 @@ impl Db<'_> {
     }
 
     pub fn thread_messages(self, id: ThreadId) -> Result<Vec<MessageRecord>, StoreError> {
-        let sql = format!(
-            "SELECT {MSG_COLS} FROM messages WHERE thread_id = ?1 ORDER BY internal_date, id"
-        );
-        self.all(&sql, [id], "read thread messages", MessageRecord::from_row)
+        self.all(
+            concat!(
+                "SELECT ",
+                msg_cols!(),
+                " FROM messages WHERE thread_id = ?1 ORDER BY internal_date, id"
+            ),
+            [id],
+            "read thread messages",
+            MessageRecord::from_row,
+        )
     }
 
     pub fn thread_facts(self, id: ThreadId) -> Result<Thread, StoreError> {
@@ -400,8 +436,12 @@ impl Db<'_> {
     }
 
     pub fn message(self, id: MessageId) -> Result<Option<MessageRecord>, StoreError> {
-        let sql = format!("SELECT {MSG_COLS} FROM messages WHERE id = ?1");
-        self.optional(&sql, [id], "read message", MessageRecord::from_row)
+        self.optional(
+            concat!("SELECT ", msg_cols!(), " FROM messages WHERE id = ?1"),
+            [id],
+            "read message",
+            MessageRecord::from_row,
+        )
     }
 
     pub fn message_by_gmail(
@@ -409,10 +449,12 @@ impl Db<'_> {
         account: AccountId,
         gmail_id: &GmailMessageId,
     ) -> Result<Option<MessageRecord>, StoreError> {
-        let sql =
-            format!("SELECT {MSG_COLS} FROM messages WHERE account_id = ?1 AND gmail_id = ?2");
         self.optional(
-            &sql,
+            concat!(
+                "SELECT ",
+                msg_cols!(),
+                " FROM messages WHERE account_id = ?1 AND gmail_id = ?2"
+            ),
             params![account, gmail_id],
             "read message by gmail id",
             MessageRecord::from_row,
@@ -483,9 +525,12 @@ impl Db<'_> {
         self,
         id: MessageId,
     ) -> Result<Vec<AttachmentRecord>, StoreError> {
-        let sql = format!("SELECT {ATT_COLS} FROM attachments WHERE message_id = ?1 ORDER BY id");
         self.all(
-            &sql,
+            concat!(
+                "SELECT ",
+                att_cols!(),
+                " FROM attachments WHERE message_id = ?1 ORDER BY id"
+            ),
             [id],
             "read message attachments",
             AttachmentRecord::from_row,
@@ -599,7 +644,6 @@ impl Db<'_> {
             [tid],
             "load message facts",
             |r| {
-                let labels: Vec<LabelId> = json_col(r, 15)?;
                 Ok(MessageFacts {
                     id: r.get(0)?,
                     gmail_id: r.get(1)?,
@@ -620,7 +664,7 @@ impl Db<'_> {
                     is_list: r.get::<_, i64>(12)? != 0,
                     is_draft: r.get::<_, i64>(13)? != 0,
                     has_attachments: r.get::<_, i64>(14)? != 0,
-                    labels: labels.into_iter().collect(),
+                    labels: json_col(r, 15)?,
                 })
             },
         )
@@ -667,11 +711,12 @@ impl Db<'_> {
         }
         let ids: Vec<MessageId> = msgs.iter().map(|m| m.id).collect();
         let encoded = id_list(&ids)?;
-        let sql = format!(
-            "SELECT {ATT_COLS} FROM attachments WHERE message_id IN (SELECT value FROM json_each(?1)) ORDER BY id"
-        );
         let atts = self.all(
-            &sql,
+            concat!(
+                "SELECT ",
+                att_cols!(),
+                " FROM attachments WHERE message_id IN (SELECT value FROM json_each(?1)) ORDER BY id"
+            ),
             [encoded],
             "batch read attachments",
             AttachmentRecord::from_row,
@@ -728,7 +773,7 @@ impl WriteTx<'_> {
             self.insert_message_row(account, thread, msg, &encoded)?
         };
 
-        self.reindex_fts(msg_id, msg, None)?;
+        self.reindex_fts(msg_id, msg)?;
         self.touch(Some(account), Table::Messages);
         Ok(msg_id)
     }
@@ -836,7 +881,7 @@ impl WriteTx<'_> {
         )?;
         db.execute(
             "INSERT INTO messages_fts (rowid, from_text, to_text, cc_text, subject, body) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![msg_id, from_text, to_text, cc_text, record.subject, body.body_text],
+            params![msg_id, from_text.as_ref(), to_text, cc_text, record.subject, body.body_text],
             "insert body fts",
         )?;
         self.touch(Some(record.account), Table::Messages);
@@ -869,8 +914,8 @@ impl WriteTx<'_> {
         for att in attachments {
             let local_path = att
                 .local_path
-                .clone()
-                .or_else(|| existing.get(&att.part_id).and_then(Clone::clone));
+                .as_deref()
+                .or_else(|| existing.get(&att.part_id).and_then(Option::as_deref));
             self.read().execute(
                 "INSERT INTO attachments (message_id, part_id, filename, mime_type, size, gmail_att_id, content_id, is_inline, local_path)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -926,7 +971,7 @@ impl WriteTx<'_> {
         let rev = self.stamp();
         let is_live =
             !msg.is_draft && !labels.has(SystemLabel::Trash) && !labels.has(SystemLabel::Spam);
-        let encoded = to_json(&labels.to_vec())?;
+        let encoded = to_json(labels)?;
         self.read().execute(
             "UPDATE messages SET label_ids = ?2, is_live = ?3, rev = ?4 WHERE id = ?1",
             params![msg_id, encoded, i64::from(is_live), rev],
@@ -1155,7 +1200,7 @@ impl WriteTx<'_> {
                 account,
                 CachedRouting {
                     router: Router::new(splits, pins),
-                    identity: acct.identity(),
+                    identity: acct.into_identity(),
                     user_labels,
                 },
             );
@@ -1166,24 +1211,16 @@ impl WriteTx<'_> {
             .and_then(|c| c.router.route(thread, &c.identity, &c.user_labels)))
     }
 
-    fn reindex_fts(
-        &self,
-        msg_id: MessageId,
-        msg: &NewMessage,
-        body_override: Option<&str>,
-    ) -> Result<(), StoreError> {
+    fn reindex_fts(&self, msg_id: MessageId, msg: &NewMessage) -> Result<(), StoreError> {
         let db = self.read();
-        let existing_body: Option<String> = match body_override {
-            Some(b) => Some(b.to_owned()),
-            None => db
-                .optional(
-                    "SELECT body_text FROM messages WHERE id = ?1",
-                    [msg_id],
-                    "read existing body_text",
-                    |r| r.get::<_, Option<String>>(0),
-                )?
-                .flatten(),
-        };
+        let existing_body: Option<String> = db
+            .optional(
+                "SELECT body_text FROM messages WHERE id = ?1",
+                [msg_id],
+                "read existing body_text",
+                |r| r.get::<_, Option<String>>(0),
+            )?
+            .flatten();
         let body = existing_body.as_deref().unwrap_or(&msg.snippet);
         let from_text = format_addr_fts(&msg.from);
         let to_text = format_addrs_fts(&msg.to);
@@ -1195,7 +1232,7 @@ impl WriteTx<'_> {
         )?;
         db.execute(
             "INSERT INTO messages_fts (rowid, from_text, to_text, cc_text, subject, body) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![msg_id, from_text, to_text, cc_text, msg.subject, body],
+            params![msg_id, from_text.as_ref(), to_text, cc_text, msg.subject, body],
             "insert fts row",
         )?;
         Ok(())
@@ -1233,22 +1270,29 @@ impl EncodedMessage {
             bcc: to_json(&msg.bcc)?,
             reply_to: to_json(&msg.reply_to)?,
             references: to_json(&msg.references)?,
-            labels: to_json(&msg.labels.to_vec())?,
+            labels: to_json(&msg.labels)?,
         })
     }
 }
 
-fn format_addr_fts(addr: &Addr) -> String {
+fn format_addr_fts(addr: &Addr) -> Cow<'_, str> {
     match addr.name.as_deref().filter(|n| !n.is_empty()) {
-        Some(name) => format!("{name} {}", addr.email),
-        None => addr.email.clone(),
+        Some(name) => Cow::Owned(format!("{name} {}", addr.email)),
+        None => Cow::Borrowed(&addr.email),
     }
 }
 
 fn format_addrs_fts(addrs: &[Addr]) -> String {
-    addrs
-        .iter()
-        .map(format_addr_fts)
-        .collect::<Vec<_>>()
-        .join(" ")
+    let mut out = String::new();
+    for (idx, addr) in addrs.iter().enumerate() {
+        if idx > 0 {
+            out.push(' ');
+        }
+        if let Some(name) = addr.name.as_deref().filter(|n| !n.is_empty()) {
+            out.push_str(name);
+            out.push(' ');
+        }
+        out.push_str(&addr.email);
+    }
+    out
 }

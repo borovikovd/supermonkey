@@ -82,7 +82,7 @@ impl Db<'_> {
         let Some(acct) = self.account(account)? else {
             return Ok(Vec::new());
         };
-        let identity = acct.identity();
+        let identity = acct.into_identity();
         let user_labels = self.user_label_names(account)?;
         let needs_body = query.reads_body();
         let mut matched = Vec::new();
@@ -130,34 +130,41 @@ impl Db<'_> {
         scope: Scope,
     ) -> Result<Vec<(ThreadId, Millis, bool)>, StoreError> {
         let limit = i64::try_from(CANDIDATE_LIMIT).unwrap_or(5000);
-        let live_filter = if matches!(scope, Scope::Normal) {
-            "AND t.has_live = 1"
-        } else {
-            ""
-        };
+        let live_only = matches!(scope, Scope::Normal);
         if let Some(fts_expr) = fts {
-            let sql = format!(
+            let sql = if live_only {
                 "SELECT DISTINCT t.id, t.sort_time, t.snooze_until IS NOT NULL
                  FROM messages_fts f
                  JOIN messages m ON m.id = f.rowid
                  JOIN threads t ON t.id = m.thread_id
-                 WHERE f.messages_fts MATCH ?2 AND m.account_id = ?1 {live_filter}
+                 WHERE f.messages_fts MATCH ?2 AND m.account_id = ?1 AND t.has_live = 1
                  ORDER BY t.sort_time DESC, t.id DESC LIMIT ?3"
-            );
+            } else {
+                "SELECT DISTINCT t.id, t.sort_time, t.snooze_until IS NOT NULL
+                 FROM messages_fts f
+                 JOIN messages m ON m.id = f.rowid
+                 JOIN threads t ON t.id = m.thread_id
+                 WHERE f.messages_fts MATCH ?2 AND m.account_id = ?1
+                 ORDER BY t.sort_time DESC, t.id DESC LIMIT ?3"
+            };
             self.all(
-                &sql,
+                sql,
                 params![account, fts_expr, limit],
                 "fts candidate threads",
                 |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? != 0)),
             )
         } else {
-            let sql = format!(
+            let sql = if live_only {
                 "SELECT t.id, t.sort_time, t.snooze_until IS NOT NULL
-                 FROM threads t WHERE t.account_id = ?1 {live_filter}
+                 FROM threads t WHERE t.account_id = ?1 AND t.has_live = 1
                  ORDER BY t.sort_time DESC, t.id DESC LIMIT ?2"
-            );
+            } else {
+                "SELECT t.id, t.sort_time, t.snooze_until IS NOT NULL
+                 FROM threads t WHERE t.account_id = ?1
+                 ORDER BY t.sort_time DESC, t.id DESC LIMIT ?2"
+            };
             self.all(
-                &sql,
+                sql,
                 params![account, limit],
                 "scan candidate threads",
                 |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? != 0)),
@@ -197,17 +204,14 @@ impl Db<'_> {
         tid: ThreadId,
         needs_body: bool,
     ) -> Result<Vec<(MessageFacts, String)>, StoreError> {
-        let body_col = if needs_body {
-            "COALESCE(body_text, snippet)"
-        } else {
-            "''"
-        };
-        let sql = format!(
-            "SELECT id, gmail_id, internal_date, from_name, from_email, to_addrs, cc_addrs, subject, snippet, is_list, is_draft, has_attachments, label_ids, {body_col}
+        let sql = if needs_body {
+            "SELECT id, gmail_id, internal_date, from_name, from_email, to_addrs, cc_addrs, subject, snippet, is_list, is_draft, has_attachments, label_ids, COALESCE(body_text, snippet)
              FROM messages WHERE thread_id = ?1"
-        );
-        self.all(&sql, [tid], "load search messages", |r| {
-            let labels: Vec<LabelId> = json_col(r, 12)?;
+        } else {
+            "SELECT id, gmail_id, internal_date, from_name, from_email, to_addrs, cc_addrs, subject, snippet, is_list, is_draft, has_attachments, label_ids, ''
+             FROM messages WHERE thread_id = ?1"
+        };
+        self.all(sql, [tid], "load search messages", |r| {
             let facts = MessageFacts {
                 id: r.get(0)?,
                 gmail_id: r.get(1)?,
@@ -228,7 +232,7 @@ impl Db<'_> {
                 is_list: r.get::<_, i64>(9)? != 0,
                 is_draft: r.get::<_, i64>(10)? != 0,
                 has_attachments: r.get::<_, i64>(11)? != 0,
-                labels: labels.into_iter().collect(),
+                labels: json_col(r, 12)?,
             };
             Ok((facts, r.get(13)?))
         })

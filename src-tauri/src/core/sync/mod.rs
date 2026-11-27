@@ -385,7 +385,6 @@ impl AccountManager {
             .map_err(|e| CoreError::internal(e.to_string()))?;
 
         let email_for_db = email.clone();
-        let name_for_db = display_name.clone();
         let account_id = self
             .inner
             .writer
@@ -400,7 +399,7 @@ impl AccountManager {
                         state.emit(Effect::FetchSubscribedBodies);
                         existing
                     }
-                    None => tx.create_account(&email_for_db, &name_for_db)?,
+                    None => tx.create_account(&email_for_db, &display_name)?,
                 };
                 Ok::<_, StoreError>(rec.id)
             })
@@ -554,7 +553,7 @@ impl AccountManager {
             cancel.clone(),
         ));
         tasks.spawn(run_outbox(Arc::clone(&slot), cancel.clone()));
-        tasks.spawn(run_sync_loop(Arc::clone(&slot), tasks.clone(), cancel));
+        tasks.spawn(run_sync_loop(Arc::clone(&slot), cancel));
 
         map.insert(
             account,

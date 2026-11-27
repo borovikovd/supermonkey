@@ -206,7 +206,7 @@ fn ammonia_builder() -> ammonia::Builder<'static> {
 
 fn filter_attribute<'a>(tag: &str, attr: &str, value: &'a str) -> Option<Cow<'a, str>> {
     match attr {
-        "style" => Some(Cow::Owned(sanitize_css(value))),
+        "style" => Some(sanitize_css(value)),
         "src" | "background" => {
             let trimmed = value.trim();
             if trimmed
@@ -287,7 +287,31 @@ fn sanitize_style_blocks(html: &str) -> Cow<'_, str> {
     })
 }
 
-fn sanitize_css(css: &str) -> String {
+struct CssUrlReplacer;
+
+impl regex::Replacer for CssUrlReplacer {
+    fn replace_append(&mut self, caps: &regex::Captures<'_>, dst: &mut String) {
+        let inner = caps
+            .get(1)
+            .map_or("", |m| m.as_str())
+            .trim()
+            .trim_matches(['\'', '"']);
+        if is_safe_url(inner) || is_safe_image_data_uri(inner) {
+            dst.push_str(caps.get(0).map_or("", |m| m.as_str()));
+        } else {
+            dst.push_str("none");
+        }
+    }
+}
+
+fn cow_replace(s: Cow<'_, str>, f: impl FnOnce(&str) -> Cow<'_, str>) -> Cow<'_, str> {
+    match f(&s) {
+        Cow::Borrowed(_) => s,
+        Cow::Owned(next) => Cow::Owned(next),
+    }
+}
+
+fn sanitize_css(css: &str) -> Cow<'_, str> {
     static COMMENT_RE: LazyLock<Option<Regex>> =
         LazyLock::new(|| Regex::new(r"(?s)/\*.*?\*/").ok());
     static URL_RE: LazyLock<Option<Regex>> =
@@ -295,35 +319,18 @@ fn sanitize_css(css: &str) -> String {
     static EXPR_RE: LazyLock<Option<Regex>> =
         LazyLock::new(|| Regex::new(r"(?is)expression\s*\([^)]*\)").ok());
 
-    let unescaped = html_escape::decode_html_entities(css);
-    let decoded = decode_css_escapes(&unescaped);
-    let no_comments = COMMENT_RE.as_ref().map_or_else(
-        || Cow::Borrowed(decoded.as_ref()),
-        |re| re.replace_all(&decoded, ""),
-    );
-
-    let safe_urls = URL_RE.as_ref().map_or_else(
-        || Cow::Borrowed(no_comments.as_ref()),
-        |re| {
-            re.replace_all(&no_comments, |caps: &regex::Captures<'_>| {
-                let inner = caps
-                    .get(1)
-                    .map_or("", |m| m.as_str())
-                    .trim()
-                    .trim_matches(['\'', '"']);
-                if is_safe_url(inner) || is_safe_image_data_uri(inner) {
-                    caps.get(0).map_or("", |m| m.as_str()).to_owned()
-                } else {
-                    "none".to_owned()
-                }
-            })
-        },
-    );
-
-    match EXPR_RE.as_ref() {
-        Some(re) => re.replace_all(&safe_urls, "none").into_owned(),
-        None => safe_urls.into_owned(),
+    let mut out = html_escape::decode_html_entities(css);
+    out = cow_replace(out, decode_css_escapes);
+    if let Some(re) = COMMENT_RE.as_ref() {
+        out = cow_replace(out, |s| re.replace_all(s, ""));
     }
+    if let Some(re) = URL_RE.as_ref() {
+        out = cow_replace(out, |s| re.replace_all(s, CssUrlReplacer));
+    }
+    if let Some(re) = EXPR_RE.as_ref() {
+        out = cow_replace(out, |s| re.replace_all(s, "none"));
+    }
+    out
 }
 
 fn decode_css_escapes(input: &str) -> Cow<'_, str> {
@@ -521,12 +528,15 @@ fn extract_plain_text(html: &str, preserve_lines: bool) -> String {
     tokenizer.end();
     let raw = tokenizer.sink.state.into_inner().out;
     if preserve_lines {
-        raw.lines()
-            .map(str::trim_end)
-            .collect::<Vec<_>>()
-            .join("\n")
-            .trim()
-            .to_owned()
+        let trimmed = raw.trim();
+        let mut out = String::with_capacity(trimmed.len());
+        for (idx, line) in trimmed.lines().enumerate() {
+            if idx > 0 {
+                out.push('\n');
+            }
+            out.push_str(line.trim_end());
+        }
+        out
     } else {
         raw
     }
@@ -684,48 +694,50 @@ fn quoted_block_end(html: &str, open_tag: &str, after_open: usize) -> Option<usi
 }
 
 #[must_use]
-pub fn data_images_to_cid(html: &str, known: &[InlinePart]) -> (String, Vec<InlinePart>) {
+pub fn data_images_to_cid<'a>(
+    html: &'a str,
+    known: &[InlinePart],
+) -> (Cow<'a, str>, Vec<InlinePart>) {
     static DATA_IMG: LazyLock<Option<Regex>> = LazyLock::new(|| {
         Regex::new(r"(?i)data:(image/[a-z0-9.+-]+);base64,([A-Za-z0-9+/=\s]+)").ok()
     });
     let Some(re) = DATA_IMG.as_ref() else {
-        return (html.to_owned(), Vec::new());
+        return (Cow::Borrowed(html), Vec::new());
     };
     let mut added: Vec<InlinePart> = Vec::new();
-    let rewritten = re
-        .replace_all(html, |caps: &regex::Captures<'_>| {
-            let mime = caps
-                .get(1)
-                .map_or("image/png", |m| m.as_str())
-                .to_ascii_lowercase();
-            let raw_b64 = caps.get(2).map_or("", |m| m.as_str());
-            let bytes = decode_base64_lenient(raw_b64);
-            if let Some(same) = known
+    let rewritten = re.replace_all(html, |caps: &regex::Captures<'_>| {
+        let mime = caps
+            .get(1)
+            .map_or("image/png", |m| m.as_str())
+            .to_ascii_lowercase();
+        let raw_b64 = caps.get(2).map_or("", |m| m.as_str());
+        let bytes = decode_base64_lenient(raw_b64);
+        if let Some(same) = known
+            .iter()
+            .chain(&added)
+            .find(|p| p.data == bytes && p.mime_type == mime)
+        {
+            return format!("cid:{}", same.content_id);
+        }
+        let mut n = known.len().saturating_add(added.len()).saturating_add(1);
+        let cid = loop {
+            let candidate = format!("inline-{n}@supermonkey.local");
+            if !known
                 .iter()
                 .chain(&added)
-                .find(|p| p.data == bytes && p.mime_type == mime)
+                .any(|p| p.content_id == candidate)
             {
-                return format!("cid:{}", same.content_id);
+                break candidate;
             }
-            let mut n = known.len().saturating_add(added.len()).saturating_add(1);
-            let cid = loop {
-                let candidate = format!("inline-{n}@supermonkey.local");
-                if !known
-                    .iter()
-                    .chain(&added)
-                    .any(|p| p.content_id == candidate)
-                {
-                    break candidate;
-                }
-                n = n.saturating_add(1);
-            };
-            added.push(InlinePart {
-                content_id: cid.clone(),
-                mime_type: mime,
-                data: bytes,
-            });
-            format!("cid:{cid}")
-        })
-        .into_owned();
+            n = n.saturating_add(1);
+        };
+        let replacement = format!("cid:{cid}");
+        added.push(InlinePart {
+            content_id: cid,
+            mime_type: mime,
+            data: bytes,
+        });
+        replacement
+    });
     (rewritten, added)
 }

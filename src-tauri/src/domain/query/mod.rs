@@ -135,8 +135,8 @@ impl Query {
     }
 
     #[must_use]
-    pub fn highlight_terms(&self) -> Vec<String> {
-        eval::highlight_terms(&self.expr)
+    pub fn into_highlight_terms(self) -> Vec<String> {
+        eval::into_highlight_terms(self.expr)
     }
 
     #[must_use]
@@ -249,7 +249,7 @@ mod tests {
             "unsupported operator disables local search"
         );
         assert_eq!(
-            Query::parse_search("from:dave plan", &now).highlight_terms(),
+            Query::parse_search("from:dave plan", &now).into_highlight_terms(),
             vec!["plan".to_owned()]
         );
     }

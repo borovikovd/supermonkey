@@ -519,7 +519,7 @@ impl ChaosEnv {
         }
 
         TokenFile::new(dir.path().join("tokens.json"))
-            .store(user.email(), &RefreshToken::new(user.refresh_token()))?;
+            .store(user.email(), RefreshToken::new(user.refresh_token()))?;
         let account = with_write_tx(&dir.path().join("mail.db"), |tx| {
             Ok::<_, StoreError>(tx.create_account("ana@acme.test", "Ana")?.id)
         })?;
@@ -984,7 +984,7 @@ fn seed_body_recovery_fixture(
         drop(user.add_message(m));
     }
     TokenFile::new(dir.join("tokens.json"))
-        .store(user.email(), &RefreshToken::new(user.refresh_token()))?;
+        .store(user.email(), RefreshToken::new(user.refresh_token()))?;
     let account = with_write_tx(&dir.join("mail.db"), |tx| {
         Ok::<_, StoreError>(tx.create_account("ana@acme.test", "Ana")?.id)
     })?;

@@ -253,30 +253,25 @@ impl LabelSet {
     }
 
     #[must_use]
-    pub fn without(&self, labels: &[LabelId]) -> Self {
-        let mut next = self.0.clone();
+    pub fn without(mut self, labels: &[LabelId]) -> Self {
         for l in labels {
-            next.remove(l);
+            self.0.remove(l);
         }
-        Self(next)
+        self
     }
 
     #[must_use]
-    pub fn and(&self, labels: &[LabelId]) -> Self {
-        let mut next = self.0.clone();
+    pub fn and(mut self, labels: &[LabelId]) -> Self {
         for l in labels {
-            next.insert(l.clone());
+            if !self.0.contains(l) {
+                self.0.insert(l.clone());
+            }
         }
-        Self(next)
+        self
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &LabelId> {
         self.0.iter()
-    }
-
-    #[must_use]
-    pub fn to_vec(&self) -> Vec<LabelId> {
-        self.0.iter().cloned().collect()
     }
 }
 

@@ -142,7 +142,7 @@ pub struct ModifyAction {
     pub undoable: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", content = "at", rename_all = "camelCase")]
 #[ts(export)]
 pub enum SnoozeChange {

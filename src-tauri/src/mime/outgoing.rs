@@ -1,6 +1,9 @@
+use std::borrow::Cow;
+
 use chrono::{DateTime, Datelike as _, FixedOffset, Timelike as _, Utc, Weekday};
 use mail_builder::MessageBuilder;
 use mail_builder::headers::address::Address;
+use mail_builder::headers::content_type::ContentType;
 use mail_builder::headers::raw::Raw;
 use mail_builder::mime::MimePart;
 use thiserror::Error;
@@ -168,7 +171,7 @@ pub fn build_mime(msg: &Outgoing<'_>) -> Result<Vec<u8>, BuildError> {
         builder = builder.in_reply_to(strip_angles(irt));
     }
     if !msg.references.is_empty() {
-        let refs: Vec<String> = msg.references.iter().map(|r| strip_angles(r)).collect();
+        let refs: Vec<&str> = msg.references.iter().map(|r| strip_angles(r)).collect();
         builder = builder.references(refs);
     }
     if let Some(draft) = msg.draft_id {
@@ -176,8 +179,8 @@ pub fn build_mime(msg: &Outgoing<'_>) -> Result<Vec<u8>, BuildError> {
     }
 
     let full_html = match msg.quote_html {
-        Some(q) if !q.is_empty() => format!("{}<br>{q}", msg.body_html),
-        _ => msg.body_html.to_owned(),
+        Some(q) if !q.is_empty() => Cow::Owned(format!("{}<br>{q}", msg.body_html)),
+        _ => Cow::Borrowed(msg.body_html),
     };
     let plain = html_to_plain(&full_html);
     let body = build_body_tree(&plain, &full_html, msg.inline, msg.attachments);
@@ -267,26 +270,30 @@ fn clean_header(s: &str) -> String {
         .collect()
 }
 
-fn clean_domain(domain: &str) -> String {
+fn clean_domain(domain: &str) -> Cow<'_, str> {
+    if !domain.is_empty()
+        && domain
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'))
+    {
+        return Cow::Borrowed(domain);
+    }
     let cleaned: String = domain
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
         .collect();
     if cleaned.is_empty() {
-        "supermonkey.local".to_owned()
+        Cow::Borrowed("supermonkey.local")
     } else {
-        cleaned
+        Cow::Owned(cleaned)
     }
 }
 
-fn strip_angles(id: &str) -> String {
-    id.trim()
-        .trim_start_matches('<')
-        .trim_end_matches('>')
-        .to_owned()
+fn strip_angles(id: &str) -> &str {
+    id.trim().trim_start_matches('<').trim_end_matches('>')
 }
 
-fn safe_mime_type(mime: &str) -> String {
+fn safe_mime_type(mime: &str) -> ContentType<'_> {
     let trimmed = mime.trim();
     if let Some((top, sub)) = trimmed.split_once('/')
         && !top.is_empty()
@@ -295,9 +302,16 @@ fn safe_mime_type(mime: &str) -> String {
         && is_mime_token(top)
         && is_mime_token(sub)
     {
-        return format!("{}/{}", top.to_ascii_lowercase(), sub.to_ascii_lowercase());
+        if trimmed.bytes().all(|b| !b.is_ascii_uppercase()) {
+            return ContentType::from(trimmed);
+        }
+        return ContentType::from(format!(
+            "{}/{}",
+            top.to_ascii_lowercase(),
+            sub.to_ascii_lowercase()
+        ));
     }
-    "application/octet-stream".to_owned()
+    ContentType::from("application/octet-stream")
 }
 
 fn is_mime_token(s: &str) -> bool {
@@ -305,19 +319,22 @@ fn is_mime_token(s: &str) -> bool {
         .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'+' | b'.' | b'_'))
 }
 
-fn format_quote_addr(addr: &Addr) -> String {
+fn format_quote_addr(addr: &Addr) -> Cow<'_, str> {
     match addr.name.as_deref().filter(|n| !n.is_empty()) {
-        Some(name) => format!("{name} <{}>", addr.email),
-        None => addr.email.clone(),
+        Some(name) => Cow::Owned(format!("{name} <{}>", addr.email)),
+        None => Cow::Borrowed(&addr.email),
     }
 }
 
 fn format_quote_list(addrs: &[Addr]) -> String {
-    addrs
-        .iter()
-        .map(format_quote_addr)
-        .collect::<Vec<_>>()
-        .join(", ")
+    let mut out = String::new();
+    for (idx, addr) in addrs.iter().enumerate() {
+        if idx > 0 {
+            out.push_str(", ");
+        }
+        out.push_str(&format_quote_addr(addr));
+    }
+    out
 }
 
 fn format_quote_date(ms: Millis, offset: FixedOffset) -> String {

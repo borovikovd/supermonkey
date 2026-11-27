@@ -25,7 +25,7 @@ pub struct AppState {
     pub online: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct GlobalSettings {
@@ -89,7 +89,7 @@ pub struct SplitInfo {
     pub hide_when_empty: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct UndoEntryInfo {

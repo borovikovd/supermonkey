@@ -46,8 +46,8 @@ impl NotificationTracker {
     pub(crate) fn notify_new_mail(
         &self,
         account: AccountId,
-        email: &str,
-        items: &[NewMailAlert],
+        email: String,
+        items: Vec<NewMailAlert>,
         open_threads: &HashSet<ThreadId>,
         muted: bool,
         clock: &Clock,
@@ -57,34 +57,42 @@ impl NotificationTracker {
             return;
         }
         let focused = self.state.lock().focused;
-        let visible: Vec<&NewMailAlert> = items
-            .iter()
+        let visible: Vec<NewMailAlert> = items
+            .into_iter()
             .filter(|i| !(focused && open_threads.contains(&i.thread_id)))
             .collect();
         if visible.is_empty() {
             return;
         }
         if visible.len() > 3 {
+            let body = format!("New mail in {email}");
             platform.notify(Notification {
-                account: email.to_owned(),
+                account: email,
                 thread: None,
                 title: format!("{} new messages", visible.len()),
-                body: format!("New mail in {email}"),
+                body,
             });
             self.record_alert_if_unfocused(clock.now(), account, None);
             return;
         }
         let mut last_tid = None;
-        for item in visible {
-            let body = if item.snippet.is_empty() {
-                format!("{} — {email}", item.subject)
+        let last_idx = visible.len() - 1;
+        let mut email = Some(email);
+        for (idx, item) in visible.into_iter().enumerate() {
+            let acct_email = if idx == last_idx {
+                email.take().unwrap_or_default()
             } else {
-                format!("{} — {} ({email})", item.subject, item.snippet)
+                email.clone().unwrap_or_default()
+            };
+            let body = if item.snippet.is_empty() {
+                format!("{} — {acct_email}", item.subject)
+            } else {
+                format!("{} — {} ({acct_email})", item.subject, item.snippet)
             };
             platform.notify(Notification {
-                account: email.to_owned(),
+                account: acct_email,
                 thread: Some(item.thread_id),
-                title: item.sender.clone(),
+                title: item.sender,
                 body,
             });
             last_tid = Some(item.thread_id);
@@ -184,8 +192,8 @@ mod tests {
         };
         tracker.notify_new_mail(
             AccountId(1),
-            "ana@acme.test",
-            &[alert],
+            "ana@acme.test".to_owned(),
+            vec![alert],
             &HashSet::new(),
             false,
             &clock,

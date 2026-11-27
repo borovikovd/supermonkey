@@ -211,9 +211,9 @@ impl FetchQueue {
     fn try_pop(&self) -> Option<FetchJob> {
         let mut g = self.inner.lock();
         let (_, gmail_id) = g.order.pop_first()?;
-        let entry = g.by_id.remove(&gmail_id)?;
+        let (in_flight_id, entry) = g.by_id.remove_entry(&gmail_id)?;
         g.in_flight.insert(
-            gmail_id.clone(),
+            in_flight_id,
             InFlightEntry {
                 format: entry.format,
                 requeue: None,
@@ -230,16 +230,18 @@ impl FetchQueue {
         })
     }
 
-    pub(crate) fn finish(&self, job: &FetchJob, settled: bool) {
+    pub(crate) fn finish(&self, job: FetchJob, settled: bool) {
         let mut g = self.inner.lock();
-        let flight = g.in_flight.remove(&job.gmail_id);
-        let (requeue, late_barriers) =
-            flight.map_or((None, Vec::new()), |f| (f.requeue, f.barriers));
+        let flight = g.in_flight.remove_entry(&job.gmail_id);
+        let (requeue, late_barriers) = match flight {
+            Some((flight_id, f)) => (f.requeue.map(|e| (flight_id, e)), f.barriers),
+            None => (None, Vec::new()),
+        };
         let requeued = requeue.is_some();
-        if let Some(entry) = requeue {
+        if let Some((flight_id, entry)) = requeue {
             let key = (entry.priority, entry.seq);
-            g.by_id.insert(job.gmail_id.clone(), entry);
-            g.order.insert(key, job.gmail_id.clone());
+            g.by_id.insert(flight_id, entry);
+            g.order.insert(key, job.gmail_id);
         }
         drop(g);
         if requeued {

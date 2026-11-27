@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::domain::query::Query;
 use crate::domain::{
@@ -29,6 +29,7 @@ pub(crate) struct ListingState {
 #[derive(Debug, Default)]
 struct SubState {
     delivered: bool,
+    force: bool,
     last_rev: Rev,
     last_ids: Vec<ListEntry>,
     listing: ListingState,
@@ -56,7 +57,7 @@ struct ListMeta {
 
 #[derive(Debug, Default)]
 pub(crate) struct Registry {
-    subs: HashMap<SubId, SubEntry>,
+    subs: BTreeMap<SubId, SubEntry>,
 }
 
 impl Registry {
@@ -123,33 +124,28 @@ impl Registry {
             .collect()
     }
 
-    pub(crate) fn all_composer_subs(&self, draft: &DraftId) -> Vec<SubId> {
+    pub(crate) fn drop_composer(&mut self, draft: &DraftId) {
         self.subs
-            .iter()
-            .filter(|(_, entry)| matches!(&entry.key, SubKey::Composer { draft: d } if d == draft))
-            .map(|(id, _)| id.clone())
-            .collect()
+            .retain(|_, entry| !matches!(&entry.key, SubKey::Composer { draft: d } if d == draft));
     }
 
-    pub(crate) fn app_and_search_subs(&self) -> Vec<SubId> {
-        self.subs
-            .iter()
-            .filter(|(_, entry)| matches!(entry.key, SubKey::App | SubKey::Search { .. }))
-            .map(|(id, _)| id.clone())
-            .collect()
+    pub(crate) fn force_app_and_search(&mut self) {
+        for entry in self.subs.values_mut() {
+            if matches!(entry.key, SubKey::App | SubKey::Search { .. }) {
+                entry.state.force = true;
+            }
+        }
     }
 
-    pub(crate) fn set_listing(&mut self, sub: &SubId, listing: ListingState) -> bool {
-        let Some(entry) = self.subs.get_mut(sub) else {
-            return false;
-        };
-        entry.state.listing = listing;
-        true
+    pub(crate) fn set_listing(&mut self, sub: &SubId, listing: ListingState) {
+        if let Some(entry) = self.subs.get_mut(sub) {
+            entry.state.listing = listing;
+            entry.state.force = true;
+        }
     }
 
-    pub(crate) fn stop_searching_for_account(&mut self, account: AccountId) -> Vec<SubId> {
-        let mut changed = Vec::new();
-        for (id, entry) in &mut self.subs {
+    pub(crate) fn stop_searching_for_account(&mut self, account: AccountId) {
+        for entry in self.subs.values_mut() {
             let matches = matches!(
                 entry.key,
                 SubKey::List { account: a, .. } | SubKey::Search { account: a, .. } if a == account
@@ -157,10 +153,9 @@ impl Registry {
             if matches && (entry.state.listing.searching || entry.state.listing.more) {
                 entry.state.listing.searching = false;
                 entry.state.listing.more = false;
-                changed.push(id.clone());
+                entry.state.force = true;
             }
         }
-        changed
     }
 
     #[expect(
@@ -174,17 +169,10 @@ impl Registry {
         rev: Rev,
         online: bool,
         clock: &Clock,
-        force_subs: &HashSet<SubId>,
     ) -> Result<Vec<SubUpdate>, StoreError> {
-        let mut ids: Vec<SubId> = self.subs.keys().cloned().collect();
-        ids.sort_by(|a, b| a.0.cmp(&b.0));
         let mut updates = Vec::new();
-        for sub_id in ids {
-            let forced_flag = force_subs.contains(&sub_id);
-            let Some(entry) = self.subs.get_mut(&sub_id) else {
-                continue;
-            };
-            let forced = !entry.state.delivered || forced_flag;
+        for (sub_id, entry) in &mut self.subs {
+            let forced = !entry.state.delivered || std::mem::take(&mut entry.state.force);
             if !forced && !sub_affected(&entry.key, changes) {
                 continue;
             }
@@ -275,7 +263,7 @@ fn sub_affected(key: &SubKey, changes: &Changes) -> bool {
 )]
 fn build_sub_update(
     db: Db<'_>,
-    sub_id: SubId,
+    sub_id: &SubId,
     entry: &mut SubEntry,
     changes: &Changes,
     rev: Rev,
@@ -286,7 +274,7 @@ fn build_sub_update(
     let first = !state.delivered;
     match key {
         SubKey::App => Ok(Some(SubUpdate::App {
-            sub: sub_id,
+            sub: sub_id.clone(),
             first,
             state: project_app_state(db, online)?,
         })),
@@ -295,7 +283,7 @@ fn build_sub_update(
                 return Ok(None);
             };
             Ok(Some(SubUpdate::Account {
-                sub: sub_id,
+                sub: sub_id.clone(),
                 first,
                 summary,
             }))
@@ -314,7 +302,7 @@ fn build_sub_update(
         } => {
             let data = project_conversation(db, *thread, *trash_mode, rev)?;
             Ok(Some(SubUpdate::Conversation {
-                sub: sub_id,
+                sub: sub_id.clone(),
                 first,
                 data,
             }))
@@ -322,7 +310,7 @@ fn build_sub_update(
         SubKey::Composer { draft } => {
             let data = project_draft(db, draft, rev)?;
             Ok(Some(SubUpdate::Composer {
-                sub: sub_id,
+                sub: sub_id.clone(),
                 first,
                 draft: data,
             }))
@@ -439,7 +427,7 @@ fn project_account_summary(
 )]
 fn build_list_update(
     db: Db<'_>,
-    sub_id: SubId,
+    sub_id: &SubId,
     account: AccountId,
     view: &View,
     state: &mut SubState,
@@ -496,7 +484,7 @@ fn build_list_update(
 )]
 fn build_search_update(
     db: Db<'_>,
-    sub_id: SubId,
+    sub_id: &SubId,
     account: AccountId,
     query: &str,
     state: &mut SubState,
@@ -516,11 +504,13 @@ fn build_search_update(
             split: None,
         })
         .collect();
+    let needs_gmail = parsed.needs_gmail();
+    let looks_in_trash = parsed.looks_in_trash();
     let meta = ListMeta {
         searching: state.listing.searching,
-        needs_gmail: parsed.needs_gmail(),
-        looks_in_trash: parsed.looks_in_trash(),
-        terms: parsed.highlight_terms(),
+        needs_gmail,
+        looks_in_trash,
+        terms: parsed.into_highlight_terms(),
         more: state.listing.more,
         oldest_hit,
     };
@@ -532,7 +522,7 @@ fn build_search_update(
     reason = "draft list diffing compares previous sub state against current drafts and commit changes"
 )]
 fn finish_draft_list_update(
-    sub_id: SubId,
+    sub_id: &SubId,
     state: &mut SubState,
     drafts: Vec<DraftRecord>,
     new_ids: Vec<ListEntry>,
@@ -548,7 +538,7 @@ fn finish_draft_list_update(
             .collect();
         state.last_ids.clone_from(&new_ids);
         return SubUpdate::List {
-            sub: sub_id,
+            sub: sub_id.clone(),
             first: true,
             ids: Some(new_ids),
             removed: Vec::new(),
@@ -577,7 +567,7 @@ fn finish_draft_list_update(
     };
     state.last_ids = new_ids;
     SubUpdate::List {
-        sub: sub_id,
+        sub: sub_id.clone(),
         first: false,
         ids: None,
         removed,
@@ -599,7 +589,7 @@ fn finish_draft_list_update(
 )]
 fn finish_thread_list_update(
     db: Db<'_>,
-    sub_id: SubId,
+    sub_id: &SubId,
     state: &mut SubState,
     new_ids: Vec<ListEntry>,
     meta: ListMeta,
@@ -619,7 +609,7 @@ fn finish_thread_list_update(
             .collect();
         state.last_ids.clone_from(&new_ids);
         return Ok(SubUpdate::List {
-            sub: sub_id,
+            sub: sub_id.clone(),
             first: true,
             ids: Some(new_ids),
             removed: Vec::new(),
@@ -656,7 +646,7 @@ fn finish_thread_list_update(
         .collect();
     state.last_ids = new_ids;
     Ok(SubUpdate::List {
-        sub: sub_id,
+        sub: sub_id.clone(),
         first: false,
         ids: None,
         removed,
@@ -708,13 +698,26 @@ fn project_conversation(
     };
     let identity = db.account(view.thread.account)?.map_or_else(
         || Identity::new(String::new(), String::new(), Vec::new()),
-        |a| a.identity(),
+        AccountRecord::into_identity,
     );
-    let landed_gids: HashSet<crate::domain::GmailMessageId> = view
-        .messages
-        .iter()
-        .map(|(m, _)| m.gmail_id.clone())
-        .collect();
+    let outbox_rows = db.outbox_for_thread(thread)?;
+    let outbox = if outbox_rows.is_empty() {
+        Vec::new()
+    } else {
+        let landed_gids: HashSet<&crate::domain::GmailMessageId> =
+            view.messages.iter().map(|(m, _)| &m.gmail_id).collect();
+        outbox_rows
+            .into_iter()
+            .filter(|o| {
+                !(o.item.state == crate::domain::OutboxState::Sent
+                    && o.item
+                        .sent_message_id
+                        .as_ref()
+                        .is_some_and(|gmid| landed_gids.contains(gmid)))
+            })
+            .map(project_outbox_row)
+            .collect()
+    };
     let mut messages = Vec::with_capacity(view.messages.len());
     for (msg, att_recs) in view.messages {
         let atts = att_recs
@@ -741,18 +744,6 @@ fn project_conversation(
             snippet: d.snippet,
             updated_at: d.updated_at,
         })
-        .collect();
-    let outbox = db
-        .outbox_for_thread(thread)?
-        .into_iter()
-        .filter(|o| {
-            !(o.item.state == crate::domain::OutboxState::Sent
-                && o.item
-                    .sent_message_id
-                    .as_ref()
-                    .is_some_and(|gmid| landed_gids.contains(gmid)))
-        })
-        .map(project_outbox_row)
         .collect();
     Ok(ConversationData {
         thread,
@@ -822,7 +813,7 @@ fn project_draft(db: Db<'_>, draft: &DraftId, rev: Rev) -> Result<DraftState, St
     };
     if rec.in_outbox {
         return Ok(DraftState {
-            id: draft.clone(),
+            id: rec.id,
             account: rec.account,
             kind: rec.kind,
             reply_all: rec.reply_all,
@@ -958,12 +949,12 @@ fn draft_to_row(d: DraftRecord) -> ListRow {
 pub(crate) fn fetch_rows(
     db: Db<'_>,
     drafts: bool,
-    keys: &[String],
+    keys: Vec<String>,
 ) -> Result<Vec<ListRow>, StoreError> {
     if drafts {
         let mut out = Vec::with_capacity(keys.len());
         for k in keys {
-            if let Some(d) = db.draft(&DraftId(k.clone()))? {
+            if let Some(d) = db.draft(&DraftId(k))? {
                 out.push(draft_to_row(d));
             }
         }

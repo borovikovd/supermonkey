@@ -172,7 +172,7 @@ async fn run_listing(
                 include_spam_trash: parsed.looks_in_trash(),
             }
         }
-        SubKey::List { view, .. } => match view.gmail_listing() {
+        SubKey::List { view, .. } => match view.into_gmail_listing() {
             Some(listing) => RemoteQuery::View(listing),
             None => return,
         },
@@ -377,7 +377,7 @@ async fn fetch_listing_page(
             gmail
                 .list_threads(
                     ThreadQuery {
-                        q: (!q.is_empty()).then_some(q.as_str()),
+                        q: (!q.is_empty()).then_some(q),
                         label_id: None,
                         include_spam_trash: false,
                         max_results: Some(LISTING_PAGE_SIZE),

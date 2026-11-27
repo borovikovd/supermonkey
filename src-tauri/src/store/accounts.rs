@@ -11,7 +11,11 @@ use crate::domain::{
 use super::sql::{id_list, json_col, to_json};
 use super::{Db, StoreError, Table, WriteTx};
 
-const ACCOUNT_COLS: &str = "id, email, display_name, send_as, position, hue, history_id, sync_status, needs_signin, connected";
+macro_rules! account_cols {
+    () => {
+        "id, email, display_name, send_as, position, hue, history_id, sync_status, needs_signin, connected"
+    };
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountRecord {
@@ -29,12 +33,8 @@ pub struct AccountRecord {
 
 impl AccountRecord {
     #[must_use]
-    pub fn identity(&self) -> Identity {
-        Identity::new(
-            self.email.clone(),
-            self.display_name.clone(),
-            self.send_as.clone(),
-        )
+    pub fn into_identity(self) -> Identity {
+        Identity::new(self.email, self.display_name, self.send_as)
     }
 
     fn from_row(row: &Row<'_>) -> rusqlite::Result<Self> {
@@ -115,19 +115,34 @@ impl Db<'_> {
     }
 
     pub fn accounts(self) -> Result<Vec<AccountRecord>, StoreError> {
-        let sql = format!("SELECT {ACCOUNT_COLS} FROM accounts ORDER BY position, id");
-        self.all(&sql, [], "list accounts", AccountRecord::from_row)
+        self.all(
+            concat!(
+                "SELECT ",
+                account_cols!(),
+                " FROM accounts ORDER BY position, id"
+            ),
+            [],
+            "list accounts",
+            AccountRecord::from_row,
+        )
     }
 
     pub fn account(self, id: AccountId) -> Result<Option<AccountRecord>, StoreError> {
-        let sql = format!("SELECT {ACCOUNT_COLS} FROM accounts WHERE id = ?1");
-        self.optional(&sql, [id], "read account", AccountRecord::from_row)
+        self.optional(
+            concat!("SELECT ", account_cols!(), " FROM accounts WHERE id = ?1"),
+            [id],
+            "read account",
+            AccountRecord::from_row,
+        )
     }
 
     pub fn account_by_email(self, email: &str) -> Result<Option<AccountRecord>, StoreError> {
-        let sql = format!("SELECT {ACCOUNT_COLS} FROM accounts WHERE email = ?1");
         self.optional(
-            &sql,
+            concat!(
+                "SELECT ",
+                account_cols!(),
+                " FROM accounts WHERE email = ?1"
+            ),
             [email],
             "read account by email",
             AccountRecord::from_row,
@@ -216,18 +231,9 @@ impl Db<'_> {
             "SELECT kind, value, split_id FROM split_overrides WHERE account_id = ?1",
             [account],
             "list pins",
-            |r| {
-                Ok((
-                    r.get::<_, PinKind>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, SplitId>(2)?,
-                ))
-            },
+            |r| Ok(Pin::new(r.get(0)?, r.get_ref(1)?.as_str()?, r.get(2)?)),
         )?;
-        Ok(rows
-            .into_iter()
-            .filter_map(|(kind, value, split)| Pin::new(kind, &value, split))
-            .collect())
+        Ok(rows.into_iter().flatten().collect())
     }
 
     pub fn pin_target(
@@ -250,14 +256,14 @@ impl Db<'_> {
         key: SettingKey,
     ) -> Result<bool, StoreError> {
         let raw_account = account.map_or(0_i64, |a| a.0);
-        let value: Option<String> = self.optional(
+        let value = self.optional(
             "SELECT value FROM settings WHERE account_id = ?1 AND key = ?2",
             params![raw_account, key],
             "read setting",
-            |r| r.get(0),
+            |r| Ok(r.get_ref(0)?.as_str()? == "on"),
         )?;
         let default = matches!(key, SettingKey::RemoteImages);
-        Ok(value.as_deref().map_or(default, |v| v == "on"))
+        Ok(value.unwrap_or(default))
     }
 
     pub fn notices(self, account: AccountId) -> Result<Vec<NoticeRecord>, StoreError> {
@@ -548,7 +554,7 @@ impl WriteTx<'_> {
         local_id: &LabelId,
         gmail_id: &LabelId,
         name: &str,
-    ) -> Result<LabelId, StoreError> {
+    ) -> Result<Option<LabelId>, StoreError> {
         let collision = self.read().label_by_gmail(account, gmail_id)?;
         if let Some(collision) = collision
             && collision.id != *local_id
@@ -562,7 +568,7 @@ impl WriteTx<'_> {
             self.touch(Some(account), Table::Labels);
             self.invalidate_routing(account);
             self.reroute_inbox(account)?;
-            return Ok(collision.id);
+            return Ok(Some(collision.id));
         }
         self.read().execute(
             "UPDATE labels SET gmail_id = ?3, name = ?4 WHERE account_id = ?1 AND id = ?2",
@@ -572,7 +578,7 @@ impl WriteTx<'_> {
         self.touch(Some(account), Table::Labels);
         self.invalidate_routing(account);
         self.reroute_inbox(account)?;
-        Ok(local_id.clone())
+        Ok(None)
     }
 
     pub fn delete_label(&mut self, account: AccountId, id: &LabelId) -> Result<(), StoreError> {
@@ -713,13 +719,15 @@ impl WriteTx<'_> {
     pub fn set_pin(
         &mut self,
         account: AccountId,
-        pin: &Pin,
+        kind: PinKind,
+        value: &str,
+        split: SplitId,
     ) -> Result<Option<SplitId>, StoreError> {
-        let previous = self.read().pin_target(account, pin.kind, &pin.value)?;
+        let previous = self.read().pin_target(account, kind, value)?;
         self.read().execute(
             "INSERT INTO split_overrides (account_id, kind, value, split_id) VALUES (?1, ?2, ?3, ?4)
              ON CONFLICT(account_id, kind, value) DO UPDATE SET split_id = excluded.split_id",
-            params![account, pin.kind, pin.value, pin.split],
+            params![account, kind, value, split],
             "upsert pin",
         )?;
         self.touch(Some(account), Table::Pins);

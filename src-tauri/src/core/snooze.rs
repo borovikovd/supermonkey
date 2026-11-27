@@ -22,7 +22,7 @@ pub(crate) async fn wake_due_snoozes(
             for (account, tid) in due {
                 let msgs = tx.read().thread_messages(tid)?;
                 let mut gmail_msg_ids = Vec::new();
-                for msg in &msgs {
+                for msg in msgs {
                     if !msg.is_draft
                         && !msg.labels.has(SystemLabel::Trash)
                         && !msg.labels.has(SystemLabel::Spam)
@@ -30,7 +30,7 @@ pub(crate) async fn wake_due_snoozes(
                     {
                         let next = msg.labels.and(&[SystemLabel::Inbox.label_id()]);
                         tx.set_message_labels(msg.id, &next)?;
-                        gmail_msg_ids.push(msg.gmail_id.clone());
+                        gmail_msg_ids.push(msg.gmail_id);
                     }
                 }
                 let before = tx.read().thread_row(tid)?.and_then(|r| r.snooze_until);

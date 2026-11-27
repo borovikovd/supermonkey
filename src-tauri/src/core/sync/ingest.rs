@@ -32,7 +32,7 @@ pub(crate) struct IngestResult {
 struct PreparedMessage {
     new_msg: NewMessage,
     body: Option<PreparedBody>,
-    sighting: Option<ContactSighting>,
+    sent_by_me: bool,
 }
 
 struct PreparedBody {
@@ -97,7 +97,12 @@ pub(crate) async fn fetch_and_ingest_thread(
     let wire_history = wire.history_id;
     let gid = wire.id;
     let identity = pool
-        .with(|db| Ok::<_, StoreError>(db.account(account)?.map(|a| a.identity())))
+        .with(|db| {
+            Ok::<_, StoreError>(
+                db.account(account)?
+                    .map(crate::store::AccountRecord::into_identity),
+            )
+        })
         .ok()
         .flatten();
     let prepared = prepare_wire_thread(
@@ -157,10 +162,10 @@ async fn prepare_wire_thread(
 ) -> Result<Vec<PreparedMessage>, GmailError> {
     let mut out = Vec::with_capacity(messages.len());
     for msg in messages {
-        let Some(payload) = &msg.payload else {
+        let Some(payload) = msg.payload else {
             continue;
         };
-        let parsed = parse_message(payload);
+        let mut parsed = parse_message(payload);
         let date = msg
             .internal_date
             .or(parsed.headers.date)
@@ -172,17 +177,19 @@ async fn prepare_wire_thread(
 
         let body = if format == Format::Full && !is_draft {
             let mut cids = CidImages::new();
-            for inline in parsed.inline_fetches() {
-                if let Some(bytes) = inline.inline_data {
-                    cids.insert(
-                        inline.content_id,
-                        inline.mime_type.to_owned(),
-                        bytes.to_vec(),
-                    );
-                } else if let Some(att_id) = inline.attachment_id {
+            for p in &mut parsed.parts {
+                if !p.is_inline {
+                    continue;
+                }
+                let Some(cid) = p.content_id.as_deref() else {
+                    continue;
+                };
+                if let Some(bytes) = p.inline_data.take() {
+                    cids.insert(cid, p.mime_type.clone(), bytes);
+                } else if let Some(att_id) = &p.attachment_id {
                     match gmail.get_attachment(&msg.id, att_id, priority).await {
                         Ok(bytes) => {
-                            cids.insert(inline.content_id, inline.mime_type.to_owned(), bytes);
+                            cids.insert(cid, p.mime_type.clone(), bytes);
                         }
                         Err(err)
                             if err.is_transient()
@@ -241,7 +248,10 @@ async fn prepare_wire_thread(
                 .map(|b| snippet_text(&b.html))
                 .unwrap_or_default()
         } else {
-            html_escape::decode_html_entities(&msg.snippet).into_owned()
+            match html_escape::decode_html_entities(&msg.snippet) {
+                std::borrow::Cow::Borrowed(_) => msg.snippet,
+                std::borrow::Cow::Owned(decoded) => decoded,
+            }
         };
 
         let from = parsed
@@ -252,15 +262,6 @@ async fn prepare_wire_thread(
             .unwrap_or_else(|| Addr::new(""));
         let sent_by_me =
             labels.has(SystemLabel::Sent) || identity.is_some_and(|id| id.is_mine(&from.email));
-        let sighting = (!is_draft).then(|| ContactSighting {
-            gmail_msg_id: msg.id.clone(),
-            date,
-            sent_by_me,
-            is_list: parsed.headers.is_list,
-            from: from.clone(),
-            to: parsed.headers.to.clone(),
-            cc: parsed.headers.cc.clone(),
-        });
 
         out.push(PreparedMessage {
             new_msg: NewMessage {
@@ -283,7 +284,7 @@ async fn prepare_wire_thread(
                 has_attachments,
             },
             body,
-            sighting,
+            sent_by_me,
         });
     }
     Ok(out)
@@ -314,12 +315,12 @@ fn commit_ingested_thread(
             alerts: Vec::new(),
         });
     };
-    let identity = acct.identity();
+    let identity = acct.into_identity();
     let all_identities: Vec<Identity> = tx
         .read()
         .accounts()?
         .into_iter()
-        .map(|a| a.identity())
+        .map(crate::store::AccountRecord::into_identity)
         .collect();
 
     let existing_tid = tx.read().thread_by_gmail(account, gmail_tid)?;
@@ -398,13 +399,13 @@ fn commit_ingested_thread(
     let added_messages = prepared
         .iter()
         .any(|p| !p.new_msg.is_draft && !prior_gids.contains(&p.new_msg.gmail_id));
-    let incoming_gids: HashSet<GmailMessageId> = prepared
-        .iter()
-        .map(|p| p.new_msg.gmail_id.clone())
-        .collect();
-    for old in &prior_msgs {
-        if !incoming_gids.contains(&old.gmail_id) {
-            tx.delete_message(old.id)?;
+    if !prior_msgs.is_empty() {
+        let incoming_gids: HashSet<&GmailMessageId> =
+            prepared.iter().map(|p| &p.new_msg.gmail_id).collect();
+        for old in &prior_msgs {
+            if !incoming_gids.contains(&old.gmail_id) {
+                tx.delete_message(old.id)?;
+            }
         }
     }
 
@@ -427,9 +428,15 @@ fn commit_ingested_thread(
             )?;
             stored_body_ids.push(msg_id);
         }
-        if let Some(s) = item.sighting {
-            sightings.push(s);
-        }
+        sightings.push(ContactSighting {
+            gmail_msg_id: item.new_msg.gmail_id,
+            date: item.new_msg.date,
+            sent_by_me: item.sent_by_me,
+            is_list: item.new_msg.is_list,
+            from: item.new_msg.from,
+            to: item.new_msg.to,
+            cc: item.new_msg.cc,
+        });
     }
 
     tx.derive_thread(tid)?;
@@ -444,7 +451,7 @@ fn commit_ingested_thread(
                 .item
                 .sent_message_id
                 .as_ref()
-                .is_some_and(|gmid| incoming_gids.contains(gmid))
+                .is_some_and(|gmid| sightings.iter().any(|s| s.gmail_msg_id == *gmid))
         {
             tx.delete_undo_for_outbox(account, ob.item.id)?;
             tx.delete_outbox(ob.item.id)?;
@@ -459,7 +466,7 @@ fn commit_ingested_thread(
             if draft.in_outbox {
                 state.emit(Effect::KickOutbox(draft.account));
             } else {
-                schedule_draft_upsert(tx, state, &draft)?;
+                schedule_draft_upsert(tx, state, draft)?;
             }
         }
     }
@@ -542,7 +549,7 @@ fn store_missing_bodies(
                 if draft.in_outbox {
                     state.emit(Effect::KickOutbox(draft.account));
                 } else {
-                    schedule_draft_upsert(tx, state, &draft)?;
+                    schedule_draft_upsert(tx, state, draft)?;
                 }
             }
         }
@@ -584,9 +591,11 @@ fn load_label_maps(
     let mut gmail_to_local = HashMap::with_capacity(labels.len());
     let mut known_locals = HashSet::with_capacity(labels.len());
     for l in labels {
-        known_locals.insert(l.id.clone());
         if let Some(gid) = l.gmail_id {
+            known_locals.insert(l.id.clone());
             gmail_to_local.insert(gid, l.id);
+        } else {
+            known_locals.insert(l.id);
         }
     }
     Ok((gmail_to_local, known_locals))
@@ -654,7 +663,9 @@ fn apply_label_overlay(
     let set: HashSet<&GmailMessageId> = gmail_ids.iter().collect();
     for item in prepared {
         if set.contains(&item.new_msg.gmail_id) {
-            item.new_msg.labels = item.new_msg.labels.without(remove).and(add);
+            item.new_msg.labels = std::mem::take(&mut item.new_msg.labels)
+                .without(remove)
+                .and(add);
         }
     }
 }

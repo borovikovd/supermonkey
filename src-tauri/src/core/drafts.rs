@@ -162,7 +162,7 @@ impl DraftFiles {
         let mut out: Vec<String> = entries
             .flatten()
             .filter(|e| e.path().is_dir())
-            .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+            .filter_map(|e| e.file_name().into_string().ok())
             .collect();
         out.sort();
         out
@@ -248,7 +248,7 @@ pub(crate) fn build_new_draft(db: Db<'_>, args: CreateDraftArgs) -> Result<NewDr
     let acct = db
         .account(args.account)?
         .ok_or(StoreError::NotFound("account"))?;
-    let identity = acct.identity();
+    let identity = acct.into_identity();
 
     if args.kind == DraftKind::New {
         let default_from = Some(identity.default_from());
@@ -319,11 +319,6 @@ pub(crate) fn build_new_draft(db: Db<'_>, args: CreateDraftArgs) -> Result<NewDr
         DraftKind::New => String::new(),
     };
 
-    let (in_reply_to, references) = target_msg
-        .as_ref()
-        .map(build_threading_headers)
-        .unwrap_or_default();
-
     let mut quote_html = None;
     let mut attachments = Vec::new();
     let mut waits_for = None;
@@ -339,6 +334,14 @@ pub(crate) fn build_new_draft(db: Db<'_>, args: CreateDraftArgs) -> Result<NewDr
             quote_html = build_snippet_quote(target, args.kind);
         }
     }
+
+    let (target_id, in_reply_to, references) = match target_msg {
+        Some(m) => {
+            let (irt, refs) = build_threading_headers(m.message_id_hdr, m.references);
+            (Some(m.id), irt, refs)
+        }
+        None => (None, None, Vec::new()),
+    };
 
     let defaults = DraftDefaults {
         from: from.clone(),
@@ -358,7 +361,7 @@ pub(crate) fn build_new_draft(db: Db<'_>, args: CreateDraftArgs) -> Result<NewDr
         kind: args.kind,
         reply_all: args.reply_all,
         thread: Some(thread_id),
-        target: target_msg.map(|m| m.id),
+        target: target_id,
         started_on_latest: args.started_on_latest,
         from,
         to,
@@ -395,13 +398,15 @@ fn resolve_target_message(
     Ok(pos.map(|i| msgs.swap_remove(i)))
 }
 
-fn build_threading_headers(target: &MessageRecord) -> (Option<String>, Vec<String>) {
-    let mut refs = target.references.clone();
-    if let Some(mid) = &target.message_id_hdr {
-        if !refs.iter().any(|r| r == mid) {
+fn build_threading_headers(
+    message_id_hdr: Option<String>,
+    mut refs: Vec<String>,
+) -> (Option<String>, Vec<String>) {
+    if let Some(mid) = message_id_hdr {
+        if !refs.iter().any(|r| r == &mid) {
             refs.push(mid.clone());
         }
-        (Some(mid.clone()), refs)
+        (Some(mid), refs)
     } else {
         (None, refs)
     }
@@ -498,11 +503,12 @@ pub(crate) fn complete_waiting_drafts_for_message(
         if draft.kind == DraftKind::Forward {
             let rev = tx.stamp();
             let carried = carried_attachments_from_message(tx.read(), msg_id, Some(rev))?;
-            let added_ids: Vec<String> = carried.iter().map(|a| a.id.clone()).collect();
-            draft.attachments.extend(carried);
             if let DraftStage::Fresh { defaults } = &mut draft.lifecycle.stage {
-                defaults.attachments.extend(added_ids);
+                defaults
+                    .attachments
+                    .extend(carried.iter().map(|a| a.id.clone()));
             }
+            draft.attachments.extend(carried);
         }
         tx.put_draft(&draft.as_write())?;
         let untouched = draft_is_untouched(&draft);
@@ -531,14 +537,16 @@ pub(crate) fn merge_attachments(
     let mut seen: HashSet<String> = HashSet::new();
 
     for item in incoming {
-        if !seen.insert(item.id.clone()) {
+        if seen.contains(&item.id) {
             continue;
         }
         if let Some(idx) = index_by_id.remove(&item.id)
             && let Some(prev) = slots[idx].take()
         {
+            seen.insert(item.id);
             out.push(prev);
         } else {
+            seen.insert(item.id.clone());
             out.push(DraftAttachmentItem {
                 id: item.id,
                 filename: item.filename,
@@ -622,10 +630,13 @@ pub(crate) fn build_draft_mime(
     identity: &Identity,
     now: Millis,
 ) -> Result<Vec<u8>, String> {
-    let from = draft
-        .from
-        .clone()
-        .unwrap_or_else(|| identity.default_from());
+    let default_from;
+    let from = if let Some(addr) = &draft.from {
+        addr
+    } else {
+        default_from = identity.default_from();
+        &default_from
+    };
     let mut out_atts = Vec::with_capacity(draft.attachments.len());
     for att in &draft.attachments {
         let Some(path) = &att.path else {
@@ -648,7 +659,7 @@ pub(crate) fn build_draft_mime(
     });
 
     build_mime(&Outgoing {
-        from: &from,
+        from,
         to: &draft.to,
         cc: &draft.cc,
         bcc: &draft.bcc,
@@ -672,30 +683,28 @@ pub(crate) enum CarriedSource {
 }
 
 #[must_use]
-pub(crate) fn carried_sources_needing_download(
-    draft: &DraftRecord,
-) -> Vec<(String, CarriedSource, String)> {
+pub(crate) fn has_carried_sources_needing_download(draft: &DraftRecord) -> bool {
     draft
         .attachments
         .iter()
+        .any(|a| a.path.is_none() && (a.source.is_some() || a.gmail_att_id.is_some()))
+}
+
+#[must_use]
+pub(crate) fn carried_sources_needing_download(
+    attachments: Vec<DraftAttachmentItem>,
+) -> Vec<(String, CarriedSource, String)> {
+    attachments
+        .into_iter()
         .filter_map(|a| {
             if a.path.is_some() {
                 return None;
             }
             if let Some(src) = a.source {
-                Some((
-                    a.id.clone(),
-                    CarriedSource::MessageAttachment(src),
-                    a.filename.clone(),
-                ))
+                Some((a.id, CarriedSource::MessageAttachment(src), a.filename))
             } else {
-                a.gmail_att_id.as_ref().map(|gid| {
-                    (
-                        a.id.clone(),
-                        CarriedSource::GmailDraftAttachment(gid.clone()),
-                        a.filename.clone(),
-                    )
-                })
+                a.gmail_att_id
+                    .map(|gid| (a.id, CarriedSource::GmailDraftAttachment(gid), a.filename))
             }
         })
         .collect()

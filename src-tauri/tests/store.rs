@@ -184,7 +184,7 @@ fn the_database_of_0_7_2_is_imported_into_the_shapes_this_version_reads() {
         let emails: Vec<&str> = accounts.iter().map(|a| a.email.as_str()).collect();
         assert_eq!(emails, vec!["ana@acme.test", "ben@bolt.test"]);
         assert!(accounts.iter().all(|a| a.connected && !a.needs_signin));
-        let identity = accounts[0].identity();
+        let identity = accounts.into_iter().next().unwrap().into_identity();
         assert!(identity.is_mine("ana@ames.dev"), "the alias is kept");
         assert_eq!(identity.default_from().email, "ana@acme.test");
         assert_eq!(db.last_action()?.0, 66);

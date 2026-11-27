@@ -172,13 +172,11 @@ impl Session {
         self.inner.host.emit(AppEvent::QuitRequested);
 
         let this = self.clone();
-        let clock = self.inner.core.clock().clone();
-        let cancel = self.inner.quit_cancel.clone();
         self.inner.handle.spawn(async move {
             tokio::select! {
                 biased;
-                () = cancel.cancelled() => {}
-                () = clock.sleep(QUIT_DEADLINE) => {
+                () = this.inner.quit_cancel.cancelled() => {}
+                () = this.inner.core.clock().sleep(QUIT_DEADLINE) => {
                     this.finish_exit(true).await;
                 }
             }
@@ -259,7 +257,7 @@ impl Session {
                 reply,
             } => {
                 let rows = core
-                    .fetch_rows(drafts, &keys)
+                    .fetch_rows(drafts, keys)
                     .map_err(CoreError::into_command_error)?;
                 reply.send(rows)
             }

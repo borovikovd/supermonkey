@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 
 use uuid::Uuid;
 
@@ -58,41 +59,38 @@ async fn fetch_remote_draft(
     let Some(msg) = draft.message else {
         return Ok(None);
     };
-    let Some(payload) = &msg.payload else {
+    let Some(payload) = msg.payload else {
         return Ok(None);
     };
     let parsed = parse_message(payload);
     let mut cids = CidImages::new();
-    for inline in parsed.inline_fetches() {
-        if let Some(bytes) = inline.inline_data {
-            cids.insert(
-                inline.content_id,
-                inline.mime_type.to_owned(),
-                bytes.to_vec(),
-            );
-        } else if let Some(att_id) = inline.attachment_id
-            && let Ok(bytes) = gmail.get_attachment(&msg.id, att_id, priority).await
-        {
-            cids.insert(inline.content_id, inline.mime_type.to_owned(), bytes);
+    let mut attachments = Vec::new();
+    for p in parsed.parts {
+        if p.is_inline {
+            if let Some(cid) = p.content_id.as_deref() {
+                if let Some(bytes) = p.inline_data {
+                    cids.insert(cid, p.mime_type, bytes);
+                } else if let Some(att_id) = &p.attachment_id
+                    && let Ok(bytes) = gmail.get_attachment(&msg.id, att_id, priority).await
+                {
+                    cids.insert(cid, p.mime_type, bytes);
+                }
+            }
+        } else {
+            attachments.push(DraftAttachmentItem {
+                id: Uuid::new_v4().to_string(),
+                filename: p.filename,
+                mime_type: p.mime_type,
+                size: p.size,
+                path: None,
+                source: None,
+                gmail_att_id: p.attachment_id,
+                added: None,
+            });
         }
     }
     let body = parsed.raw_body.to_draft(&cids);
     let snippet = snippet_text(&body.html);
-    let attachments: Vec<DraftAttachmentItem> = parsed
-        .parts
-        .into_iter()
-        .filter(|p| !p.is_inline)
-        .map(|p| DraftAttachmentItem {
-            id: Uuid::new_v4().to_string(),
-            filename: p.filename,
-            mime_type: p.mime_type,
-            size: p.size,
-            path: None,
-            source: None,
-            gmail_att_id: p.attachment_id,
-            added: None,
-        })
-        .collect();
     Ok(Some(RemoteDraftData {
         gmail_draft_id: draft.id,
         gmail_message_id: Some(msg.id),
@@ -172,7 +170,8 @@ pub(crate) async fn reconcile_drafts_with_gmail(
     let start_rev = current_rev(pool);
     let remote_stubs = list_all_draft_stubs(gmail, priority).await?;
 
-    let remote_ids: HashSet<GmailDraftId> = remote_stubs.iter().map(|d| d.id.clone()).collect();
+    let remote_ids: Arc<HashSet<GmailDraftId>> =
+        Arc::new(remote_stubs.iter().map(|d| d.id.clone()).collect());
     let mut missing_threads = Vec::new();
     let mut duplicates_to_delete = Vec::new();
 
@@ -187,7 +186,7 @@ pub(crate) async fn reconcile_drafts_with_gmail(
             continue;
         };
 
-        let remote_ids_clone = remote_ids.clone();
+        let remote_ids_ref = Arc::clone(&remote_ids);
         let res = writer
             .call(StorePriority::Sync, move |tx, state| {
                 ingest_remote_draft_tx(
@@ -195,7 +194,7 @@ pub(crate) async fn reconcile_drafts_with_gmail(
                     state,
                     account,
                     remote,
-                    &remote_ids_clone,
+                    &remote_ids_ref,
                     before_rev,
                     existing_rev,
                 )
@@ -531,7 +530,7 @@ pub(crate) async fn download_carried_draft_attachments(
     if draft.account != account {
         return Ok(());
     }
-    let missing = carried_sources_needing_download(&draft);
+    let missing = carried_sources_needing_download(draft.attachments);
     if missing.is_empty() {
         return Ok(());
     }
@@ -572,7 +571,7 @@ pub(crate) async fn download_carried_draft_attachments(
     if downloaded.is_empty() {
         return Ok(());
     }
-    let did = draft_id.clone();
+    let did = draft.id;
     super::super::log_err(
         "store downloaded carried attachment paths",
         writer
@@ -580,13 +579,13 @@ pub(crate) async fn download_carried_draft_attachments(
                 let Some(mut rec) = tx.read().draft(&did)? else {
                     return Ok::<_, StoreError>(());
                 };
-                let by_id: HashMap<String, String> = downloaded.into_iter().collect();
+                let mut by_id: HashMap<String, String> = downloaded.into_iter().collect();
                 let mut changed = false;
                 for att in &mut rec.attachments {
                     if att.path.is_none()
-                        && let Some(p) = by_id.get(&att.id)
+                        && let Some(p) = by_id.remove(&att.id)
                     {
-                        att.path = Some(p.clone());
+                        att.path = Some(p);
                         changed = true;
                     }
                 }

@@ -233,7 +233,7 @@ pub enum ErrorKind {
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(tag = "event", content = "payload", rename_all = "kebab-case")]
 #[ts(export)]
 pub enum AppEvent {
@@ -245,7 +245,7 @@ pub enum AppEvent {
 }
 
 impl AppEvent {
-    pub fn parts(&self) -> Result<(String, Value), serde_json::Error> {
+    pub fn parts(self) -> Result<(String, Value), serde_json::Error> {
         let mut event = serde_json::to_value(self)?;
         let name = if let Some(Value::String(name)) = event.get_mut("event").map(Value::take) {
             name
@@ -260,7 +260,7 @@ impl AppEvent {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct LaunchInfo {

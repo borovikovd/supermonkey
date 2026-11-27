@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::domain::query::Query;
 use crate::domain::{
     AccountId, ActionNo, DraftId, GmailMessageId, LabelDelta, LabelId, MessageFacts, Millis,
-    OpKind, OutboxId, Pin, PinKind, SnoozeEdit, Split, SplitId, SubId, SystemLabel, Thread,
+    OpKind, OutboxId, PinKind, SnoozeEdit, Split, SplitId, SubId, SystemLabel, Thread,
     ThreadChange, ThreadModify, UndoEntryId, plan_modify,
 };
 use crate::ipc::{
@@ -13,14 +13,14 @@ use crate::ipc::{
 use crate::store::{Db, NewNotice, NewOp, NewOutbox, StoreError, UndoAction, WriteTx};
 
 use super::drafts::{
-    CreateDraftArgs, apply_update_fields, build_new_draft, carried_sources_needing_download,
-    draft_is_untouched, validate_sendable,
+    CreateDraftArgs, apply_update_fields, build_new_draft, draft_is_untouched,
+    has_carried_sources_needing_download, validate_sendable,
 };
 use super::events::Effect;
 use super::outbox::{OutboxCommand, OutboxEvent, OutboxSnapshot, step as step_outbox};
 use super::writer_state::{
-    CreateLabelOpPayload, DraftOpPayloadRef, ModifyOpPayload, SubOp, TrashSentOpPayload,
-    WriterState,
+    CreateLabelOpPayloadRef, DraftOpPayloadRef, ModifyOpPayloadRef, SubOp, ThreadChangeRef,
+    TrashSentOpPayload, WriterState,
 };
 
 pub(crate) const SEND_DELAY_MS: i64 = 10_000;
@@ -135,7 +135,7 @@ fn apply_one(
             id,
             name,
             apply,
-        } => apply_create_label(tx, state, n, account, id, &name, apply),
+        } => apply_create_label(tx, state, n, account, &id, &name, apply),
         Action::SaveDraft { draft, save } => apply_save_draft(tx, state, draft, save),
         Action::CloseComposer { draft } => apply_close_composer(tx, state, draft),
         Action::SendDraft { draft } => apply_send_draft(tx, state, n, draft),
@@ -197,7 +197,6 @@ fn apply_subscribe(
     sub: SubId,
     key: SubKey,
 ) -> Result<(), StepErr> {
-    state.stage_sub(SubOp::Subscribe(sub.clone(), key.clone()));
     match &key {
         SubKey::Conversation { thread, .. } => {
             if let Some(row) = tx.read().thread_row(*thread)? {
@@ -207,18 +206,18 @@ fn apply_subscribe(
                 });
             }
         }
-        SubKey::List { account, view } if view.gmail_listing().is_some() => {
+        SubKey::List { account, view } if view.has_gmail_listing() => {
             state.emit(Effect::SubscribeList {
-                sub,
+                sub: sub.clone(),
                 account: *account,
-                key,
+                key: key.clone(),
             });
         }
         SubKey::Search { account, .. } => {
             state.emit(Effect::SubscribeList {
-                sub,
+                sub: sub.clone(),
                 account: *account,
-                key,
+                key: key.clone(),
             });
         }
         SubKey::Composer { draft } => {
@@ -231,7 +230,7 @@ fn apply_subscribe(
                         thread,
                     });
                 }
-                if !carried_sources_needing_download(&rec).is_empty() {
+                if has_carried_sources_needing_download(&rec) {
                     state.emit(Effect::EnsureDraftAttachments {
                         account: rec.account,
                         draft: rec.id,
@@ -241,6 +240,7 @@ fn apply_subscribe(
         }
         SubKey::App | SubKey::Account { .. } | SubKey::List { .. } => {}
     }
+    state.stage_sub(SubOp::Subscribe(sub, key));
     Ok(())
 }
 
@@ -287,12 +287,12 @@ fn apply_modify(
         }
 
         let by_id: HashMap<_, _> = thread.messages().iter().map(|msg| (msg.id, msg)).collect();
-        let mut changed_ids = Vec::with_capacity(change.messages.len());
+        let mut changed_ids: Vec<&GmailMessageId> = Vec::with_capacity(change.messages.len());
         for mc in &change.messages {
             if let Some(msg) = by_id.get(&mc.message) {
                 let labels = mc.apply(&msg.labels);
                 tx.set_message_labels(msg.id, &labels)?;
-                changed_ids.push(msg.gmail_id.clone());
+                changed_ids.push(&msg.gmail_id);
             }
         }
         if change.snooze_after != change.snooze_before {
@@ -300,7 +300,7 @@ fn apply_modify(
         }
         tx.derive_thread(tid)?;
 
-        let gmail_msg_ids = if changed_ids.is_empty() {
+        let gmail_msg_ids: Vec<&GmailMessageId> = if changed_ids.is_empty() {
             Vec::new()
         } else if delta.adds_unread_only() {
             changed_ids
@@ -308,11 +308,11 @@ fn apply_modify(
             let includes_trashed = delta.remove().iter().any(|l| {
                 l.as_str() == SystemLabel::Trash.id() || l.as_str() == SystemLabel::Spam.id()
             });
-            let scope_ids: Vec<GmailMessageId> = thread
+            let scope_ids: Vec<&GmailMessageId> = thread
                 .messages()
                 .iter()
                 .filter(|msg| !msg.is_draft && (includes_trashed || msg.is_live()))
-                .map(|msg| msg.gmail_id.clone())
+                .map(|msg| &msg.gmail_id)
                 .collect();
             if scope_ids.is_empty() {
                 changed_ids
@@ -322,19 +322,17 @@ fn apply_modify(
         };
 
         if !gmail_msg_ids.is_empty() {
-            let revert = if m.undoable {
-                let copy = change.clone();
-                changes.push(change);
-                copy
-            } else {
-                change
-            };
-            let payload = ModifyOpPayload {
+            let payload = ModifyOpPayloadRef {
                 thread: tid,
-                gmail_msg_ids,
-                add: delta.add().to_vec(),
-                remove: delta.remove().to_vec(),
-                revert,
+                gmail_msg_ids: &gmail_msg_ids,
+                add: delta.add(),
+                remove: delta.remove(),
+                revert: ThreadChangeRef {
+                    thread: change.thread,
+                    messages: &change.messages,
+                    snooze_before: change.snooze_before,
+                    snooze_after: change.snooze_after,
+                },
             };
             tx.queue_op(&NewOp {
                 account: m.account,
@@ -345,7 +343,8 @@ fn apply_modify(
                 payload: &payload,
             })?;
             any_op = true;
-        } else if m.undoable {
+        }
+        if m.undoable {
             changes.push(change);
         }
     }
@@ -375,7 +374,7 @@ fn apply_create_label(
     state: &mut WriterState,
     n: ActionNo,
     account: AccountId,
-    id: LabelId,
+    id: &LabelId,
     name: &str,
     apply: Option<ModifyAction>,
 ) -> Result<(), StepErr> {
@@ -384,7 +383,7 @@ fn apply_create_label(
     if trimmed.is_empty() {
         return Err(ActionReject::other("Label name cannot be empty").into());
     }
-    tx.create_local_label(account, &id, trimmed)?;
+    tx.create_local_label(account, id, trimmed)?;
     state.freshness.bump_labels(account);
     tx.queue_op(&NewOp {
         account,
@@ -392,9 +391,9 @@ fn apply_create_label(
         kind: OpKind::CreateLabel,
         draft_id: None,
         gmail_draft_id: None,
-        payload: &CreateLabelOpPayload {
+        payload: &CreateLabelOpPayloadRef {
             local_id: id,
-            name: trimmed.to_owned(),
+            name: trimmed,
         },
     })?;
     state.emit(Effect::KickOps(account));
@@ -416,7 +415,7 @@ fn apply_undo(
     };
     tx.delete_undo(account, entry)?;
     match rec.action {
-        UndoAction::Mail { threads } => undo_modify(tx, state, account, &threads),
+        UndoAction::Mail { threads } => undo_modify(tx, state, account, threads),
         UndoAction::Pin {
             pin_kind,
             value,
@@ -432,14 +431,7 @@ fn apply_undo(
                 None => None,
             };
             if let Some(split) = still_there {
-                tx.set_pin(
-                    account,
-                    &Pin {
-                        kind: pin_kind,
-                        value,
-                        split,
-                    },
-                )?;
+                tx.set_pin(account, pin_kind, &value, split)?;
             } else {
                 tx.remove_pin(account, pin_kind, &value)?;
             }
@@ -457,7 +449,7 @@ fn undo_modify(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
     account: AccountId,
-    changes: &[ThreadChange],
+    changes: Vec<ThreadChange>,
 ) -> Result<(), StepErr> {
     let mut any_op = false;
     for change in changes {
@@ -467,45 +459,46 @@ fn undo_modify(
         if row.account != account {
             continue;
         }
-        let msgs = tx.read().thread_messages(change.thread)?;
+        let prev_before_undo = row.snooze_until;
+        let snooze_now = change.snooze_undone(prev_before_undo);
+        let tid = change.thread;
+        let msgs = tx.read().thread_messages(tid)?;
         let by_id: HashMap<_, _> = msgs.iter().map(|m| (m.id, m)).collect();
-        let mut by_delta: HashMap<(Vec<LabelId>, Vec<LabelId>), Vec<GmailMessageId>> =
-            HashMap::new();
-        let mut revert_msgs = Vec::new();
+        let mut revert_msgs = Vec::with_capacity(change.messages.len());
 
-        for mc in &change.messages {
+        for mc in change.messages {
             let Some(msg) = by_id.get(&mc.message) else {
                 continue;
             };
-            let Some(rev_mc) = mc.reverted(&msg.labels) else {
+            let Some(mut rev_mc) = mc.reverted(&msg.labels) else {
                 continue;
             };
             let labels = rev_mc.apply(&msg.labels);
             tx.set_message_labels(msg.id, &labels)?;
-            let mut add = rev_mc.added.clone();
-            let mut remove = rev_mc.removed.clone();
-            add.sort_by(|a, b| a.0.cmp(&b.0));
-            remove.sort_by(|a, b| a.0.cmp(&b.0));
-            by_delta
-                .entry((add, remove))
-                .or_default()
-                .push(msg.gmail_id.clone());
+            rev_mc.added.sort_by(|a, b| a.0.cmp(&b.0));
+            rev_mc.removed.sort_by(|a, b| a.0.cmp(&b.0));
             revert_msgs.push(rev_mc);
         }
-        let prev_before_undo = row.snooze_until;
-        let snooze_now = change.snooze_undone(prev_before_undo);
-        tx.set_thread_snooze(change.thread, snooze_now)?;
-        tx.derive_thread(change.thread)?;
+        tx.set_thread_snooze(tid, snooze_now)?;
+        tx.derive_thread(tid)?;
+
+        let mut by_delta: HashMap<(&[LabelId], &[LabelId]), Vec<&GmailMessageId>> = HashMap::new();
+        for rev_mc in &revert_msgs {
+            by_delta
+                .entry((rev_mc.added.as_slice(), rev_mc.removed.as_slice()))
+                .or_default()
+                .push(&rev_mc.gmail_id);
+        }
 
         for ((add, remove), gmail_msg_ids) in by_delta {
-            let payload = ModifyOpPayload {
-                thread: change.thread,
-                gmail_msg_ids,
+            let payload = ModifyOpPayloadRef {
+                thread: tid,
+                gmail_msg_ids: &gmail_msg_ids,
                 add,
                 remove,
-                revert: ThreadChange {
-                    thread: change.thread,
-                    messages: revert_msgs.clone(),
+                revert: ThreadChangeRef {
+                    thread: tid,
+                    messages: &revert_msgs,
                     snooze_before: prev_before_undo,
                     snooze_after: snooze_now,
                 },
@@ -647,7 +640,7 @@ fn apply_save_draft(
             tx.put_draft(&rec.as_write())?;
             let untouched = draft_is_untouched(&rec);
             if (!untouched || rec.lifecycle.is_kept()) && rec.lifecycle.waits_for.is_none() {
-                schedule_draft_upsert(tx, state, &rec)?;
+                schedule_draft_upsert(tx, state, rec)?;
             }
         }
     }
@@ -657,14 +650,9 @@ fn apply_save_draft(
 pub(crate) fn schedule_draft_upsert(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
-    draft: &crate::store::DraftRecord,
+    draft: crate::store::DraftRecord,
 ) -> Result<(), StoreError> {
-    if !carried_sources_needing_download(draft).is_empty() {
-        state.emit(Effect::EnsureDraftAttachments {
-            account: draft.account,
-            draft: draft.id.clone(),
-        });
-    }
+    let needs_download = has_carried_sources_needing_download(&draft);
     tx.delete_draft_upserts(draft.account, &draft.id)?;
     tx.queue_op(&NewOp {
         account: draft.account,
@@ -677,6 +665,12 @@ pub(crate) fn schedule_draft_upsert(
             gmail_draft_id: draft.lifecycle.gmail_draft_id.as_ref(),
         },
     })?;
+    if needs_download {
+        state.emit(Effect::EnsureDraftAttachments {
+            account: draft.account,
+            draft: draft.id,
+        });
+    }
     state.emit(Effect::KickOps(draft.account));
     Ok(())
 }
@@ -698,14 +692,10 @@ fn apply_close_composer(
         discard_draft_record(tx, state, rec)?;
         return Ok(());
     }
-    let reload_remote = rec
-        .lifecycle
-        .take_gmail_change_skipped()
-        .then(|| rec.lifecycle.gmail_draft_id.clone())
-        .flatten();
+    let reload_remote = rec.lifecycle.take_gmail_change_skipped();
     rec.lifecycle.keep();
     tx.put_draft(&rec.as_write())?;
-    if let Some(gid) = reload_remote {
+    if reload_remote && let Some(gid) = rec.lifecycle.gmail_draft_id {
         state.emit(Effect::ReloadDraftFromGmail {
             account: rec.account,
             draft: rec.id,
@@ -736,9 +726,9 @@ fn apply_send_draft(
     tx.put_draft(&rec.as_write())?;
     tx.delete_draft_upserts(rec.account, &rec.id)?;
     let send_after = Millis(state.clock.now().0.saturating_add(SEND_DELAY_MS));
-    let outbox_id = tx.insert_outbox(&NewOutbox {
+    let outbox_id = tx.insert_outbox(NewOutbox {
         account: rec.account,
-        draft: &rec.id,
+        draft: rec.id,
         thread: rec.thread,
         send_after,
         gmail_draft_id: None,
@@ -877,14 +867,7 @@ fn apply_pin(
         PinKind::Sender | PinKind::Domain => trimmed.to_ascii_lowercase(),
         PinKind::Label => trimmed.to_owned(),
     };
-    let prev = tx.set_pin(
-        account,
-        &Pin {
-            kind,
-            value: normalized.clone(),
-            split,
-        },
-    )?;
+    let prev = tx.set_pin(account, kind, &normalized, split)?;
     tx.record_undo(
         UndoEntryId(n.0),
         account,
@@ -971,7 +954,7 @@ fn keep_cancelled_send_as_draft(
     draft.lifecycle.keep();
     tx.put_draft(&draft.as_write())?;
     if item.gmail_draft_id.is_none() {
-        schedule_draft_upsert(tx, state, &draft)?;
+        schedule_draft_upsert(tx, state, draft)?;
     }
     Ok(())
 }
@@ -980,7 +963,7 @@ pub(crate) fn restore_draft_from_outbox(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
     outbox: OutboxId,
-    notice: Option<super::outbox::OutboxNotice>,
+    notice: Option<&super::outbox::OutboxNotice>,
 ) -> Result<(), StoreError> {
     let Some(rec) = tx.read().outbox_row(outbox)? else {
         return Ok(());
@@ -990,15 +973,15 @@ pub(crate) fn restore_draft_from_outbox(
     keep_cancelled_send_as_draft(tx, state, &rec.item)?;
     if let Some(n) = notice {
         let (kind, msg) = match n {
-            super::outbox::OutboxNotice::Undone => {
-                (crate::domain::NoticeKind::SendUndone, String::new())
+            super::outbox::OutboxNotice::Undone => (crate::domain::NoticeKind::SendUndone, ""),
+            super::outbox::OutboxNotice::Failed(m) => {
+                (crate::domain::NoticeKind::SendFailed, m.as_str())
             }
-            super::outbox::OutboxNotice::Failed(m) => (crate::domain::NoticeKind::SendFailed, m),
         };
         tx.add_notice(&NewNotice {
             account: rec.item.account,
             kind,
-            message: &msg,
+            message: msg,
             draft: Some(&rec.item.draft),
             thread: rec.item.thread,
         })?;

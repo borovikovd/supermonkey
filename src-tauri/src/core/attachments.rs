@@ -82,8 +82,7 @@ pub(crate) fn apply_quarantine(path: &Path, now: Millis) -> Result<(), CoreError
     #[cfg(target_os = "macos")]
     {
         let secs = u64::try_from((now.0 / 1000).max(0)).unwrap_or(0);
-        let uuid = Uuid::new_v4().to_string().to_ascii_uppercase();
-        let value = format!("0081;{secs:x};Supermonkey;{uuid}");
+        let value = format!("0081;{secs:x};Supermonkey;{:X}", Uuid::new_v4());
         xattr::set(path, "com.apple.quarantine", value.as_bytes())
             .map_err(|e| CoreError::internal(format!("quarantine xattr failed: {e}")))?;
     }

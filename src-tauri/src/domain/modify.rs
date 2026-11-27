@@ -5,7 +5,7 @@ use super::{
     GmailMessageId, LabelId, LabelSet, MessageId, Millis, ModifyKind, SystemLabel, Thread, ThreadId,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum ModifyError {
     #[error("UNREAD can't be mixed with other label changes")]
     UnreadMixed,
@@ -59,29 +59,27 @@ pub struct MessageChange {
 impl MessageChange {
     #[must_use]
     pub fn apply(&self, current: &LabelSet) -> LabelSet {
-        current.without(&self.removed).and(&self.added)
+        current.clone().without(&self.removed).and(&self.added)
     }
 
     #[must_use]
-    pub fn reverted(&self, current: &LabelSet) -> Option<Self> {
+    pub fn reverted(self, current: &LabelSet) -> Option<Self> {
         let added: Vec<LabelId> = self
             .removed
-            .iter()
+            .into_iter()
             .filter(|l| !current.contains(l.as_str()))
-            .cloned()
             .collect();
         let removed: Vec<LabelId> = self
             .added
-            .iter()
+            .into_iter()
             .filter(|l| current.contains(l.as_str()))
-            .cloned()
             .collect();
         if added.is_empty() && removed.is_empty() {
             return None;
         }
         Some(Self {
             message: self.message,
-            gmail_id: self.gmail_id.clone(),
+            gmail_id: self.gmail_id,
             added,
             removed,
         })

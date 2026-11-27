@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags, params};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
 use crate::domain::{IMPORTANT_POSITION, OTHER_POSITION};
 
@@ -106,18 +106,18 @@ fn convert_accounts(db: Db<'_>) -> Result<(), StoreError> {
         "read earlier accounts",
         |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)),
     )?;
+    let empty = Value::String(String::new());
     for (id, raw) in rows {
         let old: Vec<Value> = serde_json::from_str(&raw)?;
         let new: Vec<Value> = old
             .iter()
             .map(|addr| {
                 json!({
-                    "email": addr.get("email").cloned().unwrap_or_else(|| json!("")),
+                    "email": addr.get("email").unwrap_or(&empty),
                     "displayName": addr
                         .get("displayName")
                         .or_else(|| addr.get("name"))
-                        .cloned()
-                        .unwrap_or_else(|| json!("")),
+                        .unwrap_or(&empty),
                     "primary": addr
                         .get("primary")
                         .or_else(|| addr.get("is_primary"))
@@ -196,16 +196,14 @@ fn convert_message_headers(db: Db<'_>) -> Result<(), StoreError> {
     bracket_id_column(db, "messages", "in_reply_to")
 }
 
-fn convert_draft_attachment(db: Db<'_>, item: &Value) -> Result<Value, StoreError> {
-    let Some(old) = item.as_object() else {
-        return Ok(item.clone());
+fn convert_draft_attachment(db: Db<'_>, item: Value) -> Result<Value, StoreError> {
+    let Value::Object(mut map) = item else {
+        return Ok(item);
     };
-    let mut new = Map::new();
-    for (key, value) in old {
-        let name = if key == "mime_type" { "mimeType" } else { key };
-        new.insert(name.to_owned(), value.clone());
+    if let Some(mime) = map.remove("mime_type") {
+        map.insert("mimeType".to_owned(), mime);
     }
-    if let Some(source) = old.get("source").and_then(Value::as_i64) {
+    if let Some(source) = map.get("source").and_then(Value::as_i64) {
         let of_draft_copy = db.optional(
             "SELECT a.gmail_att_id FROM attachments a JOIN messages m ON m.id = a.message_id WHERE a.id = ?1 AND m.is_draft = 1",
             [source],
@@ -213,11 +211,11 @@ fn convert_draft_attachment(db: Db<'_>, item: &Value) -> Result<Value, StoreErro
             |r| r.get::<_, Option<String>>(0),
         )?;
         if let Some(gmail_att_id) = of_draft_copy {
-            new.insert("source".to_owned(), Value::Null);
-            new.insert("gmailAttId".to_owned(), json!(gmail_att_id));
+            map.insert("source".to_owned(), Value::Null);
+            map.insert("gmailAttId".to_owned(), json!(gmail_att_id));
         }
     }
-    Ok(Value::Object(new))
+    Ok(Value::Object(map))
 }
 
 fn convert_drafts(db: Db<'_>) -> Result<(), StoreError> {
@@ -232,7 +230,7 @@ fn convert_drafts(db: Db<'_>) -> Result<(), StoreError> {
     for (rowid, raw) in rows {
         let old: Vec<Value> = serde_json::from_str(&raw)?;
         let mut new = Vec::with_capacity(old.len());
-        for item in &old {
+        for item in old {
             new.push(convert_draft_attachment(db, item)?);
         }
         db.execute(
@@ -280,12 +278,12 @@ fn convert_thread_change(
     let Some(thread) = old.get("thread").and_then(Value::as_i64) else {
         return Ok(None);
     };
+    let empty_arr = Value::Array(Vec::new());
     let changes = old
         .get("messages")
         .or_else(|| old.get("changes"))
         .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+        .map_or(&[][..], Vec::as_slice);
     let mut messages = Vec::with_capacity(changes.len());
     let mut gmail_ids = Vec::with_capacity(changes.len());
     for change in changes {
@@ -311,16 +309,16 @@ fn convert_thread_change(
         messages.push(json!({
             "message": message,
             "gmail_id": gmail_id,
-            "added": change.get("added").cloned().unwrap_or_else(|| json!([])),
-            "removed": change.get("removed").cloned().unwrap_or_else(|| json!([])),
+            "added": change.get("added").unwrap_or(&empty_arr),
+            "removed": change.get("removed").unwrap_or(&empty_arr),
         }));
         gmail_ids.push(gmail_id);
     }
     let change = json!({
         "thread": thread,
         "messages": messages,
-        "snooze_before": old.get("snooze_before").cloned().unwrap_or(Value::Null),
-        "snooze_after": old.get("snooze_after").cloned().unwrap_or(Value::Null),
+        "snooze_before": old.get("snooze_before"),
+        "snooze_after": old.get("snooze_after"),
     });
     Ok(Some((change, gmail_ids)))
 }
@@ -339,8 +337,9 @@ fn convert_modify_op(
     op: &LegacyOp,
     payload: &Value,
 ) -> Result<Vec<LegacyOp>, StoreError> {
-    let add = payload.get("add").cloned().unwrap_or_else(|| json!([]));
-    let remove = payload.get("remove").cloned().unwrap_or_else(|| json!([]));
+    let empty_arr = Value::Array(Vec::new());
+    let add = payload.get("add").unwrap_or(&empty_arr);
+    let remove = payload.get("remove").unwrap_or(&empty_arr);
     let mut unplaced: Vec<String> = payload
         .get("messages")
         .and_then(Value::as_array)
@@ -354,10 +353,9 @@ fn convert_modify_op(
     let threads = payload
         .get("threads")
         .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+        .map_or(&[][..], Vec::as_slice);
     let mut parts = Vec::with_capacity(threads.len());
-    for old in &threads {
+    for old in threads {
         if let Some((change, gmail_ids)) = convert_thread_change(db, old)? {
             unplaced.retain(|id| !gmail_ids.contains(id));
             parts.push((change, gmail_ids));
@@ -369,7 +367,7 @@ fn convert_modify_op(
     let mut out = Vec::with_capacity(parts.len());
     for (change, gmail_ids) in parts {
         let new = json!({
-            "thread": change.get("thread").cloned().unwrap_or(Value::Null),
+            "thread": change.get("thread"),
             "gmailMsgIds": gmail_ids,
             "add": add,
             "remove": remove,
@@ -391,7 +389,7 @@ fn convert_op(db: Db<'_>, op: LegacyOp) -> Result<Vec<LegacyOp>, StoreError> {
     let payload: Value = serde_json::from_str(&op.payload)?;
     let draft_payload = |op: &LegacyOp| {
         to_json(&json!({
-            "draftId": op.draft_id.clone().unwrap_or_default(),
+            "draftId": op.draft_id.as_deref().unwrap_or(""),
             "gmailDraftId": op.gmail_draft_id,
         }))
     };
@@ -400,8 +398,8 @@ fn convert_op(db: Db<'_>, op: LegacyOp) -> Result<Vec<LegacyOp>, StoreError> {
         "modify" => convert_modify_op(db, &op, &payload),
         "label_create" | "create_label" => {
             let new = json!({
-                "localId": payload.get("localId").or_else(|| payload.get("label")).cloned().unwrap_or(Value::Null),
-                "name": payload.get("name").cloned().unwrap_or(Value::Null),
+                "localId": payload.get("localId").or_else(|| payload.get("label")),
+                "name": payload.get("name"),
             });
             Ok(vec![LegacyOp {
                 kind: "create_label".to_owned(),
@@ -415,12 +413,9 @@ fn convert_op(db: Db<'_>, op: LegacyOp) -> Result<Vec<LegacyOp>, StoreError> {
             ..op
         }]),
         "trash_message" => {
-            let gmail_msg_id = payload.as_str().map(str::to_owned).or_else(|| {
-                payload
-                    .get("gmailMsgId")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            });
+            let gmail_msg_id = payload
+                .as_str()
+                .or_else(|| payload.get("gmailMsgId").and_then(Value::as_str));
             match gmail_msg_id {
                 Some(id) => Ok(vec![LegacyOp {
                     payload: to_json(&json!({ "gmailMsgId": id }))?,
@@ -469,17 +464,16 @@ fn convert_ops(db: Db<'_>) -> Result<(), StoreError> {
     Ok(())
 }
 
-fn convert_undo_entry(db: Db<'_>, payload: &Value) -> Result<Option<Value>, StoreError> {
+fn convert_undo_entry(db: Db<'_>, payload: Value) -> Result<Option<Value>, StoreError> {
     match payload.get("kind").and_then(Value::as_str) {
-        Some("send") => Ok(Some(payload.clone())),
+        Some("send") => Ok(Some(payload)),
         Some("mail") => {
             let old = payload
                 .get("threads")
                 .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
+                .map_or(&[][..], Vec::as_slice);
             let mut threads = Vec::with_capacity(old.len());
-            for change in &old {
+            for change in old {
                 if let Some((new, _)) = convert_thread_change(db, change)? {
                     threads.push(new);
                 }
@@ -488,13 +482,9 @@ fn convert_undo_entry(db: Db<'_>, payload: &Value) -> Result<Option<Value>, Stor
         }
         Some("pin") => Ok(Some(json!({
             "kind": "pin",
-            "pin_kind": payload.get("pin_kind").cloned().unwrap_or(Value::Null),
-            "value": payload.get("value").cloned().unwrap_or(Value::Null),
-            "previous": payload
-                .get("previous")
-                .or_else(|| payload.get("replaced"))
-                .cloned()
-                .unwrap_or(Value::Null),
+            "pin_kind": payload.get("pin_kind"),
+            "value": payload.get("value"),
+            "previous": payload.get("previous").or_else(|| payload.get("replaced")),
         }))),
         _ => Ok(None),
     }
@@ -509,7 +499,7 @@ fn convert_undo_entries(db: Db<'_>) -> Result<(), StoreError> {
     )?;
     for (id, raw) in rows {
         let converted = match serde_json::from_str::<Value>(&raw) {
-            Ok(payload) => convert_undo_entry(db, &payload)?,
+            Ok(payload) => convert_undo_entry(db, payload)?,
             Err(_) => None,
         };
         match converted {

@@ -48,7 +48,7 @@ impl Core {
             .map_err(|e| CoreError::internal(e.to_string()))
     }
 
-    pub fn fetch_rows(&self, drafts: bool, keys: &[String]) -> Result<Vec<ListRow>, CoreError> {
+    pub fn fetch_rows(&self, drafts: bool, keys: Vec<String>) -> Result<Vec<ListRow>, CoreError> {
         self.pool
             .with(|db| fetch_rows(db, drafts, keys))
             .map_err(|e| CoreError::internal(e.to_string()))
@@ -86,7 +86,7 @@ impl Core {
                 let Some(acct) = db.account(account)? else {
                     return Ok::<_, StoreError>(Vec::new());
                 };
-                let identity = acct.identity();
+                let identity = acct.into_identity();
                 let candidates = db.contact_candidates(account, trimmed)?;
                 let mut scored = Vec::new();
                 for stats in candidates {
@@ -99,7 +99,7 @@ impl Core {
                     let r = rank(&stats, now);
                     scored.push((r, stats, span));
                 }
-                scored.sort_by(|a, b| a.0.cmp_desc(&b.0).then_with(|| a.1.email.cmp(&b.1.email)));
+                scored.sort_by(|a, b| a.0.cmp_desc(b.0).then_with(|| a.1.email.cmp(&b.1.email)));
                 scored.truncate(MAX_AUTOCOMPLETE);
                 Ok(scored
                     .into_iter()

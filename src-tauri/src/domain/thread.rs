@@ -172,10 +172,16 @@ impl Thread {
         })
     }
 
+    fn has_inbox(&self) -> bool {
+        self.0
+            .iter()
+            .any(|m| m.is_live() && m.has(SystemLabel::Inbox))
+    }
+
     #[must_use]
     pub fn gained_inbox(before: Option<&Self>, after: &Self, identity: &Identity) -> bool {
-        let had_inbox = before.is_some_and(|t| t.labels().has(SystemLabel::Inbox));
-        let now_inbox = after.labels().has(SystemLabel::Inbox);
+        let had_inbox = before.is_some_and(Self::has_inbox);
+        let now_inbox = after.has_inbox();
         if !now_inbox {
             return false;
         }
@@ -211,7 +217,7 @@ impl Thread {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GmailListing {
-    Query(String),
+    Query(&'static str),
     Label {
         label: LabelId,
         include_spam_trash: bool,
@@ -236,23 +242,18 @@ impl View {
     }
 
     #[must_use]
-    pub fn label(&self) -> Option<LabelId> {
-        match self {
-            Self::Inbox => Some(SystemLabel::Inbox.label_id()),
-            Self::Starred => Some(SystemLabel::Starred.label_id()),
-            Self::Sent => Some(SystemLabel::Sent.label_id()),
-            Self::Trash => Some(SystemLabel::Trash.label_id()),
-            Self::Spam => Some(SystemLabel::Spam.label_id()),
-            Self::Label { label } => Some(label.clone()),
-            Self::Done | Self::AllMail | Self::Snoozed | Self::Drafts => None,
-        }
+    pub const fn has_gmail_listing(&self) -> bool {
+        matches!(
+            self,
+            Self::Done | Self::AllMail | Self::Trash | Self::Spam | Self::Label { .. }
+        )
     }
 
     #[must_use]
-    pub fn gmail_listing(&self) -> Option<GmailListing> {
+    pub fn into_gmail_listing(self) -> Option<GmailListing> {
         match self {
-            Self::Done => Some(GmailListing::Query("-in:inbox -in:draft".to_owned())),
-            Self::AllMail => Some(GmailListing::Query("-in:draft".to_owned())),
+            Self::Done => Some(GmailListing::Query("-in:inbox -in:draft")),
+            Self::AllMail => Some(GmailListing::Query("-in:draft")),
             Self::Trash => Some(GmailListing::Label {
                 label: SystemLabel::Trash.label_id(),
                 include_spam_trash: true,
@@ -262,7 +263,7 @@ impl View {
                 include_spam_trash: true,
             }),
             Self::Label { label } => Some(GmailListing::Label {
-                label: label.clone(),
+                label,
                 include_spam_trash: false,
             }),
             Self::Inbox | Self::Snoozed | Self::Starred | Self::Sent | Self::Drafts => None,
@@ -514,7 +515,7 @@ mod tests {
         );
 
         let done = LabelDelta::new(Vec::new(), vec![SystemLabel::Inbox.label_id()]).unwrap();
-        let done_change = plan_modify(
+        let mut done_change = plan_modify(
             ThreadModify {
                 thread_id: ThreadId(7),
                 thread: &thread,
@@ -530,11 +531,10 @@ mod tests {
             "archive touches every message"
         );
         assert!(done_change.restores_snooze(), "undo knows snooze changed");
-        let after = done_change.messages[0].apply(&m1.labels);
+        let mc = done_change.messages.remove(0);
+        let after = mc.apply(&m1.labels);
         assert!(!after.has(SystemLabel::Inbox), "INBOX removed");
-        let reverted = done_change.messages[0]
-            .reverted(&after)
-            .expect("revert restores removed label");
+        let reverted = mc.reverted(&after).expect("revert restores removed label");
         assert!(
             reverted.apply(&after).has(SystemLabel::Inbox),
             "INBOX restored on undo"

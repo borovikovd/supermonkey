@@ -133,6 +133,19 @@ impl Changes {
     }
 
     #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.threads.is_empty() && self.drafts.is_empty() && self.tables.is_empty()
+    }
+
+    pub fn merge(&mut self, other: Self) {
+        self.threads.extend(other.threads);
+        self.drafts.extend(other.drafts);
+        for (account, tables) in other.tables {
+            self.tables.entry(account).or_default().extend(tables);
+        }
+    }
+
+    #[must_use]
     pub fn has_table(&self, account: Option<AccountId>, table: Table) -> bool {
         self.tables
             .get(&account)
@@ -241,9 +254,14 @@ impl<'c> WriteTx<'c> {
             .execute_batch("SAVEPOINT sm_step")
             .map_err(StoreError::sql("begin savepoint"))?;
         let saved_wrote = self.wrote;
-        let saved_changes = self.changes.clone();
+        let mut saved_changes = std::mem::take(&mut self.changes);
         match run(self) {
             Ok(value) => {
+                if !saved_changes.is_empty() {
+                    let delta = std::mem::take(&mut self.changes);
+                    saved_changes.merge(delta);
+                    self.changes = saved_changes;
+                }
                 self.tx
                     .execute_batch("RELEASE SAVEPOINT sm_step")
                     .map_err(StoreError::sql("release savepoint"))?;

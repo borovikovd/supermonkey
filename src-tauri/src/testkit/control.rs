@@ -109,7 +109,7 @@ async fn plant_earlier_data(
         .map(|(email, user)| (email.clone(), user.refresh_token().to_owned()))
         .collect();
     for (email, token) in users {
-        if let Err(err) = state.tokens().store(&email, &RefreshToken::new(token)) {
+        if let Err(err) = state.tokens().store(&email, RefreshToken::new(token)) {
             return err_resp(StatusCode::INTERNAL_SERVER_ERROR, err);
         }
     }
@@ -133,7 +133,7 @@ async fn add_account(
     let user = state.ensure_user(&body.email, body.name.as_deref());
     if let Err(err) = state
         .tokens()
-        .store(&body.email, &RefreshToken::new(user.refresh_token()))
+        .store(&body.email, RefreshToken::new(user.refresh_token()))
     {
         return err_resp(StatusCode::INTERNAL_SERVER_ERROR, err);
     }

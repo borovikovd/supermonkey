@@ -142,8 +142,7 @@ pub fn run() {
             show_main_window(app_handle);
         }
         if let RunEvent::ExitRequested { code: None, .. } = event {
-            let session = app_handle.state::<Session>().inner().clone();
-            tauri::async_runtime::block_on(session.terminate());
+            tauri::async_runtime::block_on(app_handle.state::<Session>().terminate());
         }
     });
 }
@@ -151,7 +150,7 @@ pub fn run() {
 #[cfg(feature = "web")]
 fn spawn_dev_bridge(session: Session, events: crate::session::web::WebEvents) {
     let state = crate::session::web::BridgeState::new(
-        Some(session),
+        None,
         events,
         vec![
             "http://localhost:5173".to_owned(),
@@ -160,9 +159,7 @@ fn spawn_dev_bridge(session: Session, events: crate::session::web::WebEvents) {
             "http://localhost:1430".to_owned(),
         ],
     );
-    if let Some(s) = state.session() {
-        state.set_session(Some(s));
-    }
+    state.set_session(Some(session));
     tauri::async_runtime::spawn(async move {
         match tokio::net::TcpListener::bind(DEV_BRIDGE_ADDR).await {
             Ok(listener) => {

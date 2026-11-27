@@ -218,7 +218,7 @@ fn payload_handles_unknown_charset_nested_eml_and_cid_inline_rules() {
         ..WirePart::default()
     };
 
-    let parsed = parse_message(&root);
+    let parsed = parse_message(root);
     assert_eq!(parsed.raw_body.html.as_deref(), Some(html));
     let inline_ids: Vec<&str> = parsed
         .inline_fetches()
@@ -340,7 +340,7 @@ fn an_email_forwarded_as_an_attachment_is_listed_as_one() {
         ..WirePart::default()
     };
 
-    let parsed = parse_message(&root);
+    let parsed = parse_message(root);
     assert_eq!(
         parsed.raw_body.html.as_deref(),
         Some("<p>See the attached email.</p>")

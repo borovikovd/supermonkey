@@ -4,7 +4,9 @@ use std::time::Duration;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::{AccountId, LabelId, OpId, OpKind, OpQueue, SystemLabel, ThreadChange};
+use crate::domain::{
+    AccountId, GmailMessageId, LabelId, OpId, OpKind, OpQueue, SystemLabel, ThreadChange,
+};
 use crate::gmail::{Backoff, Format, Gmail, GmailError, Outcome, Priority as GmailPriority};
 use crate::store::{NewNotice, OpRecord, Priority as StorePriority, ReadPool, StoreError, WriteTx};
 
@@ -218,42 +220,28 @@ async fn recover_modify_not_found(
     slot: &AccountSlot,
     gmail: &Gmail,
     op: &OpRecord,
-    payload: ModifyOpPayload,
+    mut payload: ModifyOpPayload,
     add_wire: &[LabelId],
     remove_wire: &[LabelId],
 ) -> OpOutcome {
     let mut survivors = Vec::new();
     let mut missing = Vec::new();
-    for gid in &payload.gmail_msg_ids {
+    for gid in std::mem::take(&mut payload.gmail_msg_ids) {
         match gmail
-            .get_message(gid, Format::Minimal, GmailPriority::P1)
+            .get_message(&gid, Format::Minimal, GmailPriority::P1)
             .await
         {
-            Err(err) if err.outcome == Outcome::NotFound => missing.push(gid.clone()),
+            Err(err) if err.outcome == Outcome::NotFound => missing.push(gid),
             Err(err) if err.is_transient() => return OpOutcome::Retry(err),
             Err(err) if matches!(err.outcome, Outcome::InvalidGrant | Outcome::Unauthorized) => {
                 return OpOutcome::AuthFailed;
             }
-            Ok(_) | Err(_) => survivors.push(gid.clone()),
+            Ok(_) | Err(_) => survivors.push(gid),
         }
     }
 
     if !missing.is_empty() {
-        let acct = slot.account;
-        super::super::log_err(
-            "prune missing messages after 404 probe",
-            slot.writer
-                .call(StorePriority::Sync, move |tx, state| {
-                    for gid in &missing {
-                        if let Some(msg) = tx.read().message_by_gmail(acct, gid)? {
-                            tx.delete_message(msg.id)?;
-                        }
-                    }
-                    state.emit(Effect::RefreshBadge);
-                    Ok::<_, StoreError>(())
-                })
-                .await,
-        );
+        prune_missing_messages(slot, missing).await;
     }
 
     if survivors.is_empty() {
@@ -261,14 +249,18 @@ async fn recover_modify_not_found(
         return OpOutcome::Done;
     }
 
+    payload.gmail_msg_ids = survivors;
     match gmail
-        .batch_modify(&survivors, add_wire, remove_wire, GmailPriority::P1)
+        .batch_modify(
+            &payload.gmail_msg_ids,
+            add_wire,
+            remove_wire,
+            GmailPriority::P1,
+        )
         .await
     {
         Ok(()) => {
-            let mut adjusted = payload;
-            adjusted.gmail_msg_ids = survivors;
-            finish_modify_success(slot, op.id, adjusted).await;
+            finish_modify_success(slot, op.id, payload).await;
             OpOutcome::Done
         }
         Err(err) if err.is_transient() => OpOutcome::Retry(err),
@@ -280,6 +272,24 @@ async fn recover_modify_not_found(
             OpOutcome::Done
         }
     }
+}
+
+async fn prune_missing_messages(slot: &AccountSlot, missing: Vec<GmailMessageId>) {
+    let acct = slot.account;
+    super::super::log_err(
+        "prune missing messages after 404 probe",
+        slot.writer
+            .call(StorePriority::Sync, move |tx, state| {
+                for gid in &missing {
+                    if let Some(msg) = tx.read().message_by_gmail(acct, gid)? {
+                        tx.delete_message(msg.id)?;
+                    }
+                }
+                state.emit(Effect::RefreshBadge);
+                Ok::<_, StoreError>(())
+            })
+            .await,
+    );
 }
 
 async fn finish_modify_success(slot: &AccountSlot, op_id: OpId, payload: ModifyOpPayload) {
@@ -319,7 +329,7 @@ async fn revert_rejected_modify(
         slot.writer
             .call(StorePriority::Sync, move |tx, state| {
                 tx.delete_op(op_id, acct)?;
-                revert_thread_change(tx, acct, &payload.revert)?;
+                revert_thread_change(tx, acct, payload.revert)?;
                 tx.add_notice(&NewNotice {
                     account: acct,
                     kind: crate::domain::NoticeKind::Rejected,
@@ -338,7 +348,7 @@ async fn revert_rejected_modify(
 fn revert_thread_change(
     tx: &mut WriteTx<'_>,
     account: AccountId,
-    change: &ThreadChange,
+    change: ThreadChange,
 ) -> Result<(), StoreError> {
     let Some(row) = tx.read().thread_row(change.thread)? else {
         return Ok(());
@@ -346,9 +356,11 @@ fn revert_thread_change(
     if row.account != account {
         return Ok(());
     }
-    let msgs = tx.read().thread_messages(change.thread)?;
+    let tid = change.thread;
+    let snooze_after = change.snooze_undone(row.snooze_until);
+    let msgs = tx.read().thread_messages(tid)?;
     let by_id: HashMap<_, _> = msgs.iter().map(|m| (m.id, m)).collect();
-    for mc in &change.messages {
+    for mc in change.messages {
         if let Some(msg) = by_id.get(&mc.message)
             && let Some(rev) = mc.reverted(&msg.labels)
         {
@@ -356,8 +368,8 @@ fn revert_thread_change(
             tx.set_message_labels(msg.id, &next)?;
         }
     }
-    tx.set_thread_snooze(change.thread, change.snooze_undone(row.snooze_until))?;
-    tx.derive_thread(change.thread)?;
+    tx.set_thread_snooze(tid, snooze_after)?;
+    tx.derive_thread(tid)?;
     Ok(())
 }
 
@@ -423,10 +435,10 @@ async fn execute_create_label_op(slot: &AccountSlot, gmail: &Gmail, op: &OpRecor
                 slot.writer
                     .call(StorePriority::Sync, move |tx, state| {
                         tx.delete_op(op_id, acct)?;
-                        let canonical =
-                            tx.assign_gmail_label(acct, &local_id, &lbl.id, &lbl.name)?;
-                        if canonical != local_id {
-                            rewrite_queued_ops_label(tx, acct, &local_id, &canonical)?;
+                        if let Some(merged_into) =
+                            tx.assign_gmail_label(acct, &local_id, &lbl.id, &lbl.name)?
+                        {
+                            rewrite_queued_ops_label(tx, acct, &local_id, &merged_into)?;
                         }
                         state.freshness.bump_labels(acct);
                         Ok::<_, StoreError>(())

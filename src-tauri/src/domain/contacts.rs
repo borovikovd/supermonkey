@@ -38,7 +38,7 @@ pub struct ContactStats {
     pub last_contact: Millis,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ContactRank {
     pub tier: u8,
     pub score: f64,
@@ -47,7 +47,7 @@ pub struct ContactRank {
 
 impl ContactRank {
     #[must_use]
-    pub fn cmp_desc(&self, other: &Self) -> Ordering {
+    pub fn cmp_desc(self, other: Self) -> Ordering {
         other
             .tier
             .cmp(&self.tier)
@@ -300,7 +300,7 @@ mod tests {
             "2 sends 90 days ago equal 1 send today"
         );
         assert_eq!(
-            r_fresh.cmp_desc(&r_recv),
+            r_fresh.cmp_desc(r_recv),
             Ordering::Less,
             "sent tier beats received tier"
         );
