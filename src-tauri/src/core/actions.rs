@@ -128,14 +128,14 @@ fn apply_one(
             state.emit(Effect::Unsubscribe(sub));
             Ok(())
         }
-        Action::Modify(m) => apply_modify(tx, state, n, &m),
+        Action::Modify(m) => apply_modify(tx, state, n, m),
         Action::Undo { account, entry } => apply_undo(tx, state, account, entry),
         Action::CreateLabel {
             account,
             id,
             name,
             apply,
-        } => apply_create_label(tx, state, n, account, id, &name, apply.as_ref()),
+        } => apply_create_label(tx, state, n, account, id, &name, apply),
         Action::SaveDraft { draft, save } => apply_save_draft(tx, state, draft, save),
         Action::CloseComposer { draft } => apply_close_composer(tx, state, draft),
         Action::SendDraft { draft } => apply_send_draft(tx, state, n, draft),
@@ -156,7 +156,7 @@ fn apply_one(
             account,
             splits,
             deleted,
-        } => apply_save_splits(tx, account, &splits, &deleted),
+        } => apply_save_splits(tx, account, splits, &deleted),
         Action::RemoveAccount { account } => apply_remove_account(tx, state, account),
         Action::MoreResults { sub } => {
             state.emit(Effect::MoreResults { sub });
@@ -252,19 +252,18 @@ fn apply_modify(
     tx: &mut WriteTx<'_>,
     state: &mut WriterState,
     n: ActionNo,
-    m: &ModifyAction,
+    m: ModifyAction,
 ) -> Result<(), StepErr> {
     let _acct = require_account(tx.read(), m.account)?;
-    let delta = LabelDelta::new(m.add.clone(), m.remove.clone())
-        .map_err(|e| ActionReject::other(e.to_string()))?;
-    let snooze_edit = m.snooze.as_ref().map(|s| match s {
-        SnoozeChange::Set(at) => SnoozeEdit::Set(*at),
+    let delta = LabelDelta::new(m.add, m.remove).map_err(|e| ActionReject::other(e.to_string()))?;
+    let snooze_edit = m.snooze.map(|s| match s {
+        SnoozeChange::Set(at) => SnoozeEdit::Set(at),
         SnoozeChange::Clear => SnoozeEdit::Clear,
     });
     let mut changes = Vec::new();
     let mut any_op = false;
 
-    for &tid in &m.threads {
+    for tid in m.threads {
         let Some(row) = tx.read().thread_row(tid)? else {
             continue;
         };
@@ -272,7 +271,7 @@ fn apply_modify(
             continue;
         }
         let msgs = tx.read().thread_messages(tid)?;
-        let thread = Thread::new(msgs.iter().map(to_message_facts).collect());
+        let thread = Thread::new(msgs.into_iter().map(into_message_facts).collect());
         let change = plan_modify(
             ThreadModify {
                 thread_id: tid,
@@ -287,7 +286,7 @@ fn apply_modify(
             continue;
         }
 
-        let by_id: HashMap<_, _> = msgs.iter().map(|msg| (msg.id, msg)).collect();
+        let by_id: HashMap<_, _> = thread.messages().iter().map(|msg| (msg.id, msg)).collect();
         let mut changed_ids = Vec::with_capacity(change.messages.len());
         for mc in &change.messages {
             if let Some(msg) = by_id.get(&mc.message) {
@@ -309,9 +308,10 @@ fn apply_modify(
             let includes_trashed = delta.remove().iter().any(|l| {
                 l.as_str() == SystemLabel::Trash.id() || l.as_str() == SystemLabel::Spam.id()
             });
-            let scope_ids: Vec<GmailMessageId> = msgs
+            let scope_ids: Vec<GmailMessageId> = thread
+                .messages()
                 .iter()
-                .filter(|msg| !msg.is_draft && (includes_trashed || msg.is_live))
+                .filter(|msg| !msg.is_draft && (includes_trashed || msg.is_live()))
                 .map(|msg| msg.gmail_id.clone())
                 .collect();
             if scope_ids.is_empty() {
@@ -322,12 +322,19 @@ fn apply_modify(
         };
 
         if !gmail_msg_ids.is_empty() {
+            let revert = if m.undoable {
+                let copy = change.clone();
+                changes.push(change);
+                copy
+            } else {
+                change
+            };
             let payload = ModifyOpPayload {
                 thread: tid,
                 gmail_msg_ids,
                 add: delta.add().to_vec(),
                 remove: delta.remove().to_vec(),
-                revert: change.clone(),
+                revert,
             };
             tx.queue_op(&NewOp {
                 account: m.account,
@@ -338,8 +345,9 @@ fn apply_modify(
                 payload: &payload,
             })?;
             any_op = true;
+        } else if m.undoable {
+            changes.push(change);
         }
-        changes.push(change);
     }
 
     if m.undoable && !changes.is_empty() {
@@ -369,7 +377,7 @@ fn apply_create_label(
     account: AccountId,
     id: LabelId,
     name: &str,
-    apply: Option<&ModifyAction>,
+    apply: Option<ModifyAction>,
 ) -> Result<(), StepErr> {
     let _acct = require_account(tx.read(), account)?;
     let trimmed = name.trim();
@@ -539,7 +547,7 @@ fn undo_send(
         }
         OutboxCommand::Persist => {
             if let Some(next_snap) = next {
-                apply_outbox_snapshot(&mut rec.item, &next_snap);
+                apply_outbox_snapshot(&mut rec.item, next_snap);
                 tx.update_outbox(&rec.item)?;
                 state.emit(Effect::KickOutbox(account));
             }
@@ -547,7 +555,7 @@ fn undo_send(
         OutboxCommand::TrashSentAndDelete { message_id } => {
             tx.delete_outbox(outbox)?;
             tx.delete_draft(&rec.item.draft)?;
-            state.emit(Effect::RemoveDraftFiles(rec.item.draft.clone()));
+            state.emit(Effect::RemoveDraftFiles(rec.item.draft));
             trash_local_sent_message(tx, account, &message_id)?;
             tx.queue_op(&NewOp {
                 account,
@@ -819,7 +827,7 @@ fn apply_close_toast(
         }
         OutboxCommand::Persist => {
             if let Some(next_snap) = next {
-                apply_outbox_snapshot(&mut rec.item, &next_snap);
+                apply_outbox_snapshot(&mut rec.item, next_snap);
                 tx.update_outbox(&rec.item)?;
             }
         }
@@ -893,12 +901,12 @@ fn apply_pin(
 fn apply_save_splits(
     tx: &mut WriteTx<'_>,
     account: AccountId,
-    splits: &[SplitInfo],
+    splits: Vec<SplitInfo>,
     deleted: &[SplitId],
 ) -> Result<(), StepErr> {
     let _acct = require_account(tx.read(), account)?;
     let mut converted = Vec::with_capacity(splits.len());
-    for (idx, s) in splits.iter().enumerate() {
+    for (idx, s) in splits.into_iter().enumerate() {
         if s.kind == crate::domain::SplitKind::Custom
             && !s.query.trim().is_empty()
             && let Err(err) = Query::parse_rule(&s.query)
@@ -907,10 +915,10 @@ fn apply_save_splits(
         }
         converted.push(Split {
             id: s.id,
-            name: s.name.clone(),
+            name: s.name,
             kind: s.kind,
             position: i32::try_from(idx).unwrap_or(i32::MAX),
-            query: s.query.clone(),
+            query: s.query,
             enabled: s.enabled,
             hide_when_empty: s.hide_when_empty,
         });
@@ -1010,34 +1018,34 @@ pub(crate) fn outbox_snapshot(item: &crate::store::OutboxItem) -> OutboxSnapshot
     }
 }
 
-pub(crate) fn apply_outbox_snapshot(item: &mut crate::store::OutboxItem, snap: &OutboxSnapshot) {
+pub(crate) fn apply_outbox_snapshot(item: &mut crate::store::OutboxItem, snap: OutboxSnapshot) {
     item.state = snap.state;
     item.undo_requested = snap.undo_requested;
     item.toast_closed = snap.toast_closed;
     item.delayed = snap.delayed;
-    item.gmail_draft_id.clone_from(&snap.gmail_draft_id);
-    item.sent_message_id.clone_from(&snap.sent_message_id);
+    item.gmail_draft_id = snap.gmail_draft_id;
+    item.sent_message_id = snap.sent_message_id;
 }
 
 #[must_use]
-fn to_message_facts(rec: &crate::store::MessageRecord) -> MessageFacts {
+fn into_message_facts(rec: crate::store::MessageRecord) -> MessageFacts {
     MessageFacts {
         id: rec.id,
-        gmail_id: rec.gmail_id.clone(),
+        gmail_id: rec.gmail_id,
         date: rec.date,
-        from: rec.from.clone(),
-        to: rec.to.clone(),
-        cc: rec.cc.clone(),
-        bcc: rec.bcc.clone(),
-        reply_to: rec.reply_to.clone(),
-        subject: rec.subject.clone(),
-        snippet: rec.snippet.clone(),
-        message_id_hdr: rec.message_id_hdr.clone(),
-        in_reply_to: rec.in_reply_to.clone(),
-        references: rec.references.clone(),
+        from: rec.from,
+        to: rec.to,
+        cc: rec.cc,
+        bcc: rec.bcc,
+        reply_to: rec.reply_to,
+        subject: rec.subject,
+        snippet: rec.snippet,
+        message_id_hdr: rec.message_id_hdr,
+        in_reply_to: rec.in_reply_to,
+        references: rec.references,
         is_list: rec.is_list,
         is_draft: rec.is_draft,
         has_attachments: rec.has_attachments,
-        labels: rec.labels.clone(),
+        labels: rec.labels,
     }
 }

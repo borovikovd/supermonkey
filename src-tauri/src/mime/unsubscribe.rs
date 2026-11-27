@@ -24,8 +24,8 @@ pub fn list_unsubscribe(header: Option<&str>, post_header: Option<&str>) -> List
             .contains("list-unsubscribe=one-click")
     });
 
-    let mut insecure_url: Option<String> = None;
-    let mut secure_url: Option<String> = None;
+    let mut insecure_url: Option<&str> = None;
+    let mut secure_url: Option<&str> = None;
     let mut mailto: Option<Mailto> = None;
 
     let mut rest = header;
@@ -37,8 +37,8 @@ pub fn list_unsubscribe(header: Option<&str>, post_header: Option<&str>) -> List
         let uri = tail[..close].trim();
         if let Ok(parsed) = Url::parse(uri) {
             match parsed.scheme() {
-                "https" if secure_url.is_none() => secure_url = Some(uri.to_owned()),
-                "http" if insecure_url.is_none() => insecure_url = Some(uri.to_owned()),
+                "https" if secure_url.is_none() => secure_url = Some(uri),
+                "http" if insecure_url.is_none() => insecure_url = Some(uri),
                 "mailto" if mailto.is_none() => mailto = parse_mailto(&parsed),
                 _ => {}
             }
@@ -46,10 +46,10 @@ pub fn list_unsubscribe(header: Option<&str>, post_header: Option<&str>) -> List
         rest = &tail[close + 1..];
     }
 
-    let chosen_url = secure_url.clone().or(insecure_url);
+    let chosen_url = secure_url.or(insecure_url);
     let one_click = if allows_one_click {
         if cfg!(debug_assertions) {
-            secure_url.or_else(|| chosen_url.clone())
+            chosen_url
         } else {
             secure_url
         }
@@ -58,9 +58,9 @@ pub fn list_unsubscribe(header: Option<&str>, post_header: Option<&str>) -> List
     };
 
     ListUnsubscribe {
-        one_click,
+        one_click: one_click.map(str::to_owned),
         mailto,
-        url: chosen_url,
+        url: chosen_url.map(str::to_owned),
     }
 }
 

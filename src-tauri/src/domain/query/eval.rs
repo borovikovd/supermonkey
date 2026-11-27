@@ -410,7 +410,7 @@ fn normalize_label(name: &str) -> String {
 
 #[must_use]
 pub fn gmail_query(raw: &str) -> String {
-    let mut kept: Vec<(TokenKind, &str)> = Vec::new();
+    let mut kept: Vec<(TokenKind<'_>, &str)> = Vec::new();
     for tok in lex(raw) {
         if matches!(&tok.kind, TokenKind::Word(w) if w.eq_ignore_ascii_case("is:list")) {
             while matches!(kept.last(), Some((TokenKind::Minus, _))) {
@@ -446,8 +446,8 @@ pub fn gmail_query(raw: &str) -> String {
     out
 }
 
-fn prune_pass<'a>(items: &[(TokenKind, &'a str)]) -> Vec<(TokenKind, &'a str)> {
-    let mut out: Vec<(TokenKind, &'a str)> = Vec::with_capacity(items.len());
+fn prune_pass<'a>(items: &[(TokenKind<'a>, &'a str)]) -> Vec<(TokenKind<'a>, &'a str)> {
+    let mut out: Vec<(TokenKind<'a>, &'a str)> = Vec::with_capacity(items.len());
     let mut i = 0;
     while i < items.len() {
         let (kind, slice) = &items[i];
@@ -482,6 +482,6 @@ fn prune_pass<'a>(items: &[(TokenKind, &'a str)]) -> Vec<(TokenKind, &'a str)> {
     out
 }
 
-fn is_bool_op(kind: &TokenKind, slice: &str) -> bool {
+fn is_bool_op(kind: &TokenKind<'_>, slice: &str) -> bool {
     matches!(kind, TokenKind::Word(_)) && matches!(slice, "OR" | "AND")
 }

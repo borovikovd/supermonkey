@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use chrono::{DateTime, Days, Months, NaiveDate, NaiveTime, TimeZone};
 
 use super::{Expr, Field, Query, RuleError, Term};
@@ -18,23 +20,23 @@ const GMAIL_ONLY_OPS: &[&str] = &[
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum TokenKind {
+pub(super) enum TokenKind<'a> {
     LParen,
     RParen,
     Minus,
-    Word(String),
-    Quoted(String),
+    Word(&'a str),
+    Quoted(Cow<'a, str>),
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct Token {
-    pub(super) kind: TokenKind,
+pub(super) struct Token<'a> {
+    pub(super) kind: TokenKind<'a>,
     pub(super) start: usize,
     pub(super) end: usize,
     pub(super) unclosed: bool,
 }
 
-pub(super) fn lex(input: &str) -> Vec<Token> {
+pub(super) fn lex(input: &str) -> Vec<Token<'_>> {
     let bytes = input.as_bytes();
     let mut i = 0;
     let mut out = Vec::new();
@@ -65,7 +67,7 @@ pub(super) fn lex(input: &str) -> Vec<Token> {
     out
 }
 
-fn lex_one(input: &str, start: usize) -> (Token, usize) {
+fn lex_one(input: &str, start: usize) -> (Token<'_>, usize) {
     let bytes = input.as_bytes();
     let single = |kind| {
         (
@@ -109,30 +111,35 @@ fn lex_one(input: &str, start: usize) -> (Token, usize) {
     }
 }
 
-fn scan_quoted(input: &str, start: usize) -> (String, usize, bool) {
+fn scan_quoted(input: &str, start: usize) -> (Cow<'_, str>, usize, bool) {
     let bytes = input.as_bytes();
     let mut i = start + 1;
-    let mut out = String::new();
+    let mut owned: Option<String> = None;
     while i < bytes.len() {
         if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'"' {
-            out.push('"');
+            let buf = owned.get_or_insert_with(|| input[start + 1..i].to_owned());
+            buf.push('"');
             i += 2;
             continue;
         }
         if bytes[i] == b'"' {
-            return (out, i + 1, false);
+            let text = owned.map_or_else(|| Cow::Borrowed(&input[start + 1..i]), Cow::Owned);
+            return (text, i + 1, false);
         }
         if let Some(ch) = input[i..].chars().next() {
-            out.push(ch);
+            if let Some(buf) = &mut owned {
+                buf.push(ch);
+            }
             i += ch.len_utf8();
         } else {
             break;
         }
     }
-    (out, i, true)
+    let text = owned.map_or_else(|| Cow::Borrowed(&input[start + 1..i]), Cow::Owned);
+    (text, i, true)
 }
 
-fn scan_word(input: &str, start: usize) -> (String, usize, bool) {
+fn scan_word(input: &str, start: usize) -> (&str, usize, bool) {
     let bytes = input.as_bytes();
     let mut i = start;
     let mut unclosed = false;
@@ -157,7 +164,7 @@ fn scan_word(input: &str, start: usize) -> (String, usize, bool) {
         }
         i += 1;
     }
-    (input[start..i].to_owned(), i, unclosed)
+    (&input[start..i], i, unclosed)
 }
 
 fn scan_balanced_parens(input: &str, start: usize) -> (usize, bool) {
@@ -187,7 +194,7 @@ fn scan_balanced_parens(input: &str, start: usize) -> (usize, bool) {
 
 struct Parser<'a, Tz: TimeZone> {
     input: &'a str,
-    tokens: Vec<Token>,
+    tokens: Vec<Token<'a>>,
     pos: usize,
     rule_mode: bool,
     now: Option<&'a DateTime<Tz>>,
@@ -231,14 +238,14 @@ pub(super) fn parse_rule(input: &str) -> Result<Query, RuleError> {
     Ok(Query { expr })
 }
 
-impl<Tz: TimeZone> Parser<'_, Tz> {
+impl<'a, Tz: TimeZone> Parser<'a, Tz> {
     fn push_error(&mut self, offset: usize, message: String) {
         if self.rule_mode {
             self.errors.push(RuleError { offset, message });
         }
     }
 
-    fn peek(&self) -> Option<&Token> {
+    fn peek(&self) -> Option<&Token<'a>> {
         self.tokens.get(self.pos)
     }
 
@@ -248,7 +255,7 @@ impl<Tz: TimeZone> Parser<'_, Tz> {
             Some(Token {
                 kind: TokenKind::Word(w),
                 ..
-            }) if w == expected
+            }) if *w == expected
         )
     }
 
@@ -353,12 +360,12 @@ impl<Tz: TimeZone> Parser<'_, Tz> {
                     prefix: !self.rule_mode && tok.unclosed && is_last,
                 }))
             }
-            TokenKind::Word(ref word) => self.parse_word(word, &tok, is_last),
+            TokenKind::Word(word) => self.parse_word(word, &tok, is_last),
             TokenKind::LParen | TokenKind::RParen | TokenKind::Minus => None,
         }
     }
 
-    fn parse_word(&mut self, word: &str, tok: &Token, is_last: bool) -> Option<Expr> {
+    fn parse_word(&mut self, word: &str, tok: &Token<'_>, is_last: bool) -> Option<Expr> {
         if let Some((op, val)) = word.split_once(':') {
             return self.parse_operator(op, val, tok, is_last);
         }
@@ -377,7 +384,7 @@ impl<Tz: TimeZone> Parser<'_, Tz> {
         &mut self,
         op: &str,
         raw_val: &str,
-        tok: &Token,
+        tok: &Token<'_>,
         is_last: bool,
     ) -> Option<Expr> {
         let (val, quoted) = unquote_value(raw_val);
@@ -445,7 +452,7 @@ impl<Tz: TimeZone> Parser<'_, Tz> {
         }
     }
 
-    fn parse_is(&mut self, val: &str, tok: &Token) -> Expr {
+    fn parse_is(&mut self, val: &str, tok: &Token<'_>) -> Expr {
         if val.eq_ignore_ascii_case("list") {
             return Expr::Term(Term::IsList);
         }
@@ -465,7 +472,7 @@ impl<Tz: TimeZone> Parser<'_, Tz> {
         }
     }
 
-    fn parse_in(&mut self, val: &str, tok: &Token) -> Expr {
+    fn parse_in(&mut self, val: &str, tok: &Token<'_>) -> Expr {
         if self.rule_mode {
             self.push_error(
                 tok.start,
@@ -485,7 +492,7 @@ impl<Tz: TimeZone> Parser<'_, Tz> {
         }
     }
 
-    fn parse_has(&mut self, val: &str, tok: &Token) -> Expr {
+    fn parse_has(&mut self, val: &str, tok: &Token<'_>) -> Expr {
         if self.rule_mode {
             self.push_error(
                 tok.start,
@@ -500,7 +507,7 @@ impl<Tz: TimeZone> Parser<'_, Tz> {
         }
     }
 
-    fn parse_category(&mut self, val: &str, tok: &Token) -> Expr {
+    fn parse_category(&mut self, val: &str, tok: &Token<'_>) -> Expr {
         if self.rule_mode {
             self.push_error(
                 tok.start,
@@ -511,7 +518,7 @@ impl<Tz: TimeZone> Parser<'_, Tz> {
         Expr::Term(Term::Category(val.to_ascii_uppercase()))
     }
 
-    fn parse_date_op(&mut self, op: &str, val: &str, tok: &Token) -> Expr {
+    fn parse_date_op(&mut self, op: &str, val: &str, tok: &Token<'_>) -> Expr {
         if self.rule_mode {
             self.push_error(tok.start, format!("{op}: isn't supported in split rules"));
             return Expr::Unsupported;

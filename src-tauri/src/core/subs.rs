@@ -180,14 +180,15 @@ impl Registry {
         ids.sort_by(|a, b| a.0.cmp(&b.0));
         let mut updates = Vec::new();
         for sub_id in ids {
+            let forced_flag = force_subs.contains(&sub_id);
             let Some(entry) = self.subs.get_mut(&sub_id) else {
                 continue;
             };
-            let forced = !entry.state.delivered || force_subs.contains(&sub_id);
+            let forced = !entry.state.delivered || forced_flag;
             if !forced && !sub_affected(&entry.key, changes) {
                 continue;
             }
-            if let Some(update) = build_sub_update(db, &sub_id, entry, changes, rev, online, clock)?
+            if let Some(update) = build_sub_update(db, sub_id, entry, changes, rev, online, clock)?
             {
                 entry.state.delivered = true;
                 entry.state.last_rev = rev;
@@ -274,7 +275,7 @@ fn sub_affected(key: &SubKey, changes: &Changes) -> bool {
 )]
 fn build_sub_update(
     db: Db<'_>,
-    sub_id: &SubId,
+    sub_id: SubId,
     entry: &mut SubEntry,
     changes: &Changes,
     rev: Rev,
@@ -285,7 +286,7 @@ fn build_sub_update(
     let first = !state.delivered;
     match key {
         SubKey::App => Ok(Some(SubUpdate::App {
-            sub: sub_id.clone(),
+            sub: sub_id,
             first,
             state: project_app_state(db, online)?,
         })),
@@ -294,7 +295,7 @@ fn build_sub_update(
                 return Ok(None);
             };
             Ok(Some(SubUpdate::Account {
-                sub: sub_id.clone(),
+                sub: sub_id,
                 first,
                 summary,
             }))
@@ -313,7 +314,7 @@ fn build_sub_update(
         } => {
             let data = project_conversation(db, *thread, *trash_mode, rev)?;
             Ok(Some(SubUpdate::Conversation {
-                sub: sub_id.clone(),
+                sub: sub_id,
                 first,
                 data,
             }))
@@ -321,7 +322,7 @@ fn build_sub_update(
         SubKey::Composer { draft } => {
             let data = project_draft(db, draft, rev)?;
             Ok(Some(SubUpdate::Composer {
-                sub: sub_id.clone(),
+                sub: sub_id,
                 first,
                 draft: data,
             }))
@@ -438,7 +439,7 @@ fn project_account_summary(
 )]
 fn build_list_update(
     db: Db<'_>,
-    sub_id: &SubId,
+    sub_id: SubId,
     account: AccountId,
     view: &View,
     state: &mut SubState,
@@ -495,7 +496,7 @@ fn build_list_update(
 )]
 fn build_search_update(
     db: Db<'_>,
-    sub_id: &SubId,
+    sub_id: SubId,
     account: AccountId,
     query: &str,
     state: &mut SubState,
@@ -531,7 +532,7 @@ fn build_search_update(
     reason = "draft list diffing compares previous sub state against current drafts and commit changes"
 )]
 fn finish_draft_list_update(
-    sub_id: &SubId,
+    sub_id: SubId,
     state: &mut SubState,
     drafts: Vec<DraftRecord>,
     new_ids: Vec<ListEntry>,
@@ -547,7 +548,7 @@ fn finish_draft_list_update(
             .collect();
         state.last_ids.clone_from(&new_ids);
         return SubUpdate::List {
-            sub: sub_id.clone(),
+            sub: sub_id,
             first: true,
             ids: Some(new_ids),
             removed: Vec::new(),
@@ -576,7 +577,7 @@ fn finish_draft_list_update(
     };
     state.last_ids = new_ids;
     SubUpdate::List {
-        sub: sub_id.clone(),
+        sub: sub_id,
         first: false,
         ids: None,
         removed,
@@ -598,7 +599,7 @@ fn finish_draft_list_update(
 )]
 fn finish_thread_list_update(
     db: Db<'_>,
-    sub_id: &SubId,
+    sub_id: SubId,
     state: &mut SubState,
     new_ids: Vec<ListEntry>,
     meta: ListMeta,
@@ -618,7 +619,7 @@ fn finish_thread_list_update(
             .collect();
         state.last_ids.clone_from(&new_ids);
         return Ok(SubUpdate::List {
-            sub: sub_id.clone(),
+            sub: sub_id,
             first: true,
             ids: Some(new_ids),
             removed: Vec::new(),
@@ -655,7 +656,7 @@ fn finish_thread_list_update(
         .collect();
     state.last_ids = new_ids;
     Ok(SubUpdate::List {
-        sub: sub_id.clone(),
+        sub: sub_id,
         first: false,
         ids: None,
         removed,

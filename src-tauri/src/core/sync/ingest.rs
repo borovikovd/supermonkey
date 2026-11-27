@@ -6,7 +6,7 @@ use crate::domain::{
     OpKind, Rev, SystemLabel, Thread, ThreadId, gmail_draft_aim, is_forward_subject,
 };
 use crate::gmail::{
-    Format, Gmail, GmailError, Outcome, Priority as GmailPriority, Thread as WireThread,
+    Format, Gmail, GmailError, Message as WireMessage, Outcome, Priority as GmailPriority,
 };
 use crate::mime::{CidImages, parse_message, snippet_text};
 use crate::store::{
@@ -94,12 +94,14 @@ pub(crate) async fn fetch_and_ingest_thread(
         Err(err) => return Err(err),
     };
 
+    let wire_history = wire.history_id;
+    let gid = wire.id;
     let identity = pool
         .with(|db| Ok::<_, StoreError>(db.account(account)?.map(|a| a.identity())))
         .ok()
         .flatten();
     let prepared = prepare_wire_thread(
-        &wire,
+        wire.messages,
         identity.as_ref(),
         gmail,
         clock,
@@ -108,8 +110,6 @@ pub(crate) async fn fetch_and_ingest_thread(
         priority,
     )
     .await?;
-    let wire_history = wire.history_id;
-    let gid = wire.id;
 
     let outcome = writer
         .call(StorePriority::Sync, move |tx, state| {
@@ -147,7 +147,7 @@ pub(crate) async fn fetch_and_ingest_thread(
     reason = "parses MIME headers, inline CID images, sanitized HTML body, attachments, and contact sighting per message"
 )]
 async fn prepare_wire_thread(
-    wire: &WireThread,
+    messages: Vec<WireMessage>,
     identity: Option<&Identity>,
     gmail: &Gmail,
     clock: &Clock,
@@ -155,8 +155,8 @@ async fn prepare_wire_thread(
     format: Format,
     priority: GmailPriority,
 ) -> Result<Vec<PreparedMessage>, GmailError> {
-    let mut out = Vec::with_capacity(wire.messages.len());
-    for msg in &wire.messages {
+    let mut out = Vec::with_capacity(messages.len());
+    for msg in messages {
         let Some(payload) = &msg.payload else {
             continue;
         };
@@ -165,8 +165,10 @@ async fn prepare_wire_thread(
             .internal_date
             .or(parsed.headers.date)
             .unwrap_or(Millis(0));
-        let labels: LabelSet = msg.label_ids.iter().cloned().collect();
+        let labels: LabelSet = msg.label_ids.into_iter().collect();
         let is_draft = labels.has(SystemLabel::Draft);
+        let has_attachments =
+            (format == Format::Full).then(|| parsed.parts.iter().any(|p| !p.is_inline));
 
         let body = if format == Format::Full && !is_draft {
             let mut cids = CidImages::new();
@@ -201,7 +203,7 @@ async fn prepare_wire_thread(
             let now = clock.now();
             let attachments: Vec<NewAttachment> = parsed
                 .parts
-                .iter()
+                .into_iter()
                 .map(|p| {
                     let local_path = if !p.is_inline
                         && p.attachment_id.is_none()
@@ -213,12 +215,12 @@ async fn prepare_wire_thread(
                         None
                     };
                     NewAttachment {
-                        part_id: p.id.clone(),
-                        filename: p.filename.clone(),
-                        mime_type: p.mime_type.clone(),
+                        part_id: p.id,
+                        filename: p.filename,
+                        mime_type: p.mime_type,
                         size: p.size,
-                        gmail_att_id: p.attachment_id.clone(),
-                        content_id: p.content_id.clone(),
+                        gmail_att_id: p.attachment_id,
+                        content_id: p.content_id,
                         is_inline: p.is_inline,
                         local_path,
                     }
@@ -234,8 +236,6 @@ async fn prepare_wire_thread(
             None
         };
 
-        let has_attachments =
-            (format == Format::Full).then(|| parsed.parts.iter().any(|p| !p.is_inline));
         let snippet = if msg.snippet.is_empty() {
             body.as_ref()
                 .map(|b| snippet_text(&b.html))
@@ -264,7 +264,7 @@ async fn prepare_wire_thread(
 
         out.push(PreparedMessage {
             new_msg: NewMessage {
-                gmail_id: msg.id.clone(),
+                gmail_id: msg.id,
                 date,
                 from,
                 to: parsed.headers.to,
@@ -364,14 +364,14 @@ fn commit_ingested_thread(
     let mut unknown_labels = false;
     for item in &mut prepared {
         let mut mapped = LabelSet::new();
-        for gid in &item.new_msg.labels {
-            if let Some(local) = gmail_to_local.get(gid) {
+        for gid in std::mem::take(&mut item.new_msg.labels) {
+            if let Some(local) = gmail_to_local.get(&gid) {
                 mapped.insert(local.clone());
             } else {
-                if !SystemLabel::is_system_id(gid.as_str()) && !known_locals.contains(gid) {
+                if !SystemLabel::is_system_id(gid.as_str()) && !known_locals.contains(&gid) {
                     unknown_labels = true;
                 }
-                mapped.insert(gid.clone());
+                mapped.insert(gid);
             }
         }
         item.new_msg.labels = mapped;
@@ -410,7 +410,7 @@ fn commit_ingested_thread(
 
     let mut sightings = Vec::new();
     let mut stored_body_ids = Vec::new();
-    for item in &prepared {
+    for item in prepared {
         if item.new_msg.is_draft {
             continue;
         }
@@ -427,8 +427,8 @@ fn commit_ingested_thread(
             )?;
             stored_body_ids.push(msg_id);
         }
-        if let Some(s) = &item.sighting {
-            sightings.push(s.clone());
+        if let Some(s) = item.sighting {
+            sightings.push(s);
         }
     }
 

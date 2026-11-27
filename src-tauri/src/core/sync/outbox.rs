@@ -546,7 +546,7 @@ async fn process_outbox_row(slot: &AccountSlot, gmail: &Gmail, row: &OutboxRecor
                             let (next, _) =
                                 step_outbox(snap, OutboxEvent::DraftWritten(draft_id_copy));
                             if let Some(n) = next {
-                                apply_outbox_snapshot(&mut ob.item, &n);
+                                apply_outbox_snapshot(&mut ob.item, n);
                                 tx.update_outbox(&ob.item)?;
                             }
                         }
@@ -732,7 +732,7 @@ async fn apply_outbox_event(
                 OutboxCommand::None => {}
                 OutboxCommand::Persist | OutboxCommand::RetrySend => {
                     if let Some(n) = next {
-                        apply_outbox_snapshot(&mut rec.item, &n);
+                        apply_outbox_snapshot(&mut rec.item, n);
                         tx.update_outbox(&rec.item)?;
                     }
                 }
@@ -765,7 +765,7 @@ async fn apply_outbox_event(
                 }
                 OutboxCommand::FetchSentThread { .. } => {
                     if let Some(n) = next {
-                        apply_outbox_snapshot(&mut rec.item, &n);
+                        apply_outbox_snapshot(&mut rec.item, n);
                         tx.update_outbox(&rec.item)?;
                     } else {
                         tx.delete_undo_for_outbox(acct, outbox_id)?;

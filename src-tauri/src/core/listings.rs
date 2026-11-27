@@ -163,7 +163,7 @@ async fn run_listing(
             }
             let gmail_q = gmail_query(&query);
             if gmail_q.trim().is_empty() {
-                set_listing_state(&inner.writer, &sub, ListingState::default()).await;
+                set_listing_state(&inner.writer, sub, ListingState::default()).await;
                 return;
             }
             let parsed = Query::parse_search(&query, &inner.clock.local_now());
@@ -195,7 +195,7 @@ async fn run_listing(
         if !inner.network.is_online() {
             set_listing_state(
                 &inner.writer,
-                &sub,
+                sub.clone(),
                 ListingState {
                     remote_hits: remote_hits.clone(),
                     searching: false,
@@ -215,9 +215,9 @@ async fn run_listing(
         let Some((grant_gen, gmail)) = slot.gmail() else {
             set_listing_state(
                 &inner.writer,
-                &sub,
+                sub,
                 ListingState {
-                    remote_hits: remote_hits.clone(),
+                    remote_hits,
                     searching: false,
                     more: false,
                 },
@@ -229,7 +229,7 @@ async fn run_listing(
         let busy = inner.activity.enter();
         set_listing_state(
             &inner.writer,
-            &sub,
+            sub.clone(),
             ListingState {
                 remote_hits: remote_hits.clone(),
                 searching: true,
@@ -263,7 +263,7 @@ async fn run_listing(
                 inner.network.lost_if_unreachable(&err).await;
                 set_listing_state(
                     &inner.writer,
-                    &sub,
+                    sub.clone(),
                     ListingState {
                         remote_hits: remote_hits.clone(),
                         searching: false,
@@ -290,9 +290,9 @@ async fn run_listing(
             Err(_) => {
                 set_listing_state(
                     &inner.writer,
-                    &sub,
+                    sub,
                     ListingState {
-                        remote_hits: remote_hits.clone(),
+                        remote_hits,
                         searching: false,
                         more: page_token.is_some(),
                     },
@@ -311,21 +311,31 @@ async fn run_listing(
 
         page_token = page.next;
         let has_more = page_token.is_some();
+        if !has_more {
+            set_listing_state(
+                &inner.writer,
+                sub,
+                ListingState {
+                    remote_hits,
+                    searching: false,
+                    more: false,
+                },
+            )
+            .await;
+            drop(busy);
+            return;
+        }
         set_listing_state(
             &inner.writer,
-            &sub,
+            sub.clone(),
             ListingState {
                 remote_hits: remote_hits.clone(),
                 searching: false,
-                more: has_more,
+                more: true,
             },
         )
         .await;
         drop(busy);
-
-        if !has_more {
-            return;
-        }
         tokio::select! {
             biased;
             () = cancel.cancelled() => return,
@@ -485,13 +495,12 @@ async fn load_listing_page(
     })
 }
 
-async fn set_listing_state(writer: &Writer<WriterState>, sub: &SubId, listing: ListingState) {
-    let id = sub.clone();
+async fn set_listing_state(writer: &Writer<WriterState>, sub: SubId, listing: ListingState) {
     super::log_err(
         "update listing state",
         writer
             .call(StorePriority::Sync, move |_tx, state| {
-                state.stage_sub(SubOp::SetListing(id, listing));
+                state.stage_sub(SubOp::SetListing(sub, listing));
                 Ok::<_, StoreError>(())
             })
             .await,
