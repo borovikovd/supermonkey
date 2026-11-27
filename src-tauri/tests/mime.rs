@@ -304,3 +304,64 @@ fn only_a_quote_that_ends_the_message_is_folded_away() {
     assert_eq!(shown, "<p>Outlook reply</p>");
     assert!(folded.is_some_and(|q| q.contains("The earlier question")));
 }
+
+#[test]
+fn an_email_forwarded_as_an_attachment_is_listed_as_one() {
+    let forwarded = WirePart {
+        part_id: "1".to_owned(),
+        mime_type: "message/rfc822".to_owned(),
+        filename: "Trip plan.eml".to_owned(),
+        body: WireBody {
+            attachment_id: Some(GmailAttachmentId("att-eml".to_owned())),
+            size: 4096,
+            data: None,
+        },
+        parts: vec![
+            wire_html("1.0", "<p>The forwarded mail</p>", Vec::new()),
+            wire_att(
+                "1.1",
+                "application/pdf",
+                "tickets.pdf",
+                "att-tickets",
+                vec![wire_header(
+                    "Content-Disposition",
+                    "attachment; filename=\"tickets.pdf\"",
+                )],
+            ),
+        ],
+        ..WirePart::default()
+    };
+    let root = WirePart {
+        mime_type: "multipart/mixed".to_owned(),
+        parts: vec![
+            wire_html("0", "<p>See the attached email.</p>", Vec::new()),
+            forwarded,
+        ],
+        ..WirePart::default()
+    };
+
+    let parsed = parse_message(&root);
+    assert_eq!(
+        parsed.raw_body.html.as_deref(),
+        Some("<p>See the attached email.</p>")
+    );
+    let listed: Vec<(&str, &str, Option<&str>)> = parsed
+        .parts
+        .iter()
+        .filter(|p| !p.is_inline)
+        .map(|p| {
+            (
+                p.filename.as_str(),
+                p.mime_type.as_str(),
+                p.attachment_id.as_ref().map(GmailAttachmentId::as_str),
+            )
+        })
+        .collect();
+    assert_eq!(
+        listed,
+        vec![
+            ("Trip plan.eml", "message/rfc822", Some("att-eml")),
+            ("tickets.pdf", "application/pdf", Some("att-tickets")),
+        ]
+    );
+}

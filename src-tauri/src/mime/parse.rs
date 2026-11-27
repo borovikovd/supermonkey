@@ -153,6 +153,12 @@ fn walk_part(part: &WirePart, scope: usize, acc: &mut WalkAcc) {
     }
 
     if mime == "message/rfc822" && !part.parts.is_empty() {
+        if part.body.attachment_id.is_some() {
+            acc.candidates.push(Candidate {
+                scope,
+                part: build_part(part, mime, resolve_filename(part)),
+            });
+        }
         let nested_scope = acc.nested_cids.len() + 1;
         acc.nested_cids.push(HashSet::new());
         for child in &part.parts {
@@ -342,6 +348,7 @@ fn default_filename(mime: &str, part_id: &str) -> String {
         "application/pdf" => "pdf",
         "text/plain" => "txt",
         "text/csv" => "csv",
+        "message/rfc822" => "eml",
         _ => "bin",
     };
     let suffix = if part_id.is_empty() { "file" } else { part_id };
