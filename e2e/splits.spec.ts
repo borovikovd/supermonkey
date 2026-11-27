@@ -570,3 +570,24 @@ test("SPL-12 a rule can name you: cc:me collects the mail you were copied on", a
   await expectSplit(app, "Copied you in", "Copied");
   await expectSplit(app, "Person 1", "Important", "addressed to you, not copied");
 });
+
+test("SPL-13 z on a pin whose earlier split was deleted since removes the pin and says nothing", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await editSplits(app, (sheet) => addSplit(sheet, "VIP", NOTHING));
+  await app.highlight("Your receipt");
+  await pin(app, "Add to split", "Sender billing@shop.test → VIP");
+  await expectSplit(app, "Your receipt", "VIP");
+  await app.highlight("Your receipt");
+  await pin(app, "Move to Important", "Sender billing@shop.test");
+  await expectSplit(app, "Your receipt", "Important", "the new pin replaced the one to VIP");
+
+  await editSplits(app, (sheet) =>
+    sheetRow(sheet, "VIP").then((row) => row.getByRole("button", { name: "×" }).click()),
+  );
+  await app.press("z");
+  await expectSplit(app, "Your receipt", "Other", "the split to go back to is gone");
+  await app.expectNoErrorToasts();
+});

@@ -414,7 +414,16 @@ fn apply_undo(
             value,
             previous,
         } => {
-            if let Some(split) = previous {
+            let still_there = match previous {
+                Some(split) => tx
+                    .read()
+                    .splits(account)?
+                    .iter()
+                    .any(|s| s.id == split)
+                    .then_some(split),
+                None => None,
+            };
+            if let Some(split) = still_there {
                 tx.set_pin(
                     account,
                     &Pin {
