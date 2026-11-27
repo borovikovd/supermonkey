@@ -447,15 +447,21 @@ struct KickState {
 }
 
 #[derive(Debug)]
+struct KickInner {
+    state: Mutex<KickState>,
+    notify: Notify,
+}
+
+#[derive(Debug)]
 pub(crate) struct KickGuard {
-    state: Arc<Mutex<KickState>>,
+    inner: Arc<KickInner>,
     activity: Activity,
     _busy: Busy,
 }
 
 impl Drop for KickGuard {
     fn drop(&mut self) {
-        let mut st = self.state.lock();
+        let mut st = self.inner.state.lock();
         st.running = false;
         if st.pending && st.busy.is_none() {
             st.busy = Some(self.activity.enter());
@@ -463,10 +469,9 @@ impl Drop for KickGuard {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Kick {
-    state: Arc<Mutex<KickState>>,
-    notify: Notify,
+    inner: Arc<KickInner>,
 }
 
 impl Default for Kick {
@@ -479,30 +484,32 @@ impl Kick {
     #[must_use]
     pub(crate) fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(KickState::default())),
-            notify: Notify::new(),
+            inner: Arc::new(KickInner {
+                state: Mutex::new(KickState::default()),
+                notify: Notify::new(),
+            }),
         }
     }
 
     pub(crate) fn wake(&self, activity: &Activity) {
         {
-            let mut st = self.state.lock();
+            let mut st = self.inner.state.lock();
             st.pending = true;
             if !st.running && st.busy.is_none() {
                 st.busy = Some(activity.enter());
             }
         }
-        self.notify.notify_one();
+        self.inner.notify.notify_one();
     }
 
     fn clear_busy(&self) {
-        let mut st = self.state.lock();
+        let mut st = self.inner.state.lock();
         st.pending = false;
         st.busy.take();
     }
 
     fn take_pending(&self, activity: &Activity) -> Option<KickGuard> {
-        let mut st = self.state.lock();
+        let mut st = self.inner.state.lock();
         if !st.pending {
             return None;
         }
@@ -510,19 +517,19 @@ impl Kick {
         st.running = true;
         let busy = st.busy.take().unwrap_or_else(|| activity.enter());
         Some(KickGuard {
-            state: Arc::clone(&self.state),
+            inner: Arc::clone(&self.inner),
             activity: activity.clone(),
             _busy: busy,
         })
     }
 
     fn enter_elapsed(&self, activity: &Activity) -> KickGuard {
-        let mut st = self.state.lock();
+        let mut st = self.inner.state.lock();
         st.pending = false;
         st.running = true;
         let busy = st.busy.take().unwrap_or_else(|| activity.enter());
         KickGuard {
-            state: Arc::clone(&self.state),
+            inner: Arc::clone(&self.inner),
             activity: activity.clone(),
             _busy: busy,
         }
@@ -534,7 +541,7 @@ impl Kick {
         cancel: &CancellationToken,
     ) -> Option<KickGuard> {
         loop {
-            let notified = self.notify.notified();
+            let notified = self.inner.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
             if let Some(guard) = self.take_pending(activity) {
@@ -565,7 +572,7 @@ impl Kick {
         let sleep = clock.sleep(dur);
         tokio::pin!(sleep);
         loop {
-            let notified = self.notify.notified();
+            let notified = self.inner.notify.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
             if let Some(guard) = self.take_pending(activity) {
@@ -590,16 +597,16 @@ impl Kick {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct Signal<T> {
-    tx: Arc<watch::Sender<T>>,
+    tx: watch::Sender<T>,
 }
 
 impl<T: Clone + PartialEq + Send + Sync + 'static> Signal<T> {
     #[must_use]
     pub(crate) fn new(initial: T) -> Self {
         let (tx, _rx) = watch::channel(initial);
-        Self { tx: Arc::new(tx) }
+        Self { tx }
     }
 
     #[must_use]

@@ -77,7 +77,7 @@ pub(crate) async fn run_snooze_loop(
     pool: Arc<ReadPool>,
     writer: Writer<WriterState>,
     clock: Clock,
-    kick: Arc<Kick>,
+    kick: Kick,
     activity: Activity,
     cancel: CancellationToken,
 ) {
