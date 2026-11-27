@@ -148,12 +148,41 @@ pub(super) fn reads_body(expr: &Expr) -> bool {
     }
 }
 
-pub(super) fn list_requirement(expr: &Expr) -> Option<bool> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListRequirement {
+    Any,
+    OnlyList,
+    ExcludeList,
+    Impossible,
+}
+
+impl ListRequirement {
+    #[must_use]
+    const fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Impossible, _)
+            | (_, Self::Impossible)
+            | (Self::OnlyList, Self::ExcludeList)
+            | (Self::ExcludeList, Self::OnlyList) => Self::Impossible,
+            (Self::Any, x) | (x, Self::Any) => x,
+            (Self::OnlyList, Self::OnlyList) => Self::OnlyList,
+            (Self::ExcludeList, Self::ExcludeList) => Self::ExcludeList,
+        }
+    }
+}
+
+pub(super) fn list_requirement(expr: &Expr) -> ListRequirement {
     match expr {
-        Expr::Term(Term::IsList) => Some(true),
-        Expr::Not(inner) if matches!(**inner, Expr::Term(Term::IsList)) => Some(false),
-        Expr::And(items) => items.iter().find_map(list_requirement),
-        Expr::Term(_) | Expr::Not(_) | Expr::Or(_) | Expr::Unsupported => None,
+        Expr::Term(Term::IsList) => ListRequirement::OnlyList,
+        Expr::Not(inner) => match list_requirement(inner) {
+            ListRequirement::OnlyList => ListRequirement::ExcludeList,
+            ListRequirement::ExcludeList => ListRequirement::OnlyList,
+            ListRequirement::Any | ListRequirement::Impossible => ListRequirement::Any,
+        },
+        Expr::And(items) => items.iter().fold(ListRequirement::Any, |acc, item| {
+            acc.and(list_requirement(item))
+        }),
+        Expr::Term(_) | Expr::Or(_) | Expr::Unsupported => ListRequirement::Any,
     }
 }
 
@@ -390,6 +419,9 @@ fn prune_pass<'a>(items: &[(TokenKind, &'a str)]) -> Vec<(TokenKind, &'a str)> {
         let (kind, slice) = &items[i];
         let next = items.get(i + 1).map(|(k, _)| k);
         if matches!(kind, TokenKind::LParen) && matches!(next, Some(TokenKind::RParen)) {
+            while matches!(out.last(), Some((TokenKind::Minus, _))) {
+                out.pop();
+            }
             i += 2;
             continue;
         }

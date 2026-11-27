@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use rusqlite::params;
 
-use crate::domain::query::{MatchTarget, Query, Scope};
+use crate::domain::query::{ListRequirement, MatchTarget, Query, Scope};
 use crate::domain::{
     AccountId, Addr, Identity, LabelId, MessageFacts, Millis, SystemLabel, ThreadId,
 };
@@ -23,13 +23,17 @@ impl Db<'_> {
                 by_id.insert(tid, time);
             }
         }
-        if !gmail_hits.is_empty() {
+        let list_requirement = query.list_requirement();
+        if !gmail_hits.is_empty() && list_requirement != ListRequirement::Impossible {
             let encoded = id_list(gmail_hits)?;
             let scope = query.scope();
-            let list_requirement = query.list_requirement();
+            let normal_scope = i64::from(!matches!(
+                scope,
+                Scope::Trash | Scope::Spam | Scope::Anywhere
+            ));
             let extra = self.all(
-                "SELECT id, sort_time, has_live, EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.is_list = 1) FROM threads WHERE account_id = ?1 AND id IN (SELECT value FROM json_each(?2))",
-                params![account, encoded],
+                "SELECT id, sort_time, has_live, EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = threads.id AND m.is_draft = 0 AND (?3 = 0 OR m.is_live = 1) AND m.is_list = 1) FROM threads WHERE account_id = ?1 AND id IN (SELECT value FROM json_each(?2))",
+                params![account, encoded, normal_scope],
                 "load gmail search hits",
                 |r| {
                     Ok((
@@ -43,7 +47,13 @@ impl Db<'_> {
             for (tid, time, has_live, from_list) in extra {
                 let in_scope =
                     has_live || matches!(scope, Scope::Trash | Scope::Spam | Scope::Anywhere);
-                if in_scope && list_requirement.is_none_or(|wanted| from_list == wanted) {
+                let list_ok = match list_requirement {
+                    ListRequirement::Any => true,
+                    ListRequirement::OnlyList => from_list,
+                    ListRequirement::ExcludeList => !from_list,
+                    ListRequirement::Impossible => false,
+                };
+                if in_scope && list_ok {
                     by_id.insert(tid, time);
                 }
             }
