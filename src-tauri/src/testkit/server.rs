@@ -172,7 +172,7 @@ impl ServerState {
         });
         let core = Core::open(self.core_config(), platform).map_err(|e| e.to_string())?;
         if self.offline.load(Ordering::Acquire) {
-            core.set_online(false).await;
+            core.probe_network().await;
         }
         core.start().await.map_err(|e| e.to_string())?;
         let host: Box<dyn Host> = Box::new(TestHost {

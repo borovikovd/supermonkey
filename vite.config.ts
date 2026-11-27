@@ -129,7 +129,7 @@ export default defineConfig({
   },
 
   test: {
-    include: ["checks/**/*.test.ts"],
+    include: ["checks/**/*.test.ts", "src/**/*.test.ts"],
   },
 
   // `vp run <task>`. `gate` runs every check; run it before each commit.

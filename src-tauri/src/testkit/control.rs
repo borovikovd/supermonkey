@@ -998,7 +998,7 @@ async fn set_offline(
     if !body.probe
         && let Some(session) = state.bridge.session()
     {
-        session.core().set_online(!body.on).await;
+        session.core().probe_network().await;
     }
     Json(Value::Null).into_response()
 }

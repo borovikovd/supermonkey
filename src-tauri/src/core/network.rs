@@ -94,6 +94,12 @@ impl Network {
         }
     }
 
+    #[cfg(any(test, feature = "fake"))]
+    pub(crate) async fn probe_now(&self) {
+        let reachable = self.probe_once().await;
+        self.set_online(reachable).await;
+    }
+
     pub(crate) fn spawn_probe(&self, tasks: &Tasks) {
         let net = self.clone();
         let cancel = tasks.token();

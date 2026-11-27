@@ -402,3 +402,67 @@ fn pictures_in_the_body_and_in_the_quote_get_different_content_ids() {
         "the same picture in the quote reuses the body's part"
     );
 }
+
+#[test]
+fn outgoing_mime_round_trip_preserves_headers_attachments_and_unique_cids() {
+    use supermonkey_lib::domain::{Addr, DraftId, Millis};
+    use supermonkey_lib::mime::{DRAFT_HEADER, OutAttachment, Outgoing, build_mime};
+
+    let pic_a = STANDARD.encode(b"png-bytes-a");
+    let pic_b = STANDARD.encode(b"png-bytes-b");
+    let raw_body = format!(r#"<p>Hello</p><img src="data:image/png;base64,{pic_a}">"#);
+    let raw_quote =
+        format!(r#"<blockquote><img src="data:image/png;base64,{pic_b}"></blockquote>"#);
+    let (body_html, mut inline) = data_images_to_cid(&raw_body, &[]);
+    let (quote_html, more) = data_images_to_cid(&raw_quote, &inline);
+    inline.extend(more);
+
+    let draft_id = DraftId("sm-roundtrip-1".to_owned());
+    let att = OutAttachment {
+        filename: "report.pdf".to_owned(),
+        mime_type: "application/pdf".to_owned(),
+        data: b"%PDF-1.7 sample".to_vec(),
+    };
+    let raw = build_mime(&Outgoing {
+        from: &Addr::named("Ana Café", "ana@acme.test"),
+        to: &[Addr::named("Bob", "bob@x.test")],
+        cc: &[Addr::new("carol@x.test")],
+        bcc: &[Addr::new("hidden@x.test")],
+        subject: "Q4 — Plan",
+        body_html: &body_html,
+        quote_html: Some(&quote_html),
+        in_reply_to: Some("<parent@x.test>"),
+        references: &["<root@x.test>".to_owned(), "<parent@x.test>".to_owned()],
+        draft_id: Some(&draft_id),
+        attachments: &[att],
+        inline: &inline,
+        date: Millis(1_762_000_000_000),
+    })
+    .unwrap();
+    let text = String::from_utf8(raw).expect("built MIME is valid UTF-8");
+    assert!(
+        text.contains(&format!("{DRAFT_HEADER}: sm-roundtrip-1")),
+        "draft id header is preserved"
+    );
+    assert!(text.contains("bob@x.test"), "To recipient present");
+    assert!(text.contains("carol@x.test"), "Cc recipient present");
+    assert!(text.contains("hidden@x.test"), "Bcc recipient present");
+    assert!(
+        text.contains("<parent@x.test>"),
+        "In-Reply-To header present"
+    );
+    assert!(text.contains("report.pdf"), "attachment filename present");
+
+    let mut seen_cids = std::collections::HashSet::new();
+    for part in &inline {
+        assert!(
+            seen_cids.insert(part.content_id.as_str()),
+            "every inline part has a distinct Content-ID"
+        );
+        assert!(
+            text.contains(&format!("<{}>", part.content_id)),
+            "inline Content-ID {} emitted in MIME",
+            part.content_id
+        );
+    }
+}

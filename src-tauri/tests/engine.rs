@@ -428,3 +428,498 @@ async fn session_focus_and_quit_work_from_non_tokio_thread() {
         "request_quit from a non-Tokio thread completes exit cleanly"
     );
 }
+
+struct ChaosRng(u64);
+
+impl ChaosRng {
+    const fn next_u64(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    fn pick(&mut self, len: usize) -> usize {
+        usize::try_from(self.next_u64() % u64::try_from(len.max(1)).unwrap_or(1)).unwrap_or(0)
+    }
+}
+
+struct ChaosEnv {
+    dir: tempfile::TempDir,
+    fake: sm_fake_gmail::FakeGmail,
+    user: sm_fake_gmail::FakeUser,
+    account: AccountId,
+    core: Arc<Core>,
+    next_n: i64,
+}
+
+impl ChaosEnv {
+    fn config(data_dir: &Path, fake: &sm_fake_gmail::FakeGmail, clock: Clock) -> CoreConfig {
+        CoreConfig {
+            data_dir: data_dir.to_path_buf(),
+            gmail_base_url: fake.base_url(),
+            oauth: OAuthConfig {
+                client_id: "chaos-client".to_owned(),
+                client_secret: "chaos-secret".to_owned(),
+                auth_url: fake.auth_url(),
+                token_url: fake.token_url(),
+                revoke_url: fake.revoke_url(),
+            },
+            quota: QuotaConfig::for_budget(supermonkey_lib::gmail::Units(60_000)),
+            clock,
+        }
+    }
+
+    async fn open_core(
+        data_dir: &Path,
+        fake: &sm_fake_gmail::FakeGmail,
+        now: Millis,
+    ) -> Result<Arc<Core>, CoreError> {
+        let core = Core::open(
+            Self::config(data_dir, fake, Clock::manual(now)),
+            Box::new(TestPlatform::default()),
+        )?;
+        core.start().await?;
+        Ok(core)
+    }
+
+    async fn seed() -> Result<(Self, sm_fake_gmail::AddedMessage), Box<dyn std::error::Error>> {
+        use supermonkey_lib::gmail::{RefreshToken, TokenFile};
+        use supermonkey_lib::store::with_write_tx;
+
+        let dir = tempfile::tempdir()?;
+        let fake = sm_fake_gmail::FakeGmail::start();
+        let user = fake.add_user("ana@acme.test");
+        user.set_display_name("Ana");
+
+        let base_ms = 1_762_000_000_000_i64;
+        let mut att_msg = sm_fake_gmail::NewMessage::inbox(
+            "Carol <carol@x.test>",
+            "With PDF",
+            "Check the attached file.",
+        );
+        att_msg.internal_date = Some(u64::try_from(base_ms - 10_000).unwrap_or(0));
+        att_msg.attachments.push(sm_fake_gmail::NewAttachment {
+            filename: "plan.pdf".to_owned(),
+            mime_type: "application/pdf".to_owned(),
+            data: b"%PDF-1.4".to_vec(),
+            content_id: None,
+            inline: false,
+            served_inline: false,
+        });
+        let att_added = user.add_message(att_msg);
+        for i in 0..4_i64 {
+            let mut m = sm_fake_gmail::NewMessage::inbox(
+                "Bob <bob@x.test>",
+                &format!("Seed {i}"),
+                "Seed body.",
+            );
+            m.internal_date = Some(u64::try_from(base_ms - i * 1_000).unwrap_or(0));
+            drop(user.add_message(m));
+        }
+
+        TokenFile::new(dir.path().join("tokens.json"))
+            .store(user.email(), &RefreshToken::new(user.refresh_token()))?;
+        let account = with_write_tx(&dir.path().join("mail.db"), |tx| {
+            Ok::<_, StoreError>(tx.create_account("ana@acme.test", "Ana")?.id)
+        })?;
+        let core = Self::open_core(dir.path(), &fake, Millis(base_ms)).await?;
+        assert!(
+            core.wait_idle(Duration::from_secs(10)).await,
+            "initial sync settles"
+        );
+        Ok((
+            Self {
+                dir,
+                fake,
+                user,
+                account,
+                core,
+                next_n: 0,
+            },
+            att_added,
+        ))
+    }
+
+    async fn submit(&mut self, action: Action) -> Result<(), CoreError> {
+        self.next_n += 1;
+        self.core
+            .submit(vec![Submitted::from(NumberedAction {
+                n: ActionNo(self.next_n),
+                action,
+            })])
+            .await?;
+        Ok(())
+    }
+
+    async fn settle(&self) {
+        self.fake.clear_faults();
+        self.fake.set_offline(false).await;
+        self.core.probe_network().await;
+        for _ in 0..4 {
+            let now = self.core.clock().advance(7_200_000);
+            assert!(now.0 > 0, "manual clock advances monotonically");
+            self.core.wake_retrying();
+            self.core.poll_all();
+            assert!(
+                self.core.wait_idle(Duration::from_secs(10)).await,
+                "chaos core must settle cleanly"
+            );
+        }
+    }
+
+    async fn run_step(
+        &mut self,
+        rng: &mut ChaosRng,
+        step: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let threads = self
+            .core
+            .read_pool()
+            .with(|db| db.thread_sync_states(self.account))?;
+        match rng.pick(7) {
+            0 | 1 if !threads.is_empty() => {
+                let tid = threads[rng.pick(threads.len())].id;
+                let action = random_modify_action(rng, self.account, tid, self.core.clock().now());
+                self.submit(action).await?;
+            }
+            2 => {
+                let top_undo = self
+                    .core
+                    .read_pool()
+                    .with(|db| db.undo_entries(self.account))?
+                    .into_iter()
+                    .next();
+                if let Some(entry) = top_undo {
+                    self.submit(Action::Undo {
+                        account: self.account,
+                        entry: entry.id,
+                    })
+                    .await?;
+                }
+            }
+            3 => self.deliver_remote(step),
+            4 => self.mutate_remote(rng),
+            5 => self.inject_fault(rng),
+            _ => self.perturb_network_or_restart(rng).await?,
+        }
+        Ok(())
+    }
+
+    fn deliver_remote(&self, step: usize) {
+        let mut msg = sm_fake_gmail::NewMessage::inbox(
+            "Remote <rem@x.test>",
+            &format!("Remote msg {step}"),
+            "Body from remote.",
+        );
+        msg.internal_date = Some(u64::try_from(self.core.clock().now().0).unwrap_or(0));
+        drop(self.user.add_message(msg));
+        self.core.poll_all();
+    }
+
+    fn mutate_remote(&self, rng: &mut ChaosRng) {
+        let remote = self.user.messages();
+        if let Some(m) = remote
+            .iter()
+            .find(|m| !m.label_ids.iter().any(|l| l == "DRAFT"))
+        {
+            let add = if rng.pick(2) == 0 {
+                ["STARRED"]
+            } else {
+                ["UNREAD"]
+            };
+            let empty: &[&str] = &[];
+            assert!(
+                self.user.modify_labels(&m.id, &add, empty),
+                "remote label modification applies to existing fake message"
+            );
+            if rng.pick(3) == 0 {
+                self.user.expire_history();
+            }
+            self.core.poll_all();
+        }
+    }
+
+    fn inject_fault(&self, rng: &mut ChaosRng) {
+        let apis = [
+            "threads.get",
+            "history.list",
+            "messages.batchModify",
+            "drafts.list",
+        ];
+        let api = apis[rng.pick(apis.len())];
+        let fault_id = self.fake.inject(
+            sm_fake_gmail::Matcher::api(api).once(),
+            sm_fake_gmail::Fault::Status {
+                status: 503,
+                reason: "backendError".to_owned(),
+                retry_after_secs: None,
+            },
+        );
+        assert!(fault_id > 0, "injected fault gets a positive id");
+        self.core.poll_all();
+    }
+
+    async fn perturb_network_or_restart(
+        &mut self,
+        rng: &mut ChaosRng,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let now = self.core.clock().advance(60_000);
+        if rng.pick(2) == 0 {
+            self.fake.set_offline(true).await;
+            self.core.probe_network().await;
+            self.fake.set_offline(false).await;
+            self.core.probe_network().await;
+        } else {
+            let stopped = tokio::time::timeout(Duration::from_secs(5), self.core.stop()).await;
+            assert!(
+                stopped.is_ok(),
+                "mid-run Core::stop finishes within deadline"
+            );
+            self.core = Self::open_core(self.dir.path(), &self.fake, now).await?;
+            let info = self.core.connect()?;
+            assert_eq!(
+                info.last_action,
+                ActionNo(self.next_n),
+                "reopened core preserves last_action"
+            );
+        }
+        Ok(())
+    }
+
+    fn assert_converged(&self) -> Result<(), StoreError> {
+        use supermonkey_lib::domain::OpQueue;
+
+        let (mail_op, draft_op, outbox) = self.core.read_pool().with(|db| {
+            Ok::<_, StoreError>((
+                db.next_op(self.account, OpQueue::Mail)?,
+                db.next_op(self.account, OpQueue::Drafts)?,
+                db.outbox_for_account(self.account)?,
+            ))
+        })?;
+        assert!(mail_op.is_none(), "no stuck mail ops after settle");
+        assert!(draft_op.is_none(), "no stuck draft ops after settle");
+        assert!(outbox.is_empty(), "no stuck outbox rows after settle");
+
+        let mut by_thread: std::collections::HashMap<String, Vec<sm_fake_gmail::FakeMessage>> =
+            std::collections::HashMap::new();
+        for msg in self.user.messages() {
+            if !msg.label_ids.iter().any(|l| l == "DRAFT") {
+                by_thread
+                    .entry(msg.thread_id.clone())
+                    .or_default()
+                    .push(msg);
+            }
+        }
+        for (gtid, msgs) in by_thread {
+            self.assert_thread_converged(&gtid, &msgs)?;
+        }
+        Ok(())
+    }
+
+    fn assert_thread_converged(
+        &self,
+        gtid: &str,
+        msgs: &[sm_fake_gmail::FakeMessage],
+    ) -> Result<(), StoreError> {
+        use supermonkey_lib::domain::GmailThreadId;
+
+        let live: Vec<&sm_fake_gmail::FakeMessage> = msgs
+            .iter()
+            .filter(|m| !m.label_ids.iter().any(|l| l == "TRASH" || l == "SPAM"))
+            .collect();
+        let has_live = !live.is_empty();
+        let expected_inbox = has_live
+            && live
+                .iter()
+                .any(|m| m.label_ids.iter().any(|l| l == "INBOX"));
+        let expected_trash = msgs
+            .iter()
+            .any(|m| m.label_ids.iter().any(|l| l == "TRASH"));
+        let counted: Vec<&sm_fake_gmail::FakeMessage> = if has_live {
+            live
+        } else {
+            msgs.iter().collect()
+        };
+        let expected_unread = counted
+            .iter()
+            .any(|m| m.label_ids.iter().any(|l| l == "UNREAD"));
+        let expected_starred = has_live
+            && counted
+                .iter()
+                .any(|m| m.label_ids.iter().any(|l| l == "STARRED"));
+
+        let row = self.core.read_pool().with(|db| {
+            let tid = db.thread_by_gmail(self.account, &GmailThreadId(gtid.to_owned()))?;
+            tid.map(|id| db.thread_row(id))
+                .transpose()
+                .map(Option::flatten)
+        })?;
+        let acct_row = self.core.read_pool().with(|db| db.account(self.account))?;
+        let labels_summary: Vec<(&str, &[String])> = msgs
+            .iter()
+            .map(|m| (m.id.as_str(), m.label_ids.as_slice()))
+            .collect();
+        assert!(
+            row.is_some(),
+            "thread {gtid} missing locally after convergence (msgs={labels_summary:?}, acct_history={:?}, acct_connected={:?})",
+            acct_row.as_ref().and_then(|a| a.history_id),
+            acct_row.as_ref().map(|a| a.connected),
+        );
+        if let Some(row) = row {
+            assert_eq!(row.has_live, has_live, "has_live converged for {gtid}");
+            assert_eq!(row.in_inbox, expected_inbox, "inbox converged for {gtid}");
+            assert_eq!(
+                row.labels.contains(&SystemLabel::Trash.label_id()),
+                expected_trash,
+                "trash converged for {gtid}"
+            );
+            assert_eq!(row.unread, expected_unread, "unread converged for {gtid}");
+            assert_eq!(
+                row.labels.contains(&SystemLabel::Starred.label_id()),
+                expected_starred,
+                "starred converged for {gtid}"
+            );
+        }
+        Ok(())
+    }
+
+    async fn exercise_draft_and_metadata(
+        &mut self,
+        seed: u64,
+        att_added: &sm_fake_gmail::AddedMessage,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use supermonkey_lib::domain::{DraftId, DraftKind, GmailThreadId};
+        use supermonkey_lib::ipc::DraftSave;
+
+        let draft_id = DraftId(format!("chaos-draft-{seed}"));
+        self.submit(Action::SaveDraft {
+            draft: draft_id.clone(),
+            save: DraftSave::Create {
+                account: self.account,
+                kind: DraftKind::New,
+                reply_all: false,
+                thread: None,
+                target: None,
+                started_on_latest: false,
+            },
+        })
+        .await?;
+        self.submit(Action::DiscardDraft { draft: draft_id })
+            .await?;
+
+        self.settle().await;
+        self.assert_converged()?;
+
+        let empty: &[&str] = &[];
+        assert!(
+            self.user.modify_labels(&att_added.id, &["STARRED"], empty),
+            "remote star modification applies to attachment fixture message"
+        );
+        self.settle().await;
+        let att_row = self.core.read_pool().with(|db| {
+            let tid =
+                db.thread_by_gmail(self.account, &GmailThreadId(att_added.thread_id.clone()))?;
+            tid.map(|id| db.thread_row(id))
+                .transpose()
+                .map(Option::flatten)
+        })?;
+        assert!(
+            att_row.is_some_and(|r| r.has_attachments),
+            "metadata refetch preserves has_attachments from prior full fetch"
+        );
+        Ok(())
+    }
+
+    async fn remove_account_and_verify_clean(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        self.submit(Action::RemoveAccount {
+            account: self.account,
+        })
+        .await?;
+        assert!(
+            self.core.wait_idle(Duration::from_secs(5)).await,
+            "account removal settles"
+        );
+        #[expect(
+            clippy::redundant_closure_for_method_calls,
+            reason = "ReadPool::with requires a higher-ranked closure over Db<'_>"
+        )]
+        let remaining = self.core.read_pool().with(|db| db.accounts())?;
+        assert!(remaining.is_empty(), "removed account deleted from SQLite");
+        assert!(
+            !dir_has_files(&self.dir.path().join("attachments")),
+            "no orphan attachment files after account removal"
+        );
+        assert!(
+            !dir_has_files(&self.dir.path().join("drafts")),
+            "no orphan draft files after account removal"
+        );
+        let stopped = tokio::time::timeout(Duration::from_secs(5), self.core.stop()).await;
+        assert!(stopped.is_ok(), "final Core::stop finishes within deadline");
+        Ok(())
+    }
+}
+
+fn random_modify_action(
+    rng: &mut ChaosRng,
+    account: AccountId,
+    tid: supermonkey_lib::domain::ThreadId,
+    now: Millis,
+) -> Action {
+    let inbox = SystemLabel::Inbox.label_id();
+    let star = SystemLabel::Starred.label_id();
+    let unread = SystemLabel::Unread.label_id();
+    let trash = SystemLabel::Trash.label_id();
+    let (kind, add, remove, snooze) = match rng.pick(8) {
+        0 => (ModifyKind::Done, vec![], vec![inbox], None),
+        1 => (ModifyKind::ReturnToInbox, vec![inbox], vec![trash], None),
+        2 => (ModifyKind::Star, vec![star], vec![], None),
+        3 => (ModifyKind::Unstar, vec![], vec![star], None),
+        4 => (ModifyKind::Read, vec![], vec![unread], None),
+        5 => (ModifyKind::Unread, vec![unread], vec![], None),
+        6 => (ModifyKind::Trash, vec![trash], vec![inbox], None),
+        _ => (
+            ModifyKind::Snooze,
+            vec![],
+            vec![inbox],
+            Some(SnoozeChange::Set(Millis(now.0 + 3_600_000))),
+        ),
+    };
+    Action::Modify(ModifyAction {
+        account,
+        kind,
+        threads: vec![tid],
+        add,
+        remove,
+        snooze,
+        undoable: true,
+    })
+}
+
+fn dir_has_files(path: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_file() || (p.is_dir() && dir_has_files(&p)) {
+            return true;
+        }
+    }
+    false
+}
+
+#[tokio::test]
+async fn stateful_chaos_converges_local_state_to_gmail_and_cleans_up() {
+    for seed in [0xA11C_E001_u64, 0xB0B0_0002, 0xCA05_0003] {
+        let mut rng = ChaosRng(seed);
+        let (mut env, att_added) = ChaosEnv::seed().await.unwrap();
+        for step in 0..16 {
+            env.run_step(&mut rng, step).await.unwrap();
+        }
+        env.exercise_draft_and_metadata(seed, &att_added)
+            .await
+            .unwrap();
+        env.remove_account_and_verify_clean().await.unwrap();
+    }
+}

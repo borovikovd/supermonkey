@@ -400,8 +400,9 @@ impl Core {
         self.accounts.poll_all();
     }
 
-    pub async fn set_online(&self, online: bool) {
-        self.network.set_online(online).await;
+    #[cfg(any(test, feature = "fake"))]
+    pub async fn probe_network(&self) {
+        self.network.probe_now().await;
     }
 
     #[cfg(any(test, feature = "fake"))]
