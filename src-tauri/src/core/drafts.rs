@@ -3,7 +3,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use chrono::FixedOffset;
 use uuid::Uuid;
 
 use crate::domain::{
@@ -20,6 +19,8 @@ use crate::mime::{
 use crate::store::{
     Db, DraftAttachmentItem, DraftRecord, MessageRecord, NewDraft, StoreError, WriteTx,
 };
+
+use super::runtime::local_offset_at;
 
 pub(crate) const MAX_ATTACHMENT_BYTES: usize = 25 * 1024 * 1024;
 
@@ -237,7 +238,6 @@ pub(crate) struct CreateDraftArgs {
     pub(crate) target: Option<MessageId>,
     pub(crate) started_on_latest: bool,
     pub(crate) now: Millis,
-    pub(crate) offset: FixedOffset,
 }
 
 #[expect(
@@ -330,13 +330,13 @@ pub(crate) fn build_new_draft(db: Db<'_>, args: CreateDraftArgs) -> Result<NewDr
 
     if let Some(target) = &target_msg {
         if target.has_body {
-            quote_html = build_target_quote(db, target, args.kind, args.offset)?;
+            quote_html = build_target_quote(db, target, args.kind)?;
             if args.kind == DraftKind::Forward {
                 attachments = carried_attachments_from_message(db, target.id, None)?;
             }
         } else {
             waits_for = Some(DraftWait::TargetBody);
-            quote_html = build_snippet_quote(target, args.kind, args.offset);
+            quote_html = build_snippet_quote(target, args.kind);
         }
     }
 
@@ -411,8 +411,8 @@ fn build_target_quote(
     db: Db<'_>,
     target: &MessageRecord,
     kind: DraftKind,
-    offset: FixedOffset,
 ) -> Result<Option<String>, StoreError> {
+    let offset = local_offset_at(target.date);
     let Some(body) = db.message_body(target.id)? else {
         return Ok(None);
     };
@@ -435,11 +435,8 @@ fn build_target_quote(
     }))
 }
 
-fn build_snippet_quote(
-    target: &MessageRecord,
-    kind: DraftKind,
-    offset: FixedOffset,
-) -> Option<String> {
+fn build_snippet_quote(target: &MessageRecord, kind: DraftKind) -> Option<String> {
+    let offset = local_offset_at(target.date);
     if target.snippet.trim().is_empty() {
         return None;
     }
@@ -487,7 +484,6 @@ fn carried_attachments_from_message(
 pub(crate) fn complete_waiting_drafts_for_message(
     tx: &mut WriteTx<'_>,
     msg_id: MessageId,
-    offset: FixedOffset,
 ) -> Result<Vec<DraftRecord>, StoreError> {
     let Some(target) = tx.read().message(msg_id)? else {
         return Ok(Vec::new());
@@ -498,7 +494,7 @@ pub(crate) fn complete_waiting_drafts_for_message(
         if !draft.lifecycle.finish_wait(DraftWait::TargetBody) {
             continue;
         }
-        draft.quote_html = build_target_quote(tx.read(), &target, draft.kind, offset)?;
+        draft.quote_html = build_target_quote(tx.read(), &target, draft.kind)?;
         if draft.kind == DraftKind::Forward {
             let rev = tx.stamp();
             let carried = carried_attachments_from_message(tx.read(), msg_id, Some(rev))?;

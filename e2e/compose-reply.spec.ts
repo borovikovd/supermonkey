@@ -1037,3 +1037,21 @@ test("REP-20 Cmd+Q before a reply's first load arrives keeps what was typed", as
   expect(drafts).toHaveLength(1);
   expect(drafts[0]?.message.raw).toContain("Typed before it loaded");
 });
+
+test("REP-21 a reply names the quoted mail's time as the clock showed it that day, across a clock change", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.empty(gmail, app);
+  await gmail.deliver({
+    account: A,
+    from: "Dee Dusk <dee@dusk.test>",
+    subject: "Sent in summer time",
+    text: "Before the clocks went back.",
+    date: Date.parse("2026-10-30T12:00:00-04:00"),
+  });
+  await app.settle();
+  await app.openAndSettle("Sent in summer time");
+  await app.reply();
+  expect(await quoteText(app)).toMatch(/^On Fri, Oct 30, 2026 at 12:00 PM Dee Dusk/);
+});

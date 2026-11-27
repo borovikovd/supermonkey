@@ -108,7 +108,6 @@ pub(crate) async fn fetch_and_ingest_thread(
         priority,
     )
     .await?;
-    let offset = clock.local_offset();
     let wire_history = wire.history_id;
     let gid = wire.id;
 
@@ -124,7 +123,6 @@ pub(crate) async fn fetch_and_ingest_thread(
                 prepared,
                 format == Format::Full,
                 notify_new_mail,
-                offset,
             )
         })
         .await;
@@ -307,7 +305,6 @@ fn commit_ingested_thread(
     mut prepared: Vec<PreparedMessage>,
     full_fetch: bool,
     notify_new_mail: bool,
-    offset: chrono::FixedOffset,
 ) -> Result<IngestResult, StoreError> {
     let Some(acct) = tx.read().account(account)? else {
         return Ok(IngestResult {
@@ -347,7 +344,7 @@ fn commit_ingested_thread(
 
     if is_outdated {
         if full_fetch && let Some(tid) = existing_tid {
-            store_missing_bodies(tx, state, &prior_msgs, &prepared, offset)?;
+            store_missing_bodies(tx, state, &prior_msgs, &prepared)?;
             return Ok(IngestResult {
                 thread_id: Some(tid),
                 unknown_labels: false,
@@ -457,7 +454,7 @@ fn commit_ingested_thread(
     }
 
     for msg_id in stored_body_ids {
-        let ready = complete_waiting_drafts_for_message(tx, msg_id, offset)?;
+        let ready = complete_waiting_drafts_for_message(tx, msg_id)?;
         for draft in ready {
             if draft.in_outbox {
                 state.emit(Effect::KickOutbox(draft.account));
@@ -523,7 +520,6 @@ fn store_missing_bodies(
     state: &mut WriterState,
     existing: &[crate::store::MessageRecord],
     prepared: &[PreparedMessage],
-    offset: chrono::FixedOffset,
 ) -> Result<(), StoreError> {
     let by_gid: HashMap<&GmailMessageId, &crate::store::MessageRecord> =
         existing.iter().map(|m| (&m.gmail_id, m)).collect();
@@ -541,7 +537,7 @@ fn store_missing_bodies(
                     attachments: &body.attachments,
                 },
             )?;
-            let ready = complete_waiting_drafts_for_message(tx, rec.id, offset)?;
+            let ready = complete_waiting_drafts_for_message(tx, rec.id)?;
             for draft in ready {
                 if draft.in_outbox {
                     state.emit(Effect::KickOutbox(draft.account));

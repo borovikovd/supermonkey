@@ -16,6 +16,14 @@ use tokio_util::task::TaskTracker;
 
 use crate::domain::Millis;
 
+#[must_use]
+pub(crate) fn local_offset_at(at: Millis) -> FixedOffset {
+    Local
+        .timestamp_millis_opt(at.0)
+        .single()
+        .map_or_else(|| Local::now().offset().fix(), |dt| dt.offset().fix())
+}
+
 #[derive(Debug, Clone)]
 pub enum Clock {
     System,
@@ -50,15 +58,6 @@ impl Clock {
             .timestamp_millis_opt(self.now().0)
             .single()
             .unwrap_or_else(Local::now)
-    }
-
-    #[must_use]
-    pub fn local_offset(&self) -> FixedOffset {
-        let now = self.now().0;
-        Local
-            .timestamp_millis_opt(now)
-            .single()
-            .map_or_else(|| Local::now().offset().fix(), |dt| dt.offset().fix())
     }
 
     #[must_use]

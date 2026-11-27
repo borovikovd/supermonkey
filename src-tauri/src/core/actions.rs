@@ -619,7 +619,6 @@ fn apply_save_draft(
                     target,
                     started_on_latest,
                     now: state.clock.now(),
-                    offset: state.clock.local_offset(),
                 },
             )?;
             let needs_body = new_draft.lifecycle.waits_for.is_some();
