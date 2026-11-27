@@ -25,6 +25,13 @@ pub(crate) fn local_offset_at(at: Millis) -> FixedOffset {
 }
 
 #[derive(Debug, Clone)]
+#[cfg_attr(
+    not(any(test, feature = "fake")),
+    expect(
+        missing_copy_implementations,
+        reason = "Manual variant holds Arc<ManualClock> under test and fake features"
+    )
+)]
 pub enum Clock {
     System,
     #[cfg(any(test, feature = "fake"))]

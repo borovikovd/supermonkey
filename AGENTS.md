@@ -122,7 +122,12 @@ Assume every `.await` lets the world change.
 - **Own or borrow deliberately.** Borrow to read (`&T`, `&str`, `&[T]`, single
   field over whole context), `&mut T` to mutate, take by value to store, send,
   or consume (`Copy` by value). Never take `&T` and clone inside; never clone to
-  appease the borrow checker — reshape ownership.
+  appease the borrow checker — reshape ownership. Before writing
+  `param.clone()`, check whether callers still need it and flip to `T` if not.
+  Move data forward through multi-stage pipelines (`.take()`, `.remove()`,
+  `into_*`) instead of holding earlier stages by `&`, and use borrowing
+  `#[derive(Serialize)]` views (`*Ref<'a>`) for values built solely to serialize
+  and drop.
 - **Minimal pointers and locks.** Structs own their fields (references only in
   single-call or single-tx scopes). Add `Box`, `Arc`, or `Cow` only for a named
   need; prefer one owner + IDs over `Arc<Mutex<T>>` / `Rc<RefCell<T>>`. Never
@@ -176,7 +181,10 @@ Assume every `.await` lets the world change.
 - **Focused flow-based passes.** After large changes, run separate passes for
   architecture, ownership, concurrency, security, and test strength, sliced end
   to end by data flow rather than directory, repeating until a pass finds
-  nothing.
+  nothing. For ownership passes, enforce zero-waste strictly on hot paths
+  (loops, large buffers/bodies, SQL/MIME/sync, `Copy`/API boundaries) and leave
+  one-shot startup, error, and migration paths alone unless egregious — stop
+  once a pass finds nothing above that bar.
 - **Converging bug review.** Put batch fixes on a branch, never dueling commits
   on `main`. State the two-sided invariant before editing (both safety/no-waste
   and completeness/soundness) and lock both sides with an invariant or

@@ -306,7 +306,11 @@ fn parse_google_error(body: &str) -> (Option<String>, String) {
     (reason, err.message)
 }
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
+#[expect(
+    missing_copy_implementations,
+    reason = "stateful retry cursor; implicit Copy would silently fork attempt counts"
+)]
 pub struct Backoff {
     attempt: u32,
 }
