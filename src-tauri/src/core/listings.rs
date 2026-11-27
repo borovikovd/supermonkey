@@ -278,16 +278,6 @@ async fn run_listing(
                 continue;
             }
             Err(err) if err.is_transient() => {
-                set_listing_state(
-                    &inner.writer,
-                    &sub,
-                    ListingState {
-                        remote_hits: remote_hits.clone(),
-                        searching: false,
-                        more: page_token.is_some(),
-                    },
-                )
-                .await;
                 drop(busy);
                 let pause = inner.clock.sleep(backoff.next_delay(err.retry_after()));
                 tokio::select! {

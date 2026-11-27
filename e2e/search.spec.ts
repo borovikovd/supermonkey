@@ -259,6 +259,7 @@ test("SRC-21 a Gmail search that is turned away for a moment asks again instead 
   await app.advance(300);
   await app.settle();
   await expect(app.row("Invoice 2019")).toHaveCount(0);
+  await expect(app.page.getByText("Nothing here.")).toHaveCount(0);
 
   await app.advance(5_000);
   await app.settle();
