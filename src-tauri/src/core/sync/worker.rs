@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -32,17 +32,38 @@ pub(crate) const SLEEP_JUMP_THRESHOLD_MS: i64 = 135_000;
 const FETCH_CONCURRENCY: usize = 4;
 const CONTACTS_BACKFILL_MAX: usize = 250;
 
-#[derive(Debug, Default)]
-struct HealthState {
+struct SlotState {
+    gmail: Option<(u64, Arc<Gmail>)>,
+    next_gen: u64,
     first_failure: Option<Millis>,
     current_status: Option<SyncStatus>,
+}
+
+impl SlotState {
+    fn new(gmail: Option<Arc<Gmail>>) -> Self {
+        let (gmail, next_gen) = match gmail {
+            Some(g) => (Some((1, g)), 2),
+            None => (None, 1),
+        };
+        Self {
+            gmail,
+            next_gen,
+            first_failure: None,
+            current_status: None,
+        }
+    }
+
+    fn matches_gen(&self, grant_gen: u64) -> bool {
+        self.gmail
+            .as_ref()
+            .is_some_and(|(cur, _)| *cur == grant_gen)
+    }
 }
 
 pub(crate) struct AccountSlot {
     pub(crate) account: AccountId,
     pub(crate) email: String,
-    gmail: RwLock<Option<(u64, Arc<Gmail>)>>,
-    health: Mutex<HealthState>,
+    state: Mutex<SlotState>,
     pub(crate) network: Network,
     tasks: Tasks,
     pub(crate) fetch_queue: FetchQueue,
@@ -83,12 +104,10 @@ impl AccountSlot {
         activity: Activity,
         files: DraftFiles,
     ) -> Self {
-        let initial = gmail.map(|g| (1_u64, g));
         Self {
             account,
             email,
-            gmail: RwLock::new(initial),
-            health: Mutex::new(HealthState::default()),
+            state: Mutex::new(SlotState::new(gmail)),
             network,
             tasks,
             fetch_queue: FetchQueue::new(),
@@ -106,29 +125,20 @@ impl AccountSlot {
 
     #[must_use]
     pub(crate) fn gmail(&self) -> Option<(u64, Arc<Gmail>)> {
-        self.gmail
-            .read()
+        self.state
+            .lock()
+            .gmail
             .as_ref()
             .map(|(grant_gen, g)| (*grant_gen, Arc::clone(g)))
     }
 
     pub(crate) fn set_gmail(&self, next: Arc<Gmail>) -> u64 {
-        let mut slot = self.gmail.write();
-        let next_gen = slot.as_ref().map_or(1, |(g, _)| g.saturating_add(1));
-        *slot = Some((next_gen, next));
-        drop(slot);
-        self.health.lock().first_failure = None;
+        let mut st = self.state.lock();
+        let next_gen = st.next_gen;
+        st.next_gen = st.next_gen.saturating_add(1);
+        st.gmail = Some((next_gen, next));
+        st.first_failure = None;
         next_gen
-    }
-
-    fn clear_gmail_if_gen(&self, grant_gen: u64) -> bool {
-        let mut slot = self.gmail.write();
-        if slot.as_ref().is_some_and(|(cur, _)| *cur == grant_gen) {
-            *slot = None;
-            true
-        } else {
-            false
-        }
     }
 
     #[must_use]
@@ -139,7 +149,7 @@ impl AccountSlot {
     #[cfg(any(test, feature = "fake"))]
     #[must_use]
     pub(crate) fn has_failure(&self) -> bool {
-        self.health.lock().first_failure.is_some()
+        self.state.lock().first_failure.is_some()
     }
 
     pub(crate) fn kick_poll(&self) {
@@ -156,28 +166,36 @@ impl AccountSlot {
     }
 
     pub(crate) async fn report_success(&self, grant_gen: u64) {
-        let cur = self.gmail.read().as_ref().map(|(g, _)| *g);
-        if cur != Some(grant_gen) {
-            return;
-        }
         let was_retrying = {
-            let mut h = self.health.lock();
-            h.first_failure = None;
-            h.current_status == Some(SyncStatus::Retrying)
+            let mut st = self.state.lock();
+            if !st.matches_gen(grant_gen) {
+                return;
+            }
+            st.first_failure = None;
+            if st.current_status == Some(SyncStatus::Retrying) {
+                st.current_status = Some(SyncStatus::Idle);
+                true
+            } else {
+                false
+            }
         };
         if was_retrying {
-            self.set_status(SyncStatus::Idle).await;
+            self.write_status(SyncStatus::Idle).await;
         }
     }
 
     pub(crate) async fn set_status(&self, status: SyncStatus) {
         {
-            let mut h = self.health.lock();
-            if h.current_status == Some(status) {
+            let mut st = self.state.lock();
+            if st.current_status == Some(status) {
                 return;
             }
-            h.current_status = Some(status);
+            st.current_status = Some(status);
         }
+        self.write_status(status).await;
+    }
+
+    async fn write_status(&self, status: SyncStatus) {
         let acct = self.account;
         super::super::log_err(
             "update account sync status",
@@ -190,15 +208,16 @@ impl AccountSlot {
     }
 
     pub(crate) async fn mark_auth_failed(&self, grant_gen: u64) {
-        if !self.clear_gmail_if_gen(grant_gen) {
-            return;
+        {
+            let mut st = self.state.lock();
+            if !st.matches_gen(grant_gen) {
+                return;
+            }
+            st.gmail = None;
+            st.first_failure = None;
+            st.current_status = Some(SyncStatus::NeedsSignin);
         }
         self.fetch_queue.clear();
-        {
-            let mut h = self.health.lock();
-            h.first_failure = None;
-            h.current_status = Some(SyncStatus::NeedsSignin);
-        }
         let acct = self.account;
         super::super::log_err(
             "mark account needs_signin",
@@ -225,45 +244,75 @@ impl AccountSlot {
         }
         self.network.lost_if_unreachable(err).await;
         if !self.is_online() {
-            self.health.lock().first_failure = None;
-            self.set_status(SyncStatus::Offline).await;
+            let mark_offline = {
+                let mut st = self.state.lock();
+                if !st.matches_gen(grant_gen) {
+                    return None;
+                }
+                st.first_failure = None;
+                let changed = st.current_status != Some(SyncStatus::Offline);
+                if changed {
+                    st.current_status = Some(SyncStatus::Offline);
+                }
+                changed
+            };
+            if mark_offline {
+                self.write_status(SyncStatus::Offline).await;
+            }
             return None;
         }
         let now = self.clock.now();
         let (show_retrying, spawn_timer) = {
-            let mut h = self.health.lock();
-            if let Some(first) = h.first_failure {
-                (
-                    now.0.saturating_sub(first.0) >= RETRYING_THRESHOLD_MS,
-                    false,
-                )
+            let mut st = self.state.lock();
+            if !st.matches_gen(grant_gen) {
+                return None;
+            }
+            if let Some(first) = st.first_failure {
+                let due = now.0.saturating_sub(first.0) >= RETRYING_THRESHOLD_MS;
+                let changed = due && st.current_status != Some(SyncStatus::Retrying);
+                if changed {
+                    st.current_status = Some(SyncStatus::Retrying);
+                }
+                (changed, false)
             } else {
-                h.first_failure = Some(now);
+                st.first_failure = Some(now);
                 (false, true)
             }
         };
         if spawn_timer {
-            let slot = Arc::clone(self);
-            let cancel = self.tasks.token();
-            self.tasks.spawn(async move {
-                let dur =
-                    Duration::from_millis(u64::try_from(RETRYING_THRESHOLD_MS).unwrap_or(30_000));
-                let sleep = slot.clock.sleep(dur);
-                tokio::select! {
-                    () = cancel.cancelled() => return,
-                    () = sleep => {}
-                }
-                let _busy = slot.activity.enter();
-                let still_failing = slot.health.lock().first_failure == Some(now);
-                if still_failing && slot.is_online() && slot.gmail().is_some() {
-                    slot.set_status(SyncStatus::Retrying).await;
-                }
-            });
+            self.spawn_retrying_timer(grant_gen, now);
         }
         if show_retrying {
-            self.set_status(SyncStatus::Retrying).await;
+            self.write_status(SyncStatus::Retrying).await;
         }
         Some(backoff.next_delay(err.retry_after()))
+    }
+
+    fn spawn_retrying_timer(self: &Arc<Self>, grant_gen: u64, since: Millis) {
+        let slot = Arc::clone(self);
+        let cancel = self.tasks.token();
+        self.tasks.spawn(async move {
+            let dur = Duration::from_millis(u64::try_from(RETRYING_THRESHOLD_MS).unwrap_or(30_000));
+            let sleep = slot.clock.sleep(dur);
+            tokio::select! {
+                () = cancel.cancelled() => return,
+                () = sleep => {}
+            }
+            let _busy = slot.activity.enter();
+            let write_retrying = slot.is_online() && {
+                let mut st = slot.state.lock();
+                let still = st.matches_gen(grant_gen)
+                    && st.first_failure == Some(since)
+                    && st.current_status != Some(SyncStatus::Retrying);
+                if still {
+                    st.current_status = Some(SyncStatus::Retrying);
+                }
+                still
+            };
+            if write_retrying {
+                slot.write_status(SyncStatus::Retrying).await;
+            }
+        });
     }
 }
 
@@ -322,11 +371,7 @@ async fn run_fetch_worker(slot: Arc<AccountSlot>, cancel: CancellationToken) {
     }
 }
 
-async fn fetch_one(
-    slot: &Arc<AccountSlot>,
-    job: &FetchJob,
-    cancel: &CancellationToken,
-) -> Option<bool> {
+async fn fetch_one(slot: &AccountSlot, job: &FetchJob, cancel: &CancellationToken) -> Option<bool> {
     if !slot.is_online() {
         return Some(false);
     }
@@ -1385,5 +1430,146 @@ async fn run_contacts_backfill(slot: &AccountSlot, gmail: &Gmail, cancel: &Cance
                 })
                 .await,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::num::NonZeroUsize;
+
+    use super::*;
+    use crate::core::ChannelSink;
+    use crate::core::events::EffectBus;
+    use crate::domain::{ActionNo, Rev};
+    use crate::gmail::{HttpClient, OAuthConfig, QuotaConfig, RefreshToken, Scheduler, Tokens};
+    use crate::store::open_writer;
+
+    fn test_gmail(http: &HttpClient, sched: &Scheduler) -> Arc<Gmail> {
+        let oauth = OAuthConfig {
+            client_id: "c".to_owned(),
+            client_secret: "s".to_owned(),
+            auth_url: "http://127.0.0.1:1/auth".to_owned(),
+            token_url: "http://127.0.0.1:1/token".to_owned(),
+            revoke_url: "http://127.0.0.1:1/revoke".to_owned(),
+        };
+        let tokens = Tokens::new(http.clone(), oauth, RefreshToken::new("rt"), None);
+        Arc::new(
+            Gmail::new(
+                http.clone(),
+                "http://127.0.0.1:1",
+                tokens,
+                sched.account("a@x.test"),
+            )
+            .unwrap(),
+        )
+    }
+
+    struct TestSlotFixture {
+        _dir: tempfile::TempDir,
+        http: HttpClient,
+        sched: Scheduler,
+        tasks: Tasks,
+        writer: Writer<WriterState>,
+        slot: Arc<AccountSlot>,
+    }
+
+    fn test_slot() -> TestSlotFixture {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("slot.db");
+        drop(open_writer(&db_path).unwrap());
+        let pool = Arc::new(ReadPool::open(&db_path, NonZeroUsize::new(1).unwrap()).unwrap());
+        let clock = Clock::manual(Millis(1_000));
+        let activity = Activity::new();
+        let (bus, _rx) = EffectBus::new(activity.clone());
+        let channel: Arc<Mutex<Option<ChannelSink>>> = Arc::new(Mutex::new(None));
+        let writer = Writer::start(
+            &db_path,
+            WriterState::new(ActionNo(0), Rev(0), true, clock.clone(), bus, channel),
+            WriterState::on_commit,
+            WriterState::on_rollback,
+        )
+        .unwrap();
+        let http = HttpClient::new().unwrap();
+        let sched = Scheduler::new(QuotaConfig::default());
+        let network = Network::new(
+            "http://127.0.0.1:1",
+            http.clone(),
+            writer.clone(),
+            clock.clone(),
+            activity.clone(),
+        );
+        let tasks = Tasks::new(activity.clone());
+        let slot = Arc::new(AccountSlot::new(
+            AccountId(1),
+            "a@x.test".to_owned(),
+            Some(test_gmail(&http, &sched)),
+            network,
+            tasks.clone(),
+            writer.clone(),
+            pool,
+            clock,
+            activity,
+            DraftFiles::new(dir.path()),
+        ));
+        TestSlotFixture {
+            _dir: dir,
+            http,
+            sched,
+            tasks,
+            writer,
+            slot,
+        }
+    }
+
+    #[tokio::test]
+    async fn stale_grant_error_does_not_poison_newer_grant_health() {
+        let fx = test_slot();
+        let (gen1, _) = fx.slot.gmail().unwrap();
+        let gen2 = fx.slot.set_gmail(test_gmail(&fx.http, &fx.sched));
+        assert!(gen2 > gen1, "set_gmail advances grant generation");
+
+        let mut backoff = Backoff::new();
+        let err = GmailError {
+            outcome: Outcome::ServerError { status: 503 },
+            detail: "backend error".to_owned(),
+        };
+        let delay = fx.slot.handle_gmail_error(gen1, &err, &mut backoff).await;
+        assert_eq!(delay, None, "stale grant transient error is ignored");
+        assert!(
+            !fx.slot.has_failure(),
+            "stale grant error must not arm first_failure on newer grant"
+        );
+        fx.slot.mark_auth_failed(gen1).await;
+        assert_eq!(
+            fx.slot.gmail().map(|(g, _)| g),
+            Some(gen2),
+            "stale mark_auth_failed leaves newer grant installed"
+        );
+
+        fx.slot.mark_auth_failed(gen2).await;
+        assert!(
+            fx.slot.gmail().is_none(),
+            "active mark_auth_failed clears grant"
+        );
+        let gen3 = fx.slot.set_gmail(test_gmail(&fx.http, &fx.sched));
+        assert!(
+            gen3 > gen2,
+            "grant generation stays monotonic across sign-out"
+        );
+
+        let active_delay = fx.slot.handle_gmail_error(gen3, &err, &mut backoff).await;
+        assert!(active_delay.is_some(), "active grant error schedules retry");
+        assert!(
+            fx.slot.has_failure(),
+            "active grant error records first_failure"
+        );
+        fx.slot.report_success(gen3).await;
+        assert!(
+            !fx.slot.has_failure(),
+            "active grant report_success clears first_failure"
+        );
+
+        fx.tasks.stop().await;
+        fx.writer.stop().await.unwrap();
     }
 }

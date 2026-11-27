@@ -17,12 +17,13 @@ use super::subs::{ListingState, Registry};
 
 const MAX_LANDED_OPS: usize = 128;
 
-pub struct ChannelSink(Box<dyn Fn(ChannelMessage) + Send + Sync>);
+#[derive(Clone)]
+pub struct ChannelSink(Arc<dyn Fn(ChannelMessage) + Send + Sync>);
 
 impl ChannelSink {
     #[must_use]
     pub fn new(f: impl Fn(ChannelMessage) + Send + Sync + 'static) -> Self {
-        Self(Box::new(f))
+        Self(Arc::new(f))
     }
 
     pub fn send(&self, msg: ChannelMessage) {
@@ -345,8 +346,8 @@ impl WriterState {
     }
 
     fn send_channel(&self, msg: ChannelMessage) {
-        let guard = self.channel.lock();
-        if let Some(sink) = guard.as_ref() {
+        let sink = self.channel.lock().clone();
+        if let Some(sink) = sink {
             sink.send(msg);
         }
     }
@@ -455,6 +456,47 @@ mod tests {
                 [SubUpdate::App { first: true, .. }]
             ),
             "retry subscribe still delivers first snapshot"
+        );
+        writer.stop().wait().unwrap();
+    }
+
+    #[test]
+    fn send_channel_releases_lock_before_invoking_sink() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("reentrant.db");
+        drop(crate::store::open_writer(&db_path).unwrap());
+        let activity = Activity::new();
+        let (bus, _rx) = EffectBus::new(activity);
+        let channel: Arc<Mutex<Option<ChannelSink>>> = Arc::new(Mutex::new(None));
+        let sink_channel = Arc::clone(&channel);
+        let acquired = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let acquired_c = Arc::clone(&acquired);
+        *channel.lock() = Some(ChannelSink::new(move |_msg| {
+            let unlocked = sink_channel.try_lock().is_some();
+            acquired_c.store(unlocked, std::sync::atomic::Ordering::SeqCst);
+        }));
+        let state = WriterState::new(
+            ActionNo(0),
+            Rev(0),
+            true,
+            Clock::manual(Millis(1_000)),
+            bus,
+            Arc::clone(&channel),
+        );
+        let writer = Writer::start(
+            &db_path,
+            state,
+            WriterState::on_commit,
+            WriterState::on_rollback,
+        )
+        .unwrap();
+        writer
+            .call(StorePriority::Ui, |tx, st| apply_batch(tx, st, sub_app(1)))
+            .wait()
+            .unwrap();
+        assert!(
+            acquired.load(std::sync::atomic::Ordering::SeqCst),
+            "channel lock must be released before invoking external ChannelSink callback"
         );
         writer.stop().wait().unwrap();
     }

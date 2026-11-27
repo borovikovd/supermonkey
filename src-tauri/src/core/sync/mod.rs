@@ -171,7 +171,13 @@ impl AccountManager {
         )]
         let records = self.inner.pool.with(|db| db.accounts())?;
         for rec in records {
-            let token = self.inner.tokens.load(&rec.email).ok().flatten();
+            let token = self
+                .inner
+                .tokens
+                .load_async(rec.email.clone())
+                .await
+                .ok()
+                .flatten();
             let gmail = token.and_then(|refresh| {
                 let tok = Tokens::new(
                     self.inner.http.clone(),
