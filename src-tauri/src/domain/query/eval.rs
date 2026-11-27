@@ -169,20 +169,54 @@ impl ListRequirement {
             (Self::ExcludeList, Self::ExcludeList) => Self::ExcludeList,
         }
     }
+    #[must_use]
+    const fn or(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Impossible, x) | (x, Self::Impossible) => x,
+            (Self::OnlyList, Self::OnlyList) => Self::OnlyList,
+            (Self::ExcludeList, Self::ExcludeList) => Self::ExcludeList,
+            (Self::Any, _)
+            | (_, Self::Any)
+            | (Self::OnlyList, Self::ExcludeList)
+            | (Self::ExcludeList, Self::OnlyList) => Self::Any,
+        }
+    }
 }
 
 pub(super) fn list_requirement(expr: &Expr) -> ListRequirement {
+    list_req(expr, false)
+}
+
+fn list_req(expr: &Expr, negated: bool) -> ListRequirement {
     match expr {
-        Expr::Term(Term::IsList) => ListRequirement::OnlyList,
-        Expr::Not(inner) => match list_requirement(inner) {
-            ListRequirement::OnlyList => ListRequirement::ExcludeList,
-            ListRequirement::ExcludeList => ListRequirement::OnlyList,
-            ListRequirement::Any | ListRequirement::Impossible => ListRequirement::Any,
-        },
-        Expr::And(items) => items.iter().fold(ListRequirement::Any, |acc, item| {
-            acc.and(list_requirement(item))
-        }),
-        Expr::Term(_) | Expr::Or(_) | Expr::Unsupported => ListRequirement::Any,
+        Expr::Term(Term::IsList) => {
+            if negated {
+                ListRequirement::ExcludeList
+            } else {
+                ListRequirement::OnlyList
+            }
+        }
+        Expr::Not(inner) => list_req(inner, !negated),
+        Expr::And(items) => combine_list_req(items, negated, !negated),
+        Expr::Or(items) => combine_list_req(items, negated, negated),
+        Expr::Term(_) | Expr::Unsupported => ListRequirement::Any,
+    }
+}
+
+fn combine_list_req(items: &[Expr], negated: bool, conjunctive: bool) -> ListRequirement {
+    if items.is_empty() {
+        return ListRequirement::Any;
+    }
+    if conjunctive {
+        items.iter().fold(ListRequirement::Any, |acc, item| {
+            acc.and(list_req(item, negated))
+        })
+    } else {
+        items
+            .iter()
+            .map(|item| list_req(item, negated))
+            .reduce(ListRequirement::or)
+            .unwrap_or(ListRequirement::Any)
     }
 }
 

@@ -5,7 +5,7 @@ use chrono::{TimeZone as _, Timelike as _, Utc};
 use chrono_tz::{America::New_York, Europe::Berlin};
 use rusqlite::Connection;
 use serde_json::{Value, json};
-use supermonkey_lib::domain::query::{MatchTarget, Query, Scope, gmail_query};
+use supermonkey_lib::domain::query::{ListRequirement, MatchTarget, Query, Scope, gmail_query};
 use supermonkey_lib::domain::snooze::{parse_snooze_text, snooze_options, snooze_picker};
 use supermonkey_lib::domain::{
     AccountId, Addr, GmailMessageId, GmailThreadId, IMPORTANT_POSITION, Identity, LabelId,
@@ -806,4 +806,118 @@ fn ipc_command_and_submitted_handle_adversarial_json_without_panicking_or_leakin
             "malformed command {name} must return Err"
         );
     }
+}
+
+const LIST_REQ_PIECES: &[&str] = &[
+    "is:list",
+    "wombat",
+    "from:bob@x.test",
+    "OR",
+    "AND",
+    "-",
+    "(",
+    ")",
+    " ",
+];
+
+fn list_req_probe_message(is_list: bool, has_wombat: bool, from_bob: bool) -> MessageFacts {
+    MessageFacts {
+        id: MessageId(1),
+        gmail_id: GmailMessageId("gm-list".to_owned()),
+        date: Millis(1_000),
+        from: Addr::new(if from_bob { "bob@x.test" } else { "eve@x.test" }),
+        to: vec![Addr::new("ana@acme.test")],
+        cc: Vec::new(),
+        bcc: Vec::new(),
+        reply_to: Vec::new(),
+        subject: if has_wombat { "wombat" } else { "other" }.to_owned(),
+        snippet: String::new(),
+        message_id_hdr: None,
+        in_reply_to: None,
+        references: Vec::new(),
+        is_list,
+        is_draft: false,
+        has_attachments: false,
+        labels: std::iter::once(SystemLabel::Inbox.label_id()).collect(),
+    }
+}
+
+fn assert_list_req_fuzz_soundness(now: chrono::DateTime<Utc>) {
+    let identity = Identity::new("ana@acme.test", "Ana", Vec::new());
+    let labels = HashMap::new();
+    let mut seed: u64 = 0x1157_BEEF_9999_0001;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    for _ in 0..1_500 {
+        let len = usize::try_from(1 + next() % 8).unwrap_or(1);
+        let mut raw = String::new();
+        for _ in 0..len {
+            let idx = usize::try_from(next() % u64::try_from(LIST_REQ_PIECES.len()).unwrap_or(1))
+                .unwrap_or(0);
+            raw.push_str(LIST_REQ_PIECES[idx]);
+        }
+        let q = Query::parse_search(&raw, &now);
+        let req = q.list_requirement();
+        for is_list in [false, true] {
+            for has_wombat in [false, true] {
+                for from_bob in [false, true] {
+                    let msg = list_req_probe_message(is_list, has_wombat, from_bob);
+                    let target = MatchTarget::search(&msg, "", &labels, &identity, false);
+                    if !q.matches(&target) {
+                        continue;
+                    }
+                    assert_ne!(
+                        req,
+                        ListRequirement::Impossible,
+                        "query {raw:?} matched a message despite Impossible requirement"
+                    );
+                    assert!(
+                        req != ListRequirement::OnlyList || is_list,
+                        "query {raw:?} matched non-list mail despite OnlyList"
+                    );
+                    assert!(
+                        req != ListRequirement::ExcludeList || !is_list,
+                        "query {raw:?} matched list mail despite ExcludeList"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn list_requirement_is_sound_over_boolean_combinations_and_negated_groups() {
+    let now = Utc.with_ymd_and_hms(2026, 11, 2, 15, 0, 0).unwrap();
+
+    assert_eq!(
+        Query::parse_search("-(is:list wombat)", &now).list_requirement(),
+        ListRequirement::Any,
+        "negated conjunction -(is:list wombat) can match list mail without wombat"
+    );
+    assert_eq!(
+        Query::parse_search("-(is:list OR wombat)", &now).list_requirement(),
+        ListRequirement::ExcludeList,
+        "negated disjunction -(is:list OR wombat) excludes all list mail"
+    );
+    assert_eq!(
+        Query::parse_search("is:list OR is:list", &now).list_requirement(),
+        ListRequirement::OnlyList,
+        "disjunction where every branch requires list mail requires list mail"
+    );
+    assert_eq!(
+        Query::parse_search("-(is:list)", &now).list_requirement(),
+        ListRequirement::ExcludeList,
+        "negated singleton group -(is:list) excludes list mail"
+    );
+    assert_eq!(
+        Query::parse_search("-(is:list -is:list)", &now).list_requirement(),
+        ListRequirement::Any,
+        "negated contradiction matches both list and non-list mail"
+    );
+
+    assert_list_req_fuzz_soundness(now);
 }
