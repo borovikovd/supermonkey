@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+
 import type { Locator } from "@playwright/test";
 
 import type { App } from "./app.ts";
@@ -1180,4 +1182,22 @@ test("ACC-26 a conversation and its reply still loading when the account signs o
   await app.settle();
   await expect(app.highlighted).toContainText("Bea Blue");
   await app.expectNoErrorToasts(errors);
+});
+
+test("ACC-27 removing an account deletes the attachment files it downloaded", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await app.row("Contract").click();
+  await app.conversation.getByRole("button", { name: /contract\.pdf/ }).click();
+  await app.settle();
+  const [file] = (await gmail.platform()).openedFiles;
+  expect(file).toBeDefined();
+  expect(existsSync(file ?? "")).toBe(true);
+  await app.press("Escape");
+
+  await app.removeAccount(A);
+  await app.settle();
+  expect(existsSync(file ?? ""), "the downloaded file is gone with the account").toBe(false);
 });

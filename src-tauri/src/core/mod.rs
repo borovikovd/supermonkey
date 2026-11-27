@@ -489,6 +489,7 @@ async fn handle_effect(core: &Arc<Core>, effect: Effect) {
             core.accounts.remove_account(account, email);
         }
         Effect::RemoveDraftFiles(draft) => core.files.remove_draft_dir(&draft),
+        Effect::RemoveAttachmentFiles(paths) => core.files.remove_attachment_files(&paths),
         Effect::EnsureDraftAttachments { account, draft } => {
             spawn_ensure_attachments(core, account, draft);
         }

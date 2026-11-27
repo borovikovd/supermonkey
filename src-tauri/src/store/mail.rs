@@ -492,6 +492,15 @@ impl Db<'_> {
         )
     }
 
+    pub fn attachment_files(self, account: AccountId) -> Result<Vec<String>, StoreError> {
+        self.all(
+            "SELECT a.local_path FROM attachments a JOIN messages m ON m.id = a.message_id WHERE m.account_id = ?1 AND a.local_path IS NOT NULL",
+            [account],
+            "list account attachment files",
+            |r| r.get(0),
+        )
+    }
+
     pub fn sender_inbox_threads(
         self,
         account: AccountId,

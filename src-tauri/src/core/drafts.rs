@@ -100,6 +100,20 @@ impl DraftFiles {
         }
     }
 
+    pub fn remove_attachment_files(&self, paths: &[String]) {
+        let dir = self.attachments_dir();
+        for raw in paths {
+            let path = Path::new(raw);
+            let inside = path.starts_with(&dir)
+                && !path
+                    .components()
+                    .any(|part| matches!(part, std::path::Component::ParentDir));
+            if inside && path.exists() {
+                super::log_err("remove attachment file", fs::remove_file(path));
+            }
+        }
+    }
+
     pub fn remove_unused_files(&self, draft: &DraftId, keep_paths: &HashSet<String>) {
         if !is_safe_segment(draft.as_str()) {
             return;

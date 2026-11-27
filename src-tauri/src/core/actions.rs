@@ -937,6 +937,10 @@ fn apply_remove_account(
     for o in outbox_rows {
         state.emit(Effect::RemoveDraftFiles(o.item.draft));
     }
+    let files = tx.read().attachment_files(account)?;
+    if !files.is_empty() {
+        state.emit(Effect::RemoveAttachmentFiles(files));
+    }
     state.stage_sub(SubOp::StopSearching(account));
     state.freshness.clear_account(account);
     tx.remove_account(account)?;

@@ -44,6 +44,7 @@ pub(crate) enum Effect {
         email: String,
     },
     RemoveDraftFiles(DraftId),
+    RemoveAttachmentFiles(Vec<String>),
     EnsureDraftAttachments {
         account: AccountId,
         draft: DraftId,
