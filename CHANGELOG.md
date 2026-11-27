@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.7.3](https://github.com/borovikovd/supermonkey/compare/v0.7.2...v0.7.3) (2026-11-27)
+
+
+### Bug Fixes
+
+* **accounts:** removing an account deletes the attachment files it downloaded ([df5545a](https://github.com/borovikovd/supermonkey/commit/df5545ab4439c2f967c809e8bc93d36e0eaada94))
+* **app:** quitting no longer waits for a draft's attachment download ([d4fe721](https://github.com/borovikovd/supermonkey/commit/d4fe721078353ee5e60a0d8bcce9b9d6fac228df))
+* **compose:** pictures in a draft's body and in its quote no longer share a content id ([af0de2f](https://github.com/borovikovd/supermonkey/commit/af0de2fd85cb60e7c7d43614cdbbcab81e2eec6e))
+* **compose:** the time of the quoted mail in a reply is right across a clock change ([3110612](https://github.com/borovikovd/supermonkey/commit/31106126488deeaa0db5b0c18d2035ae5455ab08))
+* **conversation:** a reply written below the quoted mail is shown, not folded away ([0ba33ed](https://github.com/borovikovd/supermonkey/commit/0ba33edb5af9680d36ee9f511d261ad89f46dd4c))
+* **conversation:** an email forwarded as an attachment is listed as one ([2cd9317](https://github.com/borovikovd/supermonkey/commit/2cd93178c07a785c641236c3b308ea39bfa82ed7))
+* **core:** tighten lock scopes in channel sink, account slot, notifications, and token loads ([31b97f4](https://github.com/borovikovd/supermonkey/commit/31b97f4ee77406895898436a57b5d3df80eabf83))
+* **drafts:** a send pressed while an autosave is on its way no longer deletes the draft from Gmail ([66c5298](https://github.com/borovikovd/supermonkey/commit/66c5298b0d60b5faf8807a2812e428d163275ef6))
+* **drafts:** undoing a send saves the draft's latest text to Gmail ([1634536](https://github.com/borovikovd/supermonkey/commit/1634536061528bf42adaedbc8df109295de3f1cc))
+* **gmail:** large attachments download and send on a slow connection ([3bf3452](https://github.com/borovikovd/supermonkey/commit/3bf345289f9872b21d23e735addbf927c5687de7))
+* **network:** changes and mail queued while Gmail was unreachable go out once it answers again ([62684db](https://github.com/borovikovd/supermonkey/commit/62684dbabafb122510d81d45b373577d22bf1b07))
+* **notifications:** new mail read by a poll that then fails is still announced ([21027a2](https://github.com/borovikovd/supermonkey/commit/21027a218455c420e74b99a20cfc6e267b5e9271))
+* **search:** a date operator ending in a non-Latin character no longer stops the app updating ([254461b](https://github.com/borovikovd/supermonkey/commit/254461bd4f6982e57be4d0ad314d5b34a62cef01))
+* **search:** a Gmail search or list that is turned away for a moment asks again ([a96a48b](https://github.com/borovikovd/supermonkey/commit/a96a48bb4db83e340aaf62b713fb9c6945087bb7))
+* **search:** an address or a quoted phrase matches whole, not as loose words anywhere in the mail ([03e3e4c](https://github.com/borovikovd/supermonkey/commit/03e3e4ccc93beda3ee0e5201b4d5b814fcbb5135))
+* **search:** apply De Morgan duality to negated list requirements ([39fb5fe](https://github.com/borovikovd/supermonkey/commit/39fb5fe23205603df6fac63ccf09d3f0be5d4010))
+* **search:** keep searching indicator during transient retry pauses ([8cfbe53](https://github.com/borovikovd/supermonkey/commit/8cfbe53f7ae89db4568ffbe0a9a0eb52d573027b))
+* **search:** OR, -is:list and a spaced hyphen mean what they mean in Gmail ([6f9ad05](https://github.com/borovikovd/supermonkey/commit/6f9ad050fe81489216add1c8c6a7c9bd668d90dd))
+* **search:** restore AND-before-OR precedence and harden is:list filtering ([5b898be](https://github.com/borovikovd/supermonkey/commit/5b898bedfc25cc6dbe8008e8aae376d311287b0c))
+* **snooze:** a time picked for after the clocks change wakes at that time, not an hour off ([38658d7](https://github.com/borovikovd/supermonkey/commit/38658d7f6b58e3458d884b144dd2b4a2bb8f0b52))
+* **snooze:** undoing an earlier change no longer snoozes again a conversation that came back ([6d21804](https://github.com/borovikovd/supermonkey/commit/6d2180496901cef9e299135e4265d19b9b70497c))
+* **splits:** a split rule can use to:me, from:me and cc:me ([91902e3](https://github.com/borovikovd/supermonkey/commit/91902e3f553b48e330393e6cd868f42b4a2a60f4))
+* **splits:** undoing a pin whose earlier split was deleted removes the pin instead of failing ([395760b](https://github.com/borovikovd/supermonkey/commit/395760b852f5b2ee1062423980cf9397c5420226))
+* **store:** an update from 0.7.2 keeps your accounts, snoozes, splits, drafts and queued changes ([edf7f7c](https://github.com/borovikovd/supermonkey/commit/edf7f7c2ba50df90578c06ee3a34cbd473981135))
+* **sync:** a conversation keeps its paperclip after it is read or its labels change ([f4c30a0](https://github.com/borovikovd/supermonkey/commit/f4c30a0e58f54a4efab387141b4c8f3328641c3b))
+* **sync:** a full resync reads new mail only where the first sync would, not the whole mailbox ([7072156](https://github.com/borovikovd/supermonkey/commit/70721568c77e7695d9996f919463a28def6ef998))
+* **sync:** a picture in a message whose download failed is fetched again instead of staying broken ([5610bdb](https://github.com/borovikovd/supermonkey/commit/5610bdbc098a67e0853147461a7bef1bf8e602a9))
+* **sync:** a thread that could not be read during the first sync or a resync is read on the retry ([ccbd00b](https://github.com/borovikovd/supermonkey/commit/ccbd00bbc42a45dc6048c8979b45dd2bfd8baece))
+* **sync:** queue bodies for all in-scope threads missing bodies after retry or restart ([a46305d](https://github.com/borovikovd/supermonkey/commit/a46305dc354b60d83d405c2a296f503dea1750ad))
+* **sync:** quitting during the first sync no longer leaves Starred and Sent incomplete for good ([165e7bb](https://github.com/borovikovd/supermonkey/commit/165e7bb7261438a1f3830471efe7bc61380da6a8))
+* **sync:** stop eager full fetches on failed sync and filter stale retry alerts ([390830b](https://github.com/borovikovd/supermonkey/commit/390830b461acdf5dcef878e95731fab926bdd76f))
+* **ui:** resolve WCAG A/AA accessibility issues in list, composer, sheets, and theme ([dc5a3fb](https://github.com/borovikovd/supermonkey/commit/dc5a3fba59dd42fea8e2d6cb609e6be9395594e4))
+* **unwanted:** "Unsubscribe, and trash all" no longer trashes conversations where you wrote last ([952834c](https://github.com/borovikovd/supermonkey/commit/952834c8e8b24b907c79d3241c9772f9bb702837))
+* **unwanted:** Blocked senders lists only whole-sender blocks, not narrower Gmail filters ([f72a9a6](https://github.com/borovikovd/supermonkey/commit/f72a9a63af73b39b4265bc8dabf9f82cbdf65475))
+* **unwanted:** blocking a sender who is already blocked trashes the conversation instead of failing ([5dd9ed6](https://github.com/borovikovd/supermonkey/commit/5dd9ed662c50f93485748e2603035111380a1984))
+
 ## [0.7.2](https://github.com/borovikovd/supermonkey/compare/v0.7.1...v0.7.2) (2026-11-22)
 
 
