@@ -340,4 +340,25 @@ test.describe("notifications", () => {
     expect(raised.map((n) => n.account)).toEqual([A]);
     expect(raised[0]?.title).toContain("Nia New");
   });
+
+  test("NOT-08 mail archived while a failed poll waits to retry does not alert later", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    await gmail.clearRecorded();
+    await gmail.fault("drafts.list", { kind: "status", status: 503 }, { account: A, times: 1 });
+    await gmail.deliver(fresh(A, "Archived before retry"));
+    await gmail.poll();
+    await app.settle();
+    await expect(app.row("Archived before retry")).toHaveCount(1);
+
+    await app.row("Archived before retry").click();
+    await app.press("e");
+    await expect(app.row("Archived before retry")).toHaveCount(0);
+    await app.settle();
+    await app.advance(60_000);
+    await app.settle();
+    expect(await notes(gmail)).toEqual([]);
+  });
 });

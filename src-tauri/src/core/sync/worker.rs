@@ -43,7 +43,6 @@ pub(crate) struct AccountSlot {
     pub(crate) email: String,
     gmail: RwLock<Option<(u64, Arc<Gmail>)>>,
     health: Mutex<HealthState>,
-    unsent_alerts: Mutex<Vec<NewMailAlert>>,
     pub(crate) network: Network,
     tasks: Tasks,
     pub(crate) fetch_queue: FetchQueue,
@@ -90,7 +89,6 @@ impl AccountSlot {
             email,
             gmail: RwLock::new(initial),
             health: Mutex::new(HealthState::default()),
-            unsent_alerts: Mutex::new(Vec::new()),
             network,
             tasks,
             fetch_queue: FetchQueue::new(),
@@ -378,6 +376,7 @@ pub(crate) async fn run_sync_loop(slot: Arc<AccountSlot>, tasks: Tasks, cancel: 
     let mut wait: Option<Duration> = None;
     let mut last_wall = slot.clock.now();
     let mut backfill_queued = false;
+    let mut pending_alerts: Vec<NewMailAlert> = Vec::new();
 
     loop {
         if cancel.is_cancelled() {
@@ -408,6 +407,7 @@ pub(crate) async fn run_sync_loop(slot: Arc<AccountSlot>, tasks: Tasks, cancel: 
             continue;
         }
         let Some((grant_gen, gmail)) = slot.gmail() else {
+            pending_alerts.clear();
             drop(guard);
             continue;
         };
@@ -423,10 +423,12 @@ pub(crate) async fn run_sync_loop(slot: Arc<AccountSlot>, tasks: Tasks, cancel: 
                     &slot,
                     &gmail,
                     acct_row.history_id,
+                    &mut pending_alerts,
                     &cancel,
                 ))
                 .await
         } else {
+            pending_alerts.clear();
             let res = cancel
                 .run_until_cancelled(run_connect_sync(
                     &slot,
@@ -447,21 +449,38 @@ pub(crate) async fn run_sync_loop(slot: Arc<AccountSlot>, tasks: Tasks, cancel: 
             return;
         };
 
-        match result {
-            Ok(()) => {
-                backoff.reset();
-                slot.report_success(grant_gen).await;
-                slot.set_status(SyncStatus::Idle).await;
-                wait = Some(POLL_INTERVAL);
-            }
-            Err(err) => {
-                wait = slot.handle_gmail_error(grant_gen, &err, &mut backoff).await;
-                if wait.is_none() && slot.is_online() && slot.gmail().is_some() {
-                    wait = Some(POLL_INTERVAL);
-                }
+        wait =
+            settle_sync_result(&slot, grant_gen, result, &mut backoff, &mut pending_alerts).await;
+        drop(guard);
+    }
+}
+
+async fn settle_sync_result(
+    slot: &Arc<AccountSlot>,
+    grant_gen: u64,
+    result: Result<(), GmailError>,
+    backoff: &mut Backoff,
+    pending_alerts: &mut Vec<NewMailAlert>,
+) -> Option<Duration> {
+    match result {
+        Ok(()) => {
+            backoff.reset();
+            slot.report_success(grant_gen).await;
+            slot.set_status(SyncStatus::Idle).await;
+            Some(POLL_INTERVAL)
+        }
+        Err(_) if slot.gmail().is_none() => {
+            pending_alerts.clear();
+            None
+        }
+        Err(err) => {
+            let next = slot.handle_gmail_error(grant_gen, &err, backoff).await;
+            if next.is_none() && slot.is_online() && slot.gmail().is_some() {
+                Some(POLL_INTERVAL)
+            } else {
+                next
             }
         }
-        drop(guard);
     }
 }
 
@@ -540,7 +559,6 @@ async fn run_connect_sync(
         cancel,
     )
     .await;
-    enqueue_full_batch(slot, &inbox_ids, FetchPriority::ConnectSecondary);
 
     if cancel.is_cancelled() {
         return Ok(());
@@ -548,6 +566,7 @@ async fn run_connect_sync(
     if !inbox_read {
         return Err(threads_left_unread());
     }
+    enqueue_full_batch(slot, &inbox_unread, FetchPriority::ConnectSecondary);
 
     let draft_threads = reconcile_drafts_with_gmail(
         slot.account,
@@ -578,7 +597,6 @@ async fn run_connect_sync(
         cancel,
     )
     .await;
-    enqueue_full_batch(slot, &secondary, FetchPriority::ConnectSecondary);
 
     if cancel.is_cancelled() {
         return Ok(());
@@ -586,6 +604,7 @@ async fn run_connect_sync(
     if !secondary_read {
         return Err(threads_left_unread());
     }
+    enqueue_full_batch(slot, &secondary, FetchPriority::ConnectSecondary);
 
     let acct = slot.account;
     super::super::log_err(
@@ -599,7 +618,15 @@ async fn run_connect_sync(
             .await,
     );
 
-    run_incremental_poll(slot, gmail, Some(start_history), cancel).await
+    let mut connect_alerts = Vec::new();
+    run_incremental_poll(
+        slot,
+        gmail,
+        Some(start_history),
+        &mut connect_alerts,
+        cancel,
+    )
+    .await
 }
 
 struct HistoryChanges {
@@ -720,12 +747,15 @@ async fn run_incremental_poll(
     slot: &AccountSlot,
     gmail: &Gmail,
     cursor: Option<HistoryId>,
+    pending_alerts: &mut Vec<NewMailAlert>,
     cancel: &CancellationToken,
 ) -> Result<(), GmailError> {
     let Some(start_id) = cursor else {
+        pending_alerts.clear();
         return run_full_resync(slot, gmail, cancel).await;
     };
     let Some(mut changes) = collect_history_changes(slot, gmail, start_id).await? else {
+        pending_alerts.clear();
         return run_full_resync(slot, gmail, cancel).await;
     };
 
@@ -769,7 +799,7 @@ async fn run_incremental_poll(
         .await?;
         saw_unknown_label |= res.unknown_labels;
         enqueue_full_if_missing_body(slot, gtid, &res);
-        slot.unsent_alerts.lock().extend(res.alerts);
+        pending_alerts.extend(res.alerts);
     }
 
     if saw_unknown_label {
@@ -814,17 +844,27 @@ async fn run_incremental_poll(
     let acct = slot.account;
     let email = slot.email.clone();
     let newest = changes.newest_history;
-    let alerts = std::mem::take(&mut *slot.unsent_alerts.lock());
+    let alerts = std::mem::take(pending_alerts);
     super::super::log_err(
         "advance history cursor",
         slot.writer
             .call(StorePriority::Sync, move |tx, state| {
                 tx.set_history(acct, newest)?;
-                if !alerts.is_empty() {
+                let mut live_alerts = Vec::with_capacity(alerts.len());
+                for item in alerts {
+                    if tx
+                        .read()
+                        .thread_row(item.thread_id)?
+                        .is_some_and(|row| row.account == acct && row.in_inbox && row.unread)
+                    {
+                        live_alerts.push(item);
+                    }
+                }
+                if !live_alerts.is_empty() {
                     state.emit(Effect::NotifyNewMail {
                         account: acct,
                         email,
-                        items: alerts,
+                        items: live_alerts,
                     });
                 }
                 Ok::<_, StoreError>(())
@@ -1010,6 +1050,12 @@ async fn run_full_resync(
         cancel,
     )
     .await;
+    if cancel.is_cancelled() {
+        return Ok(());
+    }
+    if !all_read {
+        return Err(threads_left_unread());
+    }
     for id in &to_fetch {
         slot.fetch_queue.enqueue(
             id.clone(),
@@ -1019,12 +1065,6 @@ async fn run_full_resync(
             None,
             &slot.activity,
         );
-    }
-    if cancel.is_cancelled() {
-        return Ok(());
-    }
-    if !all_read {
-        return Err(threads_left_unread());
     }
 
     let draft_threads = reconcile_drafts_with_gmail(

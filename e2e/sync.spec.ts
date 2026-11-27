@@ -528,11 +528,15 @@ test("SYN-16 a thread whose read fails during the first sync is read when the sy
   await gmail.fault(
     { api: "threads.get", path: `*/threads/${trip}`, account: A },
     { kind: "status", status: 503 },
-    { times: 2 },
+    { times: 1 },
   );
   await app.open();
   await expect(app.row("Person 1")).toHaveCount(1);
   await app.settle();
+  const attemptsBeforeRetry = (await gmail.requests("threads.get", { account: A })).filter((r) =>
+    r.path.endsWith(`/threads/${trip}`),
+  );
+  expect(attemptsBeforeRetry).toHaveLength(1);
   await app.advance(60_000);
   await app.settle();
 
