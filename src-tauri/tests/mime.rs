@@ -3,9 +3,9 @@ use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use serde::Deserialize;
 use supermonkey_lib::domain::GmailAttachmentId;
 use supermonkey_lib::mime::{
-    CidImages, WireBody, WireHeader, WirePart, decode_encoded_words, html_to_text, is_valid_email,
-    list_unsubscribe, parse_address_list, parse_message, sanitize_html, split_quoted_history,
-    text_to_html,
+    CidImages, WireBody, WireHeader, WirePart, data_images_to_cid, decode_encoded_words,
+    html_to_text, is_valid_email, list_unsubscribe, parse_address_list, parse_message,
+    sanitize_html, split_quoted_history, text_to_html,
 };
 
 #[derive(Deserialize)]
@@ -363,5 +363,42 @@ fn an_email_forwarded_as_an_attachment_is_listed_as_one() {
             ("Trip plan.eml", "message/rfc822", Some("att-eml")),
             ("tickets.pdf", "application/pdf", Some("att-tickets")),
         ]
+    );
+}
+
+#[test]
+fn pictures_in_the_body_and_in_the_quote_get_different_content_ids() {
+    let one = STANDARD.encode(b"first picture");
+    let two = STANDARD.encode(b"second picture");
+    let body = format!(r#"<p><img src="data:image/png;base64,{one}"></p>"#);
+    let quote = format!(
+        r#"<p><img src="data:image/png;base64,{two}"><img src="data:image/png;base64,{one}"></p>"#
+    );
+
+    let (body_html, mut parts) = data_images_to_cid(&body, &[]);
+    let (quote_html, more) = data_images_to_cid(&quote, &parts);
+    parts.extend(more);
+
+    let first = &parts[0].content_id;
+    assert!(body_html.contains(&format!("cid:{first}")));
+    let ids: Vec<&str> = parts.iter().map(|p| p.content_id.as_str()).collect();
+    let mut unique = ids.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        unique.len(),
+        ids.len(),
+        "each attached picture has its own id: {ids:?}"
+    );
+    let second = parts
+        .iter()
+        .find(|p| p.data == b"second picture")
+        .map(|p| p.content_id.as_str())
+        .unwrap();
+    assert_ne!(second, first.as_str());
+    assert!(quote_html.contains(&format!("cid:{second}")));
+    assert!(
+        quote_html.contains(&format!("cid:{first}")),
+        "the same picture in the quote reuses the body's part"
     );
 }

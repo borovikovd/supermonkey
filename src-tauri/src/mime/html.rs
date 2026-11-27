@@ -691,8 +691,7 @@ pub fn data_images_to_cid(html: &str, known: &[InlinePart]) -> (String, Vec<Inli
     let Some(re) = DATA_IMG.as_ref() else {
         return (html.to_owned(), Vec::new());
     };
-    let mut used: Vec<InlinePart> = Vec::new();
-    let mut next_id = 1usize;
+    let mut added: Vec<InlinePart> = Vec::new();
     let rewritten = re
         .replace_all(html, |caps: &regex::Captures<'_>| {
             let mime = caps
@@ -701,27 +700,26 @@ pub fn data_images_to_cid(html: &str, known: &[InlinePart]) -> (String, Vec<Inli
                 .to_ascii_lowercase();
             let raw_b64 = caps.get(2).map_or("", |m| m.as_str());
             let bytes = decode_base64_lenient(raw_b64);
-            if let Some(existing) = used.iter().find(|p| p.data == bytes && p.mime_type == mime) {
-                return format!("cid:{}", existing.content_id);
+            if let Some(same) = known
+                .iter()
+                .chain(&added)
+                .find(|p| p.data == bytes && p.mime_type == mime)
+            {
+                return format!("cid:{}", same.content_id);
             }
-            if let Some(matched) = known.iter().find(|p| p.data == bytes) {
-                let cid = if used.iter().any(|u| u.content_id == matched.content_id) {
-                    let unique = format!("inline-{next_id}@supermonkey.local");
-                    next_id += 1;
-                    unique
-                } else {
-                    matched.content_id.clone()
-                };
-                used.push(InlinePart {
-                    content_id: cid.clone(),
-                    mime_type: mime,
-                    data: bytes,
-                });
-                return format!("cid:{cid}");
-            }
-            let cid = format!("inline-{next_id}@supermonkey.local");
-            next_id += 1;
-            used.push(InlinePart {
+            let mut n = known.len().saturating_add(added.len()).saturating_add(1);
+            let cid = loop {
+                let candidate = format!("inline-{n}@supermonkey.local");
+                if !known
+                    .iter()
+                    .chain(&added)
+                    .any(|p| p.content_id == candidate)
+                {
+                    break candidate;
+                }
+                n = n.saturating_add(1);
+            };
+            added.push(InlinePart {
                 content_id: cid.clone(),
                 mime_type: mime,
                 data: bytes,
@@ -729,5 +727,5 @@ pub fn data_images_to_cid(html: &str, known: &[InlinePart]) -> (String, Vec<Inli
             format!("cid:{cid}")
         })
         .into_owned();
-    (rewritten, used)
+    (rewritten, added)
 }
