@@ -923,3 +923,175 @@ async fn stateful_chaos_converges_local_state_to_gmail_and_cleans_up() {
         env.remove_account_and_verify_clean().await.unwrap();
     }
 }
+
+fn missing_body_threads(
+    core: &Core,
+    account: AccountId,
+) -> Result<Vec<supermonkey_lib::domain::GmailThreadId>, StoreError> {
+    core.read_pool().with(|db| {
+        let states = db.thread_sync_states(account)?;
+        let tids: Vec<supermonkey_lib::domain::ThreadId> = states.iter().map(|s| s.id).collect();
+        let needing = db.threads_needing_bodies(&tids)?;
+        Ok(states
+            .into_iter()
+            .filter_map(|s| needing.contains(&s.id).then_some(s.gmail_id))
+            .collect())
+    })
+}
+
+async fn settle_with_retries(core: &Core) {
+    for _ in 0..4 {
+        assert!(
+            core.clock().advance(120_000).0 > 0,
+            "manual clock advances during retry settle"
+        );
+        core.wake_retrying();
+        core.poll_all();
+        assert!(
+            core.wait_idle(Duration::from_secs(10)).await,
+            "core settles after retry"
+        );
+    }
+}
+
+fn seed_body_recovery_fixture(
+    dir: &Path,
+    fake: &sm_fake_gmail::FakeGmail,
+    base_ms: i64,
+) -> Result<(sm_fake_gmail::FakeUser, AccountId), Box<dyn std::error::Error>> {
+    use supermonkey_lib::gmail::{RefreshToken, TokenFile};
+    use supermonkey_lib::store::with_write_tx;
+
+    let user = fake.add_user("ana@acme.test");
+    user.set_display_name("Ana");
+    for i in 0..8_i64 {
+        let mut m = sm_fake_gmail::NewMessage::inbox(
+            "Bob <bob@x.test>",
+            &format!("Inbox {i}"),
+            &format!("Inbox body {i}"),
+        );
+        m.internal_date = Some(u64::try_from(base_ms - i * 1_000).unwrap_or(0));
+        drop(user.add_message(m));
+    }
+    for i in 0..2_i64 {
+        let mut m = sm_fake_gmail::NewMessage::inbox(
+            "Star <star@x.test>",
+            &format!("Starred {i}"),
+            &format!("Starred body {i}"),
+        );
+        m.labels = vec!["STARRED".to_owned()];
+        m.internal_date = Some(u64::try_from(base_ms - 50_000 - i * 1_000).unwrap_or(0));
+        drop(user.add_message(m));
+    }
+    TokenFile::new(dir.join("tokens.json"))
+        .store(user.email(), &RefreshToken::new(user.refresh_token()))?;
+    let account = with_write_tx(&dir.join("mail.db"), |tx| {
+        Ok::<_, StoreError>(tx.create_account("ana@acme.test", "Ana")?.id)
+    })?;
+    Ok((user, account))
+}
+
+fn inject_once_503(fake: &sm_fake_gmail::FakeGmail, api: &str) {
+    let fault_id = fake.inject(
+        sm_fake_gmail::Matcher::api(api).once(),
+        sm_fake_gmail::Fault::Status {
+            status: 503,
+            reason: "backendError".to_owned(),
+            retry_after_secs: None,
+        },
+    );
+    assert!(fault_id > 0, "injected transient 503 for {api}");
+}
+
+#[tokio::test]
+async fn sync_fetches_missing_bodies_after_transient_thread_failure_resync_and_restart() {
+    let base_ms = 1_762_000_000_000_i64;
+    let dir = tempfile::tempdir().unwrap();
+    let fake = sm_fake_gmail::FakeGmail::start();
+    let (user, account) = seed_body_recovery_fixture(dir.path(), &fake, base_ms).unwrap();
+
+    inject_once_503(&fake, "threads.get");
+    let core = ChaosEnv::open_core(dir.path(), &fake, Millis(base_ms))
+        .await
+        .unwrap();
+    assert!(
+        core.wait_idle(Duration::from_secs(10)).await,
+        "initial failed attempt settles"
+    );
+    settle_with_retries(&core).await;
+    assert_eq!(
+        missing_body_threads(&core, account).unwrap(),
+        Vec::<supermonkey_lib::domain::GmailThreadId>::new(),
+        "every inbox and starred thread gets a body after a transient first-sync failure"
+    );
+
+    user.expire_history();
+    for i in 0..4_i64 {
+        let mut m = sm_fake_gmail::NewMessage::inbox(
+            "Resync <resync@x.test>",
+            &format!("Resync {i}"),
+            &format!("Resync body {i}"),
+        );
+        m.internal_date = Some(u64::try_from(base_ms + (i + 1) * 1_000).unwrap_or(0));
+        drop(user.add_message(m));
+    }
+    inject_once_503(&fake, "threads.get");
+    core.poll_all();
+    assert!(
+        core.wait_idle(Duration::from_secs(10)).await,
+        "initial failed resync settles"
+    );
+    settle_with_retries(&core).await;
+    assert_eq!(
+        missing_body_threads(&core, account).unwrap(),
+        Vec::<supermonkey_lib::domain::GmailThreadId>::new(),
+        "every new thread gets a body after a transient full-resync failure"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), core.stop())
+            .await
+            .is_ok(),
+        "first core stops cleanly"
+    );
+}
+
+#[tokio::test]
+async fn reopening_mid_first_sync_downloads_remaining_bodies() {
+    let base_ms = 1_762_000_000_000_i64;
+    let restart_dir = tempfile::tempdir().unwrap();
+    let restart_fake = sm_fake_gmail::FakeGmail::start();
+    let (_user2, account2) =
+        seed_body_recovery_fixture(restart_dir.path(), &restart_fake, base_ms).unwrap();
+    inject_once_503(&restart_fake, "drafts.list");
+    let core2 = ChaosEnv::open_core(restart_dir.path(), &restart_fake, Millis(base_ms))
+        .await
+        .unwrap();
+    assert!(
+        core2.wait_idle(Duration::from_secs(10)).await,
+        "mid-first-sync failure settles before restart"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), core2.stop())
+            .await
+            .is_ok(),
+        "mid-first-sync core stops cleanly"
+    );
+    let reopened = ChaosEnv::open_core(restart_dir.path(), &restart_fake, Millis(base_ms + 60_000))
+        .await
+        .unwrap();
+    assert!(
+        reopened.wait_idle(Duration::from_secs(10)).await,
+        "reopened core finishes first sync"
+    );
+    assert_eq!(
+        missing_body_threads(&reopened, account2).unwrap(),
+        Vec::<supermonkey_lib::domain::GmailThreadId>::new(),
+        "reopening after mid-first-sync quit still downloads bodies for all inbox and starred threads"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), reopened.stop())
+            .await
+            .is_ok(),
+        "reopened core stops cleanly"
+    );
+}

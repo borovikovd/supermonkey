@@ -434,6 +434,7 @@ pub(crate) async fn run_sync_loop(slot: Arc<AccountSlot>, tasks: Tasks, cancel: 
                     &slot,
                     &gmail,
                     acct_row.history_id,
+                    &mut pending_alerts,
                     &cancel,
                 ))
                 .await;
@@ -506,8 +507,36 @@ async fn ensure_connect_history(
     Ok(h)
 }
 
-fn enqueue_full_batch(slot: &AccountSlot, ids: &[GmailThreadId], priority: FetchPriority) {
-    for id in ids {
+fn enqueue_missing_bodies(
+    slot: &AccountSlot,
+    ids: &[GmailThreadId],
+    priority: FetchPriority,
+) -> HashSet<GmailThreadId> {
+    if ids.is_empty() {
+        return HashSet::new();
+    }
+    let want: HashSet<&GmailThreadId> = ids.iter().collect();
+    let needing: Vec<GmailThreadId> = slot
+        .pool
+        .with(|db| {
+            let scoped: Vec<(ThreadId, GmailThreadId)> = db
+                .thread_sync_states(slot.account)?
+                .into_iter()
+                .filter(|s| want.contains(&s.gmail_id))
+                .map(|s| (s.id, s.gmail_id))
+                .collect();
+            let tids: Vec<ThreadId> = scoped.iter().map(|(tid, _)| *tid).collect();
+            let missing = db.threads_needing_bodies(&tids)?;
+            Ok::<_, StoreError>(
+                scoped
+                    .into_iter()
+                    .filter_map(|(tid, gtid)| missing.contains(&tid).then_some(gtid))
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
+    let mut queued = HashSet::with_capacity(needing.len());
+    for id in needing {
         slot.fetch_queue.enqueue(
             id.clone(),
             Format::Full,
@@ -516,7 +545,9 @@ fn enqueue_full_batch(slot: &AccountSlot, ids: &[GmailThreadId], priority: Fetch
             None,
             &slot.activity,
         );
+        queued.insert(id);
     }
+    queued
 }
 
 fn known_thread_ids(slot: &AccountSlot) -> HashSet<GmailThreadId> {
@@ -536,6 +567,7 @@ async fn run_connect_sync(
     slot: &AccountSlot,
     gmail: &Gmail,
     existing_history: Option<HistoryId>,
+    pending_alerts: &mut Vec<NewMailAlert>,
     cancel: &CancellationToken,
 ) -> Result<(), GmailError> {
     slot.set_status(SyncStatus::Syncing).await;
@@ -566,7 +598,11 @@ async fn run_connect_sync(
     if !inbox_read {
         return Err(threads_left_unread());
     }
-    enqueue_full_batch(slot, &inbox_unread, FetchPriority::ConnectSecondary);
+    drop(enqueue_missing_bodies(
+        slot,
+        &inbox_ids,
+        FetchPriority::ConnectSecondary,
+    ));
 
     let draft_threads = reconcile_drafts_with_gmail(
         slot.account,
@@ -581,17 +617,22 @@ async fn run_connect_sync(
         list_starred_and_recent_sent_thread_ids(gmail, GmailPriority::P5).await?;
 
     let inbox_set: HashSet<&GmailThreadId> = inbox_ids.iter().collect();
-    let mut secondary: Vec<GmailThreadId> = Vec::new();
+    let mut secondary_scope: Vec<GmailThreadId> = Vec::new();
     let mut seen: HashSet<GmailThreadId> = HashSet::new();
     for id in draft_threads.into_iter().chain(starred_ids).chain(sent_ids) {
-        if !inbox_set.contains(&id) && !known.contains(&id) && seen.insert(id.clone()) {
-            secondary.push(id);
+        if !inbox_set.contains(&id) && seen.insert(id.clone()) {
+            secondary_scope.push(id);
         }
     }
+    let secondary_unread: Vec<GmailThreadId> = secondary_scope
+        .iter()
+        .filter(|id| !known.contains(*id))
+        .cloned()
+        .collect();
 
     let secondary_read = fetch_batch_and_wait(
         slot,
-        &secondary,
+        &secondary_unread,
         Format::Metadata,
         FetchPriority::ConnectSecondary,
         cancel,
@@ -604,7 +645,11 @@ async fn run_connect_sync(
     if !secondary_read {
         return Err(threads_left_unread());
     }
-    enqueue_full_batch(slot, &secondary, FetchPriority::ConnectSecondary);
+    drop(enqueue_missing_bodies(
+        slot,
+        &secondary_scope,
+        FetchPriority::ConnectSecondary,
+    ));
 
     let acct = slot.account;
     super::super::log_err(
@@ -618,15 +663,7 @@ async fn run_connect_sync(
             .await,
     );
 
-    let mut connect_alerts = Vec::new();
-    run_incremental_poll(
-        slot,
-        gmail,
-        Some(start_history),
-        &mut connect_alerts,
-        cancel,
-    )
-    .await
+    run_incremental_poll(slot, gmail, Some(start_history), pending_alerts, cancel).await
 }
 
 struct HistoryChanges {
@@ -1056,16 +1093,13 @@ async fn run_full_resync(
     if !all_read {
         return Err(threads_left_unread());
     }
-    for id in &to_fetch {
-        slot.fetch_queue.enqueue(
-            id.clone(),
-            Format::Full,
-            FetchPriority::SyncNew,
-            false,
-            None,
-            &slot.activity,
-        );
-    }
+    let body_scope: Vec<GmailThreadId> = first_sync_scope
+        .into_iter()
+        .chain(to_fetch)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let queued_full = enqueue_missing_bodies(slot, &body_scope, FetchPriority::SyncNew);
 
     let draft_threads = reconcile_drafts_with_gmail(
         slot.account,
@@ -1075,9 +1109,8 @@ async fn run_full_resync(
         GmailPriority::P2,
     )
     .await?;
-    let fetched: HashSet<&GmailThreadId> = to_fetch.iter().collect();
     for gtid in &draft_threads {
-        if !fetched.contains(gtid) {
+        if !queued_full.contains(gtid) {
             slot.fetch_queue.enqueue(
                 gtid.clone(),
                 Format::Full,
