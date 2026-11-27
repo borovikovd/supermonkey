@@ -107,7 +107,7 @@ pub(crate) async fn fetch_and_ingest_thread(
         format,
         priority,
     )
-    .await;
+    .await?;
     let offset = clock.local_offset();
     let wire_history = wire.history_id;
     let gid = wire.id;
@@ -156,7 +156,7 @@ async fn prepare_wire_thread(
     attachments_dir: Option<&Path>,
     format: Format,
     priority: GmailPriority,
-) -> Vec<PreparedMessage> {
+) -> Result<Vec<PreparedMessage>, GmailError> {
     let mut out = Vec::with_capacity(wire.messages.len());
     for msg in &wire.messages {
         let Some(payload) = &msg.payload else {
@@ -179,10 +179,22 @@ async fn prepare_wire_thread(
                         inline.mime_type.to_owned(),
                         bytes.to_vec(),
                     );
-                } else if let Some(att_id) = inline.attachment_id
-                    && let Ok(bytes) = gmail.get_attachment(&msg.id, att_id, priority).await
-                {
-                    cids.insert(inline.content_id, inline.mime_type.to_owned(), bytes);
+                } else if let Some(att_id) = inline.attachment_id {
+                    match gmail.get_attachment(&msg.id, att_id, priority).await {
+                        Ok(bytes) => {
+                            cids.insert(inline.content_id, inline.mime_type.to_owned(), bytes);
+                        }
+                        Err(err)
+                            if err.is_transient()
+                                || matches!(
+                                    err.outcome,
+                                    Outcome::InvalidGrant | Outcome::Unauthorized
+                                ) =>
+                        {
+                            return Err(err);
+                        }
+                        Err(_) => {}
+                    }
                 }
             }
             let rendered = parsed
@@ -276,7 +288,7 @@ async fn prepare_wire_thread(
             sighting,
         });
     }
-    out
+    Ok(out)
 }
 
 #[expect(

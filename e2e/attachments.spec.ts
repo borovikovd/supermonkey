@@ -762,4 +762,28 @@ test.describe("attachments", () => {
     await app.press("g", "s");
     await expect(app.row("Scan for you")).toHaveAttribute("data-attachments");
   });
+
+  test("ATT-25 a picture in the body whose download failed is fetched again, not shown broken for good", async ({
+    app,
+    gmail,
+  }) => {
+    await seeds.standard(gmail, app);
+    const before = (await gmail.requests("attachments.get")).length;
+    await gmail.fault("attachments.get", { kind: "status", status: 503 }, { times: 1 });
+    await gmail.deliver({
+      account: A,
+      from: "Carl Chart <carl@chart.test>",
+      subject: "Logo in the body",
+      html: '<p>Here is the logo.</p><p><img src="cid:logo" alt="logo"></p>',
+      attachments: [attachment(files.logoPng, "logo")],
+    });
+    await app.settle();
+    expect(await gmail.requests("attachments.get")).toHaveLength(before + 1);
+
+    await app.openAndSettle("Logo in the body");
+    await expect(app.messageBody(0).locator("img")).toHaveAttribute(
+      "src",
+      /^data:image\/png;base64,/,
+    );
+  });
 });
