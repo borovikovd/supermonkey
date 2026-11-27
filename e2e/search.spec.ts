@@ -249,6 +249,22 @@ test("SRC-20 is:list and -is:list hold for what Gmail finds too", async ({ app, 
   await expect(app.row("Digest: daily")).toHaveCount(0);
 });
 
+test("SRC-21 a Gmail search that is turned away for a moment asks again instead of giving up", async ({
+  app,
+  gmail,
+}) => {
+  await seeds.standard(gmail, app);
+  await gmail.fault("threads.list", { kind: "status", status: 429 }, { account: A, times: 1 });
+  await search(app, "invoice 2019");
+  await app.advance(300);
+  await app.settle();
+  await expect(app.row("Invoice 2019")).toHaveCount(0);
+
+  await app.advance(5_000);
+  await app.settle();
+  await expect(app.row("Invoice 2019")).toHaveCount(1);
+});
+
 test("SRC-03 Gmail hits are merged in as their metadata arrives", async ({ app, gmail }) => {
   const s = await seeds.standard(gmail, app);
   const invoice = s.thread("invoiceOld").threadId;

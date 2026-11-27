@@ -10,7 +10,9 @@ use crate::domain::query::{Query, gmail_query};
 use crate::domain::{
     AccountId, GmailListing, GmailThreadId, PageToken, SubId, SystemLabel, ThreadId,
 };
-use crate::gmail::{Format, Gmail, GmailError, Outcome, Priority as GmailPriority, ThreadQuery};
+use crate::gmail::{
+    Backoff, Format, Gmail, GmailError, Outcome, Priority as GmailPriority, ThreadQuery,
+};
 use crate::ipc::SubKey;
 use crate::store::{Priority as StorePriority, ReadPool, StoreError, Writer};
 
@@ -184,6 +186,7 @@ async fn run_listing(
     let mut remote_hits: Vec<ThreadId> = Vec::new();
     let mut seen_hits: HashSet<ThreadId> = HashSet::new();
     let mut online_rx = inner.network.subscribe();
+    let mut backoff = Backoff::new();
 
     loop {
         if cancel.is_cancelled() {
@@ -235,11 +238,13 @@ async fn run_listing(
         )
         .await;
 
-        let Some(page_res) = cancel
-            .run_until_cancelled(fetch_listing_page(
+        let Some(loaded) = cancel
+            .run_until_cancelled(load_listing_page(
+                account,
                 &gmail,
                 &inner.pool,
-                account,
+                &inner.writer,
+                &inner.clock,
                 &remote_query,
                 page_token.as_ref(),
             ))
@@ -248,7 +253,7 @@ async fn run_listing(
             return;
         };
 
-        let page = match page_res {
+        let page = match loaded {
             Ok(p) => p,
             Err(err) if matches!(err.outcome, Outcome::InvalidGrant | Outcome::Unauthorized) => {
                 slot.mark_auth_failed(grant_gen).await;
@@ -272,6 +277,26 @@ async fn run_listing(
                 }
                 continue;
             }
+            Err(err) if err.is_transient() => {
+                set_listing_state(
+                    &inner.writer,
+                    &sub,
+                    ListingState {
+                        remote_hits: remote_hits.clone(),
+                        searching: false,
+                        more: page_token.is_some(),
+                    },
+                )
+                .await;
+                drop(busy);
+                let pause = inner.clock.sleep(backoff.next_delay(err.retry_after()));
+                tokio::select! {
+                    biased;
+                    () = cancel.cancelled() => return,
+                    () = pause => {}
+                }
+                continue;
+            }
             Err(_) => {
                 set_listing_state(
                     &inner.writer,
@@ -286,32 +311,15 @@ async fn run_listing(
                 return;
             }
         };
+        backoff.reset();
 
-        for tref in page.threads {
-            if cancel.is_cancelled() {
-                return;
-            }
-            let Some(local_tid) = cancel
-                .run_until_cancelled(resolve_or_fetch_hit(
-                    account,
-                    &gmail,
-                    &inner.pool,
-                    &inner.writer,
-                    &inner.clock,
-                    &tref.id,
-                ))
-                .await
-            else {
-                return;
-            };
-            if let Some(tid) = local_tid
-                && seen_hits.insert(tid)
-            {
+        for tid in page.hits {
+            if seen_hits.insert(tid) {
                 remote_hits.push(tid);
             }
         }
 
-        page_token = page.next_page_token;
+        page_token = page.next;
         let has_more = page_token.is_some();
         set_listing_state(
             &inner.writer,
@@ -425,13 +433,13 @@ async fn resolve_or_fetch_hit(
     writer: &Writer<WriterState>,
     clock: &Clock,
     gtid: &GmailThreadId,
-) -> Option<ThreadId> {
+) -> Result<Option<ThreadId>, GmailError> {
     if let Some(tid) = pool
         .with(|db| db.thread_by_gmail(account, gtid))
         .ok()
         .flatten()
     {
-        return Some(tid);
+        return Ok(Some(tid));
     }
     fetch_and_ingest_thread(
         account,
@@ -446,8 +454,45 @@ async fn resolve_or_fetch_hit(
         false,
     )
     .await
-    .ok()
-    .and_then(|r| r.thread_id)
+    .map(|r| r.thread_id)
+}
+
+struct LoadedPage {
+    hits: Vec<ThreadId>,
+    next: Option<PageToken>,
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "lists one Gmail page and resolves each hit with the storage, clock, and writer the fetch needs"
+)]
+async fn load_listing_page(
+    account: AccountId,
+    gmail: &Gmail,
+    pool: &ReadPool,
+    writer: &Writer<WriterState>,
+    clock: &Clock,
+    query: &RemoteQuery,
+    page_token: Option<&PageToken>,
+) -> Result<LoadedPage, GmailError> {
+    let page = fetch_listing_page(gmail, pool, account, query, page_token).await?;
+    let mut hits = Vec::with_capacity(page.threads.len());
+    for tref in page.threads {
+        match resolve_or_fetch_hit(account, gmail, pool, writer, clock, &tref.id).await {
+            Ok(Some(tid)) => hits.push(tid),
+            Err(err)
+                if err.is_transient()
+                    || matches!(err.outcome, Outcome::InvalidGrant | Outcome::Unauthorized) =>
+            {
+                return Err(err);
+            }
+            Ok(None) | Err(_) => {}
+        }
+    }
+    Ok(LoadedPage {
+        hits,
+        next: page.next_page_token,
+    })
 }
 
 async fn set_listing_state(writer: &Writer<WriterState>, sub: &SubId, listing: ListingState) {
