@@ -30,7 +30,9 @@ function Sheet({
         open
         aria-modal="true"
         aria-label={title}
-        className={`fade-in absolute top-16 left-1/2 m-0 max-h-sheet-max -translate-x-1/2 overflow-y-auto rounded-lg border-0 bg-bg px-8 py-5 text-text shadow-float ${wide ? "w-sheet-wide" : "w-sheet"}`}
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- scrollable dialog must be keyboard-focusable (WCAG 2.1.1)
+        tabIndex={0}
+        className={`fade-in absolute top-16 left-1/2 m-0 max-h-sheet-max -translate-x-1/2 overflow-y-auto rounded-lg border-0 bg-bg px-8 py-5 text-text shadow-float outline-none ${wide ? "w-sheet-wide" : "w-sheet"}`}
       >
         <div className="mb-4 text-title font-semibold">{title}</div>
         {children}

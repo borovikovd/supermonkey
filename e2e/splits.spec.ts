@@ -430,7 +430,7 @@ test("SPL-07 starter splits, and a flat inbox", async ({ app, gmail }) => {
     await toggle(s, "Important");
   });
   await expectHeader(app, "Other 23");
-  await expect(app.list.getByRole("heading")).toHaveCount(0);
+  await expect(app.listContainer.getByRole("heading")).toHaveCount(0);
   const sections = await app.sections();
   expect(sections).toHaveLength(1);
   expect(sections[0]?.subjects.toSorted()).toEqual([...IMPORTANT, ...OTHER].toSorted());
@@ -508,9 +508,11 @@ test("SPL-10 clicking a split name scrolls to its section", async ({ app, gmail 
   await app.splitTitles().filter({ hasText: "Other" }).click();
   await expect
     .poll(() =>
-      app.list.evaluate((list) => {
-        const viewport = list.parentElement?.getBoundingClientRect().top ?? Number.NaN;
-        const header = list.querySelector("h2[aria-label^='Other']")?.getBoundingClientRect().top;
+      app.listContainer.evaluate((scroller) => {
+        const viewport = scroller.getBoundingClientRect().top;
+        const header = scroller
+          .querySelector("h2[aria-label^='Other']")
+          ?.getBoundingClientRect().top;
         return header === undefined ? "not rendered" : Math.round(header - viewport);
       }),
     )

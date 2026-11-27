@@ -248,6 +248,11 @@ export function Composer({ draft, inline }: { draft: string; inline: boolean }) 
     ],
     content: "",
     autofocus: false,
+    editorProps: {
+      attributes: {
+        "aria-label": inline ? "Reply body" : "Message body",
+      },
+    },
     onUpdate: ({ editor: ed }) => {
       const html = ed.getHTML();
       update({ bodyHtml: html === "<p></p>" ? "" : html });

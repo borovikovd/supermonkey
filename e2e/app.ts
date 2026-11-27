@@ -364,12 +364,16 @@ export class App {
     return this.splitTitles().and(this.page.locator('[aria-current="true"]'));
   }
 
+  get listContainer(): Locator {
+    return this.page.locator("[data-list-container]");
+  }
+
   section(name: string): Locator {
-    return this.list.getByRole("heading", { name: new RegExp(`^${name}( |$)`) });
+    return this.listContainer.getByRole("heading", { name: new RegExp(`^${name}( |$)`) });
   }
 
   async sections(): Promise<{ name: string; subjects: string[] }[]> {
-    return this.list.evaluate((list) => {
+    return this.listContainer.evaluate((list) => {
       const out: { name: string; subjects: string[] }[] = [];
       const items = Array.from(list.querySelectorAll("[data-split], [data-row]"));
       const tops = items.map((el) => el.getBoundingClientRect().top);

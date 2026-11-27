@@ -282,7 +282,12 @@ export function ListView() {
   }
 
   return (
-    <div ref={parent} className="min-h-0 flex-1 overflow-y-auto" style={{ contain: "strict" }}>
+    <div
+      ref={parent}
+      data-list-container
+      className="relative min-h-0 flex-1 overflow-y-auto"
+      style={{ contain: "strict" }}
+    >
       <div
         // oxlint-disable-next-line jsx-a11y/prefer-tag-over-role -- rich rows; native elements cannot render them
         role="listbox"
@@ -293,10 +298,11 @@ export function ListView() {
       >
         {virtual.map((vi) => {
           const it = items[vi.index];
-          if (!it) return null;
+          if (!it || it.type !== "row") return null;
           return (
             <div
               key={vi.key}
+              role="none"
               style={{
                 position: "absolute",
                 top: 0,
@@ -305,23 +311,38 @@ export function ListView() {
                 transform: `translateY(${vi.start}px)`,
               }}
             >
-              {it.type === "header" ? (
-                <SplitHeader split={it.split} name={it.name} count={it.count} />
-              ) : (
-                <Row
-                  row={rows[it.key]}
-                  rowKey={it.key}
-                  highlighted={it.key === highlight}
-                  selected={selected.has(it.key)}
-                  onClick={onClick}
-                  onHover={onHover}
-                  terms={terms}
-                />
-              )}
+              <Row
+                row={rows[it.key]}
+                rowKey={it.key}
+                highlighted={it.key === highlight}
+                selected={selected.has(it.key)}
+                onClick={onClick}
+                onHover={onHover}
+                terms={terms}
+              />
             </div>
           );
         })}
       </div>
+      {virtual.map((vi) => {
+        const it = items[vi.index];
+        if (!it || it.type !== "header") return null;
+        return (
+          <div
+            key={vi.key}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              transform: `translateY(${vi.start}px)`,
+              pointerEvents: "none",
+            }}
+          >
+            <SplitHeader split={it.split} name={it.name} count={it.count} />
+          </div>
+        );
+      })}
     </div>
   );
 }
