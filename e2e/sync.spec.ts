@@ -519,6 +519,28 @@ test("SYN-15 a full resync reads new mail only where the first sync would, not t
   await expectInboxMatchesGmail(app, A);
 });
 
+test("SYN-16 a thread whose read fails during the first sync is read when the sync is tried again, not left out", async ({
+  app,
+  gmail,
+}) => {
+  const s = await seeds.standard(gmail, app, { open: false });
+  const trip = s.thread("starredOld").threadId;
+  await gmail.fault(
+    { api: "threads.get", path: `*/threads/${trip}`, account: A },
+    { kind: "status", status: 503 },
+    { times: 2 },
+  );
+  await app.open();
+  await expect(app.row("Person 1")).toHaveCount(1);
+  await app.settle();
+  await app.advance(60_000);
+  await app.settle();
+
+  await app.press("g", "s");
+  await app.settle();
+  await expect(app.row("Trip ideas")).toHaveCount(1);
+});
+
 test("SYN-13 a quit during the contacts backfill does not end it: it runs again after the relaunch", async ({
   app,
   gmail,

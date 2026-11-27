@@ -24,7 +24,7 @@ use super::super::writer_state::{SubOp, WriterState};
 use super::drafts::reconcile_drafts_with_gmail;
 use super::ingest::{IngestResult, fetch_and_ingest_thread};
 use super::ops::wait_kick;
-use super::queue::{FetchPriority, FetchQueue};
+use super::queue::{FetchJob, FetchPriority, FetchQueue};
 
 pub(crate) const POLL_INTERVAL: Duration = Duration::from_secs(45);
 pub(crate) const RETRYING_THRESHOLD_MS: i64 = 30_000;
@@ -316,50 +316,56 @@ async fn handle_fetch_success(
 
 async fn run_fetch_worker(slot: Arc<AccountSlot>, cancel: CancellationToken) {
     while let Some(job) = slot.fetch_queue.pop(&cancel).await {
-        let gmail_tid = job.gmail_id.clone();
-        if !slot.is_online() {
-            slot.fetch_queue.finish(&gmail_tid);
-            drop(job);
-            continue;
-        }
-        let Some((grant_gen, gmail)) = slot.gmail() else {
-            slot.fetch_queue.finish(&gmail_tid);
-            drop(job);
-            continue;
-        };
-        let att_dir = slot.files.attachments_dir();
-        let Some(res) = cancel
-            .run_until_cancelled(fetch_and_ingest_thread(
-                slot.account,
-                &gmail,
-                &slot.pool,
-                &slot.writer,
-                &slot.clock,
-                Some(att_dir.as_path()),
-                &gmail_tid,
-                job.format,
-                job.priority.gmail(),
-                job.notify_new_mail,
-            ))
-            .await
-        else {
-            slot.fetch_queue.finish(&gmail_tid);
-            drop(job);
+        let Some(settled) = fetch_one(&slot, &job, &cancel).await else {
+            slot.fetch_queue.finish(&job, false);
             return;
         };
-        match res {
-            Ok(ingest) => handle_fetch_success(&slot, &gmail, grant_gen, ingest, &cancel).await,
-            Err(err) => {
-                slot.network.lost_if_unreachable(&err).await;
-                if matches!(err.outcome, Outcome::InvalidGrant | Outcome::Unauthorized) {
-                    slot.mark_auth_failed(grant_gen).await;
-                } else if !slot.is_online() {
-                    slot.set_status(SyncStatus::Offline).await;
-                }
-            }
+        slot.fetch_queue.finish(&job, settled);
+    }
+}
+
+async fn fetch_one(
+    slot: &Arc<AccountSlot>,
+    job: &FetchJob,
+    cancel: &CancellationToken,
+) -> Option<bool> {
+    if !slot.is_online() {
+        return Some(false);
+    }
+    let Some((grant_gen, gmail)) = slot.gmail() else {
+        return Some(false);
+    };
+    let att_dir = slot.files.attachments_dir();
+    let res = cancel
+        .run_until_cancelled(fetch_and_ingest_thread(
+            slot.account,
+            &gmail,
+            &slot.pool,
+            &slot.writer,
+            &slot.clock,
+            Some(att_dir.as_path()),
+            &job.gmail_id,
+            job.format,
+            job.priority.gmail(),
+            job.notify_new_mail,
+        ))
+        .await?;
+    match res {
+        Ok(ingest) => {
+            handle_fetch_success(slot, &gmail, grant_gen, ingest, cancel).await;
+            Some(true)
         }
-        slot.fetch_queue.finish(&gmail_tid);
-        drop(job);
+        Err(err) => {
+            slot.network.lost_if_unreachable(&err).await;
+            if matches!(err.outcome, Outcome::InvalidGrant | Outcome::Unauthorized) {
+                slot.mark_auth_failed(grant_gen).await;
+                return Some(false);
+            }
+            if !slot.is_online() {
+                slot.set_status(SyncStatus::Offline).await;
+            }
+            Some(!err.is_transient())
+        }
     }
 }
 
@@ -494,6 +500,19 @@ fn enqueue_full_batch(slot: &AccountSlot, ids: &[GmailThreadId], priority: Fetch
     }
 }
 
+fn known_thread_ids(slot: &AccountSlot) -> HashSet<GmailThreadId> {
+    slot.pool
+        .with(|db| db.thread_sync_states(slot.account))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|state| state.gmail_id)
+        .collect()
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "connect sync executes the phased inbox, drafts, starred, and sent initial sync pipeline"
+)]
 async fn run_connect_sync(
     slot: &AccountSlot,
     gmail: &Gmail,
@@ -507,9 +526,15 @@ async fn run_connect_sync(
 
     let inbox_ids = list_inbox_thread_ids(gmail, GmailPriority::P2).await?;
 
-    fetch_batch_and_wait(
+    let known = known_thread_ids(slot);
+    let inbox_unread: Vec<GmailThreadId> = inbox_ids
+        .iter()
+        .filter(|id| !known.contains(*id))
+        .cloned()
+        .collect();
+    let inbox_read = fetch_batch_and_wait(
         slot,
-        &inbox_ids,
+        &inbox_unread,
         Format::Metadata,
         FetchPriority::ConnectInbox,
         cancel,
@@ -519,6 +544,9 @@ async fn run_connect_sync(
 
     if cancel.is_cancelled() {
         return Ok(());
+    }
+    if !inbox_read {
+        return Err(threads_left_unread());
     }
 
     let draft_threads = reconcile_drafts_with_gmail(
@@ -537,12 +565,12 @@ async fn run_connect_sync(
     let mut secondary: Vec<GmailThreadId> = Vec::new();
     let mut seen: HashSet<GmailThreadId> = HashSet::new();
     for id in draft_threads.into_iter().chain(starred_ids).chain(sent_ids) {
-        if !inbox_set.contains(&id) && seen.insert(id.clone()) {
+        if !inbox_set.contains(&id) && !known.contains(&id) && seen.insert(id.clone()) {
             secondary.push(id);
         }
     }
 
-    fetch_batch_and_wait(
+    let secondary_read = fetch_batch_and_wait(
         slot,
         &secondary,
         Format::Metadata,
@@ -554,6 +582,9 @@ async fn run_connect_sync(
 
     if cancel.is_cancelled() {
         return Ok(());
+    }
+    if !secondary_read {
+        return Err(threads_left_unread());
     }
 
     let acct = slot.account;
@@ -971,7 +1002,7 @@ async fn run_full_resync(
         );
     }
 
-    fetch_batch_and_wait(
+    let all_read = fetch_batch_and_wait(
         slot,
         &to_fetch,
         Format::Metadata,
@@ -988,6 +1019,12 @@ async fn run_full_resync(
             None,
             &slot.activity,
         );
+    }
+    if cancel.is_cancelled() {
+        return Ok(());
+    }
+    if !all_read {
+        return Err(threads_left_unread());
     }
 
     let draft_threads = reconcile_drafts_with_gmail(
@@ -1148,11 +1185,11 @@ async fn fetch_batch_and_wait(
     format: Format,
     priority: FetchPriority,
     cancel: &CancellationToken,
-) {
+) -> bool {
     if ids.is_empty() {
-        return;
+        return true;
     }
-    let (tx, mut rx) = mpsc::channel::<()>(1);
+    let (tx, mut rx) = mpsc::unbounded_channel::<()>();
     for id in ids {
         slot.fetch_queue.enqueue(
             id.clone(),
@@ -1164,12 +1201,23 @@ async fn fetch_batch_and_wait(
         );
     }
     drop(tx);
+    let mut settled = 0usize;
     tokio::select! {
-        () = cancel.cancelled() => {}
+        () = cancel.cancelled() => return false,
         () = async {
-            while rx.recv().await.is_some() {}
+            while rx.recv().await.is_some() {
+                settled = settled.saturating_add(1);
+            }
         } => {}
     }
+    settled >= ids.len()
+}
+
+fn threads_left_unread() -> GmailError {
+    GmailError::new(
+        Outcome::NoResponse,
+        "some conversations could not be read from Gmail",
+    )
 }
 
 fn spawn_contacts_backfill(slot: Arc<AccountSlot>, gmail: Arc<Gmail>, tasks: &Tasks) {

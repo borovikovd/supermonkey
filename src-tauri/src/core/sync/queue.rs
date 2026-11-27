@@ -36,7 +36,7 @@ pub(crate) struct FetchJob {
     pub(crate) format: Format,
     pub(crate) priority: FetchPriority,
     pub(crate) notify_new_mail: bool,
-    _barriers: Vec<mpsc::Sender<()>>,
+    barriers: Vec<mpsc::UnboundedSender<()>>,
     _busy: Vec<Busy>,
 }
 
@@ -45,13 +45,14 @@ struct QueuedEntry {
     priority: FetchPriority,
     format: Format,
     notify_new_mail: bool,
-    barriers: Vec<mpsc::Sender<()>>,
+    barriers: Vec<mpsc::UnboundedSender<()>>,
     busy: Vec<Busy>,
 }
 
 struct InFlightEntry {
     format: Format,
     requeue: Option<QueuedEntry>,
+    barriers: Vec<mpsc::UnboundedSender<()>>,
 }
 
 struct QueueInner {
@@ -107,7 +108,7 @@ impl FetchQueue {
         format: Format,
         priority: FetchPriority,
         notify_new_mail: bool,
-        barrier: Option<mpsc::Sender<()>>,
+        barrier: Option<mpsc::UnboundedSender<()>>,
         activity: &Activity,
     ) {
         let mut g = self.inner.lock();
@@ -145,6 +146,10 @@ impl FetchQueue {
                 if used_seq {
                     g.next_seq = next_seq;
                 }
+            } else if let Some(b) = barrier
+                && let Some(flight) = g.in_flight.get_mut(&gmail_id)
+            {
+                flight.barriers.push(b);
             }
             return;
         }
@@ -212,6 +217,7 @@ impl FetchQueue {
             InFlightEntry {
                 format: entry.format,
                 requeue: None,
+                barriers: Vec::new(),
             },
         );
         Some(FetchJob {
@@ -219,20 +225,30 @@ impl FetchQueue {
             format: entry.format,
             priority: entry.priority,
             notify_new_mail: entry.notify_new_mail,
-            _barriers: entry.barriers,
+            barriers: entry.barriers,
             _busy: entry.busy,
         })
     }
 
-    pub(crate) fn finish(&self, gmail_id: &GmailThreadId) {
+    pub(crate) fn finish(&self, job: &FetchJob, settled: bool) {
         let mut g = self.inner.lock();
-        let requeue = g.in_flight.remove(gmail_id).and_then(|f| f.requeue);
+        let flight = g.in_flight.remove(&job.gmail_id);
+        let (requeue, late_barriers) =
+            flight.map_or((None, Vec::new()), |f| (f.requeue, f.barriers));
+        let requeued = requeue.is_some();
         if let Some(entry) = requeue {
             let key = (entry.priority, entry.seq);
-            g.by_id.insert(gmail_id.clone(), entry);
-            g.order.insert(key, gmail_id.clone());
-            drop(g);
+            g.by_id.insert(job.gmail_id.clone(), entry);
+            g.order.insert(key, job.gmail_id.clone());
+        }
+        drop(g);
+        if requeued {
             self.notify.notify_one();
+        }
+        if settled {
+            for barrier in job.barriers.iter().chain(&late_barriers) {
+                if barrier.send(()).is_err() {}
+            }
         }
     }
 
